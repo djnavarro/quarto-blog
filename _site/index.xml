@@ -27,9 +27,80 @@
 <!--------------- my typical setup ----------------->
 <!--------------- post begins here ----------------->
 <blockquote class="blockquote">
-<p>“The time has come,” the Walrus said,<br> &nbsp;&nbsp;&nbsp;&nbsp;“To talk of many things:<br> Arrays (in Arrow) and Record Batches,<br> &nbsp;&nbsp;&nbsp;&nbsp;Of Tables, Chunks and things—<br> Why IPC’s great for streaming blocks—<br> &nbsp;&nbsp;&nbsp;&nbsp;But for saving, Parquet wins.”<br></p>
-<p>(My sincere apologies to <a href="https://poets.org/poem/walrus-and-carpenter">Lewis Carroll</a>)</p>
+<p>“The time has come,” the Walrus said,<br>
+&nbsp;&nbsp;&nbsp;“To talk of many things:<br>
+Arrays (in Arrow) and Record Batches,<br>
+&nbsp;&nbsp;&nbsp;Of Tables, Chunks and things—<br>
+Why IPC’s great for streaming blocks—<br>
+&nbsp;&nbsp;&nbsp;But for saving, Parquet wins.”<br>
+<br>
+(My sincere apologies to <a href="https://poets.org/poem/walrus-and-carpenter">Lewis Carroll</a>)</p>
 </blockquote>
+<p>This post has been rolling around in my head since the start of April. I’ve known from the beginning what I want to say – approximately! – but not how I want to say it. It is annoying me, and at a certain point I decided I just needed to put words to metaphorical paper and see what happens. It’s another post about Apache Arrow, the fourth in a series I’ve been writing.</p>
+<p>My goal in this one is… well, I suppose it is partly to do my job since I am employed to write these things, but it’s a little more than that. My goal is to clarify something that has been a source of confusion about Arrow for me, in the hope that once I’ve sorted it out in my own head I can perhaps contribute something to the official documentation that helps other people who might have the same problem that I have.</p>
+<p>So here’s the thing that has been giving me grief. If you go to the Get Started page for the <strong>arrow</strong> R package, one of the first things you encounter is a table telling you that Arrow has classes for zero-dimensional data (scalars), one-dimensional data (arrays and other vector-like data), and two-dimensional data (tabular or data frame-like data). I’ll reproduce the entire table in full because it’s actually super important…</p>
+<table class="table">
+<colgroup>
+<col style="width: 1%">
+<col style="width: 8%">
+<col style="width: 25%">
+<col style="width: 63%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Dim</th>
+<th>Class</th>
+<th>Description</th>
+<th>How to create an instance</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>0</td>
+<td><code>Scalar</code></td>
+<td>single value and its <code>DataType</code></td>
+<td><code>Scalar$create(value, type)</code></td>
+</tr>
+<tr class="even">
+<td>1</td>
+<td><code>Array</code></td>
+<td>vector of values and its <code>DataType</code></td>
+<td><code>Array$create(vector, type)</code></td>
+</tr>
+<tr class="odd">
+<td>1</td>
+<td><code>ChunkedArray</code></td>
+<td>vectors of values and their <code>DataType</code></td>
+<td><code>ChunkedArray$create(..., type)</code> or alias <code>chunked_array(..., type)</code></td>
+</tr>
+<tr class="even">
+<td>2</td>
+<td><code>RecordBatch</code></td>
+<td>list of <code>Array</code>s with a <code>Schema</code></td>
+<td><code>RecordBatch$create(...)</code> or alias <code>record_batch(...)</code></td>
+</tr>
+<tr class="odd">
+<td>2</td>
+<td><code>Table</code></td>
+<td>list of <code>ChunkedArray</code> with a <code>Schema</code></td>
+<td><code>Table$create(...)</code>, alias <code>arrow_table(...)</code>, or <code>arrow::read_*(file, as_data_frame = FALSE)</code></td>
+</tr>
+<tr class="even">
+<td>2</td>
+<td><code>Dataset</code></td>
+<td>list of <code>Table</code>s with the same <code>Schema</code></td>
+<td><code>Dataset$create(sources, schema)</code> or alias <code>open_dataset(sources, schema)</code></td>
+</tr>
+</tbody>
+</table>
+<p>…but I’m going to be honest with you, dear reader. When I first started learning Arrow, I had no idea what any of this meant. This whole table was completely intimidating. I looked at it and thoughts roughly along the following lines went through my head:</p>
+<blockquote class="blockquote">
+<p>Oh… f**k me. I’m completely out of my depth, I am too stupid to understand any of this. I should quit now and find a new job before everyone realises I’m a total fraud. They made a terrible mistake hiring me and… blah blah blah</p>
+</blockquote>
+<p>The self-pity went on for a while, but I’ll spare you the details.</p>
+<p>Eventually I remembered that this is my impostor syndrome talking and that I am in fact quite good at learning technical concepts. The problem I’m encountering here is that this table is not in any way self-explanatory, but it’s placed in a part of the documentation where new users will easily encounter it and get confused the same way I did. The placement itself isn’t the problem: the content of the table is actually pretty important for any Arrow user to grasp, but all the explanatory scaffolding is missing.</p>
+<p>To a new user, most of this is is incomprehensible. What exactly is a <code>ChunkedArray</code> and how is it different from an <code>Array</code>? Why are these necessary as distinct concepts? While we are at it, what the heck is a <code>RecordBatch</code>, a <code>Table</code> and a <code>Dataset</code>, and what makes them different from one another? Unless someone takes the time to explain it all to you, it does look like Arrow is unnecessarily complicated, doesn’t it? And yet, some very smart people seem to think that Arrow is a very good idea indeed so… what’s the story?</p>
+<p>Kick back, relax into whatever comfort you have available, and let me tell you a tale.<sup>1</sup> All will be revealed…</p>
 <!--------------- appendices go here ----------------->
 <div class="cell">
 
@@ -37,7 +108,13 @@
 
 
 
-<div id="quarto-appendix" class="default"><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
+
+<div id="quarto-appendix" class="default"><section class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
+
+<ol>
+<li id="fn1"><p>In the near future, I hope that the documentation itself is going to tell this story – and yes, I realise that by calling attention to the issue I’ve effectively volunteered to fix it – but sometimes it’s easier to do the same job in an informal blog post where you have the luxury of going overboard with “authorial voice” and “narrative”, and all those other fancy things that writers love.↩︎</p></li>
+</ol>
+</section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
   author = {Danielle Navarro},
   title = {Arrow Tables and Record Batches},
   date = {2022-04-30},
