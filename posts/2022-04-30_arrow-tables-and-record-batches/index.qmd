@@ -25,10 +25,6 @@ renv::use(lockfile = "renv.lock")
 | (My sincere apologies to [Lewis Carroll](https://poets.org/poem/walrus-and-carpenter))
 
 
-```{r}
-library(arrow)
-```
-
 This post has been rolling around in my head since the start of April. I've known from the beginning what I want to say -- approximately! -- but not how I want to say it. It is annoying me, and at a certain point I decided I just needed to put words to metaphorical paper and see what happens. It's another post about Apache Arrow, the fourth in a series I've been writing.
 
 My goal in this one is... well, I suppose it is partly to do my job since I am employed to write these things, but it's a little more than that. My goal is to clarify something that has been a source of confusion about Arrow for me, in the hope that once I've sorted it out in my own head I can perhaps contribute something to the official documentation that helps other people who might have the same problem that I have. 
@@ -59,6 +55,15 @@ To a new user, most of this is is incomprehensible. What exactly is a `ChunkedAr
 
 Kick back, relax into whatever comfort you have available, and let me tell you a tale.^[In the near future, I hope that the documentation itself is going to tell this story -- and yes, I realise that by calling attention to the issue I've effectively volunteered to fix it -- but sometimes it's easier to do the same job in an informal blog post where you have the luxury of going overboard with "authorial voice" and "narrative", and all those other fancy things that writers love.] All will be revealed...
 
+
+```{r}
+#| message: false
+library(arrow)
+library(xptr)
+library(tibble)
+options(scipen = 20)
+```
+
 ## Scalars
 
 Let's start with scalars. A scalar object is simply a single value, that can be of any type. It might be an integer, a string, a timestamp, or any of the different data types that Arrow supports. I won't talk about the different types in this post because I already wrote an extremely long post on that topic. For the current purposes, what matters is that a scalar is *one* value. It is "zero dimensional". All higher order data structures are built on top of scalars, so they are in some sense fundamental, but there is not much I need to say about them for this post. 
@@ -79,7 +84,13 @@ Okay, for the most part, those of us who use Arrow on an everyday basis don't re
 [1, null, 2, 4, 8]
 ```
 
-What does this thing look like in memory? It contains two pieces of metadata, namely the length of the array (i.e. 5) and a count of the number of null values (i.e., 1), both of which are stored as 64-bit integers. Next, it contains two buffers, a **validity bitmap buffer** and a **value buffer**. The validity bitmap is binary-valued, and contains a 1 whenever the corresponding slot in the array contains a valid, non-null value. To a first approximation, you might imagine the validity bitmap for the array above containing the following five bits: `10111`. Written this way, you can see there are four non-null values (shown as `1`s) and one null (shown as a `0`) in the second slot. This maps naturally onto the visual convention I've used to show the array, but it's a little misleading in a few respects. 
+What does this thing look like in memory? It contains two pieces of metadata, namely the length of the array (i.e. 5) and a count of the number of null values (i.e., 1), both of which are stored as 64-bit integers. Next, it contains two buffers, a **validity bitmap buffer** and a **value buffer**. The validity bitmap is binary-valued, and contains a 1 whenever the corresponding slot in the array contains a valid, non-null value. To a first approximation, you might imagine the validity bitmap for the array above containing the following five bits: 
+
+``` python
+10111
+``` 
+
+Written this way, you can see there are four non-null values (shown as `1`s) and one null (shown as a `0`) in the second slot. This maps naturally onto the visual convention I've used to show the array, and as we'll see later it also mirrors what you get when you use R to query the validity bitmap of an array, but if you want to understand the underlying physical layout it's a little misleading in a few respects:
 
 - First, I've only shown five values here, but in reality these five values occupy part of a byte, so in actuality there are 8 bits. So I ought to have added three trailing zeros to pad it out out to a complete 8-bit sequence: that gives us `10111000`. 
 
@@ -135,7 +146,32 @@ We can extract the pointer to tell us where in memory the Arrow array begins:
 arr$pointer()
 ```
 
-We can count the total number of bytes allocated to the array:
+Now, at this point in the post, an R user is typically doing one of two things. Either you're going "okay yeah, I know what a memory address looks like, let's move on already" or else you are facing a rising sense of dread at seeing these low level details exposed, and you're thinking something like "okay look, I know that things exist in memory but this looks like gibberish and I kind of hate this already..."
+
+If you're the latter, here's a quick primer. Each memory address refers to a specific *byte* (not bit). Bytes are ordered sequentially and they are conventionally written as hexadecimal numbers (that's what the `0x` prefix is telling us). That's super helpful for machine purposes, I guess, but humans don't think in hexadecimal arithmetic, so I'm going to write a little `address()` helper function to extract the pointer from an Arrow object and convert it to a numeric value:
+
+```{r}
+address <- function(x) {
+  x$pointer() |>
+    xptr_address() |>
+    as.numeric()
+}
+```
+
+The `xptr_address()` function comes from the **xptr** package which provides some handy utilities for manipulating external pointers in R. In this context, all it does is extract the memory address from a pointer object as a string. That is:
+
+```{r}
+arr$pointer() |>
+  xptr_address()
+```
+
+The `address()` function converts this to a regular numeric value so that we can do some arithmetic with it later. So here's the address of the `arr` object:
+
+```{r}
+address(arr)
+```
+
+Okay, let's get back to the Arrow array itself. The address shown above is the location of the *first* byte (i.e., byte 0) allocated to the array, but the array itself occupies a block of contiguous bytes (i.e., bytes with adjacent addresses!) in memory. How many bytes? Conveniently, Array objects have an `nbytes()` method that will tell us precisely:
 
 ```{r}
 arr$nbytes()
@@ -143,12 +179,149 @@ arr$nbytes()
 
 Notice that this doesn't count any padded bytes at the end of each buffer. The validity bitmap requires only 1 byte, and the values bitmap occupies 20 bytes (noting that the unspecified bytes corresponding to the null value do count because they are part of the contiguous region between byte 0 and byte 19)
 
-## Record Batches
+## Record batches
 
-A record batch is table-like data structure that is semantically a sequence of fields, each a contiguous Arrow array.^[If you're familiar with Arrow data structures, it is in essence a struct with additional metadata] A struct is a nested type parameterized by an ordered sequence of types (which can all be distinct), called its fields. Each field must have a UTF8-encoded name, and these field names are part of the type metadata. A struct array does not have any additional allocated physical storage for its values. A struct array must still have an allocated validity bitmap, if it has one or more null values. Physically, a struct array has one child array for each field. The child arrays are independent and need not be adjacent to each other in memory.  
+A record batch is table-like data structure that is semantically a sequence of fields, each a contiguous Arrow array.^[If you're familiar with Arrow data structures, it is in essence a struct with additional metadata] A struct is a nested type parameterized by an ordered sequence of types (which can all be distinct), called its fields. Each field must have a UTF8-encoded name, and these field names are part of the type metadata. A struct array does not have any additional allocated physical storage for its values. A struct array must still have an allocated validity bitmap, if it has one or more null values. Physically, a struct array has one child array for each field. The child arrays are independent and need not be adjacent to each other in memory.
+
+Let's start by creating a small tibble in R:
+
+```{r}
+month_df <- tibble(
+  name = month.name,
+  abbreviation = month.abb,
+  position = 1L:12L
+)
+month_df
+```
+
+Next, let's bundle these into a record batch:
+
+```{r}
+month_rb <- record_batch(month_df)
+month_rb
+```
+
+Now let's take a look at where the objects associated with the `month` record batch are located. First, the record batch itself:
+
+```{r}
+month_rb$pointer()
+```
+
+Next, the three child arrays:
+
+```{r}
+#| results: hold
+month_rb$name$pointer()
+month_rb$abbreviation$pointer()
+month_rb$position$pointer()
+```
+
+ARGH THIS IS WRONG: `month_rb$name` returns a *copy* of the array, not the original one and the pointer shows the location of the copy. You can't look up the addresses this way!!!!
+
+
+Now let's take a look at where each of these is located in memory:
+
+```{r}
+month_address <- c(
+  address(month_rb$name),
+  address(month_rb$abbreviation),
+  address(month_rb$position)
+)
+month_address
+```
+
+Okay there are lots of big numbers there so let's simplify this by subtracting off the smallest address:
+
+```{r}
+month_address - min(month_address)
+```
+
+Now, recall that we can check the sizes of these objects:
+
+```{r}
+month_nbytes <- c(
+  month_rb$name$nbytes(),
+  month_rb$abbreviation$nbytes(),
+  month_rb$position$nbytes()
+)
+month_nbytes
+```
+
+As you'd expect, the arrays themselves don't occupy very many bytes. Each array occupies a contiguous block in memory, but the arrays that are conceptually contained within a record batch do not need to be adjacent to one another.
+
+### Serialising a record batch
+
+[discuss the IPC protocol for record batches here. Mention that feather is the same thing but as a file format rather than an input stream]
+
+Okay, so here's where we're at. The Arrow specification gives a precise statement of what an array should look like and how it should be laid out in memory. It also gives a precise statement about how arrays can be organised into record batches. Not only that, it provides a specification for how a record batch should be serialised via the IPC protocol. The IPC protocol is designed so that the structure of the serialised record batch is essentially identical to the physical layout of an in-memory record batch, which minimises the amount of computation required. 
+
+## Tables and chunked arrays
+
+
+So far everything is going smoothly. Except we have a problem: there are limits on the size of individual arrays. What happens when your data set is so large that you can't fit a column into a single array? Or, as an example that might be more common, what happens when you have most of the data already, and someone else sends you a new record batch that needs to be appended to your existing data? How should we handle those cases? 
+
+This is where we need the concepts of tables and chunked arrays. Let's imagine I have data that arrive in two batches, imaginatively named `batch0` and `batch1`. For my sanity I'll keep them tiny:
+
+```{r}
+batch0 <- record_batch(
+  name = c("ant", "bat", "cat", "dog"),
+  type = c("insect", "mammal", "mammal", "mammal")
+)
+batch1 <- record_batch(
+  name = c("elk", "fig"),
+  type = c("mammal", "tree")
+)
+```
+
+I can collate these record batches into a table:
+
+```{r}
+animals <- arrow_table(batch0, batch1)
+animals$name
+```
+
+Later, someone sends me a third batch:
+
+```{r}
+batch2 <- record_batch(
+  name = c("gum", "hog"),
+  type = c("tree", "mammal")
+)
+table2 <- arrow_table(batch2)
+```
+
+
+```{r}
+concat_tables(animals, table2)$name$chunk(0)$pointer()
+```
+
+Let's write another helper function
+
+```{r}
+extract_data_buffer <- function(x, i) {
+  x$chunk(i)$data()$buffers[[3]]$data() |> rawToChar()  
+}
+```
+
+Now:
+
+```{r}
+#| results: hold
+extract_data_buffer(animals$name, 0)
+extract_data_buffer(animals$name, 1)
+```
+
+Similarly:
+
+```{r}
+#| results: hold
+extract_data_buffer(animals$type, 0)
+extract_data_buffer(animals$type, 1)
+```
 
 
 
+## Datasets
 
 <!--------------- appendices go here ----------------->
 
