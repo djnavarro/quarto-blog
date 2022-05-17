@@ -64,6 +64,12 @@ library(tibble)
 options(scipen = 20)
 ```
 
+```{r}
+#| echo: false
+#| message: false
+source("display_array_layout.R")
+```
+
 ## Scalars
 
 Let's start with scalars. A scalar object is simply a single value, that can be of any type. It might be an integer, a string, a timestamp, or any of the different data types that Arrow supports. I won't talk about the different types in this post because I already wrote an extremely long post on that topic. For the current purposes, what matters is that a scalar is *one* value. It is "zero dimensional". All higher order data structures are built on top of scalars, so they are in some sense fundamental, but there is not much I need to say about them for this post. 
@@ -75,6 +81,10 @@ Let's turn our attention to arrays next. I'll start by introducing some terminol
 - An **array** in Arrow is analogous to a vector in R: it is a sequence of values with known length, all of which have the same type. The array refers to the abstract data structure itself. 
 - A related but different concept is that of a **buffer**, a sequential virtual address space with a given length. Any byte in the buffer can be reached via a single pointer offset less than the region’s length.
 - Finally, we have the concept of the **physical layout**, which describes how information is laid out in memory, without taking into account of how that information is interpreted. For example, a 32-bit signed integer array and 32-bit floating point array have the same layout because they have the same physical structure in memory. The meaning of the bits that make up a 32-bit float is different to the meaning of the bits that make up a 32-bit integer, but the physical layout is the same. 
+
+### Arrays are immutable
+
+Coming to Arrow from R, one thing I found a little difficult to wrap my head around is the concept of an array as an **immutable** object. Once an Arrow array has been initialised, it cannot be modified. This is 
 
 ### What's an array?
 
@@ -257,66 +267,28 @@ Okay, so here's where we're at. The Arrow specification gives a precise statemen
 
 ## Tables and chunked arrays
 
-
-So far everything is going smoothly. Except we have a problem: there are limits on the size of individual arrays. What happens when your data set is so large that you can't fit a column into a single array? Or, as an example that might be more common, what happens when you have most of the data already, and someone else sends you a new record batch that needs to be appended to your existing data? How should we handle those cases? 
-
-This is where we need the concepts of tables and chunked arrays. Let's imagine I have data that arrive in two batches, imaginatively named `batch0` and `batch1`. For my sanity I'll keep them tiny:
-
 ```{r}
-batch0 <- record_batch(
-  name = c("ant", "bat", "cat", "dog"),
-  type = c("insect", "mammal", "mammal", "mammal")
+florence <- chunked_array(
+  c("I", "am", "no", "mother"),
+  c("I", "am", NA, "bride"),
+  c("I", "am", "king")
 )
-batch1 <- record_batch(
-  name = c("elk", "fig"),
-  type = c("mammal", "tree")
-)
+florence
 ```
 
-I can collate these record batches into a table:
+A chunked array has some structure to it:
 
 ```{r}
-animals <- arrow_table(batch0, batch1)
-animals$name
-```
-
-Later, someone sends me a third batch:
-
-```{r}
-batch2 <- record_batch(
-  name = c("gum", "hog"),
-  type = c("tree", "mammal")
-)
-table2 <- arrow_table(batch2)
+#| echo: false
+knitr::include_graphics("img/chunked_array_layout_small.jpg")
 ```
 
 
-```{r}
-concat_tables(animals, table2)$name$chunk(0)$pointer()
-```
-
-Let's write another helper function
+We can check:
 
 ```{r}
-extract_data_buffer <- function(x, i) {
-  x$chunk(i)$data()$buffers[[3]]$data() |> rawToChar()  
-}
-```
-
-Now:
-
-```{r}
-#| results: hold
-extract_data_buffer(animals$name, 0)
-extract_data_buffer(animals$name, 1)
-```
-
-Similarly:
-
-```{r}
-#| results: hold
-extract_data_buffer(animals$type, 0)
-extract_data_buffer(animals$type, 1)
+florence$chunk(0) |> array_layout()
+florence$chunk(1) |> array_layout()
 ```
 
 
