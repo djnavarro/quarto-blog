@@ -84,20 +84,29 @@ Let's turn our attention to arrays next. I'll start by introducing some terminol
 
 ### Structure of arrays
 
-Okay, for the most part, those of us who use Arrow on an everyday basis don't really need to care all that much about low level implementation details. The exact physical layout of an array in memory doesn't matter to us. But, on the other hand, in this post I'm trying to highlight the fact that Arrow does make some good choices about these details, so it makes a little sense to dive deeper than we normally would. So let's take a look at an example taken from the Arrow documentation pages. Here's a simple array of int32 values:
-
-``` python
-[1, null, 2, 4, 8]
-```
-
-What does this thing look like in memory? It contains two pieces of metadata, namely the length of the array (i.e. 5) and a count of the number of null values (i.e., 1), both of which are stored as 64-bit integers. The **arrow** package makes it easy to extract the values, because the Array object has fields and methods that will return them. To illustrate this, let's create the array shown above:
+Okay, for the most part, those of us who use Arrow on an everyday basis don't really need to care all that much about low level implementation details. The exact physical layout of an array in memory doesn't matter to us. But, on the other hand, in this post I'm trying to highlight the fact that Arrow does make some good choices about these details, so it makes a little sense to dive deeper than we normally would. So let's take a look at an example taken from the Arrow documentation pages. Here's a simple array of integer values:
 
 ```{r}
 arr <- Array$create(c(1L, NA, 2L, 4L, 8L))
 arr
 ```
 
-Yep, that looks like the right thing. Now we can use the `length()` method and the `null_count` field to extract the relevant metadata:
+What precisely is this thing? Well that's a mess of different questions. In one sense, the answer is straightforward. It's an Arrow array, and the values contained within the array are all stored as signed 32 bit integers:
+
+```{r}
+arr$type
+```
+
+But that's not a very satisfying answer at some level. What does this thing look like in memory? How is the information structured? In other words, what is the **physical layout** of this object? 
+
+
+```{r}
+#| echo: false
+knitr::include_graphics("img/array_layout_detail_small.jpg")
+```
+
+
+The Arrow documentation page helps us answer that. Our array contains two pieces of metadata, namely the length of the array (i.e. 5) and a count of the number of null values (i.e., 1), both of which are stored as 64-bit integers. The **arrow** package makes it easy to extract these values, because the Array object has fields and methods that will return them:
 
 ```{r}
 arr$length()
@@ -149,9 +158,9 @@ Notice that the last four bytes shown are written `08 00 00 00` (little endian),
 
 Okay, so what should you take away from all this? Well, firstly, fear not -- if you're an R user like me and trying to wrap your head around Arrow, you don't *really* have to spend much of your time thinking about what this physical layout looks like. All you need to take away from it is that an Arrow array is an immutable object with this particular "metadata + buffers" structure that is designed to be efficient, and that each buffer is a contiguous bloc of memory on your machine. 
 
-
-
 ### Peeking inside arrays
+
+
 
 ```{r}
 dance_fever <- read_csv_arrow("dance_fever_tracks.csv")
@@ -212,12 +221,23 @@ readBin(data_buffer, what = "integer", n = 14)
 
 ### A nicer way
 
+The print method for `ArrayData` objects isn't very helpful, so I'll write an `array_layout()` function that shows you the metadata and buffer contents associated with an Arrow array (source code [here](display_array_layout.R)) that works for the array types I'm using in this post. When applied to the `duration` array it produces this output:
 
 ```{r}
 array_layout(duration)
 ```
 
+The output here is divided into two sections, structured to mirror how the Arrow columnar specification is described on the website (and also to mirrot the diagrams in the post). There is one section showing the metadata variables stored: array length, and a count of the number of null values. Underneath that we have a section listing all the buffers associated with an array. For an integer array like `duration` there are two buffers, the validity bitmap buffer and the data values buffer.
 
+The `array_layout()` function also works for string arrays and produces similar output. However, character data in Arrow are stored using three buffers rather than two. As before the first buffer stores the validity bitmap. The second buffer is a vector of offsets specifying the locations for each of the substrings. The third buffer contains the character data itself. Here's an example of that:
+
+```{r}
+dance_fever$title |>
+  Array$create() |>
+  array_layout()
+```
+
+You wouldn't want to use my code in the wild though because it doesn't even try to be effienct or truncate the output in any way. I only wrote it so that I had a way of showing you the content of an Arrow array in R at a slightly lower level.
 
 
 <!-- The metadata are easily extracted: -->
@@ -314,11 +334,11 @@ dance_fever_batch <- record_batch(dance_fever)
 dance_fever_batch
 ```
 
-<!-- Now let's take a look at where the objects associated with the `month` record batch are located. First, the record batch itself: -->
+```{r}
+#| echo: false
+knitr::include_graphics("img/record_batch_layout_small.jpg")
+```
 
-<!-- ```{r} -->
-<!-- month_rb$pointer() -->
-<!-- ``` -->
 
 
 ### Serialising a record batch
@@ -329,7 +349,13 @@ Okay, so here's where we're at. The Arrow specification gives a precise statemen
 
 ## Tables
 
+Draw an analogous figure for tables, showing how a table is a collection of chunked arrays, and each chunked array is a collection of arrays. Talk a little about why that helps with sequentially arriving data: a new record batch arrives, it's already organised in the format needed for memory, so you can wrap those parts of memory in an Arrow buffer without moving it again. Then the various chunked arrays for the Table can be linked to the newly arrived Arrays without in disturbing any of the existing Arrays. Etc. 
+
+
 ## Datasets
+
+Keep this brief? It actually feels like a different topic to an extent. But still, being able to talk about larger than memory datasets at long last feels like a good place to end this post.
+
 
 <!--------------- appendices go here ----------------->
 
