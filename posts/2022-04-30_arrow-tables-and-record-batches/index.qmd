@@ -25,10 +25,6 @@ renv::use(lockfile = "renv.lock")
 | (My sincere apologies to [Lewis Carroll](https://poets.org/poem/walrus-and-carpenter))
 
 
-```{r}
-library(arrow)
-```
-
 This post has been rolling around in my head since the start of April. I've known from the beginning what I want to say -- approximately! -- but not how I want to say it. It is annoying me, and at a certain point I decided I just needed to put words to metaphorical paper and see what happens. It's another post about Apache Arrow, the fourth in a series I've been writing.
 
 My goal in this one is... well, I suppose it is partly to do my job since I am employed to write these things, but it's a little more than that. My goal is to clarify something that has been a source of confusion about Arrow for me, in the hope that once I've sorted it out in my own head I can perhaps contribute something to the official documentation that helps other people who might have the same problem that I have. 
@@ -59,7 +55,23 @@ To a new user, most of this is is incomprehensible. What exactly is a `ChunkedAr
 
 Kick back, relax into whatever comfort you have available, and let me tell you a tale.^[In the near future, I hope that the documentation itself is going to tell this story -- and yes, I realise that by calling attention to the issue I've effectively volunteered to fix it -- but sometimes it's easier to do the same job in an informal blog post where you have the luxury of going overboard with "authorial voice" and "narrative", and all those other fancy things that writers love.] All will be revealed...
 
-## Scalars
+
+```{r}
+#| message: false
+library(arrow)
+library(spotifyr)
+library(dplyr)
+library(tibble)
+options(scipen = 20)
+```
+
+```{r}
+#| echo: false
+#| message: false
+source("display_array_layout.R")
+```
+
+## Scalars?
 
 Let's start with scalars. A scalar object is simply a single value, that can be of any type. It might be an integer, a string, a timestamp, or any of the different data types that Arrow supports. I won't talk about the different types in this post because I already wrote an extremely long post on that topic. For the current purposes, what matters is that a scalar is *one* value. It is "zero dimensional". All higher order data structures are built on top of scalars, so they are in some sense fundamental, but there is not much I need to say about them for this post. 
 
@@ -67,32 +79,58 @@ Let's start with scalars. A scalar object is simply a single value, that can be 
 
 Let's turn our attention to arrays next. I'll start by introducing some terminology from the page describing the [Arrow specification](https://arrow.apache.org/docs/format/Columnar.html):
 
-- An **array** in Arrow is analogous to a vector in R: it is a sequence of values with known length, all of which have the same type. The array refers to the abstract data structure itself. 
+- An **array** in Arrow is analogous to a vector in R: it is a sequence of values with known length, all of which have the same type. Coming to Arrow from R, one thing I found a little difficult to wrap my head around is the concept of an array as an **immutable** object. Once an Arrow array has been initialised, it cannot be modified. 
 - A related but different concept is that of a **buffer**, a sequential virtual address space with a given length. Any byte in the buffer can be reached via a single pointer offset less than the region’s length.
 - Finally, we have the concept of the **physical layout**, which describes how information is laid out in memory, without taking into account of how that information is interpreted. For example, a 32-bit signed integer array and 32-bit floating point array have the same layout because they have the same physical structure in memory. The meaning of the bits that make up a 32-bit float is different to the meaning of the bits that make up a 32-bit integer, but the physical layout is the same. 
 
-### What's an array?
 
-Okay, for the most part, those of us who use Arrow on an everyday basis don't really need to care all that much about low level implementation details. The exact physical layout of an array in memory doesn't matter to us. But, on the other hand, in this post I'm trying to highlight the fact that Arrow does make some good choices about these details, so it makes a little sense to dive deeper than we normally would. So let's take a look at an example taken from the Arrow documentation pages. Here's a simple array of int32 values:
+### Structure of arrays
 
-``` python
-[1, null, 2, 4, 8]
+Okay, for the most part, those of us who use Arrow on an everyday basis don't really need to care all that much about low level implementation details. The exact physical layout of an array in memory doesn't matter to us. But, on the other hand, in this post I'm trying to highlight the fact that Arrow does make some good choices about these details, so it makes a little sense to dive deeper than we normally would. So let's take a look at an example taken from the Arrow documentation pages. Here's a simple array of integer values:
+
+```{r}
+arr <- Array$create(c(1L, NA, 2L, 4L, 8L))
+arr
 ```
 
-What does this thing look like in memory? It contains two pieces of metadata, namely the length of the array (i.e. 5) and a count of the number of null values (i.e., 1), both of which are stored as 64-bit integers. Next, it contains two buffers, a **validity bitmap buffer** and a **value buffer**. The validity bitmap is binary-valued, and contains a 1 whenever the corresponding slot in the array contains a valid, non-null value. To a first approximation, you might imagine the validity bitmap for the array above containing the following five bits: `10111`. Written this way, you can see there are four non-null values (shown as `1`s) and one null (shown as a `0`) in the second slot. This maps naturally onto the visual convention I've used to show the array, but it's a little misleading in a few respects. 
+What precisely is this thing? Well that's a mess of different questions. In one sense, the answer is straightforward. It's an Arrow array, and the values contained within the array are all stored as signed 32 bit integers:
 
-- First, I've only shown five values here, but in reality these five values occupy part of a byte, so in actuality there are 8 bits. So I ought to have added three trailing zeros to pad it out out to a complete 8-bit sequence: that gives us `10111000`. 
+```{r}
+arr$type
+```
 
-- Second, I've written this the wrong way around! I've written it left-to-right in order to match up to the usual convention of the English language (and to mirror the ordering shown in the vector above!), but by convention that corresponds to "big endian" layout, and the validity bitmap is actually little endian in Arrow. So the actual binary sequence looks like this: `00011101`
+But that's not a very satisfying answer at some level. What does this thing look like in memory? How is the information structured? In other words, what is the **physical layout** of this object? 
 
-- Third, I've not padded it enough. As a general rule, if you want things to be efficient you want the beginnings and endings of your data structures to be **naturally aligned**, in the sense that the memory address is a multiple of the data block sizes. So on a 64-bit machine, you want the memory address for every data structure to start on a multiple of 64 bits. Apparently that makes lookup easier or something. Unfortunately, I've only specified 8 bits (i.e. 1 byte) so if I wanted to ensure that the validity bitmap is naturally aligned I'm going to need to add another 7 bytes worth of padding in order to make it to the full 64 bits. This method of aligning data structures in memory is referred to as "8 byte alignment". However, what Arrow usually does in this situation is 64 byte alignment.^[Strictly speaking the Arrow specification allows some flexibility here. Implementations can choose between 8 byte alignment or 64 byte alignment. Moreover, when allocating memory this is only a "recommendation", whereas when serialising Arrow data via IPC the alignment is required. It's also recommended that implementations use 64 byte alignment rather than 8 byte alignment. As discussed in the Arrow specification page: "The recommendation for 64 byte alignment comes from the [Intel performance guide](https://software.intel.com/en-us/articles/practical-intel-avx-optimization-on-2nd-generation-intel-core-processors) that recommends alignment of memory to match SIMD register width. The specific padding length was chosen because it matches the largest SIMD instruction registers available on widely deployed x86 architecture (Intel AVX-512). The recommended padding of 64 bytes allows for using [SIMD](https://software.intel.com/en-us/cpp-compiler-developer-guide-and-reference-introduction-to-the-simd-data-layout-templates) instructions consistently in loops without additional conditional checks. This should allow for simpler, efficient and CPU cache-friendly code. In other words, we can load the entire 64-byte buffer into a 512-bit wide SIMD register and get data-level parallelism on all the columnar values packed into the 64-byte buffer. Guaranteed padding can also allow certain compilers to generate more optimized code directly." I can honestly say that I understand about 1/3 of that now. I'm learning things!] 
 
-Taking all these considerations together is what gives us this diagram on the Arrow documentation page. The validity bitmap buffer for this array is represented as follows:
+```{r}
+#| echo: false
+knitr::include_graphics("img/array_layout_detail_small.jpg")
+```
+
+
+The Arrow documentation page helps us answer that. Our array contains two pieces of metadata, namely the length of the array (i.e. 5) and a count of the number of null values (i.e., 1), both of which are stored as 64-bit integers. The **arrow** package makes it easy to extract these values, because the Array object has fields and methods that will return them:
+
+```{r}
+arr$length()
+arr$null_count
+```
+
+Okay, that seems reasonable. What about the data itself? Where is that stored? In Arrow, these are stored within buffers, a contiguous block of memory assigned to the array. The number of buffers associated with an array depends on the exact type of data being stored. For an integer array such as `arr`, there are two buffers, a **validity bitmap buffer** and a **data value buffer**. A little later in the post I'll talk about how you can access the raw content of these buffers, but for now let's talk about what each of these buffers contains. 
+
+The validity bitmap is binary-valued, and contains a 1 whenever the corresponding slot in the array contains a valid, non-null value. Setting aside some very tiresome technicalities we can imagine that the validity bitmap is a buffer that contains the following five bits: 
+
+``` python
+10111
+```
+
+Except... this isn't really true, for three reasons. First, memory is allocated in byte-size units, so we have to pad it out to the full 8 bits. That gives us the bitmap `10111000`. Second, that's still a little inaccurate because -- assuming you read left to right -- you're looking it with the "most significant bit" first (i.e., big endian format), and the bits are actually organised with the least significant bit first (i.e., little endian format) so the bits in this byte should be shown in the reverse order, `00011101`. Third, this is still misleading because I've not padded it enough. For reasons that make a lot of sense if you start diving into the Arrow specifications at a low level, you have to imagine another 503 trailing zeros.^[Quick explanation: As a general rule, if you want things to be efficient you want the beginnings and endings of your data structures to be **naturally aligned**, in the sense that the memory address is a multiple of the data block sizes. So on a 64-bit machine, you want the memory address for every data structure to start on a multiple of 64 bits. Apparently that makes lookup easier or something. Unfortunately, I've only specified 8 bits (i.e. 1 byte) so if I wanted to ensure that the validity bitmap is naturally aligned I'm going to need to add another 7 bytes worth of padding in order to make it to the full 64 bits. This method of aligning data structures in memory is referred to as "8 byte alignment". However, what Arrow does in this situation is *64 byte alignment*, so each data structure has to be 64 bytes long at a minimum. This design feature exists to allow efficient use of modern hardware, and if you want to know more, it's discussed on the Arrow website.] So that the nice and neat `10111` I've shown above actually looks like this in memory:
 
 |Byte 0 (validity bitmap) | Bytes 1-63            |
 |-------------------------|-----------------------|
 | `00011101`              | `0` (padding)         |
 
+
+I know, I know. Boring. Let's move on.
 
 Okay, now let's have a look at the value buffer. It's essentially the same logic. Again notice that its padded out to a length of 64 bytes to preserve natural alignment, but for our purposes those details don't matter too much. Here's the diagram showing the physical layout, again lifted straight from the Arrow specification page:
 
@@ -100,55 +138,342 @@ Okay, now let's have a look at the value buffer. It's essentially the same logic
 |------------|-------------|-------------|-------------|-------------|-------------|
 | `1`        | unspecified | `2`         | `4`         | `8`         | unspecified |
 
-Each integer occupies 4 bytes, as required by the int32 data type. 
+Each integer occupies 4 bytes, as required by the int32 data type. Just to give you a sense of what that looks like, I'll take a peek at the bits that make up the integer `8` (i.e., the contents of Bytes 16-19). I could do this using base R with a command like `intToBits(8L)` but the `bits()` function from the **pryr** package produces a more compact output so I'll do this:
 
-What should you take away from all this? Well, firstly, fear not -- if you're an R user like me and trying to wrap your head around Arrow, you really don't have to spend much of your time thinking about what this physical layout looks like. The thing you really need to keep in mind is that **an Arrow array is constructed from buffers that occupy a single contiguous block in memory**
+```{r}
+pryr::bits(8L)
+```
+
+Or, to condense it even further, we can express each byte as a hexadecimal value. That's what the `pryr::bytes()` function does, so this is an equivalent way of writing out the content of those four bytes:
+
+```{r}
+pryr::bytes(8L)
+```
+
+Putting all this together you can imagine -- roughly speaking -- what the contents of the data buffer should look like. Ignoring all the trailing bytes used for padding, and not worrying too much about what's going on with the command I've used to extract them, the 20 bytes worth of actual data in the data buffer look like this:
+
+```{r}
+arr$data()$buffers[[2]]$data()
+```
+
+Notice that the last four bytes shown are written `08 00 00 00` (little endian), whereas the bytes produced by `pryr::bytes()` are shown in the other direction. It's the same thing, just a different display convention! 
+
+Okay, so what should you take away from all this? Well, firstly, fear not -- if you're an R user like me and trying to wrap your head around Arrow, you don't *really* have to spend much of your time thinking about what this physical layout looks like. All you need to take away from it is that an Arrow array is an immutable object with this particular "metadata + buffers" structure that is designed to be efficient, and that each buffer is a contiguous bloc of memory on your machine. 
 
 ### Peeking inside arrays
 
-```{r}
-arr <- Array$create(c(1, NA, 2, 4, 8), type = int32())
-arr
-```
 
-The metadata are easily extracted:
 
 ```{r}
-arr$length()
-arr$null_count
+dance_fever <- read_csv_arrow("dance_fever_tracks.csv")
+dance_fever
 ```
 
-We can extract the validity bitmap, using the `IsValid()` method:
 
 ```{r}
-validity_bitmap <- function(x) {
-  slots <- 0:(x$length() - 1)
-  vapply(slots, x$IsValid, FUN.VALUE = FALSE)
-}
-
-validity_bitmap(arr)
+duration <- Array$create(dance_fever$duration)
+duration
 ```
-
-We can extract the pointer to tell us where in memory the Arrow array begins:
 
 ```{r}
-arr$pointer()
+#| echo: false
+knitr::include_graphics("img/array_layout_small.jpg")
 ```
 
-We can count the total number of bytes allocated to the array:
+Array objects come with a variety of methods you can use to examine their properties. For instance, you can use the `length()`, `null_count()` and `nbytes()` to calculate the length of the array, the number of missing values it contains, and the number of bytes it occupies in memory. To find out how many bytes have been allocated the `duration` array, we would do this:
 
 ```{r}
-arr$nbytes()
+duration$nbytes()
 ```
 
-Notice that this doesn't count any padded bytes at the end of each buffer. The validity bitmap requires only 1 byte, and the values bitmap occupies 20 bytes (noting that the unspecified bytes corresponding to the null value do count because they are part of the contiguous region between byte 0 and byte 19)
+If you really want to dive in and take a look at how information is structured in an array, you can use the `data()` method to return an ArrayData object:
 
-## Record Batches
+```{r}
+duration$data()
+```
 
-A record batch is table-like data structure that is semantically a sequence of fields, each a contiguous Arrow array.^[If you're familiar with Arrow data structures, it is in essence a struct with additional metadata] A struct is a nested type parameterized by an ordered sequence of types (which can all be distinct), called its fields. Each field must have a UTF8-encoded name, and these field names are part of the type metadata. A struct array does not have any additional allocated physical storage for its values. A struct array must still have an allocated validity bitmap, if it has one or more null values. Physically, a struct array has one child array for each field. The child arrays are independent and need not be adjacent to each other in memory.  
+This output is a little underwhelming because -- at the moment! -- the print method for an ArrayData object doesn't do anything except print the class name. However, it's an R6 object which means everything is stored in an environment. So let's use the `env_print()` function from the **rlang** package to take a look at it as an environment:
+
+```{r}
+rlang::env_print(duration$data())
+```
+
+There's a lot going on here. There are various fields used to store metadata about the array, but most of those are things we've seen before and you can access the same information in other ways (e.g., `duration$data()$length` stores the same value returned by `duration$length()`). The one we're actually interested in here is `buffers`:
+
+```{r}
+duration$data()$buffers
+```
+
+Okay, so there are two buffers here. If we look back up to the earlier discussion we might (correctly!) guess that the first one is the validity bitmap buffer, and the second one is the data buffer. As before, the buffer is an R6 object and guess what? It also has a `data()` method. If we peek into *that*, at long last we uncover the thing we were looking for:
+
+```{r}
+data_buffer <- duration$data()$buffers[[2]]$data()
+data_buffer
+```
+
+The contents of `data_buffer` are the raw bytes stored ihe data buffer that Arrow created for the `duration` array. They're not easy to read in this format, so I'll use the `readBin()` function from base R to parse the binary data as integers, and just like that...
+
+```{r}
+readBin(data_buffer, what = "integer", n = 14)
+```
+
+...we have reconstructed the values from the data buffer. 
 
 
 
+### A nicer way
+
+The print method for `ArrayData` objects isn't very helpful, so I'll write an `array_layout()` function that shows you the metadata and buffer contents associated with an Arrow array (source code [here](display_array_layout.R)) that works for the array types I'm using in this post. When applied to the `duration` array it produces this output:
+
+```{r}
+array_layout(duration)
+```
+
+The output here is divided into two sections, structured to mirror how the Arrow columnar specification is described on the website (and also to mirrot the diagrams in the post). There is one section showing the metadata variables stored: array length, and a count of the number of null values. Underneath that we have a section listing all the buffers associated with an array. For an integer array like `duration` there are two buffers, the validity bitmap buffer and the data values buffer.
+
+The `array_layout()` function also works for string arrays and produces similar output. However, character data in Arrow are stored using three buffers rather than two. As before the first buffer stores the validity bitmap. The second buffer is a vector of offsets specifying the locations for each of the substrings. The third buffer contains the character data itself. Here's an example of that:
+
+```{r}
+dance_fever$title |>
+  Array$create() |>
+  array_layout()
+```
+
+You wouldn't want to use my code in the wild though because it doesn't even try to be effienct or truncate the output in any way. I only wrote it so that I had a way of showing you the content of an Arrow array in R at a slightly lower level.
+
+
+## Chunked arrays
+
+
+```{r}
+florence <- chunked_array(
+  c("I", "am", "no", "mother"),
+  c("I", "am", NA, "bride"),
+  c("I", "am", "king")
+)
+florence
+```
+
+A chunked array has some structure to it:
+
+```{r}
+#| echo: false
+knitr::include_graphics("img/chunked_array_layout_small.jpg")
+```
+
+
+We can check:
+
+```{r}
+florence$chunk(0) |> array_layout()
+florence$chunk(1) |> array_layout()
+```
+
+
+
+
+
+## Record batches
+
+A record batch is table-like data structure that is semantically a sequence of fields, each a contiguous Arrow array.^[If you're familiar with Arrow data structures, it is in essence a struct with additional metadata] A struct is a nested type parameterized by an ordered sequence of types (which can all be distinct), called its fields. Each field must have a UTF8-encoded name, and these field names are part of the type metadata. A struct array does not have any additional allocated physical storage for its values. A struct array must still have an allocated validity bitmap, if it has one or more null values. Physically, a struct array has one child array for each field. The child arrays are independent and need not be adjacent to each other in memory. To illustrate, let's return to our `dance_fever` data set:
+
+
+```{r}
+dance_fever
+```
+
+Next, let's bundle these into a record batch:
+
+```{r}
+dance_fever_batch <- record_batch(dance_fever)
+dance_fever_batch
+```
+
+```{r}
+#| echo: false
+knitr::include_graphics("img/record_batch_layout_small.jpg")
+```
+
+
+
+### Serialising a record batch
+
+[discuss the IPC protocol for record batches here. Mention that feather is the same thing but as a file format rather than an input stream]
+
+Okay, so here's where we're at. The Arrow specification gives a precise statement of what an array should look like and how it should be laid out in memory. It also gives a precise statement about how arrays can be organised into record batches. Not only that, it provides a specification for how a record batch should be serialised via the IPC protocol. The IPC protocol is designed so that the structure of the serialised record batch is essentially identical to the physical layout of an in-memory record batch, which minimises the amount of computation required. 
+
+```{r}
+dance_fever_batch_0 <- record_batch(dance_fever[1:4,])
+dance_fever_batch_0
+dance_fever_batch_1 <- record_batch(dance_fever[5:14,])
+dance_fever_batch_1
+```
+
+Suppose I want to share this. The IPC format is designed to lay this object out as a stream of bytes that (almost) exactly mirrors the structure of the object as it is represented in memory. 
+
+(picture here)
+
+
+There are three functions you can use if you want to do this. To send the data directly to an output stream (e.g., for communicating to some other process) use `write_ipc_stream()`. When writing data in this IPC format to a static file on disk (with a few minor differences), it is referred to as a "feather" formatted file, and you use `write_feather()`. Finally, if you want the same sequence of bytes but you'd like to keep them in R as raw vectors, you can use `write_to_raw()`. That's what I'll do here so I can show you the byte stream:
+
+```{r}
+dance_fever_ipc_0 <- write_to_raw(dance_fever_batch_0)
+dance_fever_ipc_0
+```
+
+Note that by default the `write_to_raw()` function will produce output in "stream" format: what you're looking at above is the same sequence of bytes that would get transmitted if I'd called `write_ipc_stream()`. If you want `write_to_raw()` to mimic the behaviour of `write_feather()`, you can set the `format` argument:
+
+```{r}
+#| results: hide
+write_to_raw(dance_fever_batch_0, format = "file")
+```
+
+This would produce a somewhat longer output, due to the fact that the feather format includes additional information. For more detail, see the Arrow specification page.
+
+```{r}
+read_ipc_stream(dance_fever_ipc_0)
+```
+
+The same works for feather:
+
+```{r}
+write_feather(dance_fever_batch_1, "dance_fever_ipc_1.feather")
+read_feather("dance_fever_ipc_1.feather")
+```
+
+## Tables
+
+Draw an analogous figure for tables, showing how a table is a collection of chunked arrays, and each chunked array is a collection of arrays. Talk a little about why that helps with sequentially arriving data: a new record batch arrives, it's already organised in the format needed for memory, so you can wrap those parts of memory in an Arrow buffer without moving it again. Then the various chunked arrays for the Table can be linked to the newly arrived Arrays without in disturbing any of the existing Arrays. Etc.
+
+
+Can't concatenate record batches directly. Arrays are immutable, and we can't touch them. They need to be wrapped into chunked arrays. In other words we need to convert each record batch into a table. I could use the `as_arrow_table()` function to do this conversion:
+
+```{r}
+dance_fever_table_0 <- as_arrow_table(dance_fever_batch_0)
+dance_fever_table_1 <- as_arrow_table(dance_fever_batch_1)
+```
+
+This works, but it's also not something you will need to do very often in real life. The reader functions in **arrow** tend to convert record batches to tables by default. For instance, in the previous section I serialised two record batches, one to a file and one to a raw vector. Let's look at what happens when I try to deserialise (a.k.a. "read") them: 
+
+```{r}
+dance_fever_table_0 <- read_ipc_stream(
+  file = dance_fever_ipc_0, 
+  as_data_frame = FALSE
+)
+dance_fever_table_0
+```
+
+That's the same data as before, but it's a table not a record batch. Each column is a chunked array, not an array. The same happens when I read from the file:
+
+
+
+```{r}
+dance_fever_table_1 <- read_feather(
+  file = "dance_fever_ipc_1.feather", 
+  as_data_frame = FALSE
+)
+dance_fever_table_1
+```
+
+In general, you won't get a record batch in **arrow** unless you explicitly ask for one. Tables are the default tabular data structure, which is usually what you want anyway
+
+Okay, so now I have the two fragments of my data set represented as tables. The difference between the table version and the record batch version is that the columns are all represented as chunked arrays. Each array from the original record batch is now one chunk in the corresponding chunked array in the table:
+
+```{r}
+dance_fever_batch_0$title
+dance_fever_table_0$title
+```
+
+It's the same underlying object, just with a new, flexible wrapper. The wrapper is what allows us to concatenate tables:
+
+```{r}
+dance_fever_table <- concat_tables(
+  dance_fever_table_0,
+  dance_fever_table_1
+)
+dance_fever_table
+```
+
+Looking at the columns we see that the chunking are preserved. That's not arbitrary. It's because those are the original arrays, still located at the same spot in memory and not contiguous:
+
+```{r}
+dance_fever_table$title
+```
+
+An important thing to note about chunks is that they aren't considered to be a part of the data structure for the purpose of testing equality. Here's the same data with a different chunking:
+
+```{r}
+title_rechunked <- chunked_array(
+  dance_fever$title[1:8],
+  dance_fever$title[9:12],
+  dance_fever$title[13:14]
+)
+title_rechunked
+```
+
+Although these two chunked arrays partition the data in different ways, the values stored in each slot are the same. When I test for equality, the scalar values in each slot are compared to one another without regard for which chunk they are assigned to. Since all those values are the same, every comparison returns `true`:
+
+```{r}
+title_rechunked == dance_fever_table$title
+```
+
+## Datasets?
+
+So what about data sets? They're the last item on that table, and you might be wondering where they fall in all this. I'm not going to dive into the details on datasets in this post, because they're a whole separate topic and they deserve their own blog post. However, it's a little unsatisfying to write all this and not say anything about them, so I'll give a very quick overview here. 
+
+```{r}
+#| eval: false
+florence <- get_discography("florence + the machine")
+```
+```{r}
+#| echo: false
+florence <- readRDS("spotify_florence.rds")
+```
+
+This works and now we have a data frame
+
+```{r}
+florence |> 
+  select(where(~!is.list(.))) |>  # drop list columns
+  as_arrow_table() |>             # convert to arrow table
+  write_dataset(                  # write to multi-file storage
+    path = "spotify_florence",
+    format = "feather",
+    partitioning = "album_release_year"
+  )
+```
+
+```{r}
+list.files("spotify_florence", recursive = TRUE)
+```
+
+```{r}
+florence_dataset <- open_dataset("spotify_florence", format = "feather")
+florence_dataset
+```
+
+```{r}
+danceability <- florence_dataset |> 
+  select(album_name, track_name, danceability) |>
+  distinct() |>
+  arrange(desc(danceability)) |> 
+  head(n = 10) |> 
+  compute()
+
+danceability
+```
+
+This is a regular arrow table:
+
+```{r}
+danceability$track_name
+```
+
+Can convert to tibble:
+
+```{r}
+as.data.frame(danceability)
+```
 
 <!--------------- appendices go here ----------------->
 

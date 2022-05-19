@@ -219,13 +219,20 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
     <h2 id="toc-title">Table of contents</h2>
    
   <ul>
-  <li><a href="#scalars" id="toc-scalars" class="nav-link active" data-scroll-target="#scalars">Scalars</a></li>
+  <li><a href="#scalars" id="toc-scalars" class="nav-link active" data-scroll-target="#scalars">Scalars?</a></li>
   <li><a href="#arrays" id="toc-arrays" class="nav-link" data-scroll-target="#arrays">Arrays</a>
   <ul class="collapse">
-  <li><a href="#whats-an-array" id="toc-whats-an-array" class="nav-link" data-scroll-target="#whats-an-array">What’s an array?</a></li>
+  <li><a href="#structure-of-arrays" id="toc-structure-of-arrays" class="nav-link" data-scroll-target="#structure-of-arrays">Structure of arrays</a></li>
   <li><a href="#peeking-inside-arrays" id="toc-peeking-inside-arrays" class="nav-link" data-scroll-target="#peeking-inside-arrays">Peeking inside arrays</a></li>
+  <li><a href="#a-nicer-way" id="toc-a-nicer-way" class="nav-link" data-scroll-target="#a-nicer-way">A nicer way</a></li>
   </ul></li>
-  <li><a href="#record-batches" id="toc-record-batches" class="nav-link" data-scroll-target="#record-batches">Record Batches</a></li>
+  <li><a href="#chunked-arrays" id="toc-chunked-arrays" class="nav-link" data-scroll-target="#chunked-arrays">Chunked arrays</a></li>
+  <li><a href="#record-batches" id="toc-record-batches" class="nav-link" data-scroll-target="#record-batches">Record batches</a>
+  <ul class="collapse">
+  <li><a href="#serialising-a-record-batch" id="toc-serialising-a-record-batch" class="nav-link" data-scroll-target="#serialising-a-record-batch">Serialising a record batch</a></li>
+  </ul></li>
+  <li><a href="#tables" id="toc-tables" class="nav-link" data-scroll-target="#tables">Tables</a></li>
+  <li><a href="#datasets" id="toc-datasets" class="nav-link" data-scroll-target="#datasets">Datasets?</a></li>
   </ul>
 </nav>
 </nav>
@@ -250,18 +257,6 @@ Why IPC’s great for streaming blocks—<br>
 <br>
 (My sincere apologies to <a href="https://poets.org/poem/walrus-and-carpenter">Lewis Carroll</a>)</p>
 </blockquote>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb1"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(arrow)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-<div class="cell-output cell-output-stderr">
-<pre><code>
-Attaching package: 'arrow'</code></pre>
-</div>
-<div class="cell-output cell-output-stderr">
-<pre><code>The following object is masked from 'package:utils':
-
-    timestamp</code></pre>
-</div>
-</div>
 <p>This post has been rolling around in my head since the start of April. I’ve known from the beginning what I want to say – approximately! – but not how I want to say it. It is annoying me, and at a certain point I decided I just needed to put words to metaphorical paper and see what happens. It’s another post about Apache Arrow, the fourth in a series I’ve been writing.</p>
 <p>My goal in this one is… well, I suppose it is partly to do my job since I am employed to write these things, but it’s a little more than that. My goal is to clarify something that has been a source of confusion about Arrow for me, in the hope that once I’ve sorted it out in my own head I can perhaps contribute something to the official documentation that helps other people who might have the same problem that I have.</p>
 <p>So here’s the thing that has been giving me grief. If you go to the Get Started page for the <strong>arrow</strong> R package, one of the first things you encounter is a table telling you that Arrow has classes for zero-dimensional data (scalars), one-dimensional data (arrays and other vector-like data), and two-dimensional data (tabular or data frame-like data). I’ll reproduce the entire table in full because it’s actually super important…</p>
@@ -327,29 +322,75 @@ Attaching package: 'arrow'</code></pre>
 <p>Eventually I remembered that this is my impostor syndrome talking and that I am in fact quite good at learning technical concepts. The problem I’m encountering here is that this table is not in any way self-explanatory, but it’s placed in a part of the documentation where new users will easily encounter it and get confused the same way I did. The placement itself isn’t the problem: the content of the table is actually pretty important for any Arrow user to grasp, but all the explanatory scaffolding is missing.</p>
 <p>To a new user, most of this is is incomprehensible. What exactly is a <code>ChunkedArray</code> and how is it different from an <code>Array</code>? Why are these necessary as distinct concepts? While we are at it, what the heck is a <code>RecordBatch</code>, a <code>Table</code> and a <code>Dataset</code>, and what makes them different from one another? Unless someone takes the time to explain it all to you, it does look like Arrow is unnecessarily complicated, doesn’t it? And yet, some very smart people seem to think that Arrow is a very good idea indeed so… what’s the story?</p>
 <p>Kick back, relax into whatever comfort you have available, and let me tell you a tale.<a href="#fn1" class="footnote-ref" id="fnref1" role="doc-noteref"><sup>1</sup></a> All will be revealed…</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb1"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(arrow)</span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(spotifyr)</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(dplyr)</span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(tibble)</span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="fu">options</span>(<span class="at">scipen =</span> <span class="dv">20</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<div class="cell">
+
+</div>
 <section id="scalars" class="level2">
-<h2 class="anchored" data-anchor-id="scalars">Scalars</h2>
+<h2 class="anchored" data-anchor-id="scalars">Scalars?</h2>
 <p>Let’s start with scalars. A scalar object is simply a single value, that can be of any type. It might be an integer, a string, a timestamp, or any of the different data types that Arrow supports. I won’t talk about the different types in this post because I already wrote an extremely long post on that topic. For the current purposes, what matters is that a scalar is <em>one</em> value. It is “zero dimensional”. All higher order data structures are built on top of scalars, so they are in some sense fundamental, but there is not much I need to say about them for this post.</p>
 </section>
 <section id="arrays" class="level2">
 <h2 class="anchored" data-anchor-id="arrays">Arrays</h2>
 <p>Let’s turn our attention to arrays next. I’ll start by introducing some terminology from the page describing the <a href="https://arrow.apache.org/docs/format/Columnar.html">Arrow specification</a>:</p>
 <ul>
-<li>An <strong>array</strong> in Arrow is analogous to a vector in R: it is a sequence of values with known length, all of which have the same type. The array refers to the abstract data structure itself.</li>
+<li>An <strong>array</strong> in Arrow is analogous to a vector in R: it is a sequence of values with known length, all of which have the same type. Coming to Arrow from R, one thing I found a little difficult to wrap my head around is the concept of an array as an <strong>immutable</strong> object. Once an Arrow array has been initialised, it cannot be modified.</li>
 <li>A related but different concept is that of a <strong>buffer</strong>, a sequential virtual address space with a given length. Any byte in the buffer can be reached via a single pointer offset less than the region’s length.</li>
 <li>Finally, we have the concept of the <strong>physical layout</strong>, which describes how information is laid out in memory, without taking into account of how that information is interpreted. For example, a 32-bit signed integer array and 32-bit floating point array have the same layout because they have the same physical structure in memory. The meaning of the bits that make up a 32-bit float is different to the meaning of the bits that make up a 32-bit integer, but the physical layout is the same.</li>
 </ul>
-<section id="whats-an-array" class="level3">
-<h3 class="anchored" data-anchor-id="whats-an-array">What’s an array?</h3>
-<p>Okay, for the most part, those of us who use Arrow on an everyday basis don’t really need to care all that much about low level implementation details. The exact physical layout of an array in memory doesn’t matter to us. But, on the other hand, in this post I’m trying to highlight the fact that Arrow does make some good choices about these details, so it makes a little sense to dive deeper than we normally would. So let’s take a look at an example taken from the Arrow documentation pages. Here’s a simple array of int32 values:</p>
-<div class="sourceCode" id="cb4"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a>[<span class="dv">1</span>, null, <span class="dv">2</span>, <span class="dv">4</span>, <span class="dv">8</span>]</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-<p>What does this thing look like in memory? It contains two pieces of metadata, namely the length of the array (i.e.&nbsp;5) and a count of the number of null values (i.e., 1), both of which are stored as 64-bit integers. Next, it contains two buffers, a <strong>validity bitmap buffer</strong> and a <strong>value buffer</strong>. The validity bitmap is binary-valued, and contains a 1 whenever the corresponding slot in the array contains a valid, non-null value. To a first approximation, you might imagine the validity bitmap for the array above containing the following five bits: <code>10111</code>. Written this way, you can see there are four non-null values (shown as <code>1</code>s) and one null (shown as a <code>0</code>) in the second slot. This maps naturally onto the visual convention I’ve used to show the array, but it’s a little misleading in a few respects.</p>
-<ul>
-<li><p>First, I’ve only shown five values here, but in reality these five values occupy part of a byte, so in actuality there are 8 bits. So I ought to have added three trailing zeros to pad it out out to a complete 8-bit sequence: that gives us <code>10111000</code>.</p></li>
-<li><p>Second, I’ve written this the wrong way around! I’ve written it left-to-right in order to match up to the usual convention of the English language (and to mirror the ordering shown in the vector above!), but by convention that corresponds to “big endian” layout, and the validity bitmap is actually little endian in Arrow. So the actual binary sequence looks like this: <code>00011101</code></p></li>
-<li><p>Third, I’ve not padded it enough. As a general rule, if you want things to be efficient you want the beginnings and endings of your data structures to be <strong>naturally aligned</strong>, in the sense that the memory address is a multiple of the data block sizes. So on a 64-bit machine, you want the memory address for every data structure to start on a multiple of 64 bits. Apparently that makes lookup easier or something. Unfortunately, I’ve only specified 8 bits (i.e.&nbsp;1 byte) so if I wanted to ensure that the validity bitmap is naturally aligned I’m going to need to add another 7 bytes worth of padding in order to make it to the full 64 bits. This method of aligning data structures in memory is referred to as “8 byte alignment”. However, what Arrow usually does in this situation is 64 byte alignment.<a href="#fn2" class="footnote-ref" id="fnref2" role="doc-noteref"><sup>2</sup></a></p></li>
-</ul>
-<p>Taking all these considerations together is what gives us this diagram on the Arrow documentation page. The validity bitmap buffer for this array is represented as follows:</p>
+<section id="structure-of-arrays" class="level3">
+<h3 class="anchored" data-anchor-id="structure-of-arrays">Structure of arrays</h3>
+<p>Okay, for the most part, those of us who use Arrow on an everyday basis don’t really need to care all that much about low level implementation details. The exact physical layout of an array in memory doesn’t matter to us. But, on the other hand, in this post I’m trying to highlight the fact that Arrow does make some good choices about these details, so it makes a little sense to dive deeper than we normally would. So let’s take a look at an example taken from the Arrow documentation pages. Here’s a simple array of integer values:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb2"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a>arr <span class="ot">&lt;-</span> Array<span class="sc">$</span><span class="fu">create</span>(<span class="fu">c</span>(1L, <span class="cn">NA</span>, 2L, 4L, 8L))</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>arr</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Array
+&lt;int32&gt;
+[
+  1,
+  null,
+  2,
+  4,
+  8
+]</code></pre>
+</div>
+</div>
+<p>What precisely is this thing? Well that’s a mess of different questions. In one sense, the answer is straightforward. It’s an Arrow array, and the values contained within the array are all stored as signed 32 bit integers:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb4"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a>arr<span class="sc">$</span>type</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Int32
+int32</code></pre>
+</div>
+</div>
+<p>But that’s not a very satisfying answer at some level. What does this thing look like in memory? How is the information structured? In other words, what is the <strong>physical layout</strong> of this object?</p>
+<div class="cell">
+<div class="cell-output-display">
+<p><img src="img/array_layout_detail_small.jpg" class="img-fluid"></p>
+</div>
+</div>
+<p>The Arrow documentation page helps us answer that. Our array contains two pieces of metadata, namely the length of the array (i.e.&nbsp;5) and a count of the number of null values (i.e., 1), both of which are stored as 64-bit integers. The <strong>arrow</strong> package makes it easy to extract these values, because the Array object has fields and methods that will return them:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb6"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a>arr<span class="sc">$</span><span class="fu">length</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] 5</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb8"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a>arr<span class="sc">$</span>null_count</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] 1</code></pre>
+</div>
+</div>
+<p>Okay, that seems reasonable. What about the data itself? Where is that stored? In Arrow, these are stored within buffers, a contiguous block of memory assigned to the array. The number of buffers associated with an array depends on the exact type of data being stored. For an integer array such as <code>arr</code>, there are two buffers, a <strong>validity bitmap buffer</strong> and a <strong>data value buffer</strong>. A little later in the post I’ll talk about how you can access the raw content of these buffers, but for now let’s talk about what each of these buffers contains.</p>
+<p>The validity bitmap is binary-valued, and contains a 1 whenever the corresponding slot in the array contains a valid, non-null value. Setting aside some very tiresome technicalities we can imagine that the validity bitmap is a buffer that contains the following five bits:</p>
+<div class="sourceCode" id="cb10"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="dv">10111</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>Except… this isn’t really true, for three reasons. First, memory is allocated in byte-size units, so we have to pad it out to the full 8 bits. That gives us the bitmap <code>10111000</code>. Second, that’s still a little inaccurate because – assuming you read left to right – you’re looking it with the “most significant bit” first (i.e., big endian format), and the bits are actually organised with the least significant bit first (i.e., little endian format) so the bits in this byte should be shown in the reverse order, <code>00011101</code>. Third, this is still misleading because I’ve not padded it enough. For reasons that make a lot of sense if you start diving into the Arrow specifications at a low level, you have to imagine another 503 trailing zeros.<a href="#fn2" class="footnote-ref" id="fnref2" role="doc-noteref"><sup>2</sup></a> So that the nice and neat <code>10111</code> I’ve shown above actually looks like this in memory:</p>
 <table class="table">
 <thead>
 <tr class="header">
@@ -364,6 +405,7 @@ Attaching package: 'arrow'</code></pre>
 </tr>
 </tbody>
 </table>
+<p>I know, I know. Boring. Let’s move on.</p>
 <p>Okay, now let’s have a look at the value buffer. It’s essentially the same logic. Again notice that its padded out to a length of 64 bytes to preserve natural alignment, but for our purposes those details don’t matter too much. Here’s the diagram showing the physical layout, again lifted straight from the Arrow specification page:</p>
 <table class="table">
 <colgroup>
@@ -395,69 +437,696 @@ Attaching package: 'arrow'</code></pre>
 </tr>
 </tbody>
 </table>
-<p>Each integer occupies 4 bytes, as required by the int32 data type.</p>
-<p>What should you take away from all this? Well, firstly, fear not – if you’re an R user like me and trying to wrap your head around Arrow, you really don’t have to spend much of your time thinking about what this physical layout looks like. The thing you really need to keep in mind is that <strong>an Arrow array is constructed from buffers that occupy a single contiguous block in memory</strong></p>
+<p>Each integer occupies 4 bytes, as required by the int32 data type. Just to give you a sense of what that looks like, I’ll take a peek at the bits that make up the integer <code>8</code> (i.e., the contents of Bytes 16-19). I could do this using base R with a command like <code>intToBits(8L)</code> but the <code>bits()</code> function from the <strong>pryr</strong> package produces a more compact output so I’ll do this:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb11"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a>pryr<span class="sc">::</span><span class="fu">bits</span>(8L)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] "00000000 00000000 00000000 00001000"</code></pre>
+</div>
+</div>
+<p>Or, to condense it even further, we can express each byte as a hexadecimal value. That’s what the <code>pryr::bytes()</code> function does, so this is an equivalent way of writing out the content of those four bytes:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb13"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a>pryr<span class="sc">::</span><span class="fu">bytes</span>(8L)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] "00 00 00 08"</code></pre>
+</div>
+</div>
+<p>Putting all this together you can imagine – roughly speaking – what the contents of the data buffer should look like. Ignoring all the trailing bytes used for padding, and not worrying too much about what’s going on with the command I’ve used to extract them, the 20 bytes worth of actual data in the data buffer look like this:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb15"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a>arr<span class="sc">$</span><span class="fu">data</span>()<span class="sc">$</span>buffers[[<span class="dv">2</span>]]<span class="sc">$</span><span class="fu">data</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code> [1] 01 00 00 00 00 00 00 80 02 00 00 00 04 00 00 00 08 00 00 00</code></pre>
+</div>
+</div>
+<p>Notice that the last four bytes shown are written <code>08 00 00 00</code> (little endian), whereas the bytes produced by <code>pryr::bytes()</code> are shown in the other direction. It’s the same thing, just a different display convention!</p>
+<p>Okay, so what should you take away from all this? Well, firstly, fear not – if you’re an R user like me and trying to wrap your head around Arrow, you don’t <em>really</em> have to spend much of your time thinking about what this physical layout looks like. All you need to take away from it is that an Arrow array is an immutable object with this particular “metadata + buffers” structure that is designed to be efficient, and that each buffer is a contiguous bloc of memory on your machine.</p>
 </section>
 <section id="peeking-inside-arrays" class="level3">
 <h3 class="anchored" data-anchor-id="peeking-inside-arrays">Peeking inside arrays</h3>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb5"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a>arr <span class="ot">&lt;-</span> Array<span class="sc">$</span><span class="fu">create</span>(<span class="fu">c</span>(<span class="dv">1</span>, <span class="cn">NA</span>, <span class="dv">2</span>, <span class="dv">4</span>, <span class="dv">8</span>), <span class="at">type =</span> <span class="fu">int32</span>())</span>
-<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>arr</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb17"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a>dance_fever <span class="ot">&lt;-</span> <span class="fu">read_csv_arrow</span>(<span class="st">"dance_fever_tracks.csv"</span>)</span>
+<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a>dance_fever</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 14 × 3
+   track_number title             duration
+          &lt;int&gt; &lt;chr&gt;                &lt;int&gt;
+ 1            1 King                   280
+ 2            2 Free                   234
+ 3            3 Choreomania            213
+ 4            4 Back in Town           236
+ 5            5 Girls Against God      280
+ 6            6 Dream Girl Evil        227
+ 7            7 Prayer Factory          73
+ 8            8 Cassandra              258
+ 9            9 Heaven Is Here         111
+10           10 Daffodil               214
+11           11 My Love                231
+12           12 Restraint               48
+13           13 The Bomb               165
+14           14 Morning Elvis          262</code></pre>
+</div>
+</div>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb19"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a>duration <span class="ot">&lt;-</span> Array<span class="sc">$</span><span class="fu">create</span>(dance_fever<span class="sc">$</span>duration)</span>
+<span id="cb19-2"><a href="#cb19-2" aria-hidden="true" tabindex="-1"></a>duration</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>Array
 &lt;int32&gt;
 [
-  1,
-  null,
-  2,
-  4,
-  8
+  280,
+  234,
+  213,
+  236,
+  280,
+  227,
+  73,
+  258,
+  111,
+  214,
+  231,
+  48,
+  165,
+  262
 ]</code></pre>
 </div>
 </div>
-<p>The metadata are easily extracted:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb7"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a>arr<span class="sc">$</span><span class="fu">length</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>[1] 5</code></pre>
-</div>
-<div class="sourceCode cell-code" id="cb9"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a>arr<span class="sc">$</span>null_count</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>[1] 1</code></pre>
+<div class="cell-output-display">
+<p><img src="img/array_layout_small.jpg" class="img-fluid"></p>
 </div>
 </div>
-<p>We can extract the validity bitmap, using the <code>IsValid()</code> method:</p>
+<p>Array objects come with a variety of methods you can use to examine their properties. For instance, you can use the <code>length()</code>, <code>null_count()</code> and <code>nbytes()</code> to calculate the length of the array, the number of missing values it contains, and the number of bytes it occupies in memory. To find out how many bytes have been allocated the <code>duration</code> array, we would do this:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb11"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a>validity_bitmap <span class="ot">&lt;-</span> <span class="cf">function</span>(x) {</span>
-<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a>  slots <span class="ot">&lt;-</span> <span class="dv">0</span><span class="sc">:</span>(x<span class="sc">$</span><span class="fu">length</span>() <span class="sc">-</span> <span class="dv">1</span>)</span>
-<span id="cb11-3"><a href="#cb11-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">vapply</span>(slots, x<span class="sc">$</span>IsValid, <span class="at">FUN.VALUE =</span> <span class="cn">FALSE</span>)</span>
-<span id="cb11-4"><a href="#cb11-4" aria-hidden="true" tabindex="-1"></a>}</span>
-<span id="cb11-5"><a href="#cb11-5" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb11-6"><a href="#cb11-6" aria-hidden="true" tabindex="-1"></a><span class="fu">validity_bitmap</span>(arr)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb21"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb21-1"><a href="#cb21-1" aria-hidden="true" tabindex="-1"></a>duration<span class="sc">$</span><span class="fu">nbytes</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
-<pre><code>[1]  TRUE FALSE  TRUE  TRUE  TRUE</code></pre>
+<pre><code>[1] 56</code></pre>
 </div>
 </div>
-<p>We can extract the pointer to tell us where in memory the Arrow array begins:</p>
+<p>If you really want to dive in and take a look at how information is structured in an array, you can use the <code>data()</code> method to return an ArrayData object:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb13"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a>arr<span class="sc">$</span><span class="fu">pointer</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb23"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb23-1"><a href="#cb23-1" aria-hidden="true" tabindex="-1"></a>duration<span class="sc">$</span><span class="fu">data</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
-<pre><code>&lt;pointer: 0x561e827d14b0&gt;</code></pre>
+<pre><code>ArrayData</code></pre>
 </div>
 </div>
-<p>We can count the total number of bytes allocated to the array:</p>
+<p>This output is a little underwhelming because – at the moment! – the print method for an ArrayData object doesn’t do anything except print the class name. However, it’s an R6 object which means everything is stored in an environment. So let’s use the <code>env_print()</code> function from the <strong>rlang</strong> package to take a look at it as an environment:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb15"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a>arr<span class="sc">$</span><span class="fu">nbytes</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb25"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb25-1"><a href="#cb25-1" aria-hidden="true" tabindex="-1"></a>rlang<span class="sc">::</span><span class="fu">env_print</span>(duration<span class="sc">$</span><span class="fu">data</span>())</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
-<pre><code>[1] 21</code></pre>
+<pre><code>&lt;environment: 0x562fdd7f2df0&gt; [L]
+Parent: &lt;environment: empty&gt;
+Class: ArrayData, ArrowObject, R6
+Bindings:
+• .__enclos_env__: &lt;env&gt;
+• buffers: &lt;active&gt;
+• offset: &lt;active&gt;
+• null_count: &lt;active&gt;
+• length: &lt;active&gt;
+• type: &lt;active&gt;
+• `.:xp:.`: &lt;externalptr&gt;
+• clone: &lt;fn&gt; [L]
+• print: &lt;fn&gt; [L]
+• set_pointer: &lt;fn&gt; [L]
+• pointer: &lt;fn&gt; [L]
+• initialize: &lt;fn&gt; [L]</code></pre>
 </div>
 </div>
-<p>Notice that this doesn’t count any padded bytes at the end of each buffer. The validity bitmap requires only 1 byte, and the values bitmap occupies 20 bytes (noting that the unspecified bytes corresponding to the null value do count because they are part of the contiguous region between byte 0 and byte 19)</p>
+<p>There’s a lot going on here. There are various fields used to store metadata about the array, but most of those are things we’ve seen before and you can access the same information in other ways (e.g., <code>duration$data()$length</code> stores the same value returned by <code>duration$length()</code>). The one we’re actually interested in here is <code>buffers</code>:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb27"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb27-1"><a href="#cb27-1" aria-hidden="true" tabindex="-1"></a>duration<span class="sc">$</span><span class="fu">data</span>()<span class="sc">$</span>buffers</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[[1]]
+NULL
+
+[[2]]
+Buffer</code></pre>
+</div>
+</div>
+<p>Okay, so there are two buffers here. If we look back up to the earlier discussion we might (correctly!) guess that the first one is the validity bitmap buffer, and the second one is the data buffer. As before, the buffer is an R6 object and guess what? It also has a <code>data()</code> method. If we peek into <em>that</em>, at long last we uncover the thing we were looking for:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb29"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb29-1"><a href="#cb29-1" aria-hidden="true" tabindex="-1"></a>data_buffer <span class="ot">&lt;-</span> duration<span class="sc">$</span><span class="fu">data</span>()<span class="sc">$</span>buffers[[<span class="dv">2</span>]]<span class="sc">$</span><span class="fu">data</span>()</span>
+<span id="cb29-2"><a href="#cb29-2" aria-hidden="true" tabindex="-1"></a>data_buffer</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code> [1] 18 01 00 00 ea 00 00 00 d5 00 00 00 ec 00 00 00 18 01 00 00 e3 00 00 00 49
+[26] 00 00 00 02 01 00 00 6f 00 00 00 d6 00 00 00 e7 00 00 00 30 00 00 00 a5 00
+[51] 00 00 06 01 00 00</code></pre>
+</div>
+</div>
+<p>The contents of <code>data_buffer</code> are the raw bytes stored ihe data buffer that Arrow created for the <code>duration</code> array. They’re not easy to read in this format, so I’ll use the <code>readBin()</code> function from base R to parse the binary data as integers, and just like that…</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb31"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb31-1"><a href="#cb31-1" aria-hidden="true" tabindex="-1"></a><span class="fu">readBin</span>(data_buffer, <span class="at">what =</span> <span class="st">"integer"</span>, <span class="at">n =</span> <span class="dv">14</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code> [1] 280 234 213 236 280 227  73 258 111 214 231  48 165 262</code></pre>
+</div>
+</div>
+<p>…we have reconstructed the values from the data buffer.</p>
 </section>
+<section id="a-nicer-way" class="level3">
+<h3 class="anchored" data-anchor-id="a-nicer-way">A nicer way</h3>
+<p>The print method for <code>ArrayData</code> objects isn’t very helpful, so I’ll write an <code>array_layout()</code> function that shows you the metadata and buffer contents associated with an Arrow array (source code <a href="display_array_layout.R">here</a>) that works for the array types I’m using in this post. When applied to the <code>duration</code> array it produces this output:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb33"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb33-1"><a href="#cb33-1" aria-hidden="true" tabindex="-1"></a><span class="fu">array_layout</span>(duration)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>
+── Metadata 
+• length : 14
+• null count : 0
+
+── Buffers 
+• validity : null
+• data : 280 234 213 236 280 227 73 258 111 214 231 48 165 262</code></pre>
+</div>
+</div>
+<p>The output here is divided into two sections, structured to mirror how the Arrow columnar specification is described on the website (and also to mirrot the diagrams in the post). There is one section showing the metadata variables stored: array length, and a count of the number of null values. Underneath that we have a section listing all the buffers associated with an array. For an integer array like <code>duration</code> there are two buffers, the validity bitmap buffer and the data values buffer.</p>
+<p>The <code>array_layout()</code> function also works for string arrays and produces similar output. However, character data in Arrow are stored using three buffers rather than two. As before the first buffer stores the validity bitmap. The second buffer is a vector of offsets specifying the locations for each of the substrings. The third buffer contains the character data itself. Here’s an example of that:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb35"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb35-1"><a href="#cb35-1" aria-hidden="true" tabindex="-1"></a>dance_fever<span class="sc">$</span>title <span class="sc">|&gt;</span></span>
+<span id="cb35-2"><a href="#cb35-2" aria-hidden="true" tabindex="-1"></a>  Array<span class="sc">$</span><span class="fu">create</span>() <span class="sc">|&gt;</span></span>
+<span id="cb35-3"><a href="#cb35-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">array_layout</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>
+── Metadata 
+• length : 14
+• null count : 0
+
+── Buffers 
+• validity : null
+• offset : 0 4 8 19 31 48 63 77 86 100 108 115 124 132 145
+• data : KingFreeChoreomaniaBack in TownGirls Against GodDream Girl EvilPrayer
+FactoryCassandraHeaven Is HereDaffodilMy LoveRestraintThe BombMorning Elvis</code></pre>
+</div>
+</div>
+<p>You wouldn’t want to use my code in the wild though because it doesn’t even try to be effienct or truncate the output in any way. I only wrote it so that I had a way of showing you the content of an Arrow array in R at a slightly lower level.</p>
+</section>
+</section>
+<section id="chunked-arrays" class="level2">
+<h2 class="anchored" data-anchor-id="chunked-arrays">Chunked arrays</h2>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb37"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb37-1"><a href="#cb37-1" aria-hidden="true" tabindex="-1"></a>florence <span class="ot">&lt;-</span> <span class="fu">chunked_array</span>(</span>
+<span id="cb37-2"><a href="#cb37-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">c</span>(<span class="st">"I"</span>, <span class="st">"am"</span>, <span class="st">"no"</span>, <span class="st">"mother"</span>),</span>
+<span id="cb37-3"><a href="#cb37-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">c</span>(<span class="st">"I"</span>, <span class="st">"am"</span>, <span class="cn">NA</span>, <span class="st">"bride"</span>),</span>
+<span id="cb37-4"><a href="#cb37-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">c</span>(<span class="st">"I"</span>, <span class="st">"am"</span>, <span class="st">"king"</span>)</span>
+<span id="cb37-5"><a href="#cb37-5" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb37-6"><a href="#cb37-6" aria-hidden="true" tabindex="-1"></a>florence</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>ChunkedArray
+[
+  [
+    "I",
+    "am",
+    "no",
+    "mother"
+  ],
+  [
+    "I",
+    "am",
+    null,
+    "bride"
+  ],
+  [
+    "I",
+    "am",
+    "king"
+  ]
+]</code></pre>
+</div>
+</div>
+<p>A chunked array has some structure to it:</p>
+<div class="cell">
+<div class="cell-output-display">
+<p><img src="img/chunked_array_layout_small.jpg" class="img-fluid"></p>
+</div>
+</div>
+<p>We can check:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb39"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb39-1"><a href="#cb39-1" aria-hidden="true" tabindex="-1"></a>florence<span class="sc">$</span><span class="fu">chunk</span>(<span class="dv">0</span>) <span class="sc">|&gt;</span> <span class="fu">array_layout</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>
+── Metadata 
+• length : 4
+• null count : 0
+
+── Buffers 
+• validity : null
+• offset : 0 1 3 5 11
+• data : Iamnomother</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb41"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb41-1"><a href="#cb41-1" aria-hidden="true" tabindex="-1"></a>florence<span class="sc">$</span><span class="fu">chunk</span>(<span class="dv">1</span>) <span class="sc">|&gt;</span> <span class="fu">array_layout</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>
+── Metadata 
+• length : 4
+• null count : 1
+
+── Buffers 
+• validity : 1 1 0 1
+• offset : 0 1 3 3 8
+• data : Iambride</code></pre>
+</div>
+</div>
 </section>
 <section id="record-batches" class="level2">
-<h2 class="anchored" data-anchor-id="record-batches">Record Batches</h2>
-<p>A record batch is table-like data structure that is semantically a sequence of fields, each a contiguous Arrow array.<a href="#fn3" class="footnote-ref" id="fnref3" role="doc-noteref"><sup>3</sup></a> A struct is a nested type parameterized by an ordered sequence of types (which can all be distinct), called its fields. Each field must have a UTF8-encoded name, and these field names are part of the type metadata. A struct array does not have any additional allocated physical storage for its values. A struct array must still have an allocated validity bitmap, if it has one or more null values. Physically, a struct array has one child array for each field. The child arrays are independent and need not be adjacent to each other in memory.</p>
+<h2 class="anchored" data-anchor-id="record-batches">Record batches</h2>
+<p>A record batch is table-like data structure that is semantically a sequence of fields, each a contiguous Arrow array.<a href="#fn3" class="footnote-ref" id="fnref3" role="doc-noteref"><sup>3</sup></a> A struct is a nested type parameterized by an ordered sequence of types (which can all be distinct), called its fields. Each field must have a UTF8-encoded name, and these field names are part of the type metadata. A struct array does not have any additional allocated physical storage for its values. A struct array must still have an allocated validity bitmap, if it has one or more null values. Physically, a struct array has one child array for each field. The child arrays are independent and need not be adjacent to each other in memory. To illustrate, let’s return to our <code>dance_fever</code> data set:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb43"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb43-1"><a href="#cb43-1" aria-hidden="true" tabindex="-1"></a>dance_fever</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 14 × 3
+   track_number title             duration
+          &lt;int&gt; &lt;chr&gt;                &lt;int&gt;
+ 1            1 King                   280
+ 2            2 Free                   234
+ 3            3 Choreomania            213
+ 4            4 Back in Town           236
+ 5            5 Girls Against God      280
+ 6            6 Dream Girl Evil        227
+ 7            7 Prayer Factory          73
+ 8            8 Cassandra              258
+ 9            9 Heaven Is Here         111
+10           10 Daffodil               214
+11           11 My Love                231
+12           12 Restraint               48
+13           13 The Bomb               165
+14           14 Morning Elvis          262</code></pre>
+</div>
+</div>
+<p>Next, let’s bundle these into a record batch:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb45"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb45-1"><a href="#cb45-1" aria-hidden="true" tabindex="-1"></a>dance_fever_batch <span class="ot">&lt;-</span> <span class="fu">record_batch</span>(dance_fever)</span>
+<span id="cb45-2"><a href="#cb45-2" aria-hidden="true" tabindex="-1"></a>dance_fever_batch</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>RecordBatch
+14 rows x 3 columns
+$track_number &lt;int32&gt;
+$title &lt;string&gt;
+$duration &lt;int32&gt;</code></pre>
+</div>
+</div>
+<div class="cell">
+<div class="cell-output-display">
+<p><img src="img/record_batch_layout_small.jpg" class="img-fluid"></p>
+</div>
+</div>
+<section id="serialising-a-record-batch" class="level3">
+<h3 class="anchored" data-anchor-id="serialising-a-record-batch">Serialising a record batch</h3>
+<p>[discuss the IPC protocol for record batches here. Mention that feather is the same thing but as a file format rather than an input stream]</p>
+<p>Okay, so here’s where we’re at. The Arrow specification gives a precise statement of what an array should look like and how it should be laid out in memory. It also gives a precise statement about how arrays can be organised into record batches. Not only that, it provides a specification for how a record batch should be serialised via the IPC protocol. The IPC protocol is designed so that the structure of the serialised record batch is essentially identical to the physical layout of an in-memory record batch, which minimises the amount of computation required.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb47"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb47-1"><a href="#cb47-1" aria-hidden="true" tabindex="-1"></a>dance_fever_batch_0 <span class="ot">&lt;-</span> <span class="fu">record_batch</span>(dance_fever[<span class="dv">1</span><span class="sc">:</span><span class="dv">4</span>,])</span>
+<span id="cb47-2"><a href="#cb47-2" aria-hidden="true" tabindex="-1"></a>dance_fever_batch_0</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>RecordBatch
+4 rows x 3 columns
+$track_number &lt;int32&gt;
+$title &lt;string&gt;
+$duration &lt;int32&gt;</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb49"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb49-1"><a href="#cb49-1" aria-hidden="true" tabindex="-1"></a>dance_fever_batch_1 <span class="ot">&lt;-</span> <span class="fu">record_batch</span>(dance_fever[<span class="dv">5</span><span class="sc">:</span><span class="dv">14</span>,])</span>
+<span id="cb49-2"><a href="#cb49-2" aria-hidden="true" tabindex="-1"></a>dance_fever_batch_1</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>RecordBatch
+10 rows x 3 columns
+$track_number &lt;int32&gt;
+$title &lt;string&gt;
+$duration &lt;int32&gt;</code></pre>
+</div>
+</div>
+<p>Suppose I want to share this. The IPC format is designed to lay this object out as a stream of bytes that (almost) exactly mirrors the structure of the object as it is represented in memory.</p>
+<p>(picture here)</p>
+<p>There are three functions you can use if you want to do this. To send the data directly to an output stream (e.g., for communicating to some other process) use <code>write_ipc_stream()</code>. When writing data in this IPC format to a static file on disk (with a few minor differences), it is referred to as a “feather” formatted file, and you use <code>write_feather()</code>. Finally, if you want the same sequence of bytes but you’d like to keep them in R as raw vectors, you can use <code>write_to_raw()</code>. That’s what I’ll do here so I can show you the byte stream:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb51"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb51-1"><a href="#cb51-1" aria-hidden="true" tabindex="-1"></a>dance_fever_ipc_0 <span class="ot">&lt;-</span> <span class="fu">write_to_raw</span>(dance_fever_batch_0)</span>
+<span id="cb51-2"><a href="#cb51-2" aria-hidden="true" tabindex="-1"></a>dance_fever_ipc_0</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>  [1] ff ff ff ff f0 00 00 00 10 00 00 00 00 00 0a 00 0c 00 06 00 05 00 08 00 0a
+ [26] 00 00 00 00 01 04 00 0c 00 00 00 08 00 08 00 00 00 04 00 08 00 00 00 04 00
+ [51] 00 00 03 00 00 00 7c 00 00 00 3c 00 00 00 04 00 00 00 a0 ff ff ff 00 00 01
+ [76] 02 10 00 00 00 1c 00 00 00 04 00 00 00 00 00 00 00 08 00 00 00 64 75 72 61
+[101] 74 69 6f 6e 00 00 00 00 8c ff ff ff 00 00 00 01 20 00 00 00 d4 ff ff ff 00
+[126] 00 01 05 10 00 00 00 1c 00 00 00 04 00 00 00 00 00 00 00 05 00 00 00 74 69
+[151] 74 6c 65 00 00 00 04 00 04 00 04 00 00 00 10 00 14 00 08 00 06 00 07 00 0c
+[176] 00 00 00 10 00 10 00 00 00 00 00 01 02 10 00 00 00 28 00 00 00 04 00 00 00
+[201] 00 00 00 00 0c 00 00 00 74 72 61 63 6b 5f 6e 75 6d 62 65 72 00 00 00 00 08
+[226] 00 0c 00 08 00 07 00 08 00 00 00 00 00 00 01 20 00 00 00 00 00 00 00 ff ff
+[251] ff ff f8 00 00 00 14 00 00 00 00 00 00 00 0c 00 16 00 06 00 05 00 08 00 0c
+[276] 00 0c 00 00 00 00 03 04 00 18 00 00 00 58 00 00 00 00 00 00 00 00 00 0a 00
+[301] 18 00 0c 00 04 00 08 00 0a 00 00 00 8c 00 00 00 10 00 00 00 04 00 00 00 00
+[326] 00 00 00 00 00 00 00 07 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[351] 00 00 00 00 00 00 00 00 00 00 10 00 00 00 00 00 00 00 10 00 00 00 00 00 00
+[376] 00 00 00 00 00 00 00 00 00 10 00 00 00 00 00 00 00 14 00 00 00 00 00 00 00
+[401] 28 00 00 00 00 00 00 00 1f 00 00 00 00 00 00 00 48 00 00 00 00 00 00 00 00
+[426] 00 00 00 00 00 00 00 48 00 00 00 00 00 00 00 10 00 00 00 00 00 00 00 00 00
+[451] 00 00 03 00 00 00 04 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 04 00 00
+[476] 00 00 00 00 00 00 00 00 00 00 00 00 00 04 00 00 00 00 00 00 00 00 00 00 00
+[501] 00 00 00 00 01 00 00 00 02 00 00 00 03 00 00 00 04 00 00 00 00 00 00 00 04
+[526] 00 00 00 08 00 00 00 13 00 00 00 1f 00 00 00 00 00 00 00 4b 69 6e 67 46 72
+[551] 65 65 43 68 6f 72 65 6f 6d 61 6e 69 61 42 61 63 6b 20 69 6e 20 54 6f 77 6e
+[576] 00 18 01 00 00 ea 00 00 00 d5 00 00 00 ec 00 00 00 ff ff ff ff 00 00 00 00</code></pre>
+</div>
+</div>
+<p>Note that by default the <code>write_to_raw()</code> function will produce output in “stream” format: what you’re looking at above is the same sequence of bytes that would get transmitted if I’d called <code>write_ipc_stream()</code>. If you want <code>write_to_raw()</code> to mimic the behaviour of <code>write_feather()</code>, you can set the <code>format</code> argument:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb53"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb53-1"><a href="#cb53-1" aria-hidden="true" tabindex="-1"></a><span class="fu">write_to_raw</span>(dance_fever_batch_0, <span class="at">format =</span> <span class="st">"file"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>This would produce a somewhat longer output, due to the fact that the feather format includes additional information. For more detail, see the Arrow specification page.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb54"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb54-1"><a href="#cb54-1" aria-hidden="true" tabindex="-1"></a><span class="fu">read_ipc_stream</span>(dance_fever_ipc_0)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 4 × 3
+  track_number title        duration
+         &lt;int&gt; &lt;chr&gt;           &lt;int&gt;
+1            1 King              280
+2            2 Free              234
+3            3 Choreomania       213
+4            4 Back in Town      236</code></pre>
+</div>
+</div>
+<p>The same works for feather:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb56"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb56-1"><a href="#cb56-1" aria-hidden="true" tabindex="-1"></a><span class="fu">write_feather</span>(dance_fever_batch_1, <span class="st">"dance_fever_ipc_1.feather"</span>)</span>
+<span id="cb56-2"><a href="#cb56-2" aria-hidden="true" tabindex="-1"></a><span class="fu">read_feather</span>(<span class="st">"dance_fever_ipc_1.feather"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 10 × 3
+   track_number title             duration
+          &lt;int&gt; &lt;chr&gt;                &lt;int&gt;
+ 1            5 Girls Against God      280
+ 2            6 Dream Girl Evil        227
+ 3            7 Prayer Factory          73
+ 4            8 Cassandra              258
+ 5            9 Heaven Is Here         111
+ 6           10 Daffodil               214
+ 7           11 My Love                231
+ 8           12 Restraint               48
+ 9           13 The Bomb               165
+10           14 Morning Elvis          262</code></pre>
+</div>
+</div>
+</section>
+</section>
+<section id="tables" class="level2">
+<h2 class="anchored" data-anchor-id="tables">Tables</h2>
+<p>Draw an analogous figure for tables, showing how a table is a collection of chunked arrays, and each chunked array is a collection of arrays. Talk a little about why that helps with sequentially arriving data: a new record batch arrives, it’s already organised in the format needed for memory, so you can wrap those parts of memory in an Arrow buffer without moving it again. Then the various chunked arrays for the Table can be linked to the newly arrived Arrays without in disturbing any of the existing Arrays. Etc.</p>
+<p>Can’t concatenate record batches directly. Arrays are immutable, and we can’t touch them. They need to be wrapped into chunked arrays. In other words we need to convert each record batch into a table. I could use the <code>as_arrow_table()</code> function to do this conversion:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb58"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb58-1"><a href="#cb58-1" aria-hidden="true" tabindex="-1"></a>dance_fever_table_0 <span class="ot">&lt;-</span> <span class="fu">as_arrow_table</span>(dance_fever_batch_0)</span>
+<span id="cb58-2"><a href="#cb58-2" aria-hidden="true" tabindex="-1"></a>dance_fever_table_1 <span class="ot">&lt;-</span> <span class="fu">as_arrow_table</span>(dance_fever_batch_1)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>This works, but it’s also not something you will need to do very often in real life. The reader functions in <strong>arrow</strong> tend to convert record batches to tables by default. For instance, in the previous section I serialised two record batches, one to a file and one to a raw vector. Let’s look at what happens when I try to deserialise (a.k.a. “read”) them:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb59"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb59-1"><a href="#cb59-1" aria-hidden="true" tabindex="-1"></a>dance_fever_table_0 <span class="ot">&lt;-</span> <span class="fu">read_ipc_stream</span>(</span>
+<span id="cb59-2"><a href="#cb59-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">file =</span> dance_fever_ipc_0, </span>
+<span id="cb59-3"><a href="#cb59-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">as_data_frame =</span> <span class="cn">FALSE</span></span>
+<span id="cb59-4"><a href="#cb59-4" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb59-5"><a href="#cb59-5" aria-hidden="true" tabindex="-1"></a>dance_fever_table_0</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Table
+4 rows x 3 columns
+$track_number &lt;int32&gt;
+$title &lt;string&gt;
+$duration &lt;int32&gt;</code></pre>
+</div>
+</div>
+<p>That’s the same data as before, but it’s a table not a record batch. Each column is a chunked array, not an array. The same happens when I read from the file:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb61"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb61-1"><a href="#cb61-1" aria-hidden="true" tabindex="-1"></a>dance_fever_table_1 <span class="ot">&lt;-</span> <span class="fu">read_feather</span>(</span>
+<span id="cb61-2"><a href="#cb61-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">file =</span> <span class="st">"dance_fever_ipc_1.feather"</span>, </span>
+<span id="cb61-3"><a href="#cb61-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">as_data_frame =</span> <span class="cn">FALSE</span></span>
+<span id="cb61-4"><a href="#cb61-4" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb61-5"><a href="#cb61-5" aria-hidden="true" tabindex="-1"></a>dance_fever_table_1</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Table
+10 rows x 3 columns
+$track_number &lt;int32&gt;
+$title &lt;string&gt;
+$duration &lt;int32&gt;</code></pre>
+</div>
+</div>
+<p>In general, you won’t get a record batch in <strong>arrow</strong> unless you explicitly ask for one. Tables are the default tabular data structure, which is usually what you want anyway</p>
+<p>Okay, so now I have the two fragments of my data set represented as tables. The difference between the table version and the record batch version is that the columns are all represented as chunked arrays. Each array from the original record batch is now one chunk in the corresponding chunked array in the table:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb63"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb63-1"><a href="#cb63-1" aria-hidden="true" tabindex="-1"></a>dance_fever_batch_0<span class="sc">$</span>title</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Array
+&lt;string&gt;
+[
+  "King",
+  "Free",
+  "Choreomania",
+  "Back in Town"
+]</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb65"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb65-1"><a href="#cb65-1" aria-hidden="true" tabindex="-1"></a>dance_fever_table_0<span class="sc">$</span>title</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>ChunkedArray
+[
+  [
+    "King",
+    "Free",
+    "Choreomania",
+    "Back in Town"
+  ]
+]</code></pre>
+</div>
+</div>
+<p>It’s the same underlying object, just with a new, flexible wrapper. The wrapper is what allows us to concatenate tables:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb67"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb67-1"><a href="#cb67-1" aria-hidden="true" tabindex="-1"></a>dance_fever_table <span class="ot">&lt;-</span> <span class="fu">concat_tables</span>(</span>
+<span id="cb67-2"><a href="#cb67-2" aria-hidden="true" tabindex="-1"></a>  dance_fever_table_0,</span>
+<span id="cb67-3"><a href="#cb67-3" aria-hidden="true" tabindex="-1"></a>  dance_fever_table_1</span>
+<span id="cb67-4"><a href="#cb67-4" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb67-5"><a href="#cb67-5" aria-hidden="true" tabindex="-1"></a>dance_fever_table</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Table
+14 rows x 3 columns
+$track_number &lt;int32&gt;
+$title &lt;string&gt;
+$duration &lt;int32&gt;</code></pre>
+</div>
+</div>
+<p>Looking at the columns we see that the chunking are preserved. That’s not arbitrary. It’s because those are the original arrays, still located at the same spot in memory and not contiguous:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb69"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb69-1"><a href="#cb69-1" aria-hidden="true" tabindex="-1"></a>dance_fever_table<span class="sc">$</span>title</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>ChunkedArray
+[
+  [
+    "King",
+    "Free",
+    "Choreomania",
+    "Back in Town"
+  ],
+  [
+    "Girls Against God",
+    "Dream Girl Evil",
+    "Prayer Factory",
+    "Cassandra",
+    "Heaven Is Here",
+    "Daffodil",
+    "My Love",
+    "Restraint",
+    "The Bomb",
+    "Morning Elvis"
+  ]
+]</code></pre>
+</div>
+</div>
+<p>An important thing to note about chunks is that they aren’t considered to be a part of the data structure for the purpose of testing equality. Here’s the same data with a different chunking:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb71"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb71-1"><a href="#cb71-1" aria-hidden="true" tabindex="-1"></a>title_rechunked <span class="ot">&lt;-</span> <span class="fu">chunked_array</span>(</span>
+<span id="cb71-2"><a href="#cb71-2" aria-hidden="true" tabindex="-1"></a>  dance_fever<span class="sc">$</span>title[<span class="dv">1</span><span class="sc">:</span><span class="dv">8</span>],</span>
+<span id="cb71-3"><a href="#cb71-3" aria-hidden="true" tabindex="-1"></a>  dance_fever<span class="sc">$</span>title[<span class="dv">9</span><span class="sc">:</span><span class="dv">12</span>],</span>
+<span id="cb71-4"><a href="#cb71-4" aria-hidden="true" tabindex="-1"></a>  dance_fever<span class="sc">$</span>title[<span class="dv">13</span><span class="sc">:</span><span class="dv">14</span>]</span>
+<span id="cb71-5"><a href="#cb71-5" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb71-6"><a href="#cb71-6" aria-hidden="true" tabindex="-1"></a>title_rechunked</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>ChunkedArray
+[
+  [
+    "King",
+    "Free",
+    "Choreomania",
+    "Back in Town",
+    "Girls Against God",
+    "Dream Girl Evil",
+    "Prayer Factory",
+    "Cassandra"
+  ],
+  [
+    "Heaven Is Here",
+    "Daffodil",
+    "My Love",
+    "Restraint"
+  ],
+  [
+    "The Bomb",
+    "Morning Elvis"
+  ]
+]</code></pre>
+</div>
+</div>
+<p>Although these two chunked arrays partition the data in different ways, the values stored in each slot are the same. When I test for equality, the scalar values in each slot are compared to one another without regard for which chunk they are assigned to. Since all those values are the same, every comparison returns <code>true</code>:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb73"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb73-1"><a href="#cb73-1" aria-hidden="true" tabindex="-1"></a>title_rechunked <span class="sc">==</span> dance_fever_table<span class="sc">$</span>title</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>ChunkedArray
+[
+  [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true
+  ]
+]</code></pre>
+</div>
+</div>
+</section>
+<section id="datasets" class="level2">
+<h2 class="anchored" data-anchor-id="datasets">Datasets?</h2>
+<p>So what about data sets? They’re the last item on that table, and you might be wondering where they fall in all this. I’m not going to dive into the details on datasets in this post, because they’re a whole separate topic and they deserve their own blog post. However, it’s a little unsatisfying to write all this and not say anything about them, so I’ll give a very quick overview here.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb75"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb75-1"><a href="#cb75-1" aria-hidden="true" tabindex="-1"></a>florence <span class="ot">&lt;-</span> <span class="fu">get_discography</span>(<span class="st">"florence + the machine"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<div class="cell">
+
+</div>
+<p>This works and now we have a data frame</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb76"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb76-1"><a href="#cb76-1" aria-hidden="true" tabindex="-1"></a>florence <span class="sc">|&gt;</span> </span>
+<span id="cb76-2"><a href="#cb76-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(<span class="fu">where</span>(<span class="sc">~!</span><span class="fu">is.list</span>(.))) <span class="sc">|&gt;</span>  <span class="co"># drop list columns</span></span>
+<span id="cb76-3"><a href="#cb76-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">as_arrow_table</span>() <span class="sc">|&gt;</span>             <span class="co"># convert to arrow table</span></span>
+<span id="cb76-4"><a href="#cb76-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">write_dataset</span>(                  <span class="co"># write to multi-file storage</span></span>
+<span id="cb76-5"><a href="#cb76-5" aria-hidden="true" tabindex="-1"></a>    <span class="at">path =</span> <span class="st">"spotify_florence"</span>,</span>
+<span id="cb76-6"><a href="#cb76-6" aria-hidden="true" tabindex="-1"></a>    <span class="at">format =</span> <span class="st">"feather"</span>,</span>
+<span id="cb76-7"><a href="#cb76-7" aria-hidden="true" tabindex="-1"></a>    <span class="at">partitioning =</span> <span class="st">"album_release_year"</span></span>
+<span id="cb76-8"><a href="#cb76-8" aria-hidden="true" tabindex="-1"></a>  )</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb77"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb77-1"><a href="#cb77-1" aria-hidden="true" tabindex="-1"></a><span class="fu">list.files</span>(<span class="st">"spotify_florence"</span>, <span class="at">recursive =</span> <span class="cn">TRUE</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] "album_release_year=2009/part-0.feather"
+[2] "album_release_year=2010/part-0.feather"
+[3] "album_release_year=2011/part-0.feather"
+[4] "album_release_year=2012/part-0.feather"
+[5] "album_release_year=2015/part-0.feather"
+[6] "album_release_year=2018/part-0.feather"
+[7] "album_release_year=2022/part-0.feather"</code></pre>
+</div>
+</div>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb79"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb79-1"><a href="#cb79-1" aria-hidden="true" tabindex="-1"></a>florence_dataset <span class="ot">&lt;-</span> <span class="fu">open_dataset</span>(<span class="st">"spotify_florence"</span>, <span class="at">format =</span> <span class="st">"feather"</span>)</span>
+<span id="cb79-2"><a href="#cb79-2" aria-hidden="true" tabindex="-1"></a>florence_dataset</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>FileSystemDataset with 7 Feather files
+artist_name: string
+artist_id: string
+album_id: string
+album_type: string
+album_release_date: string
+album_release_date_precision: string
+danceability: double
+energy: double
+key: int32
+loudness: double
+mode: int32
+speechiness: double
+acousticness: double
+instrumentalness: double
+liveness: double
+valence: double
+tempo: double
+track_id: string
+analysis_url: string
+time_signature: int32
+disc_number: int32
+duration_ms: int32
+explicit: bool
+track_href: string
+is_local: bool
+track_name: string
+track_preview_url: bool
+track_number: int32
+type: string
+track_uri: string
+external_urls.spotify: string
+album_name: string
+key_name: string
+mode_name: string
+key_mode: string
+track_n: double
+album_release_year: int32
+
+See $metadata for additional Schema metadata</code></pre>
+</div>
+</div>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb81"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb81-1"><a href="#cb81-1" aria-hidden="true" tabindex="-1"></a>danceability <span class="ot">&lt;-</span> florence_dataset <span class="sc">|&gt;</span> </span>
+<span id="cb81-2"><a href="#cb81-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(album_name, track_name, danceability) <span class="sc">|&gt;</span></span>
+<span id="cb81-3"><a href="#cb81-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">distinct</span>() <span class="sc">|&gt;</span></span>
+<span id="cb81-4"><a href="#cb81-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">arrange</span>(<span class="fu">desc</span>(danceability)) <span class="sc">|&gt;</span> </span>
+<span id="cb81-5"><a href="#cb81-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">head</span>(<span class="at">n =</span> <span class="dv">10</span>) <span class="sc">|&gt;</span> </span>
+<span id="cb81-6"><a href="#cb81-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">compute</span>()</span>
+<span id="cb81-7"><a href="#cb81-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb81-8"><a href="#cb81-8" aria-hidden="true" tabindex="-1"></a>danceability</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Table
+10 rows x 3 columns
+$album_name &lt;string&gt;
+$track_name &lt;string&gt;
+$danceability &lt;double&gt;
+
+See $metadata for additional Schema metadata</code></pre>
+</div>
+</div>
+<p>This is a regular arrow table:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb83"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb83-1"><a href="#cb83-1" aria-hidden="true" tabindex="-1"></a>danceability<span class="sc">$</span>track_name</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>ChunkedArray
+[
+  [
+    "Heaven Is Here",
+    "King",
+    "King",
+    "Hunger",
+    "My Love - Acoustic",
+    "Ghosts - Demo",
+    "What The Water Gave Me - Demo",
+    "What The Water Gave Me - Demo",
+    "South London Forever",
+    "What The Water Gave Me - Demo"
+  ]
+]</code></pre>
+</div>
+</div>
+<p>Can convert to tibble:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb85"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb85-1"><a href="#cb85-1" aria-hidden="true" tabindex="-1"></a><span class="fu">as.data.frame</span>(danceability)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 10 × 3
+   album_name                   track_name                    danceability
+   &lt;chr&gt;                        &lt;chr&gt;                                &lt;dbl&gt;
+ 1 Dance Fever                  Heaven Is Here                       0.852
+ 2 Dance Fever                  King                                 0.731
+ 3 Dance Fever (Deluxe)         King                                 0.73 
+ 4 High As Hope                 Hunger                               0.729
+ 5 Dance Fever (Deluxe)         My Love - Acoustic                   0.719
+ 6 Lungs (Deluxe Version)       Ghosts - Demo                        0.681
+ 7 Ceremonials                  What The Water Gave Me - Demo        0.68 
+ 8 Ceremonials (Deluxe Edition) What The Water Gave Me - Demo        0.68 
+ 9 High As Hope                 South London Forever                 0.679
+10 Ceremonials (Deluxe Edition) What The Water Gave Me - Demo        0.678</code></pre>
+</div>
+</div>
 <!--------------- appendices go here ----------------->
 <div class="cell">
 
@@ -471,7 +1140,7 @@ Attaching package: 'arrow'</code></pre>
 
 <ol>
 <li id="fn1" role="doc-endnote"><p>In the near future, I hope that the documentation itself is going to tell this story – and yes, I realise that by calling attention to the issue I’ve effectively volunteered to fix it – but sometimes it’s easier to do the same job in an informal blog post where you have the luxury of going overboard with “authorial voice” and “narrative”, and all those other fancy things that writers love.<a href="#fnref1" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
-<li id="fn2" role="doc-endnote"><p>Strictly speaking the Arrow specification allows some flexibility here. Implementations can choose between 8 byte alignment or 64 byte alignment. Moreover, when allocating memory this is only a “recommendation”, whereas when serialising Arrow data via IPC the alignment is required. It’s also recommended that implementations use 64 byte alignment rather than 8 byte alignment. As discussed in the Arrow specification page: “The recommendation for 64 byte alignment comes from the <a href="https://software.intel.com/en-us/articles/practical-intel-avx-optimization-on-2nd-generation-intel-core-processors">Intel performance guide</a> that recommends alignment of memory to match SIMD register width. The specific padding length was chosen because it matches the largest SIMD instruction registers available on widely deployed x86 architecture (Intel AVX-512). The recommended padding of 64 bytes allows for using <a href="https://software.intel.com/en-us/cpp-compiler-developer-guide-and-reference-introduction-to-the-simd-data-layout-templates">SIMD</a> instructions consistently in loops without additional conditional checks. This should allow for simpler, efficient and CPU cache-friendly code. In other words, we can load the entire 64-byte buffer into a 512-bit wide SIMD register and get data-level parallelism on all the columnar values packed into the 64-byte buffer. Guaranteed padding can also allow certain compilers to generate more optimized code directly.” I can honestly say that I understand about 1/3 of that now. I’m learning things!<a href="#fnref2" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn2" role="doc-endnote"><p>Quick explanation: As a general rule, if you want things to be efficient you want the beginnings and endings of your data structures to be <strong>naturally aligned</strong>, in the sense that the memory address is a multiple of the data block sizes. So on a 64-bit machine, you want the memory address for every data structure to start on a multiple of 64 bits. Apparently that makes lookup easier or something. Unfortunately, I’ve only specified 8 bits (i.e.&nbsp;1 byte) so if I wanted to ensure that the validity bitmap is naturally aligned I’m going to need to add another 7 bytes worth of padding in order to make it to the full 64 bits. This method of aligning data structures in memory is referred to as “8 byte alignment”. However, what Arrow does in this situation is <em>64 byte alignment</em>, so each data structure has to be 64 bytes long at a minimum. This design feature exists to allow efficient use of modern hardware, and if you want to know more, it’s discussed on the Arrow website.<a href="#fnref2" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
 <li id="fn3" role="doc-endnote"><p>If you’re familiar with Arrow data structures, it is in essence a struct with additional metadata<a href="#fnref3" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
 </ol>
 </section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
