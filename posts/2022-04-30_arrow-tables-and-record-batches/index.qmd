@@ -59,6 +59,8 @@ Kick back, relax into whatever comfort you have available, and let me tell you a
 ```{r}
 #| message: false
 library(arrow)
+library(spotifyr)
+library(dplyr)
 library(tibble)
 options(scipen = 20)
 ```
@@ -240,53 +242,6 @@ dance_fever$title |>
 You wouldn't want to use my code in the wild though because it doesn't even try to be effienct or truncate the output in any way. I only wrote it so that I had a way of showing you the content of an Arrow array in R at a slightly lower level.
 
 
-<!-- The metadata are easily extracted: -->
-
-<!-- ```{r} -->
-<!-- arr <- Array$create(c(1, NA, 2, 4, 8), type = int32()) -->
-<!-- arr -->
-
-<!-- arr$length() -->
-<!-- arr$null_count -->
-<!-- ``` -->
-
-<!-- We can extract the validity bitmap, using the `IsValid()` method: -->
-
-<!-- ```{r} -->
-<!-- validity_bitmap <- function(x) { -->
-<!--   slots <- 0:(x$length() - 1) -->
-<!--   vapply(slots, x$IsValid, FUN.VALUE = FALSE) -->
-<!-- } -->
-
-<!-- validity_bitmap(arr) -->
-<!-- ``` -->
-
-
-<!--
-
-We can extract the pointer to tell us where in memory the Arrow array begins:^[At this point, you're doing one of two things. Either you're going "okay yeah, I know what a memory address looks like, let's move on already" or else you are facing a rising sense of dread/ If you are in the latter group, here is a quick primer. Each memory address refers to a specific *byte* (not bit). Bytes are ordered sequentially and they are conventionally written as hexadecimal numbers (that's what the `0x` prefix is telling us). That's super helpful for machine purposes, I guess, but humans don't think in hexadecimal arithmetic. We usually think in decimal numbers. Suffice it to say this output is literally nothing more interesting than a number. It's a location in memory, and the machine knows how to find it. Adding or subtracting numbers from the pointer address will return the addresses for adjacent locations in memory. Boooooooring.]
-
-```{r}
-arr$pointer()
-```
-
--->
-
-<!-- ```{r} -->
-<!-- address <- function(x) { -->
-<!--   x$pointer() |> -->
-<!--     xptr::xptr_address() |> -->
-<!--     as.numeric() -->
-<!-- } -->
-<!-- ``` -->
-
-
-<!-- Okay, let's get back to the Arrow array itself. The address shown above is the location of the *first* byte (i.e., byte 0) allocated to the array, but the array itself occupies a block of contiguous bytes (i.e., bytes with adjacent addresses!) in memory. How many bytes? Conveniently, Array objects have an `nbytes()` method that will tell us precisely: -->
-
-<!-- ```{r} -->
-<!-- arr$nbytes() -->
-<!-- ``` -->
-
 ## Chunked arrays
 
 
@@ -464,8 +419,61 @@ title_rechunked == dance_fever_table$title
 
 ## Datasets?
 
-Keep this brief? It actually feels like a different topic to an extent. But still, being able to talk about larger than memory datasets at long last feels like a good place to end this post.
+So what about data sets? They're the last item on that table, and you might be wondering where they fall in all this. I'm not going to dive into the details on datasets in this post, because they're a whole separate topic and they deserve their own blog post. However, it's a little unsatisfying to write all this and not say anything about them, so I'll give a very quick overview here. 
 
+```{r}
+#| eval: false
+florence <- get_discography("florence + the machine")
+```
+```{r}
+#| echo: false
+florence <- readRDS("spotify_florence.rds")
+```
+
+This works and now we have a data frame
+
+```{r}
+florence |> 
+  select(where(~!is.list(.))) |>  # drop list columns
+  as_arrow_table() |>             # convert to arrow table
+  write_dataset(                  # write to multi-file storage
+    path = "spotify_florence",
+    format = "feather",
+    partitioning = "album_release_year"
+  )
+```
+
+```{r}
+list.files("spotify_florence", recursive = TRUE)
+```
+
+```{r}
+florence_dataset <- open_dataset("spotify_florence", format = "feather")
+florence_dataset
+```
+
+```{r}
+danceability <- florence_dataset |> 
+  select(album_name, track_name, danceability) |>
+  distinct() |>
+  arrange(desc(danceability)) |> 
+  head(n = 10) |> 
+  compute()
+
+danceability
+```
+
+This is a regular arrow table:
+
+```{r}
+danceability$track_name
+```
+
+Can convert to tibble:
+
+```{r}
+as.data.frame(danceability)
+```
 
 <!--------------- appendices go here ----------------->
 
