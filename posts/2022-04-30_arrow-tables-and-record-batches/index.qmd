@@ -1,8 +1,9 @@
 ---
 title: "Arrow tables and record batches"
+subtitle: "In which the author discusses arrays, chunked arrays, record batches, tables, and datasets in the R interface to Apache Arrow. Masochism is mentioned, and the music of Florence + The Machine makes a guest appearance"
 date: "2022-04-30"
 categories: [Apache Arrow]
-image: "../../blank_preview.jpg"
+image: "img/cover.jpg"
 ---
 
 <!--------------- my typical setup ----------------->
@@ -15,22 +16,33 @@ renv::use(lockfile = "renv.lock")
 <!--------------- post begins here ----------------->
 
 >
-| "The time has come," the Walrus said,
-|    "To talk of many things:
-| Arrays (in Arrow) and Record Batches,
-|    Of Tables, Chunks and things—
-| Why IPC's great for streaming blocks—
-|    But for saving, Parquet wins." 
-|
-| (My sincere apologies to [Lewis Carroll](https://poets.org/poem/walrus-and-carpenter))
+| My catholic taste in the devil
+| All gilded and golden, yes, I'm your girl
+| Hell, if it glitters, I'm going
+|   -- *Heaven is Here*, Florence + The Machine
 
+If you've made the life choice to become a developer advocate with a focus on [Apache Arrow](https://arrow.apache.org/), you're probably not unfamiliar with masochism. Don't believe me? 
 
-This post has been rolling around in my head since the start of April. I've known from the beginning what I want to say -- approximately! -- but not how I want to say it. It is annoying me, and at a certain point I decided I just needed to put words to metaphorical paper and see what happens. It's another post about Apache Arrow, the fourth in a series I've been writing.
+Well then, let's consider my past choices:
 
-My goal in this one is... well, I suppose it is partly to do my job since I am employed to write these things, but it's a little more than that. My goal is to clarify something that has been a source of confusion about Arrow for me, in the hope that once I've sorted it out in my own head I can perhaps contribute something to the official documentation that helps other people who might have the same problem that I have. 
+- My first attempt to write about the topic didn't even talk about Arrow: the post was a descent into the madness of [data serialisation in R](https://blog.djnavarro.net/posts/2021-11-15_serialisation-with-rds/) and the RDS format. 
+- My second attempt went a little better, and I managed to write a few thousand words on [getting started with Apache Arrow](https://blog.djnavarro.net/posts/2021-11-19_starting-apache-arrow-in-r/) for the R user. Much of that post was spent on answering very technical questions like _"what is this??????"_ and _"why do I care????"_ Totally normal behaviour, right? 
+- My third attempt talked about how [the **arrow** package supplies **dplyr** bindings](https://blog.djnavarro.net/posts/2022-01-18_binding-arrow-to-r/), allowing R to perform data manipulation on Arrow data using familiar **dplyr** syntax. It wasn't a bad post, to be honest, but I did go down a very strange path with all the _Magicians_ gifs. 
+- As for my fourth attempt, the [data types in Arrow and R](https://blog.djnavarro.net/posts/2022-03-04_data-types-in-arrow-and-r/) post... look, if you've ever had a secret desire to see what happens when I am reduced to tears and wailing at the horrors of the world and of IEEE 754, then oh my yes, this is the extremely long blog post for you.
 
-So here's the thing that has been giving me grief. If you go to the Get Started page for the **arrow** R package, one of the first things you encounter is a table telling you that Arrow has classes for zero-dimensional data (scalars), one-dimensional data (arrays and other vector-like data), and two-dimensional data (tabular or data frame-like data). I'll reproduce the entire table in full because it's actually super important...
+What I am trying to convey to you, dear reader, is that -- setting aside the superficial trappings of whips and chains and the various other devices that propelled E. L. James to great fortune -- I am intimately acquainted with pain. It is important to me that you understand this, and that when I mention the pain I encountered when trying to learn how the **arrow** R package works, I am not using the term lightly.
 
+So let talk about my latest pain point, shall we? 
+
+<br><br>
+
+## Data objects
+
+Here's the thing that has been giving me grief. Suppose you are an R user who is new to this whole Apache Arrow business. You've installed the **arrow** package, and you're now reading the [Get Started](https://arrow.apache.org/docs/r/articles/arrow.html) page in the hopes that you too will be able to, well, get started. When you visit this page, one of the very first things you encounter is a table listing a variety of data structures used by Arrow. Specifically, the table tells you that Arrow has classes for zero-dimensional data (scalars), one-dimensional data (arrays and other vector-like data), and two-dimensional data (tabular or data frame-like data). It shows you that... 
+
+...actually, you know what? Instead of describing it, let's take a look at the actual table. Here's what it tells you about the hierarchy of data structures in **arrow**:
+
+<br>
 
 | Dim | Class          | Description                               | How to create an instance                                                                             |
 | --- | -------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------|
@@ -41,20 +53,21 @@ So here's the thing that has been giving me grief. If you go to the Get Started 
 | 2   | `Table`        | list of `ChunkedArray` with a `Schema`    | `Table$create(...)`, alias `arrow_table(...)`, or `arrow::read_*(file, as_data_frame = FALSE)`        |
 | 2   | `Dataset`      | list of `Table`s  with the same `Schema`  | `Dataset$create(sources, schema)` or alias `open_dataset(sources, schema)`                            |
 
-...but I'm going to be honest with you, dear reader. When I first started learning Arrow, I had no idea what any of this meant. This whole table was completely intimidating. I looked at it and thoughts roughly along the following lines went through my head:
+<br>
+
+Now, perhaps there are some devilishly clever R users who can look at this table and immediately decode all its mysteries. But I will be honest with you, dear reader, and confess that I am not one of these people. When I first started learning Arrow, I had no idea what any of this meant. This whole table was completely intimidating. I looked at it and thoughts roughly along the following lines went through my head:
 
 
 > Oh... f**k me. I'm completely out of my depth, I am too stupid to understand any of this. I should quit now and find a new job before everyone realises I'm a total fraud. They made a terrible mistake hiring me and... blah blah blah
 
 
-The self-pity went on for a while, but I'll spare you the details. 
+The self-pity went on for a while and the names I called myself became quite inappropriate for a family restaurant, but I'll be kind and spare you the tiresome details. 
 
 Eventually I remembered that this is my impostor syndrome talking and that I am in fact quite good at learning technical concepts. The problem I'm encountering here is that this table is not in any way self-explanatory, but it's placed in a part of the documentation where new users will easily encounter it and get confused the same way I did. The placement itself isn't the problem: the content of the table is actually pretty important for any Arrow user to grasp, but all the explanatory scaffolding is missing. 
 
 To a new user, most of this is is incomprehensible. What exactly is a `ChunkedArray` and how is it different from an `Array`? Why are these necessary as distinct concepts? While we are at it, what the heck is a `RecordBatch`, a `Table` and a `Dataset`, and what makes them different from one another? Unless someone takes the time to explain it all to you, it does look like Arrow is unnecessarily complicated, doesn't it? And yet, some very smart people seem to think that Arrow is a very good idea indeed so... what's the story? 
 
 Kick back, relax into whatever comfort you have available, and let me tell you a tale.^[In the near future, I hope that the documentation itself is going to tell this story -- and yes, I realise that by calling attention to the issue I've effectively volunteered to fix it -- but sometimes it's easier to do the same job in an informal blog post where you have the luxury of going overboard with "authorial voice" and "narrative", and all those other fancy things that writers love.] All will be revealed...
-
 
 ```{r}
 #| message: false
@@ -71,11 +84,29 @@ options(scipen = 20)
 source("display_array_layout.R")
 ```
 
-## Scalars?
+```{r}
+#| echo: false
+#| column: screen
+#| fig-link: https://www.youtube.com/watch?v=Q4Ez9pitRJ0
+knitr::include_graphics("img/heaven_is_here.png")
+```
 
-Let's start with scalars. A scalar object is simply a single value, that can be of any type. It might be an integer, a string, a timestamp, or any of the different data types that Arrow supports. I won't talk about the different types in this post because I already wrote an extremely long post on that topic. For the current purposes, what matters is that a scalar is *one* value. It is "zero dimensional". All higher order data structures are built on top of scalars, so they are in some sense fundamental, but there is not much I need to say about them for this post. 
+<br><br>
+
+## Scalars
+
+Let's start with scalars. A scalar object is simply a single value, that can be of any type. It might be an integer, a string, a timestamp, or any of the different data types that Arrow supports. I won't talk about the different types in this post because I already wrote [an extremely long post on that topic](https://blog.djnavarro.net/posts/2022-03-04_data-types-in-arrow-and-r/). For the current purposes, what matters is that a scalar is *one* value. It is "zero dimensional". All higher order data structures are built on top of scalars, so they are in some sense fundamental, but there is not much I need to say about them for this post. 
+
+
+<br><br>
 
 ## Arrays
+
+>
+| All the gods have been domesticated
+| And heaven is now overrated
+|   -- *Cassandra*, Florence + The Machine
+
 
 Let's turn our attention to arrays next. I'll start by introducing some terminology from the page describing the [Arrow specification](https://arrow.apache.org/docs/format/Columnar.html):
 
@@ -83,6 +114,8 @@ Let's turn our attention to arrays next. I'll start by introducing some terminol
 - A related but different concept is that of a **buffer**, a sequential virtual address space with a given length. Any byte in the buffer can be reached via a single pointer offset less than the region’s length.
 - Finally, we have the concept of the **physical layout**, which describes how information is laid out in memory, without taking into account of how that information is interpreted. For example, a 32-bit signed integer array and 32-bit floating point array have the same layout because they have the same physical structure in memory. The meaning of the bits that make up a 32-bit float is different to the meaning of the bits that make up a 32-bit integer, but the physical layout is the same. 
 
+
+<br>
 
 ### Structure of arrays
 
@@ -104,7 +137,7 @@ But that's not a very satisfying answer at some level. What does this thing look
 
 ```{r}
 #| echo: false
-knitr::include_graphics("img/array_layout_detail_small.jpg")
+knitr::include_graphics("img/array_layout.svg")
 ```
 
 
@@ -160,6 +193,8 @@ Notice that the last four bytes shown are written `08 00 00 00` (little endian),
 
 Okay, so what should you take away from all this? Well, firstly, fear not -- if you're an R user like me and trying to wrap your head around Arrow, you don't *really* have to spend much of your time thinking about what this physical layout looks like. All you need to take away from it is that an Arrow array is an immutable object with this particular "metadata + buffers" structure that is designed to be efficient, and that each buffer is a contiguous bloc of memory on your machine. 
 
+<br>
+
 ### Peeking inside arrays
 
 
@@ -177,7 +212,7 @@ duration
 
 ```{r}
 #| echo: false
-knitr::include_graphics("img/array_layout_small.jpg")
+knitr::include_graphics("img/array_layout_with_nulls.svg")
 ```
 
 Array objects come with a variety of methods you can use to examine their properties. For instance, you can use the `length()`, `null_count()` and `nbytes()` to calculate the length of the array, the number of missing values it contains, and the number of bytes it occupies in memory. To find out how many bytes have been allocated the `duration` array, we would do this:
@@ -192,7 +227,7 @@ If you really want to dive in and take a look at how information is structured i
 duration$data()
 ```
 
-This output is a little underwhelming because -- at the moment! -- the print method for an ArrayData object doesn't do anything except print the class name. However, it's an R6 object which means everything is stored in an environment. So let's use the `env_print()` function from the **rlang** package to take a look at it as an environment:
+This output is a little underwhelming because at the moment the print method for an `ArrayData` object doesn't do anything except print the class name. However, it's an R6 object which means everything is stored in an environment. So let's use the `env_print()` function from the **rlang** package to take a look at it as an environment:
 
 ```{r}
 rlang::env_print(duration$data())
@@ -220,6 +255,7 @@ readBin(data_buffer, what = "integer", n = 14)
 ...we have reconstructed the values from the data buffer. 
 
 
+<br>
 
 ### A nicer way
 
@@ -239,39 +275,66 @@ dance_fever$title |>
   array_layout()
 ```
 
-You wouldn't want to use my code in the wild though because it doesn't even try to be effienct or truncate the output in any way. I only wrote it so that I had a way of showing you the content of an Arrow array in R at a slightly lower level.
+You wouldn't want to use my code in the wild though because it doesn't even try to be efficient or truncate the output in any way. I only wrote it so that I had a way of showing you the content of an Arrow array in R at a slightly lower level.
 
+```{r}
+#| echo: false
+#| column: screen
+#| fig-link: https://www.youtube.com/watch?v=5GHXEGz3PJg
+knitr::include_graphics("img/hunger.png")
+```
+
+
+<br><br>
 
 ## Chunked arrays
+  
+>
+| I need my golden crown of sorrow, my bloody sword to swing
+| I need my empty halls to echo with grand self-mythology
+| 'Cause I am no mother, I am no bride
+| I am king
+|   -- *King*, Florence + The Machine
+
+
+Tricky thing is how to talk about chunked arrays without first talking about record batches, and the concept of sequentially arriving record batches. I think the way around this is to ask people to imagine multiple arrays arriving from different sources (with the promissory note that this will be explained later) and wanting to treat them as "just one thing" without shuffling anything around in memory or creating a new object (remind them arrays are immutable: R users will find that hard). Think about having a wrapper that points to the different arrays: each array is now a "chunk" in some new structure... etc.
+
 
 
 ```{r}
-florence <- chunked_array(
+king <- chunked_array(
   c("I", "am", "no", "mother"),
   c("I", "am", NA, "bride"),
   c("I", "am", "king")
 )
-florence
+king
 ```
 
 A chunked array has some structure to it:
 
 ```{r}
 #| echo: false
-knitr::include_graphics("img/chunked_array_layout_small.jpg")
+knitr::include_graphics("img/chunked_array_layout.svg")
 ```
 
 
 We can check:
 
 ```{r}
-florence$chunk(0) |> array_layout()
-florence$chunk(1) |> array_layout()
+king$chunk(0) |> array_layout()
+king$chunk(1) |> array_layout()
 ```
 
 
+```{r}
+#| echo: false
+#| column: screen
+#| fig-link: https://www.youtube.com/watch?v=L62LtChAwww
+knitr::include_graphics("img/king.png")
+```
 
 
+<br><br>
 
 ## Record batches
 
@@ -285,16 +348,17 @@ dance_fever
 Next, let's bundle these into a record batch:
 
 ```{r}
-dance_fever_batch <- record_batch(dance_fever)
-dance_fever_batch
+df <- record_batch(dance_fever)
+df
 ```
 
 ```{r}
 #| echo: false
-knitr::include_graphics("img/record_batch_layout_small.jpg")
+knitr::include_graphics("img/record_batch_layout.svg")
 ```
 
 
+<br>
 
 ### Serialising a record batch
 
@@ -303,64 +367,93 @@ knitr::include_graphics("img/record_batch_layout_small.jpg")
 Okay, so here's where we're at. The Arrow specification gives a precise statement of what an array should look like and how it should be laid out in memory. It also gives a precise statement about how arrays can be organised into record batches. Not only that, it provides a specification for how a record batch should be serialised via the IPC protocol. The IPC protocol is designed so that the structure of the serialised record batch is essentially identical to the physical layout of an in-memory record batch, which minimises the amount of computation required. 
 
 ```{r}
-dance_fever_batch_0 <- record_batch(dance_fever[1:4,])
-dance_fever_batch_0
-dance_fever_batch_1 <- record_batch(dance_fever[5:14,])
-dance_fever_batch_1
+df_batch_0 <- record_batch(dance_fever[1:4,])
+df_batch_0
+df_batch_1 <- record_batch(dance_fever[5:14,])
+df_batch_1
 ```
 
 Suppose I want to share this. The IPC format is designed to lay this object out as a stream of bytes that (almost) exactly mirrors the structure of the object as it is represented in memory. 
 
-(picture here)
+
+```{r}
+#| echo: false
+knitr::include_graphics("img/record_batch_serialised.svg")
+```
+
+
+Each column in the record batch gets converted to a "flattened field". The data header for contains the length and null count for each flattened field. It also contains the memory offset (i.e., the start point) and length of every buffer that is stored in the message body.
 
 
 There are three functions you can use if you want to do this. To send the data directly to an output stream (e.g., for communicating to some other process) use `write_ipc_stream()`. When writing data in this IPC format to a static file on disk (with a few minor differences), it is referred to as a "feather" formatted file, and you use `write_feather()`. Finally, if you want the same sequence of bytes but you'd like to keep them in R as raw vectors, you can use `write_to_raw()`. That's what I'll do here so I can show you the byte stream:
 
 ```{r}
-dance_fever_ipc_0 <- write_to_raw(dance_fever_batch_0)
-dance_fever_ipc_0
+df_ipc_0 <- write_to_raw(df_batch_0)
+df_ipc_0
 ```
 
 Note that by default the `write_to_raw()` function will produce output in "stream" format: what you're looking at above is the same sequence of bytes that would get transmitted if I'd called `write_ipc_stream()`. If you want `write_to_raw()` to mimic the behaviour of `write_feather()`, you can set the `format` argument:
 
 ```{r}
 #| results: hide
-write_to_raw(dance_fever_batch_0, format = "file")
+write_to_raw(df_batch_0, format = "file")
 ```
 
 This would produce a somewhat longer output, due to the fact that the feather format includes additional information. For more detail, see the Arrow specification page.
 
 ```{r}
-read_ipc_stream(dance_fever_ipc_0)
+read_ipc_stream(df_ipc_0)
 ```
 
 The same works for feather:
 
 ```{r}
-write_feather(dance_fever_batch_1, "dance_fever_ipc_1.feather")
-read_feather("dance_fever_ipc_1.feather")
+write_feather(df_batch_1, "df_ipc_1.feather")
+read_feather("df_ipc_1.feather")
 ```
+
+```{r}
+#| echo: false
+#| column: screen
+#| fig-link: https://www.youtube.com/watch?v=zZr5Tid3Qw4
+knitr::include_graphics("img/delilah.png")
+```
+
+<br><br>
 
 ## Tables
 
+>
+| Tell me where to put my love
+| Do I wait for time to do what it does?
+| I don't know where to put my love
+|   -- *My Love*, Florence + The Machine
+
+
 Draw an analogous figure for tables, showing how a table is a collection of chunked arrays, and each chunked array is a collection of arrays. Talk a little about why that helps with sequentially arriving data: a new record batch arrives, it's already organised in the format needed for memory, so you can wrap those parts of memory in an Arrow buffer without moving it again. Then the various chunked arrays for the Table can be linked to the newly arrived Arrays without in disturbing any of the existing Arrays. Etc.
+
+
+```{r}
+#| echo: false
+knitr::include_graphics("img/table_layout.svg")
+```
 
 
 Can't concatenate record batches directly. Arrays are immutable, and we can't touch them. They need to be wrapped into chunked arrays. In other words we need to convert each record batch into a table. I could use the `as_arrow_table()` function to do this conversion:
 
 ```{r}
-dance_fever_table_0 <- as_arrow_table(dance_fever_batch_0)
-dance_fever_table_1 <- as_arrow_table(dance_fever_batch_1)
+df_table_0 <- as_arrow_table(df_batch_0)
+df_table_1 <- as_arrow_table(df_batch_1)
 ```
 
 This works, but it's also not something you will need to do very often in real life. The reader functions in **arrow** tend to convert record batches to tables by default. For instance, in the previous section I serialised two record batches, one to a file and one to a raw vector. Let's look at what happens when I try to deserialise (a.k.a. "read") them: 
 
 ```{r}
-dance_fever_table_0 <- read_ipc_stream(
-  file = dance_fever_ipc_0, 
+df_table_0 <- read_ipc_stream(
+  file = df_ipc_0, 
   as_data_frame = FALSE
 )
-dance_fever_table_0
+df_table_0
 ```
 
 That's the same data as before, but it's a table not a record batch. Each column is a chunked array, not an array. The same happens when I read from the file:
@@ -368,11 +461,11 @@ That's the same data as before, but it's a table not a record batch. Each column
 
 
 ```{r}
-dance_fever_table_1 <- read_feather(
-  file = "dance_fever_ipc_1.feather", 
+df_table_1 <- read_feather(
+  file = "df_ipc_1.feather", 
   as_data_frame = FALSE
 )
-dance_fever_table_1
+df_table_1
 ```
 
 In general, you won't get a record batch in **arrow** unless you explicitly ask for one. Tables are the default tabular data structure, which is usually what you want anyway
@@ -380,33 +473,33 @@ In general, you won't get a record batch in **arrow** unless you explicitly ask 
 Okay, so now I have the two fragments of my data set represented as tables. The difference between the table version and the record batch version is that the columns are all represented as chunked arrays. Each array from the original record batch is now one chunk in the corresponding chunked array in the table:
 
 ```{r}
-dance_fever_batch_0$title
-dance_fever_table_0$title
+df_batch_0$title
+df_table_0$title
 ```
 
 It's the same underlying object, just with a new, flexible wrapper. The wrapper is what allows us to concatenate tables:
 
 ```{r}
-dance_fever_table <- concat_tables(
-  dance_fever_table_0,
-  dance_fever_table_1
+df <- concat_tables(
+  df_table_0,
+  df_table_1
 )
-dance_fever_table
+df
 ```
 
 Looking at the columns we see that the chunking are preserved. That's not arbitrary. It's because those are the original arrays, still located at the same spot in memory and not contiguous:
 
 ```{r}
-dance_fever_table$title
+df$title
 ```
 
 An important thing to note about chunks is that they aren't considered to be a part of the data structure for the purpose of testing equality. Here's the same data with a different chunking:
 
 ```{r}
 title_rechunked <- chunked_array(
-  dance_fever$title[1:8],
-  dance_fever$title[9:12],
-  dance_fever$title[13:14]
+  df$title[1:8],
+  df$title[9:12],
+  df$title[13:14]
 )
 title_rechunked
 ```
@@ -414,28 +507,56 @@ title_rechunked
 Although these two chunked arrays partition the data in different ways, the values stored in each slot are the same. When I test for equality, the scalar values in each slot are compared to one another without regard for which chunk they are assigned to. Since all those values are the same, every comparison returns `true`:
 
 ```{r}
-title_rechunked == dance_fever_table$title
+title_rechunked == df$title
 ```
 
-## Datasets?
 
-So what about data sets? They're the last item on that table, and you might be wondering where they fall in all this. I'm not going to dive into the details on datasets in this post, because they're a whole separate topic and they deserve their own blog post. However, it's a little unsatisfying to write all this and not say anything about them, so I'll give a very quick overview here. 
+```{r}
+#| echo: false
+#| column: screen
+#| fig-link: https://www.youtube.com/watch?v=h9CNGPy11Jc
+knitr::include_graphics("img/my_love.png")
+```
+
+
+<br><br>
+
+## Datasets
+
+>
+| What kind of man loves like this?
+| To let me dangle at a cruel angle
+| Oh, my feet don't touch the floor
+| Sometimes you're half in and then you're half out
+| Buy you never close the door
+|   -- *What Kind Of Man*, Florence + The Machine
+
+
+So what about datasets? They're the last item on that table, and you might be wondering where they fall in all this. I'm not going to dive into the details on datasets in this post, because they're a whole separate topic and they deserve their own blog post. However, it's a little unsatisfying to write all this and not say anything about them, so I'll give a very quick overview here. 
+
+Up to this point I've talked about tabular data sets that are contained entirely in memory. When such data are written to disk, they are typically written to a single file. For larger-than-memory data sets, a different strategy is needed. Only a subset of the data can be stored in memory at any point in time, and as a consequence it becomes convenient to write the data to disk by partitioning it into many smaller files. This functionality is supported in Arrow via Datasets. 
+
+I'll give a simple example here, using a small data set. Let's suppose I've downloaded the entire Florence + The Machine discography using the **spotifyr** package:
 
 ```{r}
 #| eval: false
 florence <- get_discography("florence + the machine")
+florence
 ```
 ```{r}
 #| echo: false
 florence <- readRDS("spotify_florence.rds")
+florence
 ```
 
-This works and now we have a data frame
+The `florence` data frame is of course quite small, and I have no real need to use Arrow Datasets: it's small enough that I can store it natively in R as a tibble! But it will suffice to illustrate concepts that come in handy when working with large datasets.
+
+Let's suppose I want to partition this in into many data files, using the album release year as the basis for the partitioning. To do this I'll use the `write_dataset()` function, specifying `partitioning = "album_release_year"` to ensure that files are created after splitting the data set by release year. By default, the `write_dataset()` function writes individual data files in the parquet format, which is in general a very good default choice for large tabular data sets. However, because I have not talked about [Apache Parquet](https://parquet.apache.org/) in this post, I'll make a different choice and write the data files in the feather format that we've seen earlier in this post. I can do that by setting `format = "feather"`. Finally, I'll set `path = "spotify_florence"` to ensure that all the files are stored in a folder by that name. That gives this command:
 
 ```{r}
 florence |> 
   select(where(~!is.list(.))) |>  # drop list columns
-  as_arrow_table() |>             # convert to arrow table
+  as_arrow_table() |>             # convert to an arrow table
   write_dataset(                  # write to multi-file storage
     path = "spotify_florence",
     format = "feather",
@@ -443,14 +564,30 @@ florence |>
   )
 ```
 
+The result is that the following files are written to disk:
+
 ```{r}
 list.files("spotify_florence", recursive = TRUE)
 ```
+
+These file names are written in "Hive partitioning" format. It looks a little weird the first time you encounter it, because `=` is a character most coders instinctively avoid including in file names because it has such a strong meaning in programming contexts. However, when files are named in Hive partitioning format, the intended interpretation is exactly the one you implicitly expect as a coder: it's a `field_name=value` statement, so you will often encounter files with names like 
+
+```
+/year=2019/month=2/data.parquet
+```
+
+For more information see the help documentation for the `hive_partitioning()` function in the **arrow** package.  
+
+In any case, the key thing is that I've now written the data to disk in a fashion that splits it across multiple files. For the Florence + The Machine discography data this is is really not needed because the entire `spotify_florence` folder occupies a mere 320kB on my hard drive. However, elsewhere on my laptop I have a copy of the infamous New York City Taxi data set, and that one occupies a rather more awkward 69GB of storage. For that one, it really does matter that I have it written to disk in a sensible format! 
+
+Having a data set stored in a distributed multi-file format is nice, but it's only useful if I can open it and work with it as if it were the same as a regular tabular data set. The `open_dataset()` function allows me to do exactly this. Here's what happens when I open the file:
 
 ```{r}
 florence_dataset <- open_dataset("spotify_florence", format = "feather")
 florence_dataset
 ```
+
+Okay yes, the output makes clear that I have loaded *something* and it has registered the existence of the 7 constituent files that comprise the dataset as a whole. But can I work with it? One of the big selling points to the **arrow** package is that it supplies a **dplyr** backend that lets me work with `Tables` as if they were R data frames, using familiar syntax. Can I do the same thing with `Datasets`? 
 
 ```{r}
 danceability <- florence_dataset |> 
@@ -463,17 +600,25 @@ danceability <- florence_dataset |>
 danceability
 ```
 
-This is a regular arrow table:
+Yes. Yes I can. Because I called `compute()` at the end of this pipeline rather than `collect()`, the results have been returned to me as a `Table` rather than a data frame. I did that so that I can show that the `danceability` output is no different to the `Table` objects we've seen earlier, constructed from `ChunkedArray` objects:
 
 ```{r}
 danceability$track_name
 ```
 
-Can convert to tibble:
+If I want to I can convert this to a tibble, and discover that "Dance Fever" does indeed contain the most danceable F+TM tracks, at least according to Spotify:
 
 ```{r}
 as.data.frame(danceability)
 ```
+
+```{r}
+#| echo: false
+#| column: screen
+#| fig-link: https://www.youtube.com/watch?v=_kIrRooQwuk
+knitr::include_graphics("img/big_god.png")
+```
+
 
 <!--------------- appendices go here ----------------->
 
