@@ -27,18 +27,17 @@
 <!--------------- my typical setup ----------------->
 <!--------------- post begins here ----------------->
 <blockquote class="blockquote">
-<p>“The time has come,” the Walrus said,<br>
-&nbsp;&nbsp;&nbsp;“To talk of many things:<br>
-Arrays (in Arrow) and Record Batches,<br>
-&nbsp;&nbsp;&nbsp;Of Tables, Chunks and things—<br>
-Why IPC’s great for streaming blocks—<br>
-&nbsp;&nbsp;&nbsp;But for saving, Parquet wins.”<br>
-<br>
-(My sincere apologies to <a href="https://poets.org/poem/walrus-and-carpenter">Lewis Carroll</a>)</p>
+<p>My catholic taste in the devil<br>
+All gilded and golden, yes, I’m your girl<br>
+Hell, if it glitters, I’m going<br>
+&nbsp;&nbsp;– <em>Heaven is Here</em>, Florence + The Machine</p>
 </blockquote>
-<p>This post has been rolling around in my head since the start of April. I’ve known from the beginning what I want to say – approximately! – but not how I want to say it. It is annoying me, and at a certain point I decided I just needed to put words to metaphorical paper and see what happens. It’s another post about Apache Arrow, the fourth in a series I’ve been writing.</p>
-<p>My goal in this one is… well, I suppose it is partly to do my job since I am employed to write these things, but it’s a little more than that. My goal is to clarify something that has been a source of confusion about Arrow for me, in the hope that once I’ve sorted it out in my own head I can perhaps contribute something to the official documentation that helps other people who might have the same problem that I have.</p>
-<p>So here’s the thing that has been giving me grief. If you go to the Get Started page for the <strong>arrow</strong> R package, one of the first things you encounter is a table telling you that Arrow has classes for zero-dimensional data (scalars), one-dimensional data (arrays and other vector-like data), and two-dimensional data (tabular or data frame-like data). I’ll reproduce the entire table in full because it’s actually super important…</p>
+<p>If you’ve made the life choice to become a developer advocate with a focus on <a href="https://arrow.apache.org/">Apache Arrow</a>, you’re probably not unfamiliar with masochism.</p>
+<p>Let’s consider my own choices, shall we? My first attempt to write about the topic didn’t even talk about Arrow: the post was a descent into the madness of <a href="https://blog.djnavarro.net/posts/2021-11-15_serialisation-with-rds/">data serialisation in R</a> and the low level details of the RDS format. My second attempt went a little better, and I managed to write a few thousand words on <a href="https://blog.djnavarro.net/posts/2021-11-19_starting-apache-arrow-in-r/">getting started with Apache Arrow</a> for the R user. Much of that post was spent on answering very technical questions like, <em>“what. what even is this??????”</em> and <em>“whhhhhyyyy, why do I care????”</em> Totally normal behaviour, right? My third attempt talked about how <a href="https://blog.djnavarro.net/posts/2022-01-18_binding-arrow-to-r/">the <strong>arrow</strong> package supplies <strong>dplyr</strong> bindings</a>, allowing R to perform data manipulation on Arrow data using familiar <strong>dplyr</strong> syntax. It wasn’t a bad post, to be honest, but I did start going down a very strange path with all the <em>Magicians</em> gifs. And as for my fourth attempt, the <a href="https://blog.djnavarro.net/posts/2022-03-04_data-types-in-arrow-and-r/">data types in Arrow and R</a> post… look, if you’ve ever had a secret desire to see what happens when I am reduced to tears and wailing at the horrors of the world and of IEEE 754, then oh my yes.. this is the extremely long blog post for you.</p>
+<p>What I am trying to convey to you, dear reader, is that – setting aside the superficial trappings of whips and chains and the various other devices that propelled E. L. James to great fortune – I am intimately acquainted with pain. It is important to me that you understand this, and that when I mention the pain I encountered when trying to learn how the <strong>arrow</strong> R package works, I am not using the term lightly.</p>
+<p>So let talk about my latest pain point, shall we?</p>
+<p>Here’s the thing that has been giving me grief. Suppose you are an R user who is new to this whole Apache Arrow business. You’ve installed the <strong>arrow</strong> package, and you’re now reading the <a href="https://arrow.apache.org/docs/r/articles/arrow.html">Get Started</a> page in the hopes that you too will be able to, well, get started. When you visit this page, one of the very first things you encounter is a table listing a variety of data structures used by Arrow. Specifically, the table tells you that Arrow has classes for zero-dimensional data (scalars), one-dimensional data (arrays and other vector-like data), and two-dimensional data (tabular or data frame-like data). It shows you that…</p>
+<p>…actually, you know what? Instead of describing it, let’s take a look at the actual table. Here’s what it tells you about the hierarchy of data structures in <strong>arrow</strong>:</p>
 <table class="table">
 <colgroup>
 <col style="width: 1%">
@@ -93,14 +92,23 @@ Why IPC’s great for streaming blocks—<br>
 </tr>
 </tbody>
 </table>
-<p>…but I’m going to be honest with you, dear reader. When I first started learning Arrow, I had no idea what any of this meant. This whole table was completely intimidating. I looked at it and thoughts roughly along the following lines went through my head:</p>
+<p>Now, perhaps there are some devilishly clever R users who can look at this table and immediately decode all its mysteries. But I will be honest with you, dear reader, and confess that I am not one of these people. When I first started learning Arrow, I had no idea what any of this meant. This whole table was completely intimidating. I looked at it and thoughts roughly along the following lines went through my head:</p>
 <blockquote class="blockquote">
 <p>Oh… f**k me. I’m completely out of my depth, I am too stupid to understand any of this. I should quit now and find a new job before everyone realises I’m a total fraud. They made a terrible mistake hiring me and… blah blah blah</p>
 </blockquote>
-<p>The self-pity went on for a while, but I’ll spare you the details.</p>
+<p>The self-pity went on for a while and the names I called myself became quite inappropriate for a family restaurant, but I’ll be kind and spare you the tiresome details.</p>
 <p>Eventually I remembered that this is my impostor syndrome talking and that I am in fact quite good at learning technical concepts. The problem I’m encountering here is that this table is not in any way self-explanatory, but it’s placed in a part of the documentation where new users will easily encounter it and get confused the same way I did. The placement itself isn’t the problem: the content of the table is actually pretty important for any Arrow user to grasp, but all the explanatory scaffolding is missing.</p>
 <p>To a new user, most of this is is incomprehensible. What exactly is a <code>ChunkedArray</code> and how is it different from an <code>Array</code>? Why are these necessary as distinct concepts? While we are at it, what the heck is a <code>RecordBatch</code>, a <code>Table</code> and a <code>Dataset</code>, and what makes them different from one another? Unless someone takes the time to explain it all to you, it does look like Arrow is unnecessarily complicated, doesn’t it? And yet, some very smart people seem to think that Arrow is a very good idea indeed so… what’s the story?</p>
 <p>Kick back, relax into whatever comfort you have available, and let me tell you a tale.<sup>1</sup> All will be revealed…</p>
+<div class="cell page-columns page-full">
+<div class="cell-output-display column-screen">
+<div id="fig-anonymous-1" class="quarto-figure quarto-figure-center anchored">
+<figure class="figure">
+<p><a href="https://www.youtube.com/watch?v=Q4Ez9pitRJ0"><img src="https://blog.djnavarro.net/posts/2022-04-30_arrow-tables-and-record-batches/img/heaven_is_here.png" class="img-fluid figure-img"></a></p>
+</figure>
+</div>
+</div>
+</div>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><span class="fu" style="color: #4758AB;">library</span>(arrow)</span>
 <span id="cb1-2"><span class="fu" style="color: #4758AB;">library</span>(spotifyr)</span>
@@ -111,18 +119,26 @@ Why IPC’s great for streaming blocks—<br>
 <div class="cell">
 
 </div>
+<p><br><br></p>
 <section id="scalars" class="level2">
 <h2 class="anchored" data-anchor-id="scalars">Scalars</h2>
-<p>Let’s start with scalars. A scalar object is simply a single value, that can be of any type. It might be an integer, a string, a timestamp, or any of the different data types that Arrow supports. I won’t talk about the different types in this post because I already wrote an extremely long post on that topic. For the current purposes, what matters is that a scalar is <em>one</em> value. It is “zero dimensional”. All higher order data structures are built on top of scalars, so they are in some sense fundamental, but there is not much I need to say about them for this post.</p>
+<p>Let’s start with scalars. A scalar object is simply a single value, that can be of any type. It might be an integer, a string, a timestamp, or any of the different data types that Arrow supports. I won’t talk about the different types in this post because I already wrote <a href="https://blog.djnavarro.net/posts/2022-03-04_data-types-in-arrow-and-r/">an extremely long post on that topic</a>. For the current purposes, what matters is that a scalar is <em>one</em> value. It is “zero dimensional”. All higher order data structures are built on top of scalars, so they are in some sense fundamental, but there is not much I need to say about them for this post.</p>
+<p><br><br></p>
 </section>
-<section id="arrays" class="level2">
+<section id="arrays" class="level2 page-columns page-full">
 <h2 class="anchored" data-anchor-id="arrays">Arrays</h2>
+<blockquote class="blockquote">
+<p>All the gods have been domesticated<br>
+And heaven is now overrated<br>
+&nbsp;&nbsp;– <em>Cassandra</em>, Florence + The Machine</p>
+</blockquote>
 <p>Let’s turn our attention to arrays next. I’ll start by introducing some terminology from the page describing the <a href="https://arrow.apache.org/docs/format/Columnar.html">Arrow specification</a>:</p>
 <ul>
 <li>An <strong>array</strong> in Arrow is analogous to a vector in R: it is a sequence of values with known length, all of which have the same type. Coming to Arrow from R, one thing I found a little difficult to wrap my head around is the concept of an array as an <strong>immutable</strong> object. Once an Arrow array has been initialised, it cannot be modified.</li>
 <li>A related but different concept is that of a <strong>buffer</strong>, a sequential virtual address space with a given length. Any byte in the buffer can be reached via a single pointer offset less than the region’s length.</li>
 <li>Finally, we have the concept of the <strong>physical layout</strong>, which describes how information is laid out in memory, without taking into account of how that information is interpreted. For example, a 32-bit signed integer array and 32-bit floating point array have the same layout because they have the same physical structure in memory. The meaning of the bits that make up a 32-bit float is different to the meaning of the bits that make up a 32-bit integer, but the physical layout is the same.</li>
 </ul>
+<p><br></p>
 <section id="structure-of-arrays" class="level3">
 <h3 class="anchored" data-anchor-id="structure-of-arrays">Structure of arrays</h3>
 <p>Okay, for the most part, those of us who use Arrow on an everyday basis don’t really need to care all that much about low level implementation details. The exact physical layout of an array in memory doesn’t matter to us. But, on the other hand, in this post I’m trying to highlight the fact that Arrow does make some good choices about these details, so it makes a little sense to dive deeper than we normally would. So let’s take a look at an example taken from the Arrow documentation pages. Here’s a simple array of integer values:</p>
@@ -239,6 +255,7 @@ int32</code></pre>
 </div>
 <p>Notice that the last four bytes shown are written <code>08 00 00 00</code> (little endian), whereas the bytes produced by <code>pryr::bytes()</code> are shown in the other direction. It’s the same thing, just a different display convention!</p>
 <p>Okay, so what should you take away from all this? Well, firstly, fear not – if you’re an R user like me and trying to wrap your head around Arrow, you don’t <em>really</em> have to spend much of your time thinking about what this physical layout looks like. All you need to take away from it is that an Arrow array is an immutable object with this particular “metadata + buffers” structure that is designed to be efficient, and that each buffer is a contiguous bloc of memory on your machine.</p>
+<p><br></p>
 </section>
 <section id="peeking-inside-arrays" class="level3">
 <h3 class="anchored" data-anchor-id="peeking-inside-arrays">Peeking inside arrays</h3>
@@ -312,7 +329,7 @@ int32</code></pre>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb25" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb25-1">rlang<span class="sc" style="color: #5E5E5E;">::</span><span class="fu" style="color: #4758AB;">env_print</span>(duration<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">data</span>())</span></code></pre></div>
 <div class="cell-output cell-output-stdout">
-<pre><code>&lt;environment: 0x557a28e2b708&gt; [L]
+<pre><code>&lt;environment: 0x5640e980eda0&gt; [L]
 Parent: &lt;environment: empty&gt;
 Class: ArrayData, ArrowObject, R6
 Bindings:
@@ -359,8 +376,9 @@ Buffer</code></pre>
 </div>
 </div>
 <p>…we have reconstructed the values from the data buffer.</p>
+<p><br></p>
 </section>
-<section id="a-nicer-way" class="level3">
+<section id="a-nicer-way" class="level3 page-columns page-full">
 <h3 class="anchored" data-anchor-id="a-nicer-way">A nicer way</h3>
 <p>The print method for <code>ArrayData</code> objects isn’t very helpful, so I’ll write an <code>array_layout()</code> function that shows you the metadata and buffer contents associated with an Arrow array (source code <a href="display_array_layout.R">here</a>) that works for the array types I’m using in this post. When applied to the <code>duration</code> array it produces this output:</p>
 <div class="cell">
@@ -395,11 +413,28 @@ Buffer</code></pre>
 FactoryCassandraHeaven Is HereDaffodilMy LoveRestraintThe BombMorning Elvis</code></pre>
 </div>
 </div>
-<p>You wouldn’t want to use my code in the wild though because it doesn’t even try to be effienct or truncate the output in any way. I only wrote it so that I had a way of showing you the content of an Arrow array in R at a slightly lower level.</p>
+<p>You wouldn’t want to use my code in the wild though because it doesn’t even try to be efficient or truncate the output in any way. I only wrote it so that I had a way of showing you the content of an Arrow array in R at a slightly lower level.</p>
+<div class="cell page-columns page-full">
+<div class="cell-output-display column-screen">
+<div id="fig-anonymous-2" class="quarto-figure quarto-figure-center anchored">
+<figure class="figure">
+<p><a href="https://www.youtube.com/watch?v=5GHXEGz3PJg"><img src="https://blog.djnavarro.net/posts/2022-04-30_arrow-tables-and-record-batches/img/hunger.png" class="img-fluid figure-img"></a></p>
+</figure>
+</div>
+</div>
+</div>
+<p><br><br></p>
 </section>
 </section>
-<section id="chunked-arrays" class="level2">
+<section id="chunked-arrays" class="level2 page-columns page-full">
 <h2 class="anchored" data-anchor-id="chunked-arrays">Chunked arrays</h2>
+<blockquote class="blockquote">
+<p>I need my golden crown of sorrow, my bloody sword to swing<br>
+I need my empty halls to echo with grand self-mythology<br>
+’Cause I am no mother, I am no bride<br>
+I am king<br>
+&nbsp;&nbsp;– <em>King</em>, Florence + The Machine</p>
+</blockquote>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb37" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb37-1">king <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">chunked_array</span>(</span>
 <span id="cb37-2">  <span class="fu" style="color: #4758AB;">c</span>(<span class="st" style="color: #20794D;">"I"</span>, <span class="st" style="color: #20794D;">"am"</span>, <span class="st" style="color: #20794D;">"no"</span>, <span class="st" style="color: #20794D;">"mother"</span>),</span>
@@ -463,8 +498,18 @@ FactoryCassandraHeaven Is HereDaffodilMy LoveRestraintThe BombMorning Elvis</cod
 • data : Iambride</code></pre>
 </div>
 </div>
+<div class="cell page-columns page-full">
+<div class="cell-output-display column-screen">
+<div id="fig-anonymous-3" class="quarto-figure quarto-figure-center anchored">
+<figure class="figure">
+<p><a href="https://www.youtube.com/watch?v=L62LtChAwww"><img src="https://blog.djnavarro.net/posts/2022-04-30_arrow-tables-and-record-batches/img/king.png" class="img-fluid figure-img"></a></p>
+</figure>
+</div>
+</div>
+</div>
+<p><br><br></p>
 </section>
-<section id="record-batches" class="level2">
+<section id="record-batches" class="level2 page-columns page-full">
 <h2 class="anchored" data-anchor-id="record-batches">Record batches</h2>
 <p>A record batch is table-like data structure that is semantically a sequence of fields, each a contiguous Arrow array.<sup>3</sup> A struct is a nested type parameterized by an ordered sequence of types (which can all be distinct), called its fields. Each field must have a UTF8-encoded name, and these field names are part of the type metadata. A struct array does not have any additional allocated physical storage for its values. A struct array must still have an allocated validity bitmap, if it has one or more null values. Physically, a struct array has one child array for each field. The child arrays are independent and need not be adjacent to each other in memory. To illustrate, let’s return to our <code>dance_fever</code> data set:</p>
 <div class="cell">
@@ -506,7 +551,8 @@ $duration &lt;int32&gt;</code></pre>
 <p><img src="https://blog.djnavarro.net/posts/2022-04-30_arrow-tables-and-record-batches/img/record_batch_layout.svg" class="img-fluid"></p>
 </div>
 </div>
-<section id="serialising-a-record-batch" class="level3">
+<p><br></p>
+<section id="serialising-a-record-batch" class="level3 page-columns page-full">
 <h3 class="anchored" data-anchor-id="serialising-a-record-batch">Serialising a record batch</h3>
 <p>[discuss the IPC protocol for record batches here. Mention that feather is the same thing but as a file format rather than an input stream]</p>
 <p>Okay, so here’s where we’re at. The Arrow specification gives a precise statement of what an array should look like and how it should be laid out in memory. It also gives a precise statement about how arrays can be organised into record batches. Not only that, it provides a specification for how a record batch should be serialised via the IPC protocol. The IPC protocol is designed so that the structure of the serialised record batch is essentially identical to the physical layout of an in-memory record batch, which minimises the amount of computation required.</p>
@@ -605,10 +651,26 @@ $duration &lt;int32&gt;</code></pre>
 10           14 Morning Elvis          262</code></pre>
 </div>
 </div>
+<div class="cell page-columns page-full">
+<div class="cell-output-display column-screen">
+<div id="fig-anonymous-4" class="quarto-figure quarto-figure-center anchored">
+<figure class="figure">
+<p><a href="https://www.youtube.com/watch?v=zZr5Tid3Qw4"><img src="https://blog.djnavarro.net/posts/2022-04-30_arrow-tables-and-record-batches/img/delilah.png" class="img-fluid figure-img"></a></p>
+</figure>
+</div>
+</div>
+</div>
+<p><br><br></p>
 </section>
 </section>
-<section id="tables" class="level2">
+<section id="tables" class="level2 page-columns page-full">
 <h2 class="anchored" data-anchor-id="tables">Tables</h2>
+<blockquote class="blockquote">
+<p>Tell me where to put my love<br>
+Do I wait for time to do what it does?<br>
+I don’t know where to put my love<br>
+&nbsp;&nbsp;– <em>My Love</em>, Florence + The Machine</p>
+</blockquote>
 <p>Draw an analogous figure for tables, showing how a table is a collection of chunked arrays, and each chunked array is a collection of arrays. Talk a little about why that helps with sequentially arriving data: a new record batch arrives, it’s already organised in the format needed for memory, so you can wrap those parts of memory in an Arrow buffer without moving it again. Then the various chunked arrays for the Table can be linked to the newly arrived Arrays without in disturbing any of the existing Arrays. Etc.</p>
 <div class="cell">
 <div class="cell-output-display">
@@ -780,9 +842,27 @@ $duration &lt;int32&gt;</code></pre>
 ]</code></pre>
 </div>
 </div>
+<div class="cell page-columns page-full">
+<div class="cell-output-display column-screen">
+<div id="fig-anonymous-5" class="quarto-figure quarto-figure-center anchored">
+<figure class="figure">
+<p><a href="https://www.youtube.com/watch?v=h9CNGPy11Jc"><img src="https://blog.djnavarro.net/posts/2022-04-30_arrow-tables-and-record-batches/img/my_love.png" class="img-fluid figure-img"></a></p>
+</figure>
+</div>
+</div>
+</div>
+<p><br><br></p>
 </section>
-<section id="datasets" class="level2">
+<section id="datasets" class="level2 page-columns page-full">
 <h2 class="anchored" data-anchor-id="datasets">Datasets</h2>
+<blockquote class="blockquote">
+<p>What kind of man loves like this?<br>
+To let me dangle at a cruel angle<br>
+Oh, my feet don’t touch the floor<br>
+Sometimes you’re half in and then you’re half out<br>
+Buy you never close the door<br>
+&nbsp;&nbsp;– <em>What Kind Of Man</em>, Florence + The Machine</p>
+</blockquote>
 <p>So what about datasets? They’re the last item on that table, and you might be wondering where they fall in all this. I’m not going to dive into the details on datasets in this post, because they’re a whole separate topic and they deserve their own blog post. However, it’s a little unsatisfying to write all this and not say anything about them, so I’ll give a very quick overview here.</p>
 <p>Up to this point I’ve talked about tabular data sets that are contained entirely in memory. When such data are written to disk, they are typically written to a single file. For larger-than-memory data sets, a different strategy is needed. Only a subset of the data can be stored in memory at any point in time, and as a consequence it becomes convenient to write the data to disk by partitioning it into many smaller files. This functionality is supported in Arrow via Datasets.</p>
 <p>I’ll give a simple example here, using a small data set. Let’s suppose I’ve downloaded the entire Florence + The Machine discography using the <strong>spotifyr</strong> package:</p>
@@ -945,10 +1025,19 @@ See $metadata for additional Schema metadata</code></pre>
  4 High As Hope                          Hunger                            0.729
  5 Dance Fever (Deluxe)                  My Love - Acoustic                0.719
  6 Lungs (Deluxe Version)                Ghosts - Demo                     0.681
- 7 Ceremonials (Deluxe Edition)          What The Water Gave Me - …        0.68 
- 8 Ceremonials                           What The Water Gave Me - …        0.68 
+ 7 Ceremonials                           What The Water Gave Me - …        0.68 
+ 8 Ceremonials (Deluxe Edition)          What The Water Gave Me - …        0.68 
  9 High As Hope                          South London Forever              0.679
 10 Ceremonials (Original Deluxe Version) What The Water Gave Me - …        0.678</code></pre>
+</div>
+</div>
+<div class="cell page-columns page-full">
+<div class="cell-output-display column-screen">
+<div id="fig-anonymous-6" class="quarto-figure quarto-figure-center anchored">
+<figure class="figure">
+<p><a href="https://www.youtube.com/watch?v=_kIrRooQwuk"><img src="https://blog.djnavarro.net/posts/2022-04-30_arrow-tables-and-record-batches/img/big_god.png" class="img-fluid figure-img"></a></p>
+</figure>
+</div>
 </div>
 </div>
 <!--------------- appendices go here ----------------->
@@ -981,7 +1070,7 @@ April 30, 2022. <a href="https://blog.djnavarro.net/posts/2022-04-30_arrow-table
   <category>Apache Arrow</category>
   <guid>https://blog.djnavarro.net/posts/2022-04-30_arrow-tables-and-record-batches/index.html</guid>
   <pubDate>Fri, 29 Apr 2022 14:00:00 GMT</pubDate>
-  <media:content url="https://blog.djnavarro.net//blank_preview.jpg" medium="image" type="image/jpeg"/>
+  <media:content url="https://blog.djnavarro.net//posts/2022-04-30_arrow-tables-and-record-batches/img/cover.jpg" medium="image" type="image/jpeg"/>
 </item>
 <item>
   <title>Porting a distill blog to quarto</title>
