@@ -246,12 +246,12 @@ You wouldn't want to use my code in the wild though because it doesn't even try 
 
 
 ```{r}
-florence <- chunked_array(
+king <- chunked_array(
   c("I", "am", "no", "mother"),
   c("I", "am", NA, "bride"),
   c("I", "am", "king")
 )
-florence
+king
 ```
 
 A chunked array has some structure to it:
@@ -265,8 +265,8 @@ knitr::include_graphics("img/chunked_array_layout.svg")
 We can check:
 
 ```{r}
-florence$chunk(0) |> array_layout()
-florence$chunk(1) |> array_layout()
+king$chunk(0) |> array_layout()
+king$chunk(1) |> array_layout()
 ```
 
 
@@ -285,8 +285,8 @@ dance_fever
 Next, let's bundle these into a record batch:
 
 ```{r}
-dance_fever_batch <- record_batch(dance_fever)
-dance_fever_batch
+df <- record_batch(dance_fever)
+df
 ```
 
 ```{r}
@@ -303,10 +303,10 @@ knitr::include_graphics("img/record_batch_layout.svg")
 Okay, so here's where we're at. The Arrow specification gives a precise statement of what an array should look like and how it should be laid out in memory. It also gives a precise statement about how arrays can be organised into record batches. Not only that, it provides a specification for how a record batch should be serialised via the IPC protocol. The IPC protocol is designed so that the structure of the serialised record batch is essentially identical to the physical layout of an in-memory record batch, which minimises the amount of computation required. 
 
 ```{r}
-dance_fever_batch_0 <- record_batch(dance_fever[1:4,])
-dance_fever_batch_0
-dance_fever_batch_1 <- record_batch(dance_fever[5:14,])
-dance_fever_batch_1
+df_batch_0 <- record_batch(dance_fever[1:4,])
+df_batch_0
+df_batch_1 <- record_batch(dance_fever[5:14,])
+df_batch_1
 ```
 
 Suppose I want to share this. The IPC format is designed to lay this object out as a stream of bytes that (almost) exactly mirrors the structure of the object as it is represented in memory. 
@@ -317,28 +317,28 @@ Suppose I want to share this. The IPC format is designed to lay this object out 
 There are three functions you can use if you want to do this. To send the data directly to an output stream (e.g., for communicating to some other process) use `write_ipc_stream()`. When writing data in this IPC format to a static file on disk (with a few minor differences), it is referred to as a "feather" formatted file, and you use `write_feather()`. Finally, if you want the same sequence of bytes but you'd like to keep them in R as raw vectors, you can use `write_to_raw()`. That's what I'll do here so I can show you the byte stream:
 
 ```{r}
-dance_fever_ipc_0 <- write_to_raw(dance_fever_batch_0)
-dance_fever_ipc_0
+df_ipc_0 <- write_to_raw(df_batch_0)
+df_ipc_0
 ```
 
 Note that by default the `write_to_raw()` function will produce output in "stream" format: what you're looking at above is the same sequence of bytes that would get transmitted if I'd called `write_ipc_stream()`. If you want `write_to_raw()` to mimic the behaviour of `write_feather()`, you can set the `format` argument:
 
 ```{r}
 #| results: hide
-write_to_raw(dance_fever_batch_0, format = "file")
+write_to_raw(df_batch_0, format = "file")
 ```
 
 This would produce a somewhat longer output, due to the fact that the feather format includes additional information. For more detail, see the Arrow specification page.
 
 ```{r}
-read_ipc_stream(dance_fever_ipc_0)
+read_ipc_stream(df_ipc_0)
 ```
 
 The same works for feather:
 
 ```{r}
-write_feather(dance_fever_batch_1, "dance_fever_ipc_1.feather")
-read_feather("dance_fever_ipc_1.feather")
+write_feather(df_batch_1, "df_ipc_1.feather")
+read_feather("df_ipc_1.feather")
 ```
 
 ## Tables
@@ -355,18 +355,18 @@ knitr::include_graphics("img/table_layout.svg")
 Can't concatenate record batches directly. Arrays are immutable, and we can't touch them. They need to be wrapped into chunked arrays. In other words we need to convert each record batch into a table. I could use the `as_arrow_table()` function to do this conversion:
 
 ```{r}
-dance_fever_table_0 <- as_arrow_table(dance_fever_batch_0)
-dance_fever_table_1 <- as_arrow_table(dance_fever_batch_1)
+df_table_0 <- as_arrow_table(df_batch_0)
+df_table_1 <- as_arrow_table(df_batch_1)
 ```
 
 This works, but it's also not something you will need to do very often in real life. The reader functions in **arrow** tend to convert record batches to tables by default. For instance, in the previous section I serialised two record batches, one to a file and one to a raw vector. Let's look at what happens when I try to deserialise (a.k.a. "read") them: 
 
 ```{r}
-dance_fever_table_0 <- read_ipc_stream(
-  file = dance_fever_ipc_0, 
+df_table_0 <- read_ipc_stream(
+  file = df_ipc_0, 
   as_data_frame = FALSE
 )
-dance_fever_table_0
+df_table_0
 ```
 
 That's the same data as before, but it's a table not a record batch. Each column is a chunked array, not an array. The same happens when I read from the file:
@@ -374,11 +374,11 @@ That's the same data as before, but it's a table not a record batch. Each column
 
 
 ```{r}
-dance_fever_table_1 <- read_feather(
-  file = "dance_fever_ipc_1.feather", 
+df_table_1 <- read_feather(
+  file = "df_ipc_1.feather", 
   as_data_frame = FALSE
 )
-dance_fever_table_1
+df_table_1
 ```
 
 In general, you won't get a record batch in **arrow** unless you explicitly ask for one. Tables are the default tabular data structure, which is usually what you want anyway
@@ -386,33 +386,33 @@ In general, you won't get a record batch in **arrow** unless you explicitly ask 
 Okay, so now I have the two fragments of my data set represented as tables. The difference between the table version and the record batch version is that the columns are all represented as chunked arrays. Each array from the original record batch is now one chunk in the corresponding chunked array in the table:
 
 ```{r}
-dance_fever_batch_0$title
-dance_fever_table_0$title
+df_batch_0$title
+df_table_0$title
 ```
 
 It's the same underlying object, just with a new, flexible wrapper. The wrapper is what allows us to concatenate tables:
 
 ```{r}
-dance_fever_table <- concat_tables(
-  dance_fever_table_0,
-  dance_fever_table_1
+df <- concat_tables(
+  df_table_0,
+  df_table_1
 )
-dance_fever_table
+df
 ```
 
 Looking at the columns we see that the chunking are preserved. That's not arbitrary. It's because those are the original arrays, still located at the same spot in memory and not contiguous:
 
 ```{r}
-dance_fever_table$title
+df$title
 ```
 
 An important thing to note about chunks is that they aren't considered to be a part of the data structure for the purpose of testing equality. Here's the same data with a different chunking:
 
 ```{r}
 title_rechunked <- chunked_array(
-  dance_fever$title[1:8],
-  dance_fever$title[9:12],
-  dance_fever$title[13:14]
+  df$title[1:8],
+  df$title[9:12],
+  df$title[13:14]
 )
 title_rechunked
 ```
@@ -420,7 +420,7 @@ title_rechunked
 Although these two chunked arrays partition the data in different ways, the values stored in each slot are the same. When I test for equality, the scalar values in each slot are compared to one another without regard for which chunk they are assigned to. Since all those values are the same, every comparison returns `true`:
 
 ```{r}
-title_rechunked == dance_fever_table$title
+title_rechunked == df$title
 ```
 
 ## Datasets?
