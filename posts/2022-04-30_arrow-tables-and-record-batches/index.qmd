@@ -524,22 +524,18 @@ knitr::include_graphics("img/delilah.png")
 | I don't know where to put my love
 |   -- *My Love*, Florence + The Machine
 
+Earlier when I introduced the concept of chunked arrays, I explained that Arrow needs these structures because arrays are immutable objects, and Arrow is designed to avoid copying data whenever possible: when a new block of data arrive, it is stored as its own array without disturbing the existing ones, and we use the chunked array as a wrapper that lets us pretend that all these chunks are laid out end to end in a single vector. The previous section shows you exactly how that can happen. If I have a data set that arrives sequentially as a sequence of record batches, I have this problem for every column in the data set! Quite by accident^[Okay fine, I'm lying. I did it on purpose.] that's what happened in the last section -- the `dance_fever` data set has been serialised in two parts. In that example it happened because I wanted to show you what an IPC stream looked like (creating one record batch for that) as well as what a feather file looks like (creating another record batch), but in real life it's more likely to happen every time you receive an update on an ongoing data collection process (e.g., today's data arrive).
 
-Draw an analogous figure for tables, showing how a table is a collection of chunked arrays, and each chunked array is a collection of arrays. Talk a little about why that helps with sequentially arriving data: a new record batch arrives, it's already organised in the format needed for memory, so you can wrap those parts of memory in an Arrow buffer without moving it again. Then the various chunked arrays for the Table can be linked to the newly arrived Arrays without in disturbing any of the existing Arrays. Etc.
-
+To deal with this situation, we need a tabular data structure that is similar to a record batch with one exception: instead of storing each column as an array, we now want to store it as a chunked array. This is what the `Table` class in **arrow** does. Schematically, here's what the data structure for a table looks like:
 
 ```{r}
 #| echo: false
 knitr::include_graphics("img/table_layout.svg")
 ```
 
-Can't concatenate record batches directly. Arrays are immutable, and we can't touch them. They need to be wrapped into chunked arrays. In other words we need to convert each record batch into a table. I could use the `as_arrow_table()` function to do this conversion:
+Tables have a huge advantage over record batches: they can be concatenated. You can't append one record batch to another because arrays are immutable: you can't append one array to the end of another array. You would have to create a new array with all new data -- and do this for *every* column in the data -- which is a thing we really don't want to do. But because tables are built from chunked arrays, concatenation is easy: all you have to do is update the chunked arrays so that they include pointers to the newly-arrived arrays as well as the previously-existing arrays. 
 
-```{r}
-as_arrow_table(df_batch_0)
-```
-
-This works, but it's also not something you will need to do very often in real life. The reader functions in **arrow** tend to convert record batches to tables by default. For instance, in the previous section I serialised two record batches, one to a file and one to a raw vector. Let's look at what happens when I try to deserialise (a.k.a. "read") them: 
+Because tables are so much more flexible than record batches, functions in **arrow** tend to return tables rather than record batches. Unless you do what I did in the previous section and deliberately call `record_batch()` you're not likely to encounter them as the output of normal data analysis code.^[If you ever do need to convert a record batch to a table you can use `as_arrow_table()`.] For instance, in the previous section I serialised two record batches, one to a file and one to a raw vector. Let's look at what happens when I try to deserialise (a.k.a. "read") them. First the IPC stream:
 
 ```{r}
 df_table_0 <- read_ipc_stream(
@@ -549,9 +545,7 @@ df_table_0 <- read_ipc_stream(
 df_table_0
 ```
 
-That's the same data as before, but it's a table not a record batch. Each column is a chunked array, not an array. The same happens when I read from the file:
-
-
+That's the same data as before, but it's a table not a record batch. Each column is a chunked array, not an array. The same happens when I read from the feather file:
 
 ```{r}
 df_table_1 <- read_feather(
@@ -561,7 +555,7 @@ df_table_1 <- read_feather(
 df_table_1
 ```
 
-In general, you won't get a record batch in **arrow** unless you explicitly ask for one. Tables are the default tabular data structure, which is usually what you want anyway
+Again, this is a table. In general, you won't get a record batch in **arrow** unless you explicitly ask for one. Tables are the default tabular data structure, which is usually what you want anyway.
 
 Okay, so now I have the two fragments of my data set represented as tables. The difference between the table version and the record batch version is that the columns are all represented as chunked arrays. Each array from the original record batch is now one chunk in the corresponding chunked array in the table:
 
@@ -570,7 +564,7 @@ df_batch_0$title
 df_table_0$title
 ```
 
-It's the same underlying object, just with a new, flexible wrapper. The wrapper is what allows us to concatenate tables:
+It's the same underlying data (and indeed the same immutable array is referenced by both), just enclosed by a new, flexible chunked array wrapper. However, it is this wrapper that allows us to concatenate tables:
 
 ```{r}
 df <- concat_tables(
@@ -580,11 +574,14 @@ df <- concat_tables(
 df
 ```
 
-Looking at the columns we see that the chunking are preserved. That's not arbitrary. It's because those are the original arrays, still located at the same spot in memory and not contiguous:
+This is successful (yay!) and the result will behave exactly like a two dimensional object with `$`, `[[`, and `[` operators that behave as you expect them to^[Because tables are built from chunked arrays, and chunked arrays are an abstraction layer designed to ensure that the distinct arrays can be treated as if they were one contiguous vector, Arrow tables inherit all those features. You can subset tables with `$`, `[[`, and `[` the same way you can for record batches.] (yay!), but if you look closely you can still see the "seams" showing where the tables were appended:  
 
 ```{r}
 df$title
 ```
+
+When tables are concatenated the chunking is preserved. That's because those are the original arrays, still located at the same spot in memory. That's efficient from a memory use perspective, but again, don't forget that the chunking is not semantically meaningful, and there is no guaranteed that a write-to-file operation (e.g., to parquet format) will preserve those chunks. 
+
 
 <br>
 
