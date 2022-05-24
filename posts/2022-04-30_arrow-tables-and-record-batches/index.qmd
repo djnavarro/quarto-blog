@@ -95,8 +95,13 @@ knitr::include_graphics("img/heaven_is_here.png")
 
 ## Scalars
 
-Let's start with scalars. A scalar object is simply a single value, that can be of any type. It might be an integer, a string, a timestamp, or any of the different data types that Arrow supports. I won't talk about the different types in this post because I already wrote [an extremely long post on that topic](https://blog.djnavarro.net/posts/2022-03-04_data-types-in-arrow-and-r/). For the current purposes, what matters is that a scalar is *one* value. It is "zero dimensional". All higher order data structures are built on top of scalars, so they are in some sense fundamental, but there is not much I need to say about them for this post. 
+Let's start with scalars. A scalar object is simply a single value, that can be of any type. It might be an integer, a string, a timestamp, or any of the different data types that Arrow supports. I won't talk about the different types in this post because I already wrote [an extremely long post on that topic](https://blog.djnavarro.net/posts/2022-03-04_data-types-in-arrow-and-r/). For the current purposes, what matters is that a scalar is *one* value. It is "zero dimensional". All higher order data structures are built on top of scalars, so they are in some sense fundamental, but there is not much I need to say about them for this post. For the record though, you can create a scalar using `Scalar$create()`:
 
+```{r}
+Scalar$create("hi")
+```
+
+Oh the excitement. I can barely contain myself.
 
 <br><br>
 
@@ -107,19 +112,38 @@ Let's start with scalars. A scalar object is simply a single value, that can be 
 | And heaven is now overrated
 |   -- *Cassandra*, Florence + The Machine
 
+Okay, so scalars aren't very interesting for the purposes of this post. Let's turn our attention to arrays next. Broadly speaking, an array is roughly analogous to a vector in R, and the **arrow** package is written in a way that allows you to interact with Arrow arrays in ways that feel very familiar to R users. I can create an array using `Array$create()`,
 
-Let's turn our attention to arrays next. I'll start by introducing some terminology from the page describing the [Arrow specification](https://arrow.apache.org/docs/format/Columnar.html):
+```{r}
+arr <- Array$create(c("hello", "cruel", "world"))
+arr
+```
 
-- An **array** in Arrow is analogous to a vector in R: it is a sequence of values with known length, all of which have the same type. Coming to Arrow from R, one thing I found a little difficult to wrap my head around is the concept of an array as an **immutable** object. Once an Arrow array has been initialised, it cannot be modified. I will talk more about this later, but it's important.
-- A related but different concept is that of a **buffer**, a sequential virtual address space with a given length. Any byte in the buffer can be reached via a single pointer offset less than the region’s length.
-- Finally, we have the concept of the **physical layout**, which describes how information is laid out in memory, without taking into account of how that information is interpreted. For example, a 32-bit signed integer array and 32-bit floating point array have the same layout because they have the same physical structure in memory. The meaning of the bits that make up a 32-bit float is different to the meaning of the bits that make up a 32-bit integer, but the physical layout is the same. 
+I can create a subset of an array using square brackets:
+
+```{r}
+arr[2:3]
+```
+
+Notice that I used `2:3` here to extract the 2nd and 3rd elements of the array. Unlike R, Arrow uses zero-based indexing, so if I were writing this using "Arrow native" code, the relevant subset would be `1:2`. However, as a general principle, **arrow** tries to make Arrow data structures behave like R native objects. The design principle here is that you should be able to use your usual R code to manipulate Arrow data objects, without needing to think too much about the Arrow implementation. 
+
+I'm stressing this principle now because later in this post I am going to violate it! Because one of the other things **arrow** does is expose a low-level interface to Arrow. You don't need to use this (and in general you don't really need to), but it's there if you want it, and because this post explores the R/Arrow interface I am going to use it sometimes. When that happens, you'll start to see zero-based indexing appear! I promise I will signpost this every time it happens so you aren't caught unawares. 
 
 
 <br>
 
 ### Structure of arrays
 
-Okay, for the most part, those of us who use Arrow on an everyday basis don't really need to care all that much about low level implementation details. The exact physical layout of an array in memory doesn't matter to us. But, on the other hand, in this post I'm trying to highlight the fact that Arrow does make some good choices about these details, so it makes a little sense to dive deeper than we normally would. So let's take a look at an example taken from the Arrow documentation pages. Here's a simple array of integer values:
+Anyway, as I was saying, an array in Arrow is analogous to a vector in R: it is a sequence of values with known length, all of which have the same type. When you're using the **arrow** package on a day-to-day basis, you really don't need to know much more than that. But if you want to understand data objects in Arrow properly, it helps to do a slightly deeper dive. All the low level details are described on the [Arrow specification](https://arrow.apache.org/docs/format/Columnar.html) page, but the full specification is a little overwhelming when you're first starting out. I'll start by introducing two key concepts:
+
+- The data in an array are stored in one or more **buffers**. A buffer is a sequential virtual address space (i.e., block of memory) with a given length. As long as you have a pointer specifting the memory address for the buffer (i.e., where it starts), you can reach any byte in the buffer using an "offset" value that tells you the location of that byte relative to the start of the buffer. 
+- The **physical layout** of an array is a term used to describe how data in an array is laid out in memory, without taking into account of how that information is interpreted. For example, a 32-bit signed integer and 32-bit floating point number have the same layout: they are both 32 bits, represented as 4 contiguous bytes in memory. The meaning is different, but the layout is the same. However, unlike simple scalars, an array can have a relatively complex layout, storing data and metadata in a structured arrangement. 
+
+<br>
+
+#### Layouts and buffers
+
+Let's unpack some of these ideas using a simple array of integer values:
 
 ```{r}
 arr <- Array$create(c(1L, NA, 2L, 4L, 8L))
@@ -134,13 +158,6 @@ arr$type
 
 But that's not a very satisfying answer at some level. What does this thing look like in memory? How is the information structured? In other words, what is the **physical layout** of this object? 
 
-
-```{r}
-#| echo: false
-knitr::include_graphics("img/array_layout.svg")
-```
-
-
 The Arrow documentation page helps us answer that. Our array contains two pieces of metadata, namely the length of the array (i.e. 5) and a count of the number of null values (i.e., 1), both of which are stored as 64-bit integers. The **arrow** package makes it easy to extract these values, because the Array object has fields and methods that will return them:
 
 ```{r}
@@ -148,7 +165,18 @@ arr$length()
 arr$null_count
 ```
 
-Okay, that seems reasonable. What about the data itself? Where is that stored? In Arrow, these are stored within buffers, a contiguous block of memory assigned to the array. The number of buffers associated with an array depends on the exact type of data being stored. For an integer array such as `arr`, there are two buffers, a **validity bitmap buffer** and a **data value buffer**. A little later in the post I'll talk about how you can access the raw content of these buffers, but for now let's talk about what each of these buffers contains. 
+Okay, that seems reasonable. What about the data itself? Where is that stored? In Arrow, these are stored within buffers, a contiguous block of memory assigned to the array. The number of buffers associated with an array depends on the exact type of data being stored. For an integer array such as `arr`, there are two buffers, a **validity bitmap buffer** and a **data value buffer**. So we have a data structure that could be depicted like this: 
+
+```{r}
+#| echo: false
+knitr::include_graphics("img/array_layout.svg")
+```
+
+A little later in the post I'll talk about how you can access the raw content of these buffers, but for now let's talk about what each of these buffers contains. 
+
+<br>
+
+#### The validity bitmap buffer
 
 The validity bitmap is binary-valued, and contains a 1 whenever the corresponding slot in the array contains a valid, non-null value. Setting aside some very tiresome technicalities we can imagine that the validity bitmap is a buffer that contains the following five bits: 
 
@@ -164,6 +192,10 @@ Except... this isn't really true, for three reasons. First, memory is allocated 
 
 
 I know, I know. Boring. Let's move on.
+
+<br>
+
+#### The data value buffer
 
 Okay, now let's have a look at the value buffer. It's essentially the same logic. Again notice that its padded out to a length of 64 bytes to preserve natural alignment, but for our purposes those details don't matter too much. Here's the diagram showing the physical layout, again lifted straight from the Arrow specification page:
 
@@ -191,7 +223,11 @@ arr$data()$buffers[[2]]$data()
 
 Notice that the last four bytes shown are written `08 00 00 00` (little endian), whereas the bytes produced by `pryr::bytes()` are shown in the other direction. It's the same thing, just a different display convention! 
 
-Okay, so what should you take away from all this? Well, firstly, fear not -- if you're an R user like me and trying to wrap your head around Arrow, you don't *really* have to spend much of your time thinking about what this physical layout looks like. All you need to take away from it is that an Arrow array is an immutable object with this particular "metadata + buffers" structure that is designed to be efficient, and that each buffer is a contiguous bloc of memory on your machine. 
+<br>
+
+#### Um... summary please?
+
+Okay, let's be honest. This section went down into the weeds a bit. I personally find it helpful to understand how all these concepts play out in terms of actual bits in memory, but it does get a bit much. So let's pull back and ask ourselves what matters here. For me, the big picture is this: an Arrow array is an immutable object with an "metadata + buffers" structure that is designed to be efficient, and each buffer is a contiguous bloc of memory on your machine. 
 
 <br>
 
@@ -320,7 +356,7 @@ king <- chunked_array(
 )
 ```
 
-An alternative way to do the same thing would be to use the `create()` method of the R6 object `ChunkedArray`. In fact, the `chunked_array()` function is just a slightly nicer wraper around the same functionality that `ChunkedArray$create()` provides. But that's a bit of a digression. Let's take a look at the object I just created:
+An alternative way to do the same thing would be to use the `create()` method of the R6 object `ChunkedArray`. In fact, the `chunked_array()` function is just a slightly nicer wrapper around the same functionality that `ChunkedArray$create()` provides. But that's a bit of a digression. Let's take a look at the object I just created:
 
 ```{r}
 king
