@@ -233,70 +233,69 @@ Okay, let's be honest. This section went down into the weeds a bit. I personally
 
 ### Peeking inside arrays
 
+I mentioned earlier that **arrow** exposes some "low level" tools that allow you to interact with Arrow data objects in more of a bare bones fashion than a data analyst normally would. For example, you wouldn't normally have a need to extract the raw bytes that comprise the buffers in an array. There's no "high level" interface that lets you do this. But if you really want to see what's going on under the hood you absolutely can, and **arrow** lets you do this. To show you how it works, I'll uses a small data set containing the track listing for the new Florence + The Machine album, [Dance Fever](https://en.wikipedia.org/wiki/Dance_Fever_(album)):
 
 ```{r}
 dance_fever <- read_csv_arrow("dance_fever_tracks.csv")
 dance_fever
 ```
 
+I'll start by taking the `duration` variable and creating an Arrow array from it:
 
 ```{r}
 duration <- Array$create(dance_fever$duration)
 duration
 ```
 
+As a reminder, here's a crude schematic diagram showing how that object is laid out. It has some metadata that you've already learned how to extract, and it has two data buffers that I talked about at tedious length but haven't actually *shown* you yet:
+
 ```{r}
 #| echo: false
 knitr::include_graphics("img/array_layout_with_nulls.svg")
 ```
 
-Array objects come with a variety of methods you can use to examine their properties. For instance, you can use the `length()`, `null_count()` and `nbytes()` to calculate the length of the array, the number of missing values it contains, and the number of bytes it occupies in memory. To find out how many bytes have been allocated the `duration` array, we would do this:
-
-```{r}
-duration$nbytes()
-```
-
-If you really want to dive in and take a look at how information is structured in an array, you can use the `data()` method to return an ArrayData object:
+To take a more detailed look at the data stored in the `duration` object, we can call its `data()` method to return an `ArrayData` object. Admittedly, the results are not immediately very exciting:
 
 ```{r}
 duration$data()
 ```
 
-This output is a little underwhelming because at the moment the print method for an `ArrayData` object doesn't do anything except print the class name. However, it's an R6 object which means everything is stored in an environment. So let's use the `env_print()` function from the **rlang** package to take a look at it as an environment:
+This output is a little underwhelming because at the moment the print method for an `ArrayData` object doesn't do anything except print the class name. Boring! However, because an `ArrayData` object is stored as an R6 object, all the information is tucked away in an environment. We can find out the names of objects contained in that environment easily enough:
 
 ```{r}
-rlang::env_print(duration$data())
+names(duration$data())
 ```
 
-There's a lot going on here. There are various fields used to store metadata about the array, but most of those are things we've seen before and you can access the same information in other ways (e.g., `duration$data()$length` stores the same value returned by `duration$length()`). The one we're actually interested in here is `buffers`:
+Hm. There's a `buffers` variable in there. I wonder what that is...
 
 ```{r}
 duration$data()$buffers
 ```
 
-Okay, so there are two buffers here. If we look back up to the earlier discussion we might (correctly!) guess that the first one is the validity bitmap buffer, and the second one is the data buffer. As before, the buffer is an R6 object and guess what? It also has a `data()` method. If we peek into *that*, at long last we uncover the thing we were looking for:
+Oh look, there are two buffers here! What's the chance that the first one is the validity bitmap and the second one is the data buffer? (Answer: 100% chance). It turns out that this is another situation where a `Buffer` object belongs to an R6 class with a boring print method. I could bore you by going through the same process I did last time, but I'd rather not waste your time. It turns out that `Buffer` objects have a `data()` method of their own, and when we call that it returns the bytes stored in the relevant buffer as a raw vector. At long last, we can pull out the raw bytes:
 
 ```{r}
 data_buffer <- duration$data()$buffers[[2]]$data()
 data_buffer
 ```
 
-The contents of `data_buffer` are the raw bytes stored ihe data buffer that Arrow created for the `duration` array. They're not easy to read in this format, so I'll use the `readBin()` function from base R to parse the binary data as integers, and just like that...
+Shockingly, I personally cannot read binary, but as it turns out the `readBin()` function from base R is perfectly well equipped to do that. Let's see what happens when we interpret these 56 bytes as a sequence of 14 integers:^[More precisely, signed 32 bit integers.]
 
 ```{r}
 readBin(data_buffer, what = "integer", n = 14)
 ```
 
-...we have reconstructed the values from the data buffer. 
+Yes, those are indeed the actual bytes in the data buffer. 
 
 <br>
 
-### A nicer way
+### Prettier ArrayData
 
-The print method for `ArrayData` objects isn't very helpful, so I'll write an `array_layout()` function that shows you the metadata and buffer contents associated with an Arrow array (source code [here](display_array_layout.R)) that works for the array types I'm using in this post. When applied to the `duration` array it produces this output:
+A little digression before we move on to talking about chunked arrays. Later in this post I'll occasionally want to show you the internal structure of an array, just so you can see that the buffers and metadata have the values you'd expect them to. The information I need for this is stored in the `ArrayData` object returned by a command like `duration$data()` but as we saw in the last section there's no convenient way to display these objects. To make this a little simpler, I wrote my own `array_layout()` function that shows you the metadata and buffer contents associated with an Arrow array -- the source code is [here](display_array_layout.R)) --- that doesn't work for all array types, but can handle the ones I'm using in this post. When applied to the `duration` array it produces this output:
 
 ```{r}
-array_layout(duration)
+duration |>
+  array_layout()
 ```
 
 The output here is divided into two sections, structured to mirror how the Arrow columnar specification is described on the website (and also to mirrot the diagrams in the post). There is one section showing the metadata variables stored: array length, and a count of the number of null values. Underneath that we have a section listing all the buffers associated with an array. For an integer array like `duration` there are two buffers, the validity bitmap buffer and the data values buffer.
@@ -309,7 +308,8 @@ dance_fever$title |>
   array_layout()
 ```
 
-You wouldn't want to use my code in the wild though because it doesn't even try to be efficient or truncate the output in any way. I only wrote it so that I had a way of showing you the content of an Arrow array in R at a slightly lower level.
+If you want more information about how character data are stored in Arrow and how the offset buffer and data buffer are used to define the array as a whole, I wrote about it in tiresome detail in my [data types post](https://blog.djnavarro.net/posts/2022-03-04_data-types-in-arrow-and-r/#character-types). For the purposes of this post, it's enough to understand that string arrays are organised using these three buffers.
+
 
 <br>
 
