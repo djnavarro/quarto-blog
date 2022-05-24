@@ -26,11 +26,11 @@ If you've made the life choice to become a developer advocate with a focus on [A
 Well then, let's consider my past choices:
 
 - My first attempt to write about the topic didn't even talk about Arrow: the post was a descent into the madness of [data serialisation in R](https://blog.djnavarro.net/posts/2021-11-15_serialisation-with-rds/) and the RDS format. 
-- My second attempt went a little better, and I managed to write a few thousand words on [getting started with Apache Arrow](https://blog.djnavarro.net/posts/2021-11-19_starting-apache-arrow-in-r/) for the R user. Much of that post was spent on answering very technical questions like _"what is this??????"_ and _"why do I care????"_ Totally normal behaviour, right? 
+- My second attempt went a little better, and I managed to write a few thousand words on [getting started with Apache Arrow](https://blog.djnavarro.net/posts/2021-11-19_starting-apache-arrow-in-r/) for the R user. Much of that post was spent on answering very technical questions like "what is this?" and "why do I care?" It was a learning experience for me, shall we say? 
 - My third attempt talked about how [the **arrow** package supplies **dplyr** bindings](https://blog.djnavarro.net/posts/2022-01-18_binding-arrow-to-r/), allowing R to perform data manipulation on Arrow data using familiar **dplyr** syntax. It wasn't a bad post, to be honest, but I did go down a very strange path with all the _Magicians_ gifs. 
 - As for my fourth attempt, the [data types in Arrow and R](https://blog.djnavarro.net/posts/2022-03-04_data-types-in-arrow-and-r/) post... look, if you've ever had a secret desire to see what happens when I am reduced to tears and wailing at the horrors of the world and of IEEE 754, then oh my yes, this is the extremely long blog post for you.
 
-What I am trying to convey to you, dear reader, is that -- setting aside the superficial trappings of whips and chains and the various other devices that propelled E. L. James to great fortune -- I am intimately acquainted with pain. It is important to me that you understand this, and that when I mention the pain I encountered when trying to learn how the **arrow** R package works, I am not using the term lightly.
+I don't regret any of these choices, particularly the fact that they have helped keep me gainfully employed, but there's no denying the fact that a lot of blood and tears have been spilled in the endeavour. In any case, what I am trying to convey to you, dear reader, is that -- setting aside the superficial trappings of whips and chains and the various other devices that propelled E. L. James to great fortune -- I am intimately acquainted with pain. It is important to me that you understand this, and that when I mention the pain I encountered when trying to learn how the **arrow** R package works, I am not using the term lightly.
 
 So let talk about my latest pain point, shall we? 
 
@@ -156,7 +156,7 @@ The validity bitmap is binary-valued, and contains a 1 whenever the correspondin
 10111
 ```
 
-Except... this isn't really true, for three reasons. First, memory is allocated in byte-size units, so we have to pad it out to the full 8 bits. That gives us the bitmap `10111000`. Second, that's still a little inaccurate because -- assuming you read left to right -- you're looking it with the "most significant bit" first (i.e., big endian format), and the bits are actually organised with the least significant bit first (i.e., little endian format) so the bits in this byte should be shown in the reverse order, `00011101`. Third, this is still misleading because I've not padded it enough. For reasons that make a lot of sense if you start diving into the Arrow specifications at a low level, you have to imagine another 503 trailing zeros.^[Quick explanation: As a general rule, if you want things to be efficient you want the beginnings and endings of your data structures to be **naturally aligned**, in the sense that the memory address is a multiple of the data block sizes. So on a 64-bit machine, you want the memory address for every data structure to start on a multiple of 64 bits. Apparently that makes lookup easier or something. Unfortunately, I've only specified 8 bits (i.e. 1 byte) so if I wanted to ensure that the validity bitmap is naturally aligned I'm going to need to add another 7 bytes worth of padding in order to make it to the full 64 bits. This method of aligning data structures in memory is referred to as "8 byte alignment". However, what Arrow does in this situation is *64 byte alignment*, so each data structure has to be 64 bytes long at a minimum. This design feature exists to allow efficient use of modern hardware, and if you want to know more, it's discussed on the Arrow website.] So that the nice and neat `10111` I've shown above actually looks like this in memory:
+Except... this isn't really true, for three reasons. First, memory is allocated in byte-size units, so we have to pad it out to the full 8 bits. That gives us the bitmap `10111000`. Second, that's still a little inaccurate because -- assuming you read left to right -- you're looking it with the "most significant bit" first (i.e., big endian format), and the bits are actually organised with the least significant bit first (i.e., little endian format) so the bits in this byte should be shown in the reverse order, `00011101`. Third, this is still misleading because I've not padded it enough. For reasons that make a lot of sense if you start diving into the Arrow specifications at a low level, you have to imagine another 503 trailing zeros.^[Quick explanation: As a general rule, if you want things to be efficient you want the beginnings and endings of your data structures to be [naturally aligned](https://en.wikipedia.org/wiki/Data_structure_alignment), in the sense that the memory address is a multiple of the data block sizes. So on a 64-bit machine, you want the memory address for every data structure to start on a multiple of 64 bits. Apparently that makes lookup easier or something. Unfortunately, I've only specified 8 bits (i.e. 1 byte) so if I wanted to ensure that the validity bitmap is naturally aligned I'm going to need to add another 7 bytes worth of padding in order to make it to the full 64 bits. This method of aligning data structures in memory is referred to as "8 byte alignment". However, what Arrow does in this situation is *64 byte alignment*, so each data structure has to be 64 bytes long at a minimum. This design feature exists to allow efficient use of modern hardware, and if you want to know more, it's discussed in the [Arrow documentation](https://arrow.apache.org/docs/format/Columnar.html#buffer-alignment-and-padding).] So that the nice and neat `10111` I've shown above actually looks like this in memory:
 
 |Byte 0 (validity bitmap) | Bytes 1-63            |
 |-------------------------|-----------------------|
@@ -389,79 +389,121 @@ knitr::include_graphics("img/king.png")
 
 ## Record batches
 
-A record batch is table-like data structure that is semantically a sequence of fields, each a contiguous Arrow array.^[If you're familiar with Arrow data structures, it is in essence a struct with additional metadata] A struct is a nested type parameterized by an ordered sequence of types (which can all be distinct), called its fields. Each field must have a UTF8-encoded name, and these field names are part of the type metadata. A struct array does not have any additional allocated physical storage for its values. A struct array must still have an allocated validity bitmap, if it has one or more null values. Physically, a struct array has one child array for each field. The child arrays are independent and need not be adjacent to each other in memory. To illustrate, let's return to our `dance_fever` data set:
+Now that we have a good understanding of zero dimensional data objects (scalars), and one dimensional data objects (arrays and chunked arrays), the time has come to make the jump into the second dimension and talk about tabular data structures in **arrow**. In the data objects table I presented at the start of the post there are three of these listed: record batches, tables, and datasets. Record batches are the simplest of the three so I'm going to start there, but in everyday data analysis you're not likely to be using them very much: in practice tables and datasets are the things you're likely to care about most. Even so, from a learning standpoint it really helps to have a good understanding of record batches because the other concepts are built on top of them.
 
+A record batch is table-like data structure comprised of a sequence of arrays. The arrays can be of different types but they must all be the same length. Each array is referred to as one of the "fields" or "columns" of the record batch. This probably sounds terribly familiar to you as an R user, because -- apart from a few differences in terminology -- what I've just described to you is essentially the same kind of thing as a data frame. The parallels between record batches and data frames run deeper too: 
+
+- In R, the columns in a data frame must be named.^[If you don't specify names when creating a data frame, R will create them for you. For example, when you create an ostensibly unnamed data frame with a command like `x <- data.frame(1:2, 3:4)`, you'll find that `x` still has a `names` attribute, and `names(x)` returns `r names(data.frame(1:2, 3:4))`] Record batches have the same property: each field must have a (UTF8-encoded) name, and these names form part of the metadata for the record batch. 
+- A data frame in R is secretly just a list of vectors, and like any other list it does not really "contain" those vectors: rather it consists of a set of pointers that link to those vector objects. There's a good discussion of list references in [chapter 2 of Advanced R](https://adv-r.hadley.nz/names-values.html#list-references). Record batches in Arrow are much the same. When stored in memory, the record batch does not include physical storage for the values stored in each field, it simply contains pointers to the relevant array objects. It does, however, contain its own validity bitmap.
+
+To illustrate, let's return to our `dance_fever` data set. Here it is as a data frame (well, tibble technically, but whatever): 
 
 ```{r}
 dance_fever
 ```
 
-Next, let's bundle these into a record batch:
+The **arrow** package provides two different ways to create a record batch. I can either use `RecordBatch$create()` or I can use the `record_batch()` function. The latter is the simpler method, so I'll do that. The `record_batch()` function is pretty flexible, and can accept inputs in several formats. I can pass it a data frame, one or more named vectors, an input stream, or even a raw vector containing appropriate binary data. But I don't need all that fancy complexity here so I'll just give it a data frame: 
 
 ```{r}
 df <- record_batch(dance_fever)
 df
 ```
 
+The output is amusingly terse. It doesn't give a preview of the data, but it kindly confirms that this is a record batch containing 14 rows and 3 columns. It also tells me the column names and the type of data stored in each column. The **arrow** package supplies a `$` method for record batch objects, and it behaves the same way you'd expect for a data frame. If I want to look at a particular column in my record batch, I can refer to it by name like so:
+
+```{r}
+df$title
+```
+
+So the structure of the `df` record batch object I just created looks like this:
+
 ```{r}
 #| echo: false
 knitr::include_graphics("img/record_batch_layout.svg")
 ```
 
+In some respects it's similar to a chunked array, insofar record batches and chunked arrays are both lists of arrays, but in other ways they are quite different. The arrays indexed in a record batch can be different types, but they must be the same length: this is required to ensure that at a high level we can treat a record batch like a two dimensional table. In contrast, the arrays indexed by a chunked array can be different lengths, but must all be the same type: this is required to ensure that at a high level we can treat a chunked array like a one dimensional vector.  
+
+Returning to the practical details, it's worth noting that there is also a double bracket `[[` method for record batches, so I'm also allowed to refer to columns by position. Just like we saw with chunked array, this isn't a situation where I am deliberately exposing a low-level Arrow property, so you'll be relieved to see that these positions follow the R convention of using 1 to refer to the first element. The `df$title` array is the 2nd column in our record batch so I can extract it with this:
+
+```{r}
+df[[2]]
+```
+
+Finally there is a `[` method, and again it allows you to extract subsets of a record batch in the same way you would for a regular data frame. The output of `df[1:10, 1:2]` extracts the first 10 rows of the record batch and the first two 20 columns and returns those as a record batch:
+
+```{r}
+df[1:10, 1:2]
+```
+
+If you are wondering what `df[1:2]` returns, try it out for yourself. Hopefully you will not be surprised! 
+
 
 <br>
 
-### Serialising a record batch
+### Serialisation
 
-[discuss the IPC protocol for record batches here. Mention that feather is the same thing but as a file format rather than an input stream]
+Before I move on to talk about Arrow tables, I want to make a small digression. Remember how, way back at the beginning of this post I mentioned that my very first attempt to write about Arrow ended up becoming a post about [data serialisation in R](https://blog.djnavarro.net/posts/2021-11-15_serialisation-with-rds/) that had nothing to do with Arrow itself? Well, that didn't happen entirely by accident, and I'll try to explain some of that now.
 
-Okay, so here's where we're at. The Arrow specification gives a precise statement of what an array should look like and how it should be laid out in memory. It also gives a precise statement about how arrays can be organised into record batches. Not only that, it provides a specification for how a record batch should be serialised via the IPC protocol. The IPC protocol is designed so that the structure of the serialised record batch is essentially identical to the physical layout of an in-memory record batch, which minimises the amount of computation required. 
+When we talk about data serialisation, what we're talking about is taking a data structure stored in memory and organising it into a format that is suitable for writing to disk (serialising to file format) or transmitting over some other communication channel (serialising to a stream). From the beginning, data structures in Arrow were designed *together* with file formats and streaming formats, with the intention that -- to the extent that it is practical and doesn't mess with other important design considerations -- the thing you send across the communication channel (or write to disk) has the exact same structure as the thing you need to store in memory. That way, when the data arrive at the other end, you don't have to do a lot of work reorganising the data. 
+
+That... makes sense, right? Like, if I want to tell you to "meet me under the bridge" the message I should send you should be "meet me under the bridge". It makes no sense whatsoever for me to say "meet me at [the title of that really annoying red hot chilli peppers song]" and expect you to decode it. Yet, surprisingly, that's what happens a lot of the time when we send data across communication channels. For example, suppose you and I are both R users. We both work with data frames. Because a data frame is fundamentally a list of variables (each of which is a vector), we use data that are organised *column-wise*: the first thing in a data frame is column 1, then column 2, then column 3, and so on. Okay, cool. So now let's say you want to send me a data set, and what you do is send me a CSV file. A CSV file is written row by row: the first thing in a CSV file is row 1, then row 2, then row 3. It is a *row-wise* data structure. In order for you to send data to me, what has to happen is you take your column-wise data frame, invert it so that it is now a row-wise structure, write that to a CSV and then send it to me. At the other end, I have to invert the whole process, transforming the row-wise structure into a column-wise organisation that I can now load into memory as a data frame.^[On the off chance that you're one of those extremely sensible people who chose not to read my data serialisation post, I'll mention that the native RDS format that R uses avoids this trap. Much like Arrow serialisation formats, RDS preserves the column wise organisation to data frames.]
+
+Um... that *doesn't* make sense.
+
+This particular problem arises quite a lot, largely because serialisation formats and in-memory data structures aren't always designed in tandem. To get around this, Arrow specifies the [Interprocess Communication](https://arrow.apache.org/docs/format/Columnar.html#serialization-and-interprocess-communication-ipc) serialisation format that is designed specifically to ensure that Arrow data objects can be transmitted (and saved) efficiently. Because data sets are typically organised into tabular structures, the primitive unit for communication is the record batch. I'm not going to dive into the very low level details of how IPC messages are structured, but the key thing for our purposes is that IPC is designed to ensure that the structure of the serialised record batch is essentially identical to the physical layout of an in-memory record batch. 
+
+I'll give a very simple example. Let's take the first few rows of the `dance_fever` data set and convert them into a small record batch:
 
 ```{r}
 df_batch_0 <- record_batch(dance_fever[1:4,])
 df_batch_0
-df_batch_1 <- record_batch(dance_fever[5:14,])
-df_batch_1
 ```
 
-Suppose I want to share this. The IPC format is designed to lay this object out as a stream of bytes that (almost) exactly mirrors the structure of the object as it is represented in memory. 
-
+Suppose I want to share this. Currently this is an object in memory that consists of three arrays (which are contiguous in memory) but as we've seen earlier, these arrays are themselves comprised of multiple buffers. What the IPC format does is collect the relevant metadata into a "data header",^[The data header for contains the length and null count for each flattened field. It also contains the memory offset (i.e., the start point) and length of every buffer that is stored in the message body.] and then lay out the buffers one after the other. Glossing a few minor details^[For instance, there are padding requirements involved that I am ignoring here.], this is essentially what the IPC message would look like for this record batch:
 
 ```{r}
 #| echo: false
 knitr::include_graphics("img/record_batch_serialised.svg")
 ```
 
+At this point you're probably thinking okay that's nice Danielle, but how do I do this? There are three functions you can use: 
 
-Each column in the record batch gets converted to a "flattened field". The data header for contains the length and null count for each flattened field. It also contains the memory offset (i.e., the start point) and length of every buffer that is stored in the message body.
+- To send the data directly to an output stream use `write_ipc_stream()`. 
+- To write data in IPC format to a static file on disk it is referred to as a "feather" formatted file,^[Full disclosure: there are a few minor differences between the IPC streaming format and the feather file format. I've glossed over those in this post but you can find the details on the [Arrow specification page](https://arrow.apache.org/docs/format/Columnar.html#ipc-file-format).] and you use `write_feather()`. 
+- To construct the same sequence of bytes but return them in R as raw vectors, you can use `write_to_raw()`. 
 
-
-There are three functions you can use if you want to do this. To send the data directly to an output stream (e.g., for communicating to some other process) use `write_ipc_stream()`. When writing data in this IPC format to a static file on disk (with a few minor differences), it is referred to as a "feather" formatted file, and you use `write_feather()`. Finally, if you want the same sequence of bytes but you'd like to keep them in R as raw vectors, you can use `write_to_raw()`. That's what I'll do here so I can show you the byte stream:
+In order to show you what the byte stream actually looks like, I'll use the `write_to_raw()` function: 
 
 ```{r}
 df_ipc_0 <- write_to_raw(df_batch_0)
 df_ipc_0
 ```
 
-Note that by default the `write_to_raw()` function will produce output in "stream" format: what you're looking at above is the same sequence of bytes that would get transmitted if I'd called `write_ipc_stream()`. If you want `write_to_raw()` to mimic the behaviour of `write_feather()`, you can set the `format` argument:
-
-```{r}
-#| results: hide
-write_to_raw(df_batch_0, format = "file")
-```
-
-This would produce a somewhat longer output, due to the fact that the feather format includes additional information. For more detail, see the Arrow specification page.
+To reassure you that this byte stream does indeed contain the relevant information, I'll use the `read_ipc_stream()` function to decode it. By default this function returns data to R natively as a tibble, which is fine for my purposes: 
 
 ```{r}
 read_ipc_stream(df_ipc_0)
 ```
 
-The same works for feather:
+We can use the same logic to write data to disk. As mentioned above, when writing data in IPC format to file, the result is called a "feather" file. So okay, let's take the rest of the `dance_fever` data, and write it to a feather file:
 
 ```{r}
-write_feather(df_batch_1, "df_ipc_1.feather")
+dance_fever[5:14,] |>
+  record_batch() |>
+  write_feather("df_ipc_1.feather")
+```
+
+Now we can read this feather file from disk:
+
+```{r}
 read_feather("df_ipc_1.feather")
 ```
+
+Yay! It's always nice when things do what you expect them to do.
+
+Before moving on, there's one last thing I should mention. The feather file format is a handy thing to know about, and can be very convenient in some instances, but it's not really optimised to be the best "big data file format". It's intended to be the file format analog of IPC messages, and those in turn are designed for optimal streaming of Arrow data. Because of this, in practice you will probably not find yourself using the feather format all that much. Instead, you're more likely to use something like [Apache Parquet](https://parquet.apache.org/), which is explicitly designed for this purpose. Arrow and parquet play nicely with one another, and **arrow** supports reading and parquet files using the `read_parquet()` and `write_parquet()` functions. However, parquet is a topic for a future post, so that's all I'll say about this today! 
+
 
 <br>
 
@@ -491,12 +533,10 @@ Draw an analogous figure for tables, showing how a table is a collection of chun
 knitr::include_graphics("img/table_layout.svg")
 ```
 
-
 Can't concatenate record batches directly. Arrays are immutable, and we can't touch them. They need to be wrapped into chunked arrays. In other words we need to convert each record batch into a table. I could use the `as_arrow_table()` function to do this conversion:
 
 ```{r}
-df_table_0 <- as_arrow_table(df_batch_0)
-df_table_1 <- as_arrow_table(df_batch_1)
+as_arrow_table(df_batch_0)
 ```
 
 This works, but it's also not something you will need to do very often in real life. The reader functions in **arrow** tend to convert record batches to tables by default. For instance, in the previous section I serialised two record batches, one to a file and one to a raw vector. Let's look at what happens when I try to deserialise (a.k.a. "read") them: 
