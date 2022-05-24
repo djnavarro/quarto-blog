@@ -228,7 +228,11 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
   <li><a href="#peeking-inside-arrays" id="toc-peeking-inside-arrays" class="nav-link" data-scroll-target="#peeking-inside-arrays">Peeking inside arrays</a></li>
   <li><a href="#a-nicer-way" id="toc-a-nicer-way" class="nav-link" data-scroll-target="#a-nicer-way">A nicer way</a></li>
   </ul></li>
-  <li><a href="#chunked-arrays" id="toc-chunked-arrays" class="nav-link" data-scroll-target="#chunked-arrays">Chunked arrays</a></li>
+  <li><a href="#chunked-arrays" id="toc-chunked-arrays" class="nav-link" data-scroll-target="#chunked-arrays">Chunked arrays</a>
+  <ul class="collapse">
+  <li><a href="#list-like-aspects" id="toc-list-like-aspects" class="nav-link" data-scroll-target="#list-like-aspects">List-like aspects</a></li>
+  <li><a href="#vector-like-aspects" id="toc-vector-like-aspects" class="nav-link" data-scroll-target="#vector-like-aspects">Vector-like aspects</a></li>
+  </ul></li>
   <li><a href="#record-batches" id="toc-record-batches" class="nav-link" data-scroll-target="#record-batches">Record batches</a>
   <ul class="collapse">
   <li><a href="#serialising-a-record-batch" id="toc-serialising-a-record-batch" class="nav-link" data-scroll-target="#serialising-a-record-batch">Serialising a record batch</a></li>
@@ -369,7 +373,7 @@ And heaven is now overrated<br>
 </blockquote>
 <p>Let’s turn our attention to arrays next. I’ll start by introducing some terminology from the page describing the <a href="https://arrow.apache.org/docs/format/Columnar.html">Arrow specification</a>:</p>
 <ul>
-<li>An <strong>array</strong> in Arrow is analogous to a vector in R: it is a sequence of values with known length, all of which have the same type. Coming to Arrow from R, one thing I found a little difficult to wrap my head around is the concept of an array as an <strong>immutable</strong> object. Once an Arrow array has been initialised, it cannot be modified.</li>
+<li>An <strong>array</strong> in Arrow is analogous to a vector in R: it is a sequence of values with known length, all of which have the same type. Coming to Arrow from R, one thing I found a little difficult to wrap my head around is the concept of an array as an <strong>immutable</strong> object. Once an Arrow array has been initialised, it cannot be modified. I will talk more about this later, but it’s important.</li>
 <li>A related but different concept is that of a <strong>buffer</strong>, a sequential virtual address space with a given length. Any byte in the buffer can be reached via a single pointer offset less than the region’s length.</li>
 <li>Finally, we have the concept of the <strong>physical layout</strong>, which describes how information is laid out in memory, without taking into account of how that information is interpreted. For example, a 32-bit signed integer array and 32-bit floating point array have the same layout because they have the same physical structure in memory. The meaning of the bits that make up a 32-bit float is different to the meaning of the bits that make up a 32-bit integer, but the physical layout is the same.</li>
 </ul>
@@ -564,7 +568,7 @@ int32</code></pre>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb25"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb25-1"><a href="#cb25-1" aria-hidden="true" tabindex="-1"></a>rlang<span class="sc">::</span><span class="fu">env_print</span>(duration<span class="sc">$</span><span class="fu">data</span>())</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
-<pre><code>&lt;environment: 0x5563b225bfa8&gt; [L]
+<pre><code>&lt;environment: 0x560d3b9324e0&gt; [L]
 Parent: &lt;environment: empty&gt;
 Class: ArrayData, ArrowObject, R6
 Bindings:
@@ -649,6 +653,7 @@ FactoryCassandraHeaven Is HereDaffodilMy LoveRestraintThe BombMorning Elvis</cod
 </div>
 </div>
 <p>You wouldn’t want to use my code in the wild though because it doesn’t even try to be efficient or truncate the output in any way. I only wrote it so that I had a way of showing you the content of an Arrow array in R at a slightly lower level.</p>
+<p><br></p>
 <div class="cell page-columns page-full">
 <div class="cell-output-display column-screen">
 <div id="fig-anonymous-2" class="quarto-figure quarto-figure-center anchored">
@@ -670,13 +675,25 @@ I need my empty halls to echo with grand self-mythology<br>
 I am king<br>
 &nbsp;&nbsp;– <em>King</em>, Florence + The Machine</p>
 </blockquote>
+<p>The next entry in the table of data objects refers to “chunked arrays”. In most respects a chunked array behaves just like a regular array. It is a one-dimensional data structure. It is zero-indexed, so the first slot in a chunked array is slot 0 not slot 1. It requires every value stored to be of the same type: all integers, or all strings, or whatever. From the perspective of a <em>data scientist</em> who just wants to analyse the data, an array and a chunked array are essentially identical. Under the hood, however, they are quite different – and the reason for this is fundamentally a <em>data engineering</em> issue. In this section I’ll unpack this.</p>
+<p>Recall at the beginning I emphasised that an array is an <a href="https://en.wikipedia.org/wiki/Immutable_object">immutable object</a>. Once an array has been created by Arrow, the values it stores cannot be altered. The decision to make arrays immutable reduces the need to create copies: many other objects can all safely refer to the array (via pointers) without making copies of the data, safe in the knowledge that it is impossible<a href="#fn3" class="footnote-ref" id="fnref3" role="doc-noteref"><sup>3</sup></a> for anyone else to change the data values. For large data sets that’s a huge advantage: you really don’t want to be making copies of data if you can avoid doing so. Immutable arrays are good.</p>
+<p>Well, mostly good.</p>
+<p>There are some limitations to immutable arrays, and one of the big ones is prompted by the very simple question: what happens when a new batch of data arrives? An array is immutable, so you can’t add the new information to an existing array. The only thing you can do if you don’t want to disturb or copy your existing array is create a new array that contains the new data. Doing that preserves the immutability of arrays and doesn’t lead to any unnecessary copying – which keeps us happy(ish) from a data engineering perspective – but now we have a new problem: the data are now split across two arrays. Each array contains only one “chunk” of the data. We need some way of “pretending” that these two arrays are in fact a single array-like object.</p>
+<p>This is the problem that chunked arrays solve. A chunked array is a wrapper around a list of arrays, and allows you to index their contents “as if” they were a single array. Physically, the data are still stored in separate places – each array is one chunk, and these chunks don’t have to be adjacent to each other in memory – but the chunked array provides us will a layer of abstraction that allows us to pretend that they are all one thing.</p>
+<p><br></p>
+<section id="list-like-aspects" class="level3">
+<h3 class="anchored" data-anchor-id="list-like-aspects">List-like aspects</h3>
+<p>Here’s an example. I’ll take some lyrics to <em>King</em> by Florence + The Machine, and use the <code>chunked_array()</code> function from <strong>arrow</strong> to store them as a chunked array that is comprised of three smaller arrays:</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb37"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb37-1"><a href="#cb37-1" aria-hidden="true" tabindex="-1"></a>king <span class="ot">&lt;-</span> <span class="fu">chunked_array</span>(</span>
-<span id="cb37-2"><a href="#cb37-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">c</span>(<span class="st">"I"</span>, <span class="st">"am"</span>, <span class="st">"no"</span>, <span class="st">"mother"</span>),</span>
-<span id="cb37-3"><a href="#cb37-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">c</span>(<span class="st">"I"</span>, <span class="st">"am"</span>, <span class="cn">NA</span>, <span class="st">"bride"</span>),</span>
-<span id="cb37-4"><a href="#cb37-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">c</span>(<span class="st">"I"</span>, <span class="st">"am"</span>, <span class="st">"king"</span>)</span>
-<span id="cb37-5"><a href="#cb37-5" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb37-6"><a href="#cb37-6" aria-hidden="true" tabindex="-1"></a>king</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<span id="cb37-2"><a href="#cb37-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">c</span>(<span class="st">"I"</span>, <span class="st">"am"</span>, <span class="st">"no"</span>, <span class="st">"mother"</span>), <span class="co"># chunk 0</span></span>
+<span id="cb37-3"><a href="#cb37-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">c</span>(<span class="st">"I"</span>, <span class="st">"am"</span>, <span class="cn">NA</span>, <span class="st">"bride"</span>),    <span class="co"># chunk 1</span></span>
+<span id="cb37-4"><a href="#cb37-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">c</span>(<span class="st">"I"</span>, <span class="st">"am"</span>, <span class="st">"king"</span>)          <span class="co"># chunk 2</span></span>
+<span id="cb37-5"><a href="#cb37-5" aria-hidden="true" tabindex="-1"></a>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>An alternative way to do the same thing would be to use the <code>create()</code> method of the R6 object <code>ChunkedArray</code>. In fact, the <code>chunked_array()</code> function is just a slightly nicer wraper around the same functionality that <code>ChunkedArray$create()</code> provides. But that’s a bit of a digression. Let’s take a look at the object I just created:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb38"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb38-1"><a href="#cb38-1" aria-hidden="true" tabindex="-1"></a>king</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>ChunkedArray
 [
@@ -700,27 +717,30 @@ I am king<br>
 ]</code></pre>
 </div>
 </div>
-<p>A chunked array has some structure to it:</p>
+<p>The double bracketing in this output is intended to highlight the “list-like” nature of chunked arrays. There are three separate arrays that I have created here, wrapped in a handly little container object that is secretly a list of arrays, but allows that list to behave just like a regular one-dimensional data structure. Schematically, this is what I’ve just created:</p>
 <div class="cell">
 <div class="cell-output-display">
 <p><img src="img/chunked_array_layout.svg" class="img-fluid"></p>
 </div>
 </div>
-<p>We can check:</p>
+<p>As this figure illustrates, there really are three arrays here. I can pull them out individually by referring to their position in the array list by using the <code>chunk()</code> method that all chunked array objects possess. Here’s the second chunk:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb39"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb39-1"><a href="#cb39-1" aria-hidden="true" tabindex="-1"></a>king<span class="sc">$</span><span class="fu">chunk</span>(<span class="dv">0</span>) <span class="sc">|&gt;</span> <span class="fu">array_layout</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-<div class="cell-output cell-output-stderr">
-<pre><code>
-── Metadata 
-• length : 4
-• null count : 0
-
-── Buffers 
-• validity : null
-• offset : 0 1 3 5 11
-• data : Iamnomother</code></pre>
+<div class="sourceCode cell-code" id="cb40"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb40-1"><a href="#cb40-1" aria-hidden="true" tabindex="-1"></a>king<span class="sc">$</span><span class="fu">chunk</span>(<span class="dv">1</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Array
+&lt;string&gt;
+[
+  "I",
+  "am",
+  null,
+  "bride"
+]</code></pre>
 </div>
-<div class="sourceCode cell-code" id="cb41"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb41-1"><a href="#cb41-1" aria-hidden="true" tabindex="-1"></a>king<span class="sc">$</span><span class="fu">chunk</span>(<span class="dv">1</span>) <span class="sc">|&gt;</span> <span class="fu">array_layout</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>Notice from the output that this chunk is a vanilla <code>Array</code> object, and I can take a peek at the underlying metadata and buffers associated with that object by using the <code>array_layout()</code> function I wrote earlier. Here’s what that chunk looks like:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb42"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb42-1"><a href="#cb42-1" aria-hidden="true" tabindex="-1"></a>king<span class="sc">$</span><span class="fu">chunk</span>(<span class="dv">1</span>) <span class="sc">|&gt;</span> </span>
+<span id="cb42-2"><a href="#cb42-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">array_layout</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stderr">
 <pre><code>
 ── Metadata 
@@ -733,6 +753,62 @@ I am king<br>
 • data : Iambride</code></pre>
 </div>
 </div>
+<p>Hopefully by now this all looks quite familiar to you! The <code>Array</code> object here has length 4, contains 1 missing value (referred to as null values in Arrow), and because it is a string array, it contains three buffers: a validity bitmap, an offset buffer, and a data buffer.</p>
+<p><br></p>
+</section>
+<section id="vector-like-aspects" class="level3 page-columns page-full">
+<h3 class="anchored" data-anchor-id="vector-like-aspects">Vector-like aspects</h3>
+<p>In the previous section I highlighted the fact that internally a chunked array is “just” a list of arrays and showed you how you can interact with a chunked array in a “list-like” way. Most of the time though, when you’re working with a chunked array as a data analyst you aren’t really interested in its list-like properties, what you actually care about is the abstraction layer that provides it with vector-like properties. Specifically, what you actually care about is the fact that a chunked array is a one-dimensional object with a single indexing scheme. Let’s go back to the <code>king</code> data to illustrate this. Suppose I want to extract a subset of the elements. Specifically I want to grab the 3rd through 6th elements. These slots actually belong to different arrays, and it would be a pain to extract the 3rd and 4th slots from the first array, and the 1st and 2nd slots from the second array. No data analyst wants that headache. Fortunately, I don’t have to:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb44"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb44-1"><a href="#cb44-1" aria-hidden="true" tabindex="-1"></a>king[<span class="dv">3</span><span class="sc">:</span><span class="dv">6</span>]</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>ChunkedArray
+[
+  [
+    "no",
+    "mother"
+  ],
+  [
+    "I",
+    "am"
+  ]
+]</code></pre>
+</div>
+</div>
+<p>As an R user you are probably breathing a sigh of relief to see the return of one-based indexing! As a general rule, the <strong>arrow</strong> package tries to mimic R conventions whenever you are “just trying to do normal R things”. If you’re trying to manipulate and analyse data, the intention is that your regular <strong>dplyr</strong> functions should work the same way they always did, and the same goes for subsetting data. In R, the first element of a vector is element 1, not element 0, and that convention is preserved here. The only time you’re going to see <strong>arrow</strong> adopt zero-based indexing is when you are interacting with Arrow at a low level. Because I’ve been talking a lot about those low level features in this post, I’ve had to use zero-based indexing a lot, but that’s probably not going to be typical!</p>
+<p>Another thing to highlight about chunked arrays is that the “chunking” is not considered semantically meaningful. It is an internal implementation detail only: you should never treat the chunk as a meaningful unit! Writing the data to disk, for example, often results in the data being organised into different chunks. Two arrays that have the same values in different chunking arrangements are deemed equivalent. For example, here’s the same four values as <code>king[3:6]</code> all grouped into a single chunk:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb46"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb46-1"><a href="#cb46-1" aria-hidden="true" tabindex="-1"></a>no_mother <span class="ot">&lt;-</span> <span class="fu">chunked_array</span>(<span class="fu">c</span>(<span class="st">"no"</span>, <span class="st">"mother"</span>, <span class="st">"I"</span>, <span class="st">"am"</span>))</span>
+<span id="cb46-2"><a href="#cb46-2" aria-hidden="true" tabindex="-1"></a>no_mother</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>ChunkedArray
+[
+  [
+    "no",
+    "mother",
+    "I",
+    "am"
+  ]
+]</code></pre>
+</div>
+</div>
+<p>When I test for equality using <code>==</code>, you can see that the results are shown element-wise. All four elements are the same, so the result is a (chunked) array of four <code>true</code> values:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb48"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb48-1"><a href="#cb48-1" aria-hidden="true" tabindex="-1"></a>no_mother <span class="sc">==</span> king[<span class="dv">3</span><span class="sc">:</span><span class="dv">6</span>]</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>ChunkedArray
+[
+  [
+    true,
+    true,
+    true,
+    true
+  ]
+]</code></pre>
+</div>
+</div>
+<p>The intention, ultimately, is that users should be able to interact with chunked arrays as if they were ordinary one-dimensional data structures without ever having to think much about their list-like nature. They exist as an abstraction to help bridge the gap between the needs of the data engineer and the needs of the data scientist. So except in those special cases where you have to think carefully about the engineering aspect, a data analyst should be able to treat them just like regular vectors!</p>
+<p><br></p>
 <div class="cell page-columns page-full">
 <div class="cell-output-display column-screen">
 <div id="fig-anonymous-3" class="quarto-figure quarto-figure-center anchored">
@@ -744,11 +820,12 @@ I am king<br>
 </div>
 <p><br><br></p>
 </section>
+</section>
 <section id="record-batches" class="level2 page-columns page-full">
 <h2 class="anchored" data-anchor-id="record-batches">Record batches</h2>
-<p>A record batch is table-like data structure that is semantically a sequence of fields, each a contiguous Arrow array.<a href="#fn3" class="footnote-ref" id="fnref3" role="doc-noteref"><sup>3</sup></a> A struct is a nested type parameterized by an ordered sequence of types (which can all be distinct), called its fields. Each field must have a UTF8-encoded name, and these field names are part of the type metadata. A struct array does not have any additional allocated physical storage for its values. A struct array must still have an allocated validity bitmap, if it has one or more null values. Physically, a struct array has one child array for each field. The child arrays are independent and need not be adjacent to each other in memory. To illustrate, let’s return to our <code>dance_fever</code> data set:</p>
+<p>A record batch is table-like data structure that is semantically a sequence of fields, each a contiguous Arrow array.<a href="#fn4" class="footnote-ref" id="fnref4" role="doc-noteref"><sup>4</sup></a> A struct is a nested type parameterized by an ordered sequence of types (which can all be distinct), called its fields. Each field must have a UTF8-encoded name, and these field names are part of the type metadata. A struct array does not have any additional allocated physical storage for its values. A struct array must still have an allocated validity bitmap, if it has one or more null values. Physically, a struct array has one child array for each field. The child arrays are independent and need not be adjacent to each other in memory. To illustrate, let’s return to our <code>dance_fever</code> data set:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb43"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb43-1"><a href="#cb43-1" aria-hidden="true" tabindex="-1"></a>dance_fever</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb50"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb50-1"><a href="#cb50-1" aria-hidden="true" tabindex="-1"></a>dance_fever</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code># A tibble: 14 × 3
    track_number title             duration
@@ -771,8 +848,8 @@ I am king<br>
 </div>
 <p>Next, let’s bundle these into a record batch:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb45"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb45-1"><a href="#cb45-1" aria-hidden="true" tabindex="-1"></a>df <span class="ot">&lt;-</span> <span class="fu">record_batch</span>(dance_fever)</span>
-<span id="cb45-2"><a href="#cb45-2" aria-hidden="true" tabindex="-1"></a>df</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb52"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb52-1"><a href="#cb52-1" aria-hidden="true" tabindex="-1"></a>df <span class="ot">&lt;-</span> <span class="fu">record_batch</span>(dance_fever)</span>
+<span id="cb52-2"><a href="#cb52-2" aria-hidden="true" tabindex="-1"></a>df</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>RecordBatch
 14 rows x 3 columns
@@ -792,8 +869,8 @@ $duration &lt;int32&gt;</code></pre>
 <p>[discuss the IPC protocol for record batches here. Mention that feather is the same thing but as a file format rather than an input stream]</p>
 <p>Okay, so here’s where we’re at. The Arrow specification gives a precise statement of what an array should look like and how it should be laid out in memory. It also gives a precise statement about how arrays can be organised into record batches. Not only that, it provides a specification for how a record batch should be serialised via the IPC protocol. The IPC protocol is designed so that the structure of the serialised record batch is essentially identical to the physical layout of an in-memory record batch, which minimises the amount of computation required.</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb47"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb47-1"><a href="#cb47-1" aria-hidden="true" tabindex="-1"></a>df_batch_0 <span class="ot">&lt;-</span> <span class="fu">record_batch</span>(dance_fever[<span class="dv">1</span><span class="sc">:</span><span class="dv">4</span>,])</span>
-<span id="cb47-2"><a href="#cb47-2" aria-hidden="true" tabindex="-1"></a>df_batch_0</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb54"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb54-1"><a href="#cb54-1" aria-hidden="true" tabindex="-1"></a>df_batch_0 <span class="ot">&lt;-</span> <span class="fu">record_batch</span>(dance_fever[<span class="dv">1</span><span class="sc">:</span><span class="dv">4</span>,])</span>
+<span id="cb54-2"><a href="#cb54-2" aria-hidden="true" tabindex="-1"></a>df_batch_0</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>RecordBatch
 4 rows x 3 columns
@@ -801,8 +878,8 @@ $track_number &lt;int32&gt;
 $title &lt;string&gt;
 $duration &lt;int32&gt;</code></pre>
 </div>
-<div class="sourceCode cell-code" id="cb49"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb49-1"><a href="#cb49-1" aria-hidden="true" tabindex="-1"></a>df_batch_1 <span class="ot">&lt;-</span> <span class="fu">record_batch</span>(dance_fever[<span class="dv">5</span><span class="sc">:</span><span class="dv">14</span>,])</span>
-<span id="cb49-2"><a href="#cb49-2" aria-hidden="true" tabindex="-1"></a>df_batch_1</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb56"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb56-1"><a href="#cb56-1" aria-hidden="true" tabindex="-1"></a>df_batch_1 <span class="ot">&lt;-</span> <span class="fu">record_batch</span>(dance_fever[<span class="dv">5</span><span class="sc">:</span><span class="dv">14</span>,])</span>
+<span id="cb56-2"><a href="#cb56-2" aria-hidden="true" tabindex="-1"></a>df_batch_1</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>RecordBatch
 10 rows x 3 columns
@@ -820,8 +897,8 @@ $duration &lt;int32&gt;</code></pre>
 <p>Each column in the record batch gets converted to a “flattened field”. The data header for contains the length and null count for each flattened field. It also contains the memory offset (i.e., the start point) and length of every buffer that is stored in the message body.</p>
 <p>There are three functions you can use if you want to do this. To send the data directly to an output stream (e.g., for communicating to some other process) use <code>write_ipc_stream()</code>. When writing data in this IPC format to a static file on disk (with a few minor differences), it is referred to as a “feather” formatted file, and you use <code>write_feather()</code>. Finally, if you want the same sequence of bytes but you’d like to keep them in R as raw vectors, you can use <code>write_to_raw()</code>. That’s what I’ll do here so I can show you the byte stream:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb51"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb51-1"><a href="#cb51-1" aria-hidden="true" tabindex="-1"></a>df_ipc_0 <span class="ot">&lt;-</span> <span class="fu">write_to_raw</span>(df_batch_0)</span>
-<span id="cb51-2"><a href="#cb51-2" aria-hidden="true" tabindex="-1"></a>df_ipc_0</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb58"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb58-1"><a href="#cb58-1" aria-hidden="true" tabindex="-1"></a>df_ipc_0 <span class="ot">&lt;-</span> <span class="fu">write_to_raw</span>(df_batch_0)</span>
+<span id="cb58-2"><a href="#cb58-2" aria-hidden="true" tabindex="-1"></a>df_ipc_0</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>  [1] ff ff ff ff f0 00 00 00 10 00 00 00 00 00 0a 00 0c 00 06 00 05 00 08 00 0a
  [26] 00 00 00 00 01 04 00 0c 00 00 00 08 00 08 00 00 00 04 00 08 00 00 00 04 00
@@ -851,11 +928,11 @@ $duration &lt;int32&gt;</code></pre>
 </div>
 <p>Note that by default the <code>write_to_raw()</code> function will produce output in “stream” format: what you’re looking at above is the same sequence of bytes that would get transmitted if I’d called <code>write_ipc_stream()</code>. If you want <code>write_to_raw()</code> to mimic the behaviour of <code>write_feather()</code>, you can set the <code>format</code> argument:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb53"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb53-1"><a href="#cb53-1" aria-hidden="true" tabindex="-1"></a><span class="fu">write_to_raw</span>(df_batch_0, <span class="at">format =</span> <span class="st">"file"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb60"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb60-1"><a href="#cb60-1" aria-hidden="true" tabindex="-1"></a><span class="fu">write_to_raw</span>(df_batch_0, <span class="at">format =</span> <span class="st">"file"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <p>This would produce a somewhat longer output, due to the fact that the feather format includes additional information. For more detail, see the Arrow specification page.</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb54"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb54-1"><a href="#cb54-1" aria-hidden="true" tabindex="-1"></a><span class="fu">read_ipc_stream</span>(df_ipc_0)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb61"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb61-1"><a href="#cb61-1" aria-hidden="true" tabindex="-1"></a><span class="fu">read_ipc_stream</span>(df_ipc_0)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code># A tibble: 4 × 3
   track_number title        duration
@@ -868,8 +945,8 @@ $duration &lt;int32&gt;</code></pre>
 </div>
 <p>The same works for feather:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb56"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb56-1"><a href="#cb56-1" aria-hidden="true" tabindex="-1"></a><span class="fu">write_feather</span>(df_batch_1, <span class="st">"df_ipc_1.feather"</span>)</span>
-<span id="cb56-2"><a href="#cb56-2" aria-hidden="true" tabindex="-1"></a><span class="fu">read_feather</span>(<span class="st">"df_ipc_1.feather"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb63"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb63-1"><a href="#cb63-1" aria-hidden="true" tabindex="-1"></a><span class="fu">write_feather</span>(df_batch_1, <span class="st">"df_ipc_1.feather"</span>)</span>
+<span id="cb63-2"><a href="#cb63-2" aria-hidden="true" tabindex="-1"></a><span class="fu">read_feather</span>(<span class="st">"df_ipc_1.feather"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code># A tibble: 10 × 3
    track_number title             duration
@@ -886,6 +963,7 @@ $duration &lt;int32&gt;</code></pre>
 10           14 Morning Elvis          262</code></pre>
 </div>
 </div>
+<p><br></p>
 <div class="cell page-columns page-full">
 <div class="cell-output-display column-screen">
 <div id="fig-anonymous-4" class="quarto-figure quarto-figure-center anchored">
@@ -914,16 +992,16 @@ I don’t know where to put my love<br>
 </div>
 <p>Can’t concatenate record batches directly. Arrays are immutable, and we can’t touch them. They need to be wrapped into chunked arrays. In other words we need to convert each record batch into a table. I could use the <code>as_arrow_table()</code> function to do this conversion:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb58"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb58-1"><a href="#cb58-1" aria-hidden="true" tabindex="-1"></a>df_table_0 <span class="ot">&lt;-</span> <span class="fu">as_arrow_table</span>(df_batch_0)</span>
-<span id="cb58-2"><a href="#cb58-2" aria-hidden="true" tabindex="-1"></a>df_table_1 <span class="ot">&lt;-</span> <span class="fu">as_arrow_table</span>(df_batch_1)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb65"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb65-1"><a href="#cb65-1" aria-hidden="true" tabindex="-1"></a>df_table_0 <span class="ot">&lt;-</span> <span class="fu">as_arrow_table</span>(df_batch_0)</span>
+<span id="cb65-2"><a href="#cb65-2" aria-hidden="true" tabindex="-1"></a>df_table_1 <span class="ot">&lt;-</span> <span class="fu">as_arrow_table</span>(df_batch_1)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <p>This works, but it’s also not something you will need to do very often in real life. The reader functions in <strong>arrow</strong> tend to convert record batches to tables by default. For instance, in the previous section I serialised two record batches, one to a file and one to a raw vector. Let’s look at what happens when I try to deserialise (a.k.a. “read”) them:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb59"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb59-1"><a href="#cb59-1" aria-hidden="true" tabindex="-1"></a>df_table_0 <span class="ot">&lt;-</span> <span class="fu">read_ipc_stream</span>(</span>
-<span id="cb59-2"><a href="#cb59-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">file =</span> df_ipc_0, </span>
-<span id="cb59-3"><a href="#cb59-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">as_data_frame =</span> <span class="cn">FALSE</span></span>
-<span id="cb59-4"><a href="#cb59-4" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb59-5"><a href="#cb59-5" aria-hidden="true" tabindex="-1"></a>df_table_0</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb66"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb66-1"><a href="#cb66-1" aria-hidden="true" tabindex="-1"></a>df_table_0 <span class="ot">&lt;-</span> <span class="fu">read_ipc_stream</span>(</span>
+<span id="cb66-2"><a href="#cb66-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">file =</span> df_ipc_0, </span>
+<span id="cb66-3"><a href="#cb66-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">as_data_frame =</span> <span class="cn">FALSE</span></span>
+<span id="cb66-4"><a href="#cb66-4" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb66-5"><a href="#cb66-5" aria-hidden="true" tabindex="-1"></a>df_table_0</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>Table
 4 rows x 3 columns
@@ -934,11 +1012,11 @@ $duration &lt;int32&gt;</code></pre>
 </div>
 <p>That’s the same data as before, but it’s a table not a record batch. Each column is a chunked array, not an array. The same happens when I read from the file:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb61"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb61-1"><a href="#cb61-1" aria-hidden="true" tabindex="-1"></a>df_table_1 <span class="ot">&lt;-</span> <span class="fu">read_feather</span>(</span>
-<span id="cb61-2"><a href="#cb61-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">file =</span> <span class="st">"df_ipc_1.feather"</span>, </span>
-<span id="cb61-3"><a href="#cb61-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">as_data_frame =</span> <span class="cn">FALSE</span></span>
-<span id="cb61-4"><a href="#cb61-4" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb61-5"><a href="#cb61-5" aria-hidden="true" tabindex="-1"></a>df_table_1</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb68"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb68-1"><a href="#cb68-1" aria-hidden="true" tabindex="-1"></a>df_table_1 <span class="ot">&lt;-</span> <span class="fu">read_feather</span>(</span>
+<span id="cb68-2"><a href="#cb68-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">file =</span> <span class="st">"df_ipc_1.feather"</span>, </span>
+<span id="cb68-3"><a href="#cb68-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">as_data_frame =</span> <span class="cn">FALSE</span></span>
+<span id="cb68-4"><a href="#cb68-4" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb68-5"><a href="#cb68-5" aria-hidden="true" tabindex="-1"></a>df_table_1</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>Table
 10 rows x 3 columns
@@ -950,7 +1028,7 @@ $duration &lt;int32&gt;</code></pre>
 <p>In general, you won’t get a record batch in <strong>arrow</strong> unless you explicitly ask for one. Tables are the default tabular data structure, which is usually what you want anyway</p>
 <p>Okay, so now I have the two fragments of my data set represented as tables. The difference between the table version and the record batch version is that the columns are all represented as chunked arrays. Each array from the original record batch is now one chunk in the corresponding chunked array in the table:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb63"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb63-1"><a href="#cb63-1" aria-hidden="true" tabindex="-1"></a>df_batch_0<span class="sc">$</span>title</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb70"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb70-1"><a href="#cb70-1" aria-hidden="true" tabindex="-1"></a>df_batch_0<span class="sc">$</span>title</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>Array
 &lt;string&gt;
@@ -961,7 +1039,7 @@ $duration &lt;int32&gt;</code></pre>
   "Back in Town"
 ]</code></pre>
 </div>
-<div class="sourceCode cell-code" id="cb65"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb65-1"><a href="#cb65-1" aria-hidden="true" tabindex="-1"></a>df_table_0<span class="sc">$</span>title</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb72"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb72-1"><a href="#cb72-1" aria-hidden="true" tabindex="-1"></a>df_table_0<span class="sc">$</span>title</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>ChunkedArray
 [
@@ -976,11 +1054,11 @@ $duration &lt;int32&gt;</code></pre>
 </div>
 <p>It’s the same underlying object, just with a new, flexible wrapper. The wrapper is what allows us to concatenate tables:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb67"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb67-1"><a href="#cb67-1" aria-hidden="true" tabindex="-1"></a>df <span class="ot">&lt;-</span> <span class="fu">concat_tables</span>(</span>
-<span id="cb67-2"><a href="#cb67-2" aria-hidden="true" tabindex="-1"></a>  df_table_0,</span>
-<span id="cb67-3"><a href="#cb67-3" aria-hidden="true" tabindex="-1"></a>  df_table_1</span>
-<span id="cb67-4"><a href="#cb67-4" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb67-5"><a href="#cb67-5" aria-hidden="true" tabindex="-1"></a>df</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb74"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb74-1"><a href="#cb74-1" aria-hidden="true" tabindex="-1"></a>df <span class="ot">&lt;-</span> <span class="fu">concat_tables</span>(</span>
+<span id="cb74-2"><a href="#cb74-2" aria-hidden="true" tabindex="-1"></a>  df_table_0,</span>
+<span id="cb74-3"><a href="#cb74-3" aria-hidden="true" tabindex="-1"></a>  df_table_1</span>
+<span id="cb74-4"><a href="#cb74-4" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb74-5"><a href="#cb74-5" aria-hidden="true" tabindex="-1"></a>df</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>Table
 14 rows x 3 columns
@@ -991,7 +1069,7 @@ $duration &lt;int32&gt;</code></pre>
 </div>
 <p>Looking at the columns we see that the chunking are preserved. That’s not arbitrary. It’s because those are the original arrays, still located at the same spot in memory and not contiguous:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb69"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb69-1"><a href="#cb69-1" aria-hidden="true" tabindex="-1"></a>df<span class="sc">$</span>title</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb76"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb76-1"><a href="#cb76-1" aria-hidden="true" tabindex="-1"></a>df<span class="sc">$</span>title</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>ChunkedArray
 [
@@ -1016,67 +1094,7 @@ $duration &lt;int32&gt;</code></pre>
 ]</code></pre>
 </div>
 </div>
-<p>An important thing to note about chunks is that they aren’t considered to be a part of the data structure for the purpose of testing equality. Here’s the same data with a different chunking:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb71"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb71-1"><a href="#cb71-1" aria-hidden="true" tabindex="-1"></a>title_rechunked <span class="ot">&lt;-</span> <span class="fu">chunked_array</span>(</span>
-<span id="cb71-2"><a href="#cb71-2" aria-hidden="true" tabindex="-1"></a>  df<span class="sc">$</span>title[<span class="dv">1</span><span class="sc">:</span><span class="dv">8</span>],</span>
-<span id="cb71-3"><a href="#cb71-3" aria-hidden="true" tabindex="-1"></a>  df<span class="sc">$</span>title[<span class="dv">9</span><span class="sc">:</span><span class="dv">12</span>],</span>
-<span id="cb71-4"><a href="#cb71-4" aria-hidden="true" tabindex="-1"></a>  df<span class="sc">$</span>title[<span class="dv">13</span><span class="sc">:</span><span class="dv">14</span>]</span>
-<span id="cb71-5"><a href="#cb71-5" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb71-6"><a href="#cb71-6" aria-hidden="true" tabindex="-1"></a>title_rechunked</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>ChunkedArray
-[
-  [
-    "King",
-    "Free",
-    "Choreomania",
-    "Back in Town"
-  ],
-  [
-    "Girls Against God",
-    "Dream Girl Evil",
-    "Prayer Factory",
-    "Cassandra"
-  ],
-  [
-    "Heaven Is Here",
-    "Daffodil",
-    "My Love",
-    "Restraint"
-  ],
-  [
-    "The Bomb",
-    "Morning Elvis"
-  ]
-]</code></pre>
-</div>
-</div>
-<p>Although these two chunked arrays partition the data in different ways, the values stored in each slot are the same. When I test for equality, the scalar values in each slot are compared to one another without regard for which chunk they are assigned to. Since all those values are the same, every comparison returns <code>true</code>:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb73"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb73-1"><a href="#cb73-1" aria-hidden="true" tabindex="-1"></a>title_rechunked <span class="sc">==</span> df<span class="sc">$</span>title</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>ChunkedArray
-[
-  [
-    true,
-    true,
-    true,
-    true,
-    true,
-    true,
-    true,
-    true,
-    true,
-    true,
-    true,
-    true,
-    true,
-    true
-  ]
-]</code></pre>
-</div>
-</div>
+<p><br></p>
 <div class="cell page-columns page-full">
 <div class="cell-output-display column-screen">
 <div id="fig-anonymous-5" class="quarto-figure quarto-figure-center anchored">
@@ -1102,8 +1120,8 @@ Buy you never close the door<br>
 <p>Up to this point I’ve talked about tabular data sets that are contained entirely in memory. When such data are written to disk, they are typically written to a single file. For larger-than-memory data sets, a different strategy is needed. Only a subset of the data can be stored in memory at any point in time, and as a consequence it becomes convenient to write the data to disk by partitioning it into many smaller files. This functionality is supported in Arrow via Datasets.</p>
 <p>I’ll give a simple example here, using a small data set. Let’s suppose I’ve downloaded the entire Florence + The Machine discography using the <strong>spotifyr</strong> package:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb75"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb75-1"><a href="#cb75-1" aria-hidden="true" tabindex="-1"></a>florence <span class="ot">&lt;-</span> <span class="fu">get_discography</span>(<span class="st">"florence + the machine"</span>)</span>
-<span id="cb75-2"><a href="#cb75-2" aria-hidden="true" tabindex="-1"></a>florence</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb78"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb78-1"><a href="#cb78-1" aria-hidden="true" tabindex="-1"></a>florence <span class="ot">&lt;-</span> <span class="fu">get_discography</span>(<span class="st">"florence + the machine"</span>)</span>
+<span id="cb78-2"><a href="#cb78-2" aria-hidden="true" tabindex="-1"></a>florence</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <div class="cell">
 <div class="cell-output cell-output-stdout">
@@ -1133,18 +1151,18 @@ Buy you never close the door<br>
 <p>The <code>florence</code> data frame is of course quite small, and I have no real need to use Arrow Datasets: it’s small enough that I can store it natively in R as a tibble! But it will suffice to illustrate concepts that come in handy when working with large datasets.</p>
 <p>Let’s suppose I want to partition this in into many data files, using the album release year as the basis for the partitioning. To do this I’ll use the <code>write_dataset()</code> function, specifying <code>partitioning = "album_release_year"</code> to ensure that files are created after splitting the data set by release year. By default, the <code>write_dataset()</code> function writes individual data files in the parquet format, which is in general a very good default choice for large tabular data sets. However, because I have not talked about <a href="https://parquet.apache.org/">Apache Parquet</a> in this post, I’ll make a different choice and write the data files in the feather format that we’ve seen earlier in this post. I can do that by setting <code>format = "feather"</code>. Finally, I’ll set <code>path = "spotify_florence"</code> to ensure that all the files are stored in a folder by that name. That gives this command:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb77"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb77-1"><a href="#cb77-1" aria-hidden="true" tabindex="-1"></a>florence <span class="sc">|&gt;</span> </span>
-<span id="cb77-2"><a href="#cb77-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(<span class="fu">where</span>(<span class="sc">~!</span><span class="fu">is.list</span>(.))) <span class="sc">|&gt;</span>  <span class="co"># drop list columns</span></span>
-<span id="cb77-3"><a href="#cb77-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">as_arrow_table</span>() <span class="sc">|&gt;</span>             <span class="co"># convert to an arrow table</span></span>
-<span id="cb77-4"><a href="#cb77-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">write_dataset</span>(                  <span class="co"># write to multi-file storage</span></span>
-<span id="cb77-5"><a href="#cb77-5" aria-hidden="true" tabindex="-1"></a>    <span class="at">path =</span> <span class="st">"spotify_florence"</span>,</span>
-<span id="cb77-6"><a href="#cb77-6" aria-hidden="true" tabindex="-1"></a>    <span class="at">format =</span> <span class="st">"feather"</span>,</span>
-<span id="cb77-7"><a href="#cb77-7" aria-hidden="true" tabindex="-1"></a>    <span class="at">partitioning =</span> <span class="st">"album_release_year"</span></span>
-<span id="cb77-8"><a href="#cb77-8" aria-hidden="true" tabindex="-1"></a>  )</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb80"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb80-1"><a href="#cb80-1" aria-hidden="true" tabindex="-1"></a>florence <span class="sc">|&gt;</span> </span>
+<span id="cb80-2"><a href="#cb80-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(<span class="fu">where</span>(<span class="sc">~!</span><span class="fu">is.list</span>(.))) <span class="sc">|&gt;</span>  <span class="co"># drop list columns</span></span>
+<span id="cb80-3"><a href="#cb80-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">as_arrow_table</span>() <span class="sc">|&gt;</span>             <span class="co"># convert to an arrow table</span></span>
+<span id="cb80-4"><a href="#cb80-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">write_dataset</span>(                  <span class="co"># write to multi-file storage</span></span>
+<span id="cb80-5"><a href="#cb80-5" aria-hidden="true" tabindex="-1"></a>    <span class="at">path =</span> <span class="st">"spotify_florence"</span>,</span>
+<span id="cb80-6"><a href="#cb80-6" aria-hidden="true" tabindex="-1"></a>    <span class="at">format =</span> <span class="st">"feather"</span>,</span>
+<span id="cb80-7"><a href="#cb80-7" aria-hidden="true" tabindex="-1"></a>    <span class="at">partitioning =</span> <span class="st">"album_release_year"</span></span>
+<span id="cb80-8"><a href="#cb80-8" aria-hidden="true" tabindex="-1"></a>  )</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <p>The result is that the following files are written to disk:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb78"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb78-1"><a href="#cb78-1" aria-hidden="true" tabindex="-1"></a><span class="fu">list.files</span>(<span class="st">"spotify_florence"</span>, <span class="at">recursive =</span> <span class="cn">TRUE</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb81"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb81-1"><a href="#cb81-1" aria-hidden="true" tabindex="-1"></a><span class="fu">list.files</span>(<span class="st">"spotify_florence"</span>, <span class="at">recursive =</span> <span class="cn">TRUE</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>[1] "album_release_year=2009/part-0.feather"
 [2] "album_release_year=2010/part-0.feather"
@@ -1161,8 +1179,8 @@ Buy you never close the door<br>
 <p>In any case, the key thing is that I’ve now written the data to disk in a fashion that splits it across multiple files. For the Florence + The Machine discography data this is is really not needed because the entire <code>spotify_florence</code> folder occupies a mere 320kB on my hard drive. However, elsewhere on my laptop I have a copy of the infamous New York City Taxi data set, and that one occupies a rather more awkward 69GB of storage. For that one, it really does matter that I have it written to disk in a sensible format!</p>
 <p>Having a data set stored in a distributed multi-file format is nice, but it’s only useful if I can open it and work with it as if it were the same as a regular tabular data set. The <code>open_dataset()</code> function allows me to do exactly this. Here’s what happens when I open the file:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb81"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb81-1"><a href="#cb81-1" aria-hidden="true" tabindex="-1"></a>florence_dataset <span class="ot">&lt;-</span> <span class="fu">open_dataset</span>(<span class="st">"spotify_florence"</span>, <span class="at">format =</span> <span class="st">"feather"</span>)</span>
-<span id="cb81-2"><a href="#cb81-2" aria-hidden="true" tabindex="-1"></a>florence_dataset</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb84"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb84-1"><a href="#cb84-1" aria-hidden="true" tabindex="-1"></a>florence_dataset <span class="ot">&lt;-</span> <span class="fu">open_dataset</span>(<span class="st">"spotify_florence"</span>, <span class="at">format =</span> <span class="st">"feather"</span>)</span>
+<span id="cb84-2"><a href="#cb84-2" aria-hidden="true" tabindex="-1"></a>florence_dataset</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>FileSystemDataset with 7 Feather files
 artist_name: string
@@ -1208,14 +1226,14 @@ See $metadata for additional Schema metadata</code></pre>
 </div>
 <p>Okay yes, the output makes clear that I have loaded <em>something</em> and it has registered the existence of the 7 constituent files that comprise the dataset as a whole. But can I work with it? One of the big selling points to the <strong>arrow</strong> package is that it supplies a <strong>dplyr</strong> backend that lets me work with <code>Tables</code> as if they were R data frames, using familiar syntax. Can I do the same thing with <code>Datasets</code>?</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb83"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb83-1"><a href="#cb83-1" aria-hidden="true" tabindex="-1"></a>danceability <span class="ot">&lt;-</span> florence_dataset <span class="sc">|&gt;</span> </span>
-<span id="cb83-2"><a href="#cb83-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(album_name, track_name, danceability) <span class="sc">|&gt;</span></span>
-<span id="cb83-3"><a href="#cb83-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">distinct</span>() <span class="sc">|&gt;</span></span>
-<span id="cb83-4"><a href="#cb83-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">arrange</span>(<span class="fu">desc</span>(danceability)) <span class="sc">|&gt;</span> </span>
-<span id="cb83-5"><a href="#cb83-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">head</span>(<span class="at">n =</span> <span class="dv">10</span>) <span class="sc">|&gt;</span> </span>
-<span id="cb83-6"><a href="#cb83-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">compute</span>()</span>
-<span id="cb83-7"><a href="#cb83-7" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb83-8"><a href="#cb83-8" aria-hidden="true" tabindex="-1"></a>danceability</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb86"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb86-1"><a href="#cb86-1" aria-hidden="true" tabindex="-1"></a>danceability <span class="ot">&lt;-</span> florence_dataset <span class="sc">|&gt;</span> </span>
+<span id="cb86-2"><a href="#cb86-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(album_name, track_name, danceability) <span class="sc">|&gt;</span></span>
+<span id="cb86-3"><a href="#cb86-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">distinct</span>() <span class="sc">|&gt;</span></span>
+<span id="cb86-4"><a href="#cb86-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">arrange</span>(<span class="fu">desc</span>(danceability)) <span class="sc">|&gt;</span> </span>
+<span id="cb86-5"><a href="#cb86-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">head</span>(<span class="at">n =</span> <span class="dv">10</span>) <span class="sc">|&gt;</span> </span>
+<span id="cb86-6"><a href="#cb86-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">compute</span>()</span>
+<span id="cb86-7"><a href="#cb86-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb86-8"><a href="#cb86-8" aria-hidden="true" tabindex="-1"></a>danceability</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>Table
 10 rows x 3 columns
@@ -1228,7 +1246,7 @@ See $metadata for additional Schema metadata</code></pre>
 </div>
 <p>Yes. Yes I can. Because I called <code>compute()</code> at the end of this pipeline rather than <code>collect()</code>, the results have been returned to me as a <code>Table</code> rather than a data frame. I did that so that I can show that the <code>danceability</code> output is no different to the <code>Table</code> objects we’ve seen earlier, constructed from <code>ChunkedArray</code> objects:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb85"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb85-1"><a href="#cb85-1" aria-hidden="true" tabindex="-1"></a>danceability<span class="sc">$</span>track_name</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb88"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb88-1"><a href="#cb88-1" aria-hidden="true" tabindex="-1"></a>danceability<span class="sc">$</span>track_name</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>ChunkedArray
 [
@@ -1249,23 +1267,24 @@ See $metadata for additional Schema metadata</code></pre>
 </div>
 <p>If I want to I can convert this to a tibble, and discover that “Dance Fever” does indeed contain the most danceable F+TM tracks, at least according to Spotify:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb87"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb87-1"><a href="#cb87-1" aria-hidden="true" tabindex="-1"></a><span class="fu">as.data.frame</span>(danceability)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb90"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb90-1"><a href="#cb90-1" aria-hidden="true" tabindex="-1"></a><span class="fu">as.data.frame</span>(danceability)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code># A tibble: 10 × 3
-   album_name                   track_name                    danceability
-   &lt;chr&gt;                        &lt;chr&gt;                                &lt;dbl&gt;
- 1 Dance Fever                  Heaven Is Here                       0.852
- 2 Dance Fever                  King                                 0.731
- 3 Dance Fever (Deluxe)         King                                 0.73 
- 4 High As Hope                 Hunger                               0.729
- 5 Dance Fever (Deluxe)         My Love - Acoustic                   0.719
- 6 Lungs (Deluxe Version)       Ghosts - Demo                        0.681
- 7 Ceremonials                  What The Water Gave Me - Demo        0.68 
- 8 Ceremonials (Deluxe Edition) What The Water Gave Me - Demo        0.68 
- 9 High As Hope                 South London Forever                 0.679
-10 Ceremonials (Deluxe Edition) What The Water Gave Me - Demo        0.678</code></pre>
+   album_name                            track_name                 danceability
+   &lt;chr&gt;                                 &lt;chr&gt;                             &lt;dbl&gt;
+ 1 Dance Fever                           Heaven Is Here                    0.852
+ 2 Dance Fever                           King                              0.731
+ 3 Dance Fever (Deluxe)                  King                              0.73 
+ 4 High As Hope                          Hunger                            0.729
+ 5 Dance Fever (Deluxe)                  My Love - Acoustic                0.719
+ 6 Lungs (Deluxe Version)                Ghosts - Demo                     0.681
+ 7 Ceremonials (Deluxe Edition)          What The Water Gave Me - …        0.68 
+ 8 Ceremonials                           What The Water Gave Me - …        0.68 
+ 9 High As Hope                          South London Forever              0.679
+10 Ceremonials (Original Deluxe Version) What The Water Gave Me - …        0.678</code></pre>
 </div>
 </div>
+<p><br></p>
 <div class="cell page-columns page-full">
 <div class="cell-output-display column-screen">
 <div id="fig-anonymous-6" class="quarto-figure quarto-figure-center anchored">
@@ -1275,6 +1294,7 @@ See $metadata for additional Schema metadata</code></pre>
 </div>
 </div>
 </div>
+<p><br><br></p>
 <!--------------- appendices go here ----------------->
 <div class="cell">
 
@@ -1289,7 +1309,8 @@ See $metadata for additional Schema metadata</code></pre>
 <ol>
 <li id="fn1" role="doc-endnote"><p>In the near future, I hope that the documentation itself is going to tell this story – and yes, I realise that by calling attention to the issue I’ve effectively volunteered to fix it – but sometimes it’s easier to do the same job in an informal blog post where you have the luxury of going overboard with “authorial voice” and “narrative”, and all those other fancy things that writers love.<a href="#fnref1" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
 <li id="fn2" role="doc-endnote"><p>Quick explanation: As a general rule, if you want things to be efficient you want the beginnings and endings of your data structures to be <strong>naturally aligned</strong>, in the sense that the memory address is a multiple of the data block sizes. So on a 64-bit machine, you want the memory address for every data structure to start on a multiple of 64 bits. Apparently that makes lookup easier or something. Unfortunately, I’ve only specified 8 bits (i.e.&nbsp;1 byte) so if I wanted to ensure that the validity bitmap is naturally aligned I’m going to need to add another 7 bytes worth of padding in order to make it to the full 64 bits. This method of aligning data structures in memory is referred to as “8 byte alignment”. However, what Arrow does in this situation is <em>64 byte alignment</em>, so each data structure has to be 64 bytes long at a minimum. This design feature exists to allow efficient use of modern hardware, and if you want to know more, it’s discussed on the Arrow website.<a href="#fnref2" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
-<li id="fn3" role="doc-endnote"><p>If you’re familiar with Arrow data structures, it is in essence a struct with additional metadata<a href="#fnref3" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn3" role="doc-endnote"><p>I know, I know. Nothing is impossible. But you know what I mean.<a href="#fnref3" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn4" role="doc-endnote"><p>If you’re familiar with Arrow data structures, it is in essence a struct with additional metadata<a href="#fnref4" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
 </ol>
 </section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
   author = {Danielle Navarro},

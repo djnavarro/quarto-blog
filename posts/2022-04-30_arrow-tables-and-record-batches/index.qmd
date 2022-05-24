@@ -110,7 +110,7 @@ Let's start with scalars. A scalar object is simply a single value, that can be 
 
 Let's turn our attention to arrays next. I'll start by introducing some terminology from the page describing the [Arrow specification](https://arrow.apache.org/docs/format/Columnar.html):
 
-- An **array** in Arrow is analogous to a vector in R: it is a sequence of values with known length, all of which have the same type. Coming to Arrow from R, one thing I found a little difficult to wrap my head around is the concept of an array as an **immutable** object. Once an Arrow array has been initialised, it cannot be modified. 
+- An **array** in Arrow is analogous to a vector in R: it is a sequence of values with known length, all of which have the same type. Coming to Arrow from R, one thing I found a little difficult to wrap my head around is the concept of an array as an **immutable** object. Once an Arrow array has been initialised, it cannot be modified. I will talk more about this later, but it's important.
 - A related but different concept is that of a **buffer**, a sequential virtual address space with a given length. Any byte in the buffer can be reached via a single pointer offset less than the region’s length.
 - Finally, we have the concept of the **physical layout**, which describes how information is laid out in memory, without taking into account of how that information is interpreted. For example, a 32-bit signed integer array and 32-bit floating point array have the same layout because they have the same physical structure in memory. The meaning of the bits that make up a 32-bit float is different to the meaning of the bits that make up a 32-bit integer, but the physical layout is the same. 
 
@@ -198,7 +198,6 @@ Okay, so what should you take away from all this? Well, firstly, fear not -- if 
 ### Peeking inside arrays
 
 
-
 ```{r}
 dance_fever <- read_csv_arrow("dance_fever_tracks.csv")
 dance_fever
@@ -254,7 +253,6 @@ readBin(data_buffer, what = "integer", n = 14)
 
 ...we have reconstructed the values from the data buffer. 
 
-
 <br>
 
 ### A nicer way
@@ -277,13 +275,14 @@ dance_fever$title |>
 
 You wouldn't want to use my code in the wild though because it doesn't even try to be efficient or truncate the output in any way. I only wrote it so that I had a way of showing you the content of an Arrow array in R at a slightly lower level.
 
+<br>
+
 ```{r}
 #| echo: false
 #| column: screen
 #| fig-link: https://www.youtube.com/watch?v=5GHXEGz3PJg
 knitr::include_graphics("img/hunger.png")
 ```
-
 
 <br><br>
 
@@ -296,35 +295,88 @@ knitr::include_graphics("img/hunger.png")
 | I am king
 |   -- *King*, Florence + The Machine
 
+The next entry in the table of data objects refers to "chunked arrays". In most respects a chunked array behaves just like a regular array. It is a one-dimensional data structure. It is zero-indexed, so the first slot in a chunked array is slot 0 not slot 1. It requires every value stored to be of the same type: all integers, or all strings, or whatever. From the perspective of a _data scientist_ who just wants to analyse the data, an array and a chunked array are essentially identical. Under the hood, however, they are quite different -- and the reason for this is fundamentally a _data engineering_ issue. In this section I'll unpack this.
 
-Tricky thing is how to talk about chunked arrays without first talking about record batches, and the concept of sequentially arriving record batches. I think the way around this is to ask people to imagine multiple arrays arriving from different sources (with the promissory note that this will be explained later) and wanting to treat them as "just one thing" without shuffling anything around in memory or creating a new object (remind them arrays are immutable: R users will find that hard). Think about having a wrapper that points to the different arrays: each array is now a "chunk" in some new structure... etc.
+Recall at the beginning I emphasised that an array is an [immutable object](https://en.wikipedia.org/wiki/Immutable_object). Once an array has been created by Arrow, the values it stores cannot be altered. The decision to make arrays immutable reduces the need to create copies: many other objects can all safely refer to the array (via pointers) without making copies of the data, safe in the knowledge that it is impossible^[I know, I know. Nothing is impossible. But you know what I mean.] for anyone else to change the data values. For large data sets that's a huge advantage: you really don't want to be making copies of data if you can avoid doing so. Immutable arrays are good.
 
+Well, mostly good.
+
+There are some limitations to immutable arrays, and one of the big ones is prompted by the very simple question: what happens when a new batch of data arrives? An array is immutable, so you can't add the new information to an existing array. The only thing you can do if you don't want to disturb or copy your existing array is create a new array that contains the new data. Doing that preserves the immutability of arrays and doesn't lead to any unnecessary copying -- which keeps us happy(ish) from a data engineering perspective -- but now we have a new problem: the data are now split across two arrays. Each array contains only one "chunk" of the data. We need some way of "pretending" that these two arrays are in fact a single array-like object.
+
+This is the problem that chunked arrays solve. A chunked array is a wrapper around a list of arrays, and allows you to index their contents "as if" they were a single array. Physically, the data are still stored in separate places -- each array is one chunk, and these chunks don't have to be adjacent to each other in memory -- but the chunked array provides us will a layer of abstraction that allows us to pretend that they are all one thing. 
+
+<br>
+
+### List-like aspects
+
+Here's an example. I'll take some lyrics to *King* by Florence + The Machine, and use the `chunked_array()` function from **arrow** to store them as a chunked array that is comprised of three smaller arrays:
 
 
 ```{r}
 king <- chunked_array(
-  c("I", "am", "no", "mother"),
-  c("I", "am", NA, "bride"),
-  c("I", "am", "king")
+  c("I", "am", "no", "mother"), # chunk 0
+  c("I", "am", NA, "bride"),    # chunk 1
+  c("I", "am", "king")          # chunk 2
 )
+```
+
+An alternative way to do the same thing would be to use the `create()` method of the R6 object `ChunkedArray`. In fact, the `chunked_array()` function is just a slightly nicer wraper around the same functionality that `ChunkedArray$create()` provides. But that's a bit of a digression. Let's take a look at the object I just created:
+
+```{r}
 king
 ```
 
-A chunked array has some structure to it:
+The double bracketing in this output is intended to highlight the "list-like" nature of chunked arrays. There are three separate arrays that I have created here, wrapped in a handly little container object that is secretly a list of arrays, but allows that list to behave just like a regular one-dimensional data structure. Schematically, this is what I've just created:
 
 ```{r}
 #| echo: false
 knitr::include_graphics("img/chunked_array_layout.svg")
 ```
 
-
-We can check:
+As this figure illustrates, there really are three arrays here. I can pull them out individually by referring to their position in the array list by using the `chunk()` method that all chunked array objects possess. Here's the second chunk:
 
 ```{r}
-king$chunk(0) |> array_layout()
-king$chunk(1) |> array_layout()
+king$chunk(1)
 ```
 
+Notice from the output that this chunk is a vanilla `Array` object, and I can take a peek at the underlying metadata and buffers associated with that object by using the `array_layout()` function I wrote earlier. Here's what that chunk looks like:
+
+```{r}
+king$chunk(1) |> 
+  array_layout()
+```
+
+Hopefully by now this all looks quite familiar to you! The `Array` object here has length 4, contains 1 missing value (referred to as null values in Arrow), and because it is a string array, it contains three buffers: a validity bitmap, an offset buffer, and a data buffer. 
+
+
+<br>
+
+### Vector-like aspects
+
+In the previous section I highlighted the fact that internally a chunked array is "just" a list of arrays and showed you how you can interact with a chunked array in a "list-like" way. Most of the time though, when you're working with a chunked array as a data analyst you aren't really interested in its list-like properties, what you actually care about is the abstraction layer that provides it with vector-like properties. Specifically, what you actually care about is the fact that a chunked array is a one-dimensional object with a single indexing scheme. Let's go back to the `king` data to illustrate this. Suppose I want to extract a subset of the elements. Specifically I want to grab the 3rd through 6th elements. These slots actually belong to different arrays, and it would be a pain to extract the 3rd and 4th slots from the first array, and the 1st and 2nd slots from the second array. No data analyst wants that headache. Fortunately, I don't have to:
+
+```{r}
+king[3:6]
+```
+
+As an R user you are probably breathing a sigh of relief to see the return of one-based indexing! As a general rule, the **arrow** package tries to mimic R conventions whenever you are "just trying to do normal R things". If you're trying to manipulate and analyse data, the intention is that your regular **dplyr** functions should work the same way they always did, and the same goes for subsetting data. In R, the first element of a vector is element 1, not element 0, and that convention is preserved here. The only time you're going to see **arrow** adopt zero-based indexing is when you are interacting with Arrow at a low level. Because I've been talking a lot about those low level features in this post, I've had to use zero-based indexing a lot, but that's probably not going to be typical!
+
+Another thing to highlight about chunked arrays is that the "chunking" is not considered semantically meaningful. It is an internal implementation detail only: you should never treat the chunk as a meaningful unit! Writing the data to disk, for example, often results in the data being organised into different chunks. Two arrays that have the same values in different chunking arrangements are deemed equivalent. For example, here's the same four values as `king[3:6]` all grouped into a single chunk:
+
+```{r}
+no_mother <- chunked_array(c("no", "mother", "I", "am"))
+no_mother
+```
+
+When I test for equality using `==`, you can see that the results are shown element-wise. All four elements are the same, so the result is a (chunked) array of four `true` values:
+
+```{r}
+no_mother == king[3:6]
+```
+
+The intention, ultimately, is that users should be able to interact with chunked arrays as if they were ordinary one-dimensional data structures without ever having to think much about their list-like nature. They exist as an abstraction to help bridge the gap between the needs of the data engineer and the needs of the data scientist. So except in those special cases where you have to think carefully about the engineering aspect, a data analyst should be able to treat them just like regular vectors! 
+
+<br>
 
 ```{r}
 #| echo: false
@@ -332,7 +384,6 @@ king$chunk(1) |> array_layout()
 #| fig-link: https://www.youtube.com/watch?v=L62LtChAwww
 knitr::include_graphics("img/king.png")
 ```
-
 
 <br><br>
 
@@ -411,6 +462,8 @@ The same works for feather:
 write_feather(df_batch_1, "df_ipc_1.feather")
 read_feather("df_ipc_1.feather")
 ```
+
+<br>
 
 ```{r}
 #| echo: false
@@ -493,23 +546,7 @@ Looking at the columns we see that the chunking are preserved. That's not arbitr
 df$title
 ```
 
-An important thing to note about chunks is that they aren't considered to be a part of the data structure for the purpose of testing equality. Here's the same data with a different chunking:
-
-```{r}
-title_rechunked <- chunked_array(
-  df$title[1:8],
-  df$title[9:12],
-  df$title[13:14]
-)
-title_rechunked
-```
-
-Although these two chunked arrays partition the data in different ways, the values stored in each slot are the same. When I test for equality, the scalar values in each slot are compared to one another without regard for which chunk they are assigned to. Since all those values are the same, every comparison returns `true`:
-
-```{r}
-title_rechunked == df$title
-```
-
+<br>
 
 ```{r}
 #| echo: false
@@ -517,7 +554,6 @@ title_rechunked == df$title
 #| fig-link: https://www.youtube.com/watch?v=h9CNGPy11Jc
 knitr::include_graphics("img/my_love.png")
 ```
-
 
 <br><br>
 
@@ -612,12 +648,16 @@ If I want to I can convert this to a tibble, and discover that "Dance Fever" doe
 as.data.frame(danceability)
 ```
 
+<br>
+
 ```{r}
 #| echo: false
 #| column: screen
 #| fig-link: https://www.youtube.com/watch?v=_kIrRooQwuk
 knitr::include_graphics("img/big_god.png")
 ```
+
+<br><br>
 
 
 <!--------------- appendices go here ----------------->
