@@ -2,12 +2,13 @@
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
 
 <meta charset="utf-8">
-<meta name="generator" content="quarto-0.9.282">
+<meta name="generator" content="quarto-1.0.38">
 
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
 <meta name="author" content="Danielle Navarro">
 <meta name="dcterms.date" content="2021-11-15">
+<meta name="description" content="A terrifying descent into madness, or, an explanation of how R serialises an in-memory data structure to summon a sequence of bytes that can be saved or transmitted. Eldritch horrors are unleashed by reading occult texts such as the R internals manual, SEXPTYPE codes are extracted from RDS with bitwise logic, and in the dark conclusion the R source code is consulted">
 
 <title>Notes from a data witch - Data serialisation in R</title>
 <style>
@@ -82,22 +83,23 @@ code span.vs { color: #4070a0; } /* VerbatimString */
 code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
 </style>
 
+
 <script src="../../site_libs/quarto-nav/quarto-nav.js"></script>
 <script src="../../site_libs/quarto-nav/headroom.min.js"></script>
 <script src="../../site_libs/clipboard/clipboard.min.js"></script>
-<meta name="quarto:offset" content="../../">
 <script src="../../site_libs/quarto-search/autocomplete.umd.js"></script>
 <script src="../../site_libs/quarto-search/fuse.min.js"></script>
 <script src="../../site_libs/quarto-search/quarto-search.js"></script>
+<meta name="quarto:offset" content="../../">
 <script src="../../site_libs/quarto-html/quarto.js"></script>
 <script src="../../site_libs/quarto-html/popper.min.js"></script>
 <script src="../../site_libs/quarto-html/tippy.umd.min.js"></script>
 <script src="../../site_libs/quarto-html/anchor.min.js"></script>
 <link href="../../site_libs/quarto-html/tippy.css" rel="stylesheet">
-<link id="quarto-text-highlighting-styles" href="../../site_libs/quarto-html/quarto-syntax-highlighting.css" rel="stylesheet">
+<link href="../../site_libs/quarto-html/quarto-syntax-highlighting.css" rel="stylesheet" id="quarto-text-highlighting-styles">
 <script src="../../site_libs/bootstrap/bootstrap.min.js"></script>
 <link href="../../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="../../site_libs/bootstrap/bootstrap.min.css" rel="stylesheet">
+<link href="../../site_libs/bootstrap/bootstrap.min.css" rel="stylesheet" id="quarto-bootstrap" data-mode="light">
 <script id="quarto-search-options" type="application/json">{
   "location": "navbar",
   "copy-button": false,
@@ -121,9 +123,11 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
 
 <link rel="stylesheet" href="../../styles.css">
 <meta property="og:title" content="Notes from a data witch - Data serialisation in R">
+<meta property="og:description" content="A terrifying descent into madness, or, an explanation of how R serialises an in-memory data structure to summon a sequence of bytes that can be saved or transmitted. Eldritch horrors are unleashed by reading occult texts such as the R internals manual, SEXPTYPE codes are extracted from RDS with bitwise logic, and in the dark conclusion the R source code is consulted">
 <meta property="og:image" content="https://blog.djnavarro.net/posts/2021-11-15_serialisation-with-rds/preview-image.jpg">
 <meta property="og:site-name" content="Notes from a data witch">
 <meta name="twitter:title" content="Notes from a data witch - Data serialisation in R">
+<meta name="twitter:description" content="A terrifying descent into madness, or, an explanation of how R serialises an in-memory data structure to summon a sequence of bytes that can be saved or transmitted. Eldritch horrors are unleashed by reading occult texts such as the R internals manual, SEXPTYPE codes are extracted from RDS with bitwise logic, and in the dark conclusion the R source code is consulted">
 <meta name="twitter:image" content="https://blog.djnavarro.net/posts/2021-11-15_serialisation-with-rds/preview-image.jpg">
 <meta name="twitter:creator" content="@djnavarro">
 <meta name="twitter:card" content="summary_large_image">
@@ -177,28 +181,32 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
   <div class="quarto-title-banner page-columns page-full">
     <div class="quarto-title column-body">
       <h1 class="title">Data serialisation in R</h1>
-            <p class="subtitle lead"></p><p>A terrifying descent into madness, or, an explanation of how R serialises an in-memory data structure to summon a sequence of bytes that can be saved or transmitted. Eldritch horrors are unleashed by reading occult texts such as the R internals manual, SEXPTYPE codes are extracted from RDS with bitwise logic, and in the dark conclusion the R source code is consulted</p><p></p>
+                  <div>
+        <div class="description">
+          <p>A terrifying descent into madness, or, an explanation of how R serialises an in-memory data structure to summon a sequence of bytes that can be saved or transmitted. Eldritch horrors are unleashed by reading occult texts such as the R internals manual, SEXPTYPE codes are extracted from RDS with bitwise logic, and in the dark conclusion the R source code is consulted</p>
+        </div>
+      </div>
                           <div class="quarto-categories">
                 <div class="quarto-category">Serialisation</div>
               </div>
                   </div>
   </div>
     
-  
   <div class="quarto-title-meta-author">
     <div class="quarto-title-meta-heading">Author</div>
     <div class="quarto-title-meta-heading">Affiliation</div>
     
-      <div class="quarto-title-meta-contents">Danielle Navarro <a href="https://orcid.org/0000-0001-7648-6578" class="quarto-title-author-orcid"> <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAA2ZpVFh0WE1MOmNvbS5hZG9iZS54bXAAAAAAADw/eHBhY2tldCBiZWdpbj0i77u/IiBpZD0iVzVNME1wQ2VoaUh6cmVTek5UY3prYzlkIj8+IDx4OnhtcG1ldGEgeG1sbnM6eD0iYWRvYmU6bnM6bWV0YS8iIHg6eG1wdGs9IkFkb2JlIFhNUCBDb3JlIDUuMC1jMDYwIDYxLjEzNDc3NywgMjAxMC8wMi8xMi0xNzozMjowMCAgICAgICAgIj4gPHJkZjpSREYgeG1sbnM6cmRmPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5LzAyLzIyLXJkZi1zeW50YXgtbnMjIj4gPHJkZjpEZXNjcmlwdGlvbiByZGY6YWJvdXQ9IiIgeG1sbnM6eG1wTU09Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC9tbS8iIHhtbG5zOnN0UmVmPSJodHRwOi8vbnMuYWRvYmUuY29tL3hhcC8xLjAvc1R5cGUvUmVzb3VyY2VSZWYjIiB4bWxuczp4bXA9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC8iIHhtcE1NOk9yaWdpbmFsRG9jdW1lbnRJRD0ieG1wLmRpZDo1N0NEMjA4MDI1MjA2ODExOTk0QzkzNTEzRjZEQTg1NyIgeG1wTU06RG9jdW1lbnRJRD0ieG1wLmRpZDozM0NDOEJGNEZGNTcxMUUxODdBOEVCODg2RjdCQ0QwOSIgeG1wTU06SW5zdGFuY2VJRD0ieG1wLmlpZDozM0NDOEJGM0ZGNTcxMUUxODdBOEVCODg2RjdCQ0QwOSIgeG1wOkNyZWF0b3JUb29sPSJBZG9iZSBQaG90b3Nob3AgQ1M1IE1hY2ludG9zaCI+IDx4bXBNTTpEZXJpdmVkRnJvbSBzdFJlZjppbnN0YW5jZUlEPSJ4bXAuaWlkOkZDN0YxMTc0MDcyMDY4MTE5NUZFRDc5MUM2MUUwNEREIiBzdFJlZjpkb2N1bWVudElEPSJ4bXAuZGlkOjU3Q0QyMDgwMjUyMDY4MTE5OTRDOTM1MTNGNkRBODU3Ii8+IDwvcmRmOkRlc2NyaXB0aW9uPiA8L3JkZjpSREY+IDwveDp4bXBtZXRhPiA8P3hwYWNrZXQgZW5kPSJyIj8+84NovQAAAR1JREFUeNpiZEADy85ZJgCpeCB2QJM6AMQLo4yOL0AWZETSqACk1gOxAQN+cAGIA4EGPQBxmJA0nwdpjjQ8xqArmczw5tMHXAaALDgP1QMxAGqzAAPxQACqh4ER6uf5MBlkm0X4EGayMfMw/Pr7Bd2gRBZogMFBrv01hisv5jLsv9nLAPIOMnjy8RDDyYctyAbFM2EJbRQw+aAWw/LzVgx7b+cwCHKqMhjJFCBLOzAR6+lXX84xnHjYyqAo5IUizkRCwIENQQckGSDGY4TVgAPEaraQr2a4/24bSuoExcJCfAEJihXkWDj3ZAKy9EJGaEo8T0QSxkjSwORsCAuDQCD+QILmD1A9kECEZgxDaEZhICIzGcIyEyOl2RkgwAAhkmC+eAm0TAAAAABJRU5ErkJggg=="></a></div>
-
+      <div class="quarto-title-meta-contents">
+      <a href="https://djnavarro.net">Danielle Navarro</a> <a href="https://orcid.org/0000-0001-7648-6578" class="quarto-title-author-orcid"> <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAA2ZpVFh0WE1MOmNvbS5hZG9iZS54bXAAAAAAADw/eHBhY2tldCBiZWdpbj0i77u/IiBpZD0iVzVNME1wQ2VoaUh6cmVTek5UY3prYzlkIj8+IDx4OnhtcG1ldGEgeG1sbnM6eD0iYWRvYmU6bnM6bWV0YS8iIHg6eG1wdGs9IkFkb2JlIFhNUCBDb3JlIDUuMC1jMDYwIDYxLjEzNDc3NywgMjAxMC8wMi8xMi0xNzozMjowMCAgICAgICAgIj4gPHJkZjpSREYgeG1sbnM6cmRmPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5LzAyLzIyLXJkZi1zeW50YXgtbnMjIj4gPHJkZjpEZXNjcmlwdGlvbiByZGY6YWJvdXQ9IiIgeG1sbnM6eG1wTU09Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC9tbS8iIHhtbG5zOnN0UmVmPSJodHRwOi8vbnMuYWRvYmUuY29tL3hhcC8xLjAvc1R5cGUvUmVzb3VyY2VSZWYjIiB4bWxuczp4bXA9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC8iIHhtcE1NOk9yaWdpbmFsRG9jdW1lbnRJRD0ieG1wLmRpZDo1N0NEMjA4MDI1MjA2ODExOTk0QzkzNTEzRjZEQTg1NyIgeG1wTU06RG9jdW1lbnRJRD0ieG1wLmRpZDozM0NDOEJGNEZGNTcxMUUxODdBOEVCODg2RjdCQ0QwOSIgeG1wTU06SW5zdGFuY2VJRD0ieG1wLmlpZDozM0NDOEJGM0ZGNTcxMUUxODdBOEVCODg2RjdCQ0QwOSIgeG1wOkNyZWF0b3JUb29sPSJBZG9iZSBQaG90b3Nob3AgQ1M1IE1hY2ludG9zaCI+IDx4bXBNTTpEZXJpdmVkRnJvbSBzdFJlZjppbnN0YW5jZUlEPSJ4bXAuaWlkOkZDN0YxMTc0MDcyMDY4MTE5NUZFRDc5MUM2MUUwNEREIiBzdFJlZjpkb2N1bWVudElEPSJ4bXAuZGlkOjU3Q0QyMDgwMjUyMDY4MTE5OTRDOTM1MTNGNkRBODU3Ii8+IDwvcmRmOkRlc2NyaXB0aW9uPiA8L3JkZjpSREY+IDwveDp4bXBtZXRhPiA8P3hwYWNrZXQgZW5kPSJyIj8+84NovQAAAR1JREFUeNpiZEADy85ZJgCpeCB2QJM6AMQLo4yOL0AWZETSqACk1gOxAQN+cAGIA4EGPQBxmJA0nwdpjjQ8xqArmczw5tMHXAaALDgP1QMxAGqzAAPxQACqh4ER6uf5MBlkm0X4EGayMfMw/Pr7Bd2gRBZogMFBrv01hisv5jLsv9nLAPIOMnjy8RDDyYctyAbFM2EJbRQw+aAWw/LzVgx7b+cwCHKqMhjJFCBLOzAR6+lXX84xnHjYyqAo5IUizkRCwIENQQckGSDGY4TVgAPEaraQr2a4/24bSuoExcJCfAEJihXkWDj3ZAKy9EJGaEo8T0QSxkjSwORsCAuDQCD+QILmD1A9kECEZgxDaEZhICIzGcIyEyOl2RkgwAAhkmC+eAm0TAAAAABJRU5ErkJggg=="></a>
+    </div>
       <div class="quarto-title-meta-contents">
           <p class="affiliation">
+              <a href="https://voltrondata.com">
               Voltron Data
+              </a>
             </p>
         </div>
       </div>
-
-
 
   <div class="quarto-title-meta">
 
@@ -206,7 +214,7 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
       <div>
       <div class="quarto-title-meta-heading">Published</div>
       <div class="quarto-title-meta-contents">
-        <p class="date">2021-11-15</p>
+        <p class="date">November 15, 2021</p>
       </div>
     </div>
       
@@ -271,7 +279,7 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
 <p><img src="img/andrey-zvyagintsev-G5nl9_YEXuc-unsplash.jpg" class="img-fluid figure-img" width="960"></p>
-<p></p><figcaption aria-hidden="true" class="figure-caption">Image by Andrey Zvyagintsev. Available by CC0 licence on <a href="https://unsplash.com/photos/G5nl9_YEXuc">unsplash</a>.</figcaption><p></p>
+<p></p><figcaption class="figure-caption">Image by Andrey Zvyagintsev. Available by CC0 licence on <a href="https://unsplash.com/photos/G5nl9_YEXuc">unsplash</a>.</figcaption><p></p>
 </figure>
 </div>
 </div>
@@ -382,7 +390,7 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
 <p><img src="img/daniel-jensen-NMk1Vggt2hg-unsplash.jpg" class="img-fluid figure-img" width="960"></p>
-<p></p><figcaption aria-hidden="true" class="figure-caption">Image by Daniel Jensen. Available by CC0 licence on <a href="https://unsplash.com/photos/NMk1Vggt2hg">unsplash</a>.</figcaption><p></p>
+<p></p><figcaption class="figure-caption">Image by Daniel Jensen. Available by CC0 licence on <a href="https://unsplash.com/photos/NMk1Vggt2hg">unsplash</a>.</figcaption><p></p>
 </figure>
 </div>
 </div>
@@ -431,7 +439,7 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
 <div class="cell">
 <div class="sourceCode cell-code" id="cb19"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a>bytes[<span class="dv">1</span><span class="sc">:</span><span class="dv">100</span>]</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
-<pre><code>  [1] 58 0a 00 00 00 03 00 04 01 03 00 03 05 00 00 00 00 05 55 54 46 2d 38 00 00
+<pre><code>  [1] 58 0a 00 00 00 03 00 04 02 01 00 03 05 00 00 00 00 05 55 54 46 2d 38 00 00
  [26] 03 13 00 00 00 06 00 00 00 0d 00 00 00 0a 00 00 03 e8 00 00 03 e8 00 00 07
  [51] d0 00 00 07 d0 00 00 0f a0 00 00 0f a0 00 00 01 f4 00 00 01 f4 00 00 1f 40
  [76] 00 00 1f 40 00 00 00 10 00 00 00 0a 00 04 00 09 00 00 00 0b 77 61 74 65 72</code></pre>
@@ -449,7 +457,7 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
 <div class="cell">
 <div class="sourceCode cell-code" id="cb22"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a><span class="fu">read_bytes</span>(<span class="st">"art_nozip.rds"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
-<pre><code>  [1] 58 0a 00 00 00 03 00 04 01 03 00 03 05 00 00 00 00 05 55 54 46 2d 38 00 00
+<pre><code>  [1] 58 0a 00 00 00 03 00 04 02 01 00 03 05 00 00 00 00 05 55 54 46 2d 38 00 00
  [26] 03 13 00 00 00 06 00 00 00 0d 00 00 00 0a 00 00 03 e8 00 00 03 e8 00 00 07
  [51] d0 00 00 07 d0 00 00 0f a0 00 00 0f a0 00 00 01 f4 00 00 01 f4 00 00 1f 40
  [76] 00 00 1f 40 00 00 00 10 00 00 00 0a 00 04 00 09 00 00 00 0b 77 61 74 65 72</code></pre>
@@ -488,7 +496,7 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
 <p><img src="img/chelms-varthoumlien-j-zQJk6aaaA-unsplash.jpg" class="img-fluid figure-img" width="960"></p>
-<p></p><figcaption aria-hidden="true" class="figure-caption">Image by Chelms Varthoumlien. Available by CC0 licence on <a href="https://unsplash.com/photos/j-zQJk6aaaA">unsplash</a>.</figcaption><p></p>
+<p></p><figcaption class="figure-caption">Image by Chelms Varthoumlien. Available by CC0 licence on <a href="https://unsplash.com/photos/j-zQJk6aaaA">unsplash</a>.</figcaption><p></p>
 </figure>
 </div>
 </div>
@@ -513,7 +521,7 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
 <div class="cell">
 <div class="sourceCode cell-code" id="cb27"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb27-1"><a href="#cb27-1" aria-hidden="true" tabindex="-1"></a>bytes</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
-<pre><code> [1] 41 0a 33 0a 32 36 32 34 30 33 0a 31 39 37 38 38 38 0a 35 0a 55 54 46 2d 38
+<pre><code> [1] 41 0a 33 0a 32 36 32 36 35 37 0a 31 39 37 38 38 38 0a 35 0a 55 54 46 2d 38
 [26] 0a 31 34 0a 33 0a 31 30 2e 31 0a 32 2e 32 0a 39 34 2e 33 0a</code></pre>
 </div>
 </div>
@@ -521,7 +529,7 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
 <div class="cell">
 <div class="sourceCode cell-code" id="cb29"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb29-1"><a href="#cb29-1" aria-hidden="true" tabindex="-1"></a><span class="fu">rawToChar</span>(bytes)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
-<pre><code>[1] "A\n3\n262403\n197888\n5\nUTF-8\n14\n3\n10.1\n2.2\n94.3\n"</code></pre>
+<pre><code>[1] "A\n3\n262657\n197888\n5\nUTF-8\n14\n3\n10.1\n2.2\n94.3\n"</code></pre>
 </div>
 </div>
 <p>It is a little easier to read if I use <code>cat()</code> to print the output:</p>
@@ -532,7 +540,7 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
 <div class="cell-output cell-output-stdout">
 <pre><code>A
 3
-262403
+262657
 197888
 5
 UTF-8
@@ -562,7 +570,7 @@ UTF-8
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
 <p><img src="img/daria-shevtsova-7mbvu0biZgg-unsplash.jpg" class="img-fluid figure-img" width="960"></p>
-<p></p><figcaption aria-hidden="true" class="figure-caption">Image by Daria Shevtsova. Available by CC0 licence on <a href="https://unsplash.com/photos/7mbvu0biZgg">unsplash</a>.</figcaption><p></p>
+<p></p><figcaption class="figure-caption">Image by Daria Shevtsova. Available by CC0 licence on <a href="https://unsplash.com/photos/7mbvu0biZgg">unsplash</a>.</figcaption><p></p>
 </figure>
 </div>
 </div>
@@ -588,7 +596,7 @@ UTF-8
 <div class="cell-output cell-output-stdout">
 <pre><code>A
 3
-262403
+262657
 197888
 5
 UTF-8
@@ -606,7 +614,7 @@ UTF-8
 <div class="cell-output cell-output-stdout">
 <pre><code>A
 3
-262403
+262657
 197888
 5
 UTF-8
@@ -687,7 +695,7 @@ UTF-8
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
 <p><img src="img/roxy-aln--d3_Ez5pKss-unsplash.jpg" class="img-fluid figure-img" width="960"></p>
-<p></p><figcaption aria-hidden="true" class="figure-caption">Image by Roxy Aln Available by CC0 licence on <a href="https://unsplash.com/photos/-d3_Ez5pKss">unsplash</a>.</figcaption><p></p>
+<p></p><figcaption class="figure-caption">Image by Roxy Aln Available by CC0 licence on <a href="https://unsplash.com/photos/-d3_Ez5pKss">unsplash</a>.</figcaption><p></p>
 </figure>
 </div>
 </div>
@@ -740,7 +748,7 @@ UTF-8  # the file encodes UTF-8 characters not Latin-1</code></pre>
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
 <p><img src="img/liza-polyanskaya-PrXN8-YG5WI-unsplash.jpg" class="img-fluid figure-img" width="960"></p>
-<p></p><figcaption aria-hidden="true" class="figure-caption">Image by Liza Polyanskaya. Available by CC0 licence on <a href="https://unsplash.com/photos/PrXN8-YG5WI">unsplash</a>.</figcaption><p></p>
+<p></p><figcaption class="figure-caption">Image by Liza Polyanskaya. Available by CC0 licence on <a href="https://unsplash.com/photos/PrXN8-YG5WI">unsplash</a>.</figcaption><p></p>
 </figure>
 </div>
 </div>
@@ -806,7 +814,7 @@ NA</code></pre>
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
 <p><img src="img/hoshino-ai-sybO0dQ8hTw-unsplash.jpg" class="img-fluid figure-img" width="960"></p>
-<p></p><figcaption aria-hidden="true" class="figure-caption">Image by Hoshino Ai. Available by CC0 licence on <a href="https://unsplash.com/photos/sybO0dQ8hTw">unsplash</a>.</figcaption><p></p>
+<p></p><figcaption class="figure-caption">Image by Hoshino Ai. Available by CC0 licence on <a href="https://unsplash.com/photos/sybO0dQ8hTw">unsplash</a>.</figcaption><p></p>
 </figure>
 </div>
 </div>
@@ -857,7 +865,7 @@ strange  # the 7 characters in the string</code></pre>
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
 <p><img src="img/tim-marshall-qKlD2QlK-CY-unsplash.jpg" class="img-fluid figure-img" width="960"></p>
-<p></p><figcaption aria-hidden="true" class="figure-caption">Image by Tim Marshall Available by CC0 licence on <a href="https://unsplash.com/photos/qKlD2QlK-CY">unsplash</a>.</figcaption><p></p>
+<p></p><figcaption class="figure-caption">Image by Tim Marshall Available by CC0 licence on <a href="https://unsplash.com/photos/qKlD2QlK-CY">unsplash</a>.</figcaption><p></p>
 </figure>
 </div>
 </div>
@@ -930,7 +938,7 @@ thing</code></pre>
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
 <p><img src="img/moreno-matkovic-BlbBO2L3pK4-unsplash.jpg" class="img-fluid figure-img" width="960"></p>
-<p></p><figcaption aria-hidden="true" class="figure-caption">Image by Moreno Matković. Available by CC0 licence on <a href="https://unsplash.com/photos/BlbBO2L3pK4">unsplash</a>.</figcaption><p></p>
+<p></p><figcaption class="figure-caption">Image by Moreno Matković. Available by CC0 licence on <a href="https://unsplash.com/photos/BlbBO2L3pK4">unsplash</a>.</figcaption><p></p>
 </figure>
 </div>
 </div>
@@ -1023,7 +1031,7 @@ b
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
 <p><img src="img/kelly-sikkema-D_5iQVxKkPY-unsplash.jpg" class="img-fluid figure-img" width="960"></p>
-<p></p><figcaption aria-hidden="true" class="figure-caption">Image by Kelly Sikkema. Available by CC0 licence on <a href="https://unsplash.com/photos/D_5iQVxKkPY">unsplash</a>.</figcaption><p></p>
+<p></p><figcaption class="figure-caption">Image by Kelly Sikkema. Available by CC0 licence on <a href="https://unsplash.com/photos/D_5iQVxKkPY">unsplash</a>.</figcaption><p></p>
 </figure>
 </div>
 </div>
@@ -1085,7 +1093,7 @@ b
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
 <p><img src="img/aimee-vogelsang-DbJR10fEteE-unsplash.jpg" class="img-fluid figure-img" width="960"></p>
-<p></p><figcaption aria-hidden="true" class="figure-caption">Image by Aimee Vogelsang. Available by CC0 licence on <a href="https://unsplash.com/photos/DbJR10fEteE">unsplash</a>.</figcaption><p></p>
+<p></p><figcaption class="figure-caption">Image by Aimee Vogelsang. Available by CC0 licence on <a href="https://unsplash.com/photos/DbJR10fEteE">unsplash</a>.</figcaption><p></p>
 </figure>
 </div>
 </div>
@@ -1138,7 +1146,7 @@ b
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
 <p><img src="img/pelly-benassi-Hz1WQbHcXag-unsplash.jpg" class="img-fluid figure-img" width="960"></p>
-<p></p><figcaption aria-hidden="true" class="figure-caption">Image by Pelly Benassi. Available by CC0 licence on <a href="https://unsplash.com/photos/Hz1WQbHcXag">unsplash</a>.</figcaption><p></p>
+<p></p><figcaption class="figure-caption">Image by Pelly Benassi. Available by CC0 licence on <a href="https://unsplash.com/photos/Hz1WQbHcXag">unsplash</a>.</figcaption><p></p>
 </figure>
 </div>
 </div>
@@ -1193,7 +1201,7 @@ c
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
 <p><img src="img/andrey-zvyagintsev-kpjCk9ImBPA-unsplash.jpg" class="img-fluid figure-img" width="960"></p>
-<p></p><figcaption aria-hidden="true" class="figure-caption">Image by Andrey Zvyagintsev. Available by CC0 licence on <a href="https://unsplash.com/photos/kpjCk9ImBPA">unsplash</a>.</figcaption><p></p>
+<p></p><figcaption class="figure-caption">Image by Andrey Zvyagintsev. Available by CC0 licence on <a href="https://unsplash.com/photos/kpjCk9ImBPA">unsplash</a>.</figcaption><p></p>
 </figure>
 </div>
 </div>
@@ -1219,8 +1227,26 @@ Danielle Navarro. 2021. <span>“Data Serialisation in R.”</span> November
 </div></div></section></div></main> <!-- /main -->
 <!-- plausible -->
 <script async="" defer="" data-domain="blog.djnavarro.net" src="https://plausible.io/js/plausible.js"></script>
-<script type="application/javascript">
+<script id="quarto-html-after-body" type="application/javascript">
 window.document.addEventListener("DOMContentLoaded", function (event) {
+  const toggleBodyColorMode = (bsSheetEl) => {
+    const mode = bsSheetEl.getAttribute("data-mode");
+    const bodyEl = window.document.querySelector("body");
+    if (mode === "dark") {
+      bodyEl.classList.add("quarto-dark");
+      bodyEl.classList.remove("quarto-light");
+    } else {
+      bodyEl.classList.add("quarto-light");
+      bodyEl.classList.remove("quarto-dark");
+    }
+  }
+  const toggleBodyColorPrimary = () => {
+    const bsSheetEl = window.document.querySelector("link#quarto-bootstrap");
+    if (bsSheetEl) {
+      toggleBodyColorMode(bsSheetEl);
+    }
+  }
+  toggleBodyColorPrimary();  
   const icon = "";
   const anchorJS = new window.AnchorJS();
   anchorJS.options = {
