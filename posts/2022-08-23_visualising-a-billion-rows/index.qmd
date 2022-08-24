@@ -17,11 +17,6 @@ long_slug <- "2022-08-23_visualising-a-billion-rows"
 
 It's been a couple of months since I published anything on this blog. In my defence, I've been busy: I spent the month of June developing a workshop and website on [larger than memory workflows in R with Apache Arrow](https://arrow-user2022.netlify.app/) for the useR! conference, and I spent July doing the same thing for my [art from code](https://art-from-code.netlify.app/) workshop at rstudio::conf. It was a little intense because both workshops had to be prepared from scratch, and there is very little overlap in content. The first one was all about how to use the {arrow} package to analyse very large data sets in R, whereas the second was was all about techniques for making generative art in R. There wasn't a lot of room for art in my Arrow workshop, nor for Arrow in my art workshop. It's a bit of a shame: ever since I started learning Arrow in late 2021 I've been wondering how to bring the two worlds. It feels like Arrow represents an untapped wellspring of creative possibilities for generative art, and I really want to develop generative art systems built on top of Arrow. Sadly, I am not quite there yet, but I've started the journey with something a little less ambitious: data visualisation with Arrow.
 
-
-
-
-
-
 ```{r packages, message=FALSE}
 library(arrow)
 library(dplyr)
@@ -29,6 +24,11 @@ library(tictoc)
 library(tidyr)
 library(ggplot2)
 ```
+
+:::{.column-margin}
+The post is adapted from the [NYC taxi scatter GitHub repository](https://github.com/djnavarro/arrow-nyc-taxi-scatter) that I put together to chat about on [The Data Thread](https://www.youtube.com/c/TheDataThread/about) live interviews series, *Pulling the Thread*
+:::
+
 
 ## The NYC taxi data
 
@@ -43,7 +43,7 @@ On my laptop I have a copy of both the full data set, located at `"~/Datasets/ny
 
 ## Loading the data
 
-Since I have local copies of the data, I'll use the `open_dataset()` function from the {arrow} package to connect to both versions of the NYC taxi data (note that you can connect to remote data sets as well as local ones, but that's a bit beyond the scope of this post)
+Since I have local copies of the data, I'll use the `open_dataset()` function from the {arrow} package to connect to both versions of the NYC taxi data:^[It's worth noting that you can connect to remote data sets as well as local ones, but that's a bit beyond the scope of this post.]
 
 ```{r load-data}
 nyc_taxi <- open_dataset("~/Datasets/nyc-taxi/")
@@ -262,7 +262,25 @@ render_image(pickup_grid, cols = c("#002222", "white", "#800020"))
 
 At long last we have a visualisation that shows all the billion rows of data, crisply delineates all the streets on which taxi pickups are at least moderately frequent, *and* does a reasonable job of highlighting those locations where taxi pickups are extremely common. 
 
-In real life we'd now want to go on to add legends, explanatory text, and other annotations, but I'm not going to bother with that here. The point of this post was to give an example of how to draw the heat map itself.
+In real life we'd now want to go on to add legends, explanatory text, and other annotations, but I'm not going to bother with that here. After all, the point of this post was to give an example of how to draw the heat map itself!
+
+## Lessons learned?
+
+To wrap this post up, I think it's useful to reflect on the process I went through in constructing this image. In one sense, the process I've gone through here isn't actually much different to what we do when creating any other data visualisation in R. For example, if you're working in {tidyverse}, a typical work flow is to use {dplyr} to wrangle the data into an appropriate format and then use {ggplot2} to plot the data. What I've done here isn't that different: okay yes, my {dplyr} code only works because it's backed by the {arrow} engine, and in the end I decided to use base graphics rather than {ggplot2} to draw the final image, but I don't think those differences constitute a major departure from my usual approach.
+
+That being said, I think there are two key principles I've taken away from this. When trying to visualise very large data sets in R, the things I'm going to try to keep in mind are:
+
+- Push as much of the computational work onto {arrow} as possible. The {arrow} package is designed specifically to handle these kinds of data manipulation problems, and things go much more smoothly when I don't make {ggplot2} do the computational heavy lifting.
+
+- Think carefully about the data representation. The reason why the final plot drawn with `image()` is so much nicer than the earlier ones drawn with {ggplot2} has nothing at all to do with the "base R vs tidyverse" issue. Instead, it's because the data structure I created (i.e., `pickup_grid`) is the exact bitmap that needed to be rendered, and that's exactly what `image()` is good for. 
+
+Oddly, the second point is something that came up in my rstudio::conf workshop when discussing [raster representations in generative art](https://art-from-code.netlify.app/day-2/session-1/#even-faster-chaos-with-raster-representation). Here's what I had to say in that context:
+
+> If you want your image rendering to go faster, well, maybe you should store the data in a format that mirrors the output you want? I mean, at this point we’re storing a data frame with 10 million coordinates, and then plotting circles in an abstract canvas that ggplot2 constructs with the help of the grid graphics system, and then… aren’t you tired already?
+>
+>If you want a bitmap that stores pixel values at the end of your generative process, why not start with the data in exactly the same format at the beginning? Don’t draw circles-as-polygons-around-a-coordinate. Just store the damned pixel values from the outset.
+
+This is not to say that {ggplot2} isn't useful in generative art, and it's not to say that we don't need it when visualising large data sets. That's not even remotely the point! It's a powerful tool that serves us well. The point is much more low level: don't make your plotting library fight *against* your data representation. If you've created a bitmap (as I did here), use a tool that writes bitmaps (so I used `image()`), but if you've created something else you should use something else. The main thing is to spend some time thinking about "what is it that I'm trying to draw?" and as a consequence "what data format is optimal for helping me draw that?" 
 
 <br><br>
 
