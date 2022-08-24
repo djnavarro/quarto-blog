@@ -17,7 +17,7 @@
 <generator>quarto-1.0.38</generator>
 <lastBuildDate>Mon, 22 Aug 2022 14:00:00 GMT</lastBuildDate>
 <item>
-  <title>Visualising a Billion Rows of Data</title>
+  <title>How to visualise a billion rows of data in R with Apache Arrow</title>
   <dc:creator>Danielle Navarro</dc:creator>
   <link>https://blog.djnavarro.net/posts/2022-08-23_visualising-a-billion-rows/index.html</link>
   <description><![CDATA[ 
@@ -27,7 +27,275 @@
 
 <!--------------- my typical setup ----------------->
 <!--------------- post begins here ----------------->
-<p>Let’s do this babes.</p>
+<p>It’s been a couple of months since I published anything on this blog. In my defence, I’ve been busy: I spent the month of June developing a workshop and website on <a href="https://arrow-user2022.netlify.app/">larger than memory workflows in R with Apache Arrow</a> for the useR! conference, and I spent July doing the same thing for my <a href="https://art-from-code.netlify.app/">art from code</a> workshop at rstudio::conf. It was a little intense because both workshops had to be prepared from scratch, and there is very little overlap in content. The first one was all about how to use the {arrow} package to analyse very large data sets in R, whereas the second was was all about techniques for making generative art in R. There wasn’t a lot of room for art in my Arrow workshop, nor for Arrow in my art workshop. It’s a bit of a shame: ever since I started learning Arrow in late 2021 I’ve been wondering how to bring the two worlds. It feels like Arrow represents an untapped wellspring of creative possibilities for generative art, and I really want to develop generative art systems built on top of Arrow. Sadly, I am not quite there yet, but I’ve started the journey with something a little less ambitious: data visualisation with Arrow.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><span class="fu" style="color: #4758AB;">library</span>(arrow)</span>
+<span id="cb1-2"><span class="fu" style="color: #4758AB;">library</span>(dplyr)</span>
+<span id="cb1-3"><span class="fu" style="color: #4758AB;">library</span>(tictoc)</span>
+<span id="cb1-4"><span class="fu" style="color: #4758AB;">library</span>(tidyr)</span>
+<span id="cb1-5"><span class="fu" style="color: #4758AB;">library</span>(ggplot2)</span></code></pre></div>
+</div>
+
+<div class="no-row-height column-margin column-container"><div class="">
+<p>The post is adapted from the <a href="https://github.com/djnavarro/arrow-nyc-taxi-scatter">NYC taxi scatter GitHub repository</a> that I put together to chat about on <a href="https://www.youtube.com/c/TheDataThread/about">The Data Thread</a> live interviews series, <em>Pulling the Thread</em></p>
+</div></div><section id="the-nyc-taxi-data" class="level2">
+<h2 class="anchored" data-anchor-id="the-nyc-taxi-data">The NYC taxi data</h2>
+<p>At this point in my life I have used the “NYC Taxi Data” for so many illustrative examples I feel like I don’t need to explain it: doesn’t “everyone” know about this data by now? Yeah, no dice sweetie. That’s a terrible intuition. Most people don’t know the data, and those that do can just skip this section. So here’s a quick summary of the data set. In its full form, the data set takes the form of one very large table with about 1.7 billion rows and 24 columns. Each row corresponds to a single taxi ride sometime between 2009 and 2022. There’s a complete <a href="https://arrow-user2022.netlify.app/packages-and-data.html#data">data dictionary for the NYC taxi data</a> on the useR workshop site, but the columns that will be relevant for us are as follows:</p>
+<ul>
+<li><code>pickup_longitude</code> (double): Longitude data for the pickup location</li>
+<li><code>pickup_latitude</code> (double): Latitude data for the pickup location</li>
+<li><code>dropoff_longitude</code> (double): Longitude data for the dropoff location</li>
+<li><code>dropoff_latitude</code> (double): Latitude data for the dropoff location</li>
+</ul>
+<p>On my laptop I have a copy of both the full data set, located at <code>"~/Datasets/nyc-taxi"</code> on my machine, and a much smaller “tiny” data set that contains 1 out of every 1000 records from the original, located at <code>"~/Datasets/nyc-taxi-tiny/"</code>. This tiny version has a mere 1.7 million rows of data, and as such is small enough that it will fit in memory. <a href="https://arrow-user2022.netlify.app/packages-and-data.html#data">Instructions for downloading both data sets</a> are available at the same location as the data dictionary.</p>
+</section>
+<section id="loading-the-data" class="level2">
+<h2 class="anchored" data-anchor-id="loading-the-data">Loading the data</h2>
+<p>Since I have local copies of the data, I’ll use the <code>open_dataset()</code> function from the {arrow} package to connect to both versions of the NYC taxi data:<sup>1</sup></p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb2" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1">nyc_taxi <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">open_dataset</span>(<span class="st" style="color: #20794D;">"~/Datasets/nyc-taxi/"</span>)</span>
+<span id="cb2-2">nyc_taxi_tiny <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">open_dataset</span>(<span class="st" style="color: #20794D;">"~/Datasets/nyc-taxi-tiny/"</span>)</span></code></pre></div>
+</div>
+<p>Starting with Arrow 9.0.0 it’s been possible to use the {dplyr} <code>glimpse()</code> function to take a look at the data sets, so let’s do that:</p>
+<div class="cell" data-hash="index_cache/html/glimpse-data_9a1e42d8540622b23300148ccf5b5bca">
+<div class="sourceCode cell-code" id="cb3" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1"><span class="fu" style="color: #4758AB;">glimpse</span>(nyc_taxi)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>FileSystemDataset with 158 Parquet files
+1,672,590,319 rows x 24 columns
+$ vendor_name             &lt;string&gt; "VTS", "VTS", "VTS", "DDS", "DDS", "DDS", "DD…
+$ pickup_datetime  &lt;timestamp[ms]&gt; 2009-01-04 13:52:00, 2009-01-04 14:31:00, 200…
+$ dropoff_datetime &lt;timestamp[ms]&gt; 2009-01-04 14:02:00, 2009-01-04 14:38:00, 200…
+$ passenger_count          &lt;int64&gt; 1, 3, 5, 1, 1, 2, 1, 1, 1, 1, 1, 1, 2, 2, 1, …
+$ trip_distance           &lt;double&gt; 2.63, 4.55, 10.35, 5.00, 0.40, 1.20, 0.40, 1.…
+$ pickup_longitude        &lt;double&gt; -73.99196, -73.98210, -74.00259, -73.97427, -…
+$ pickup_latitude         &lt;double&gt; 40.72157, 40.73629, 40.73975, 40.79095, 40.71…
+$ rate_code               &lt;string&gt; NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, N…
+$ store_and_fwd           &lt;string&gt; NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, N…
+$ dropoff_longitude       &lt;double&gt; -73.99380, -73.95585, -73.86998, -73.99656, -…
+$ dropoff_latitude        &lt;double&gt; 40.69592, 40.76803, 40.77023, 40.73185, 40.72…
+$ payment_type            &lt;string&gt; "Cash", "Credit card", "Credit card", "Credit…
+$ fare_amount             &lt;double&gt; 8.9, 12.1, 23.7, 14.9, 3.7, 6.1, 5.7, 6.1, 8.…
+$ extra                   &lt;double&gt; 0.5, 0.5, 0.0, 0.5, 0.0, 0.5, 0.0, 0.5, 0.0, …
+$ mta_tax                 &lt;double&gt; NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, N…
+$ tip_amount              &lt;double&gt; 0.00, 2.00, 4.74, 3.05, 0.00, 0.00, 1.00, 0.0…
+$ tolls_amount            &lt;double&gt; 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, …
+$ total_amount            &lt;double&gt; 9.40, 14.60, 28.44, 18.45, 3.70, 6.60, 6.70, …
+$ improvement_surcharge   &lt;double&gt; NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, N…
+$ congestion_surcharge    &lt;double&gt; NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, N…
+$ pickup_location_id       &lt;int64&gt; NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, N…
+$ dropoff_location_id      &lt;int64&gt; NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, N…
+$ year                     &lt;int32&gt; 2009, 2009, 2009, 2009, 2009, 2009, 2009, 200…
+$ month                    &lt;int32&gt; 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, …</code></pre>
+</div>
+</div>
+<p>If you’ve used <code>glimpse()</code> before this output will look very familiar. Each line in the output show the name of one column in the data, followed by the first few entries in that column. There are a few small hints that the underlying data structure is different though. For instance, the data types associated with each column refer to Arrow data types (e.g., timestamp, int32, int64, etc) rather than R data types. I’m not going to talk about those here, but if you’re looking for information about this topic, there’s a short <a href="https://arrow-user2022.netlify.app/advanced.html#how-are-scalar-types-mapped">summary of Arrow data types</a> on the workshop website, and a <a href="https://blog.djnavarro.net/posts/2022-03-04_data-types-in-arrow-and-r/">longer blog post on Arrow data types</a> on this blog. Nevertheless, those minor differences notwithstanding, the output of <code>glimpse()</code> is more or less exactly what you’d expect to see if <code>nyc_taxi</code> were a data frame. However, when you look at the size of the data set, you might begin to suspect that some magic is going on. Behind the scenes there are 1.7 billion rows of data in one huge table, and this is just too big to load into memory. Fortunately, the {arrow} package allows us to work with it anyway!</p>
+</section>
+<section id="plotting-a-million-rows" class="level2">
+<h2 class="anchored" data-anchor-id="plotting-a-million-rows">Plotting a million rows</h2>
+<p>Okay, let’s start with a data visualisation problem that wouldn’t be too difficult to manage on a small data set. I want to draw an image that plots the pickup location for every taxi ride in the data set. Here’s how I might go about that. First, I’ll do a minimal amount of data wrangling in {arrow}. Specifically, I’ll use the {dplyr} <code>select()</code> and <code>filter()</code> functions to limit the amount of data I have to <code>collect()</code> into R:</p>
+<div class="cell" data-hash="index_cache/html/filtering_105a395a3b69129b1deb402371e596aa">
+<div class="sourceCode cell-code" id="cb5" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1"><span class="fu" style="color: #4758AB;">tic</span>()</span>
+<span id="cb5-2">nyc_pickups <span class="ot" style="color: #003B4F;">&lt;-</span> nyc_taxi_tiny <span class="sc" style="color: #5E5E5E;">|&gt;</span></span>
+<span id="cb5-3">  <span class="fu" style="color: #4758AB;">select</span>(pickup_longitude, pickup_latitude) <span class="sc" style="color: #5E5E5E;">|&gt;</span></span>
+<span id="cb5-4">  <span class="fu" style="color: #4758AB;">filter</span>(</span>
+<span id="cb5-5">    <span class="sc" style="color: #5E5E5E;">!</span><span class="fu" style="color: #4758AB;">is.na</span>(pickup_longitude),</span>
+<span id="cb5-6">    <span class="sc" style="color: #5E5E5E;">!</span><span class="fu" style="color: #4758AB;">is.na</span>(pickup_latitude)</span>
+<span id="cb5-7">  ) <span class="sc" style="color: #5E5E5E;">|&gt;</span></span>
+<span id="cb5-8">  <span class="fu" style="color: #4758AB;">collect</span>()</span>
+<span id="cb5-9"><span class="fu" style="color: #4758AB;">toc</span>()</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>0.16 sec elapsed</code></pre>
+</div>
+</div>
+<p>At this point I have a regular R data frame, <code>nyc_pickups</code>, that contains only the data I need: the pickup locations for all those taxi rides (in the <em>tiny</em> taxi data set) that actually contain longitude and latitude data. Let’s use <code>glimpse()</code> again:</p>
+<div class="cell" data-hash="index_cache/html/glimpse-pickups_777a2e321317d21e8bd17c1d8b4b682e">
+<div class="sourceCode cell-code" id="cb7" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1"><span class="fu" style="color: #4758AB;">glimpse</span>(nyc_pickups)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Rows: 1,249,107
+Columns: 2
+$ pickup_longitude &lt;dbl&gt; -73.95557, -73.97467, -73.78190, -73.97872, -73.97400…
+$ pickup_latitude  &lt;dbl&gt; 40.76416, 40.76222, 40.64478, 40.75371, 40.77901, 0.0…</code></pre>
+</div>
+</div>
+<p>Compared to the full NYC taxi data, this is a relatively small data set. Drawing a scatter plot from 1.2 million observations isn’t a trivial task, to be sure, but it is achievable. In fact the {ggplot2} package handles this task surprisingly well:</p>
+<div class="cell" data-hash="index_cache/html/ggplot2-image_72f14eb74a16f2be7164916ef14192b5">
+<div class="sourceCode cell-code" id="cb9" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1">x0 <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="sc" style="color: #5E5E5E;">-</span><span class="fl" style="color: #AD0000;">74.05</span> <span class="co" style="color: #5E5E5E;"># minimum longitude to plot</span></span>
+<span id="cb9-2">y0 <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fl" style="color: #AD0000;">40.6</span>   <span class="co" style="color: #5E5E5E;"># minimum latitude to plot</span></span>
+<span id="cb9-3">span <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fl" style="color: #AD0000;">0.3</span>  <span class="co" style="color: #5E5E5E;"># size of the lat/long window to plot</span></span>
+<span id="cb9-4"></span>
+<span id="cb9-5"><span class="fu" style="color: #4758AB;">tic</span>()</span>
+<span id="cb9-6">pic <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">ggplot</span>(nyc_pickups) <span class="sc" style="color: #5E5E5E;">+</span></span>
+<span id="cb9-7">  <span class="fu" style="color: #4758AB;">geom_point</span>(</span>
+<span id="cb9-8">    <span class="fu" style="color: #4758AB;">aes</span>(pickup_longitude, pickup_latitude), </span>
+<span id="cb9-9">    <span class="at" style="color: #657422;">size =</span> .<span class="dv" style="color: #AD0000;">2</span>, </span>
+<span id="cb9-10">    <span class="at" style="color: #657422;">stroke =</span> <span class="dv" style="color: #AD0000;">0</span>, </span>
+<span id="cb9-11">    <span class="at" style="color: #657422;">colour =</span> <span class="st" style="color: #20794D;">"#800020"</span></span>
+<span id="cb9-12">  ) <span class="sc" style="color: #5E5E5E;">+</span></span>
+<span id="cb9-13">  <span class="fu" style="color: #4758AB;">scale_x_continuous</span>(<span class="at" style="color: #657422;">expand =</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="dv" style="color: #AD0000;">0</span>, <span class="dv" style="color: #AD0000;">0</span>)) <span class="sc" style="color: #5E5E5E;">+</span></span>
+<span id="cb9-14">  <span class="fu" style="color: #4758AB;">scale_y_continuous</span>(<span class="at" style="color: #657422;">expand =</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="dv" style="color: #AD0000;">0</span>, <span class="dv" style="color: #AD0000;">0</span>)) <span class="sc" style="color: #5E5E5E;">+</span></span>
+<span id="cb9-15">  <span class="fu" style="color: #4758AB;">theme_void</span>() <span class="sc" style="color: #5E5E5E;">+</span></span>
+<span id="cb9-16">  <span class="fu" style="color: #4758AB;">coord_equal</span>(</span>
+<span id="cb9-17">    <span class="at" style="color: #657422;">xlim =</span> x0 <span class="sc" style="color: #5E5E5E;">+</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="dv" style="color: #AD0000;">0</span>, span), </span>
+<span id="cb9-18">    <span class="at" style="color: #657422;">ylim =</span> y0 <span class="sc" style="color: #5E5E5E;">+</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="dv" style="color: #AD0000;">0</span>, span)</span>
+<span id="cb9-19">  )</span>
+<span id="cb9-20">pic</span></code></pre></div>
+<div class="cell-output-display">
+<p><img src="https://blog.djnavarro.net/posts/2022-08-23_visualising-a-billion-rows/index_files/figure-html/ggplot2-image-1.png" class="img-fluid" width="672"></p>
+</div>
+<div class="sourceCode cell-code" id="cb10" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1"><span class="fu" style="color: #4758AB;">toc</span>()</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>3.365 sec elapsed</code></pre>
+</div>
+</div>
+<p>It’s not lightning fast or anything, but it’s still pretty quick!</p>
+<p>As neat as this visualisation is, if we look at it for a while we can see some problems with it. I’m not talking about the fact that there’s no legend or explanatory text: although those are real failures of data visualisation, they’re easily fixable. {ggplot2} has lots of tools that would allow us to fix those problems. The bigger issue here is that the plot manages to be too dense and too sparse at the same time. There are so many data points in Manhattan (particularly in the midtown area) that it’s impossible to discern any fine detail: that part of the map is just one solid block of colour. Yet, at the same time, for most places outside of Manhattan there the data are too sparse. There are so few data points in surrounding areas of the city that it’s hard to see a lot of detail.</p>
+<div class="cell" data-hash="index_cache/html/annotated-ggplot_75189ae42604d08a128a4c5c2067bf46">
+<div class="cell-output-display">
+<p><img src="https://blog.djnavarro.net/posts/2022-08-23_visualising-a-billion-rows/index_files/figure-html/annotated-ggplot-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>This combination of problems is a little tricky: if we want more detail in the plot, we need to include a lot more data. In one sense this is fine: we have 1000x the volume of data in the <em>full</em> NYC taxi data, but there is so much data there that we can’t even load it into R, much less ask {ggplot2} to create a scatter plot from it. Plus, even if we did somehow manage to accomplish this, just imagine how utterly unreadable the high-density parts of the plot would look. The entirety of Manhattan would just be one enormous blur.</p>
+<p>If we want to make good use of our large data set, we have to rethink our data visualisation technique. Perhaps scatter plots are not quite the right approach?</p>
+</section>
+<section id="scaling-to-a-billion-rows" class="level2">
+<h2 class="anchored" data-anchor-id="scaling-to-a-billion-rows">Scaling to a billion rows</h2>
+<p>A natural solution to the “some parts are too dense, others are too sparse” problem is to stop thinking of the desired visualisation as a scatter plot, and instead think of it as a heat map. Instead of drawing a small plot marker at the location of each pickup, we colour each pixel in the image based on the number of pickups within the geographic region spanned by that pixel. Normally, this approach wouldn’t work very well: the number of observations within each pixel would probably be too small, and the resulting heat map wouldn’t be much of an improvement over a scatter plot.</p>
+<p>But these aren’t normal circumstances. We have 1.2 billion rows of data here. Even if I create a fairly high resolution 4000x4000 image, there are “only” 16 million pixels. The expected number of pickups within each pixel is 75. Binning 1.2 billion observations into 16 million categories isn’t an <em>easy</em> thing to do, but it’s exactly the kind of task that Arrow excels at. So let’s do that: we’ll use the {arrow} package to count the number of pickups that fall within the region spanned by each pixel in the image. This does almost all of the work for us, because we reduce billions of records to a much smaller table of pixels and counts, one that is small enough to pull into R:</p>
+<div class="cell" data-hash="index_cache/html/compute-pixels_47854146bcf35cbd0a57c1d3a15eb7da">
+<div class="sourceCode cell-code" id="cb12" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb12-1"><span class="fu" style="color: #4758AB;">tic</span>()</span>
+<span id="cb12-2">pixels <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="dv" style="color: #AD0000;">4000</span></span>
+<span id="cb12-3">pickup <span class="ot" style="color: #003B4F;">&lt;-</span> nyc_taxi <span class="sc" style="color: #5E5E5E;">|&gt;</span></span>
+<span id="cb12-4">  <span class="fu" style="color: #4758AB;">filter</span>(</span>
+<span id="cb12-5">    <span class="sc" style="color: #5E5E5E;">!</span><span class="fu" style="color: #4758AB;">is.na</span>(pickup_longitude),</span>
+<span id="cb12-6">    <span class="sc" style="color: #5E5E5E;">!</span><span class="fu" style="color: #4758AB;">is.na</span>(pickup_latitude),</span>
+<span id="cb12-7">    pickup_longitude <span class="sc" style="color: #5E5E5E;">&gt;</span> x0,</span>
+<span id="cb12-8">    pickup_longitude <span class="sc" style="color: #5E5E5E;">&lt;</span> x0 <span class="sc" style="color: #5E5E5E;">+</span> span,</span>
+<span id="cb12-9">    pickup_latitude <span class="sc" style="color: #5E5E5E;">&gt;</span> y0,</span>
+<span id="cb12-10">    pickup_latitude <span class="sc" style="color: #5E5E5E;">&lt;</span> y0 <span class="sc" style="color: #5E5E5E;">+</span> span</span>
+<span id="cb12-11">  ) <span class="sc" style="color: #5E5E5E;">|&gt;</span></span>
+<span id="cb12-12">  <span class="fu" style="color: #4758AB;">mutate</span>(</span>
+<span id="cb12-13">    <span class="at" style="color: #657422;">unit_scaled_x =</span> (pickup_longitude <span class="sc" style="color: #5E5E5E;">-</span> x0) <span class="sc" style="color: #5E5E5E;">/</span> span,</span>
+<span id="cb12-14">    <span class="at" style="color: #657422;">unit_scaled_y =</span> (pickup_latitude <span class="sc" style="color: #5E5E5E;">-</span> y0) <span class="sc" style="color: #5E5E5E;">/</span> span,</span>
+<span id="cb12-15">    <span class="at" style="color: #657422;">x =</span> <span class="fu" style="color: #4758AB;">as.integer</span>(<span class="fu" style="color: #4758AB;">round</span>(pixels <span class="sc" style="color: #5E5E5E;">*</span> unit_scaled_x)), </span>
+<span id="cb12-16">    <span class="at" style="color: #657422;">y =</span> <span class="fu" style="color: #4758AB;">as.integer</span>(<span class="fu" style="color: #4758AB;">round</span>(pixels <span class="sc" style="color: #5E5E5E;">*</span> unit_scaled_y))</span>
+<span id="cb12-17">  ) <span class="sc" style="color: #5E5E5E;">|&gt;</span></span>
+<span id="cb12-18">  <span class="fu" style="color: #4758AB;">count</span>(x, y, <span class="at" style="color: #657422;">name =</span> <span class="st" style="color: #20794D;">"pickup"</span>) <span class="sc" style="color: #5E5E5E;">|&gt;</span></span>
+<span id="cb12-19">  <span class="fu" style="color: #4758AB;">collect</span>()</span>
+<span id="cb12-20"><span class="fu" style="color: #4758AB;">toc</span>()</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>31.101 sec elapsed</code></pre>
+</div>
+</div>
+<p>Half a minute to solve the binning problem is pretty decent, really. As before, I’ll use <code>glimpse()</code> to take a peek at the object we’ve just created. It’s a data frame containing <code>x</code> and <code>y</code> columns specifying the horizontal and vertical index of a pixel, and a <code>pickup</code> column that counts the number of pickups that fall within the geographical region covered by that pixel:</p>
+<div class="cell" data-hash="index_cache/html/glimpse-pickup_fae4536072ae01f505509c9d4d61bb91">
+<div class="sourceCode cell-code" id="cb14" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb14-1"><span class="fu" style="color: #4758AB;">glimpse</span>(pickup)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Rows: 4,677,864
+Columns: 3
+$ x      &lt;int&gt; 1058, 1024, 1162, 3525, 865, 794, 856, 705, 647, 762, 802, 1207…
+$ y      &lt;int&gt; 2189, 2040, 2265, 552, 1983, 1646, 2018, 1590, 1723, 2010, 1645…
+$ pickup &lt;int&gt; 6514, 5030, 3818, 67, 2408, 2415, 932, 3607, 2664, 1024, 2207, …</code></pre>
+</div>
+</div>
+<p>One thing to note about this output is that the pixels aren’t arranged in a meaningful order, and only those pixels with at least one pickup (a little under 30% of all pixels) are included in data.</p>
+<p>Now that we have a smaller data set to work with, visualising this condensed data can be done in a number of ways. The “laziest” way to it is to repeat the exact same approach I took earlier. That is, I could draw a scatter plot:</p>
+<div class="cell" data-hash="index_cache/html/ggplot2-image-2_b70a8ab656a5717a6cb46fb50a9f0cb9">
+<div class="sourceCode cell-code" id="cb16" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb16-1"><span class="fu" style="color: #4758AB;">tic</span>()</span>
+<span id="cb16-2"><span class="fu" style="color: #4758AB;">ggplot</span>(pickup) <span class="sc" style="color: #5E5E5E;">+</span></span>
+<span id="cb16-3">  <span class="fu" style="color: #4758AB;">geom_point</span>(</span>
+<span id="cb16-4">    <span class="fu" style="color: #4758AB;">aes</span>(x, y, <span class="at" style="color: #657422;">colour =</span> <span class="fu" style="color: #4758AB;">log10</span>(pickup)), </span>
+<span id="cb16-5">    <span class="at" style="color: #657422;">size =</span> .<span class="dv" style="color: #AD0000;">01</span>, </span>
+<span id="cb16-6">    <span class="at" style="color: #657422;">stroke =</span> <span class="dv" style="color: #AD0000;">0</span>, </span>
+<span id="cb16-7">    <span class="at" style="color: #657422;">show.legend =</span> <span class="cn" style="color: #8f5902;">FALSE</span></span>
+<span id="cb16-8">  ) <span class="sc" style="color: #5E5E5E;">+</span></span>
+<span id="cb16-9">  <span class="fu" style="color: #4758AB;">scale_colour_gradient</span>(<span class="at" style="color: #657422;">low =</span> <span class="st" style="color: #20794D;">"white"</span>, <span class="at" style="color: #657422;">high =</span> <span class="st" style="color: #20794D;">"#800020"</span>) <span class="sc" style="color: #5E5E5E;">+</span></span>
+<span id="cb16-10">  <span class="fu" style="color: #4758AB;">scale_x_continuous</span>(<span class="at" style="color: #657422;">expand =</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="dv" style="color: #AD0000;">0</span>, <span class="dv" style="color: #AD0000;">0</span>)) <span class="sc" style="color: #5E5E5E;">+</span></span>
+<span id="cb16-11">  <span class="fu" style="color: #4758AB;">scale_y_continuous</span>(<span class="at" style="color: #657422;">expand =</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="dv" style="color: #AD0000;">0</span>, <span class="dv" style="color: #AD0000;">0</span>)) <span class="sc" style="color: #5E5E5E;">+</span></span>
+<span id="cb16-12">  <span class="fu" style="color: #4758AB;">theme_void</span>() <span class="sc" style="color: #5E5E5E;">+</span></span>
+<span id="cb16-13">  <span class="fu" style="color: #4758AB;">coord_equal</span>()</span></code></pre></div>
+<div class="cell-output-display">
+<p><img src="https://blog.djnavarro.net/posts/2022-08-23_visualising-a-billion-rows/index_files/figure-html/ggplot2-image-2-1.png" class="img-fluid" width="672"></p>
+</div>
+<div class="sourceCode cell-code" id="cb17" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb17-1"><span class="fu" style="color: #4758AB;">toc</span>()</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>12.159 sec elapsed</code></pre>
+</div>
+</div>
+<p>As you can see, {ggplot2} has no problems drawing a scatter plot from a few million observations, and it’s not too slow in producing an output either. It’s also much clearer than our first attempt using the tiny taxi data. The “too dense but also too sparse” problem no longer plagues us, and we’re better able to see how the distribution of pickups spreads along the streets of New York.</p>
+<p>However, there’s a better way to do this. Instead of trying to draw a scatter plot of all the points listed in the <code>pickup</code> data frame, we can use it to populate a bitmap. We’ll create a 4000x4000 matrix, and fill in the cells with the pickup counts at the corresponding pixel. It’s a two part process. First, we use <code>expand_grid()</code> to initialise a “grid like” tibble that contains every valid combination of <code>x</code> and <code>y</code> values. Then we use <code>left_join()</code> to populate a column containing the pickup counts:</p>
+<div class="cell" data-hash="index_cache/html/expand-to-grid_9e7b0810461cde4fb35da44cb352ee62">
+<div class="sourceCode cell-code" id="cb19" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb19-1"><span class="fu" style="color: #4758AB;">tic</span>()</span>
+<span id="cb19-2">grid <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">expand_grid</span>(<span class="at" style="color: #657422;">x =</span> <span class="dv" style="color: #AD0000;">0</span><span class="sc" style="color: #5E5E5E;">:</span>pixels, <span class="at" style="color: #657422;">y =</span> <span class="dv" style="color: #AD0000;">0</span><span class="sc" style="color: #5E5E5E;">:</span>pixels) <span class="sc" style="color: #5E5E5E;">|&gt;</span></span>
+<span id="cb19-3">  <span class="fu" style="color: #4758AB;">left_join</span>(pickup, <span class="at" style="color: #657422;">by =</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="st" style="color: #20794D;">"x"</span>, <span class="st" style="color: #20794D;">"y"</span>)) <span class="sc" style="color: #5E5E5E;">|&gt;</span></span>
+<span id="cb19-4">  <span class="fu" style="color: #4758AB;">mutate</span>(<span class="at" style="color: #657422;">pickup =</span> <span class="fu" style="color: #4758AB;">replace_na</span>(pickup,  <span class="dv" style="color: #AD0000;">0</span>))</span>
+<span id="cb19-5"><span class="fu" style="color: #4758AB;">toc</span>()</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>7.98 sec elapsed</code></pre>
+</div>
+</div>
+<p>Having done this, we can explicitly convert this to a matrix. It’s super-easy to do this because <code>expand_grid()</code> orders the elements of <code>grid$pickup</code> so that they can be passed straight to <code>matrix()</code>:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb21" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb21-1"><span class="fu" style="color: #4758AB;">tic</span>()</span>
+<span id="cb21-2">pickup_grid <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">matrix</span>(</span>
+<span id="cb21-3">  <span class="at" style="color: #657422;">data =</span> grid<span class="sc" style="color: #5E5E5E;">$</span>pickup,</span>
+<span id="cb21-4">  <span class="at" style="color: #657422;">nrow =</span> pixels <span class="sc" style="color: #5E5E5E;">+</span> <span class="dv" style="color: #AD0000;">1</span>,</span>
+<span id="cb21-5">  <span class="at" style="color: #657422;">ncol =</span> pixels <span class="sc" style="color: #5E5E5E;">+</span> <span class="dv" style="color: #AD0000;">1</span></span>
+<span id="cb21-6">)</span>
+<span id="cb21-7"><span class="fu" style="color: #4758AB;">toc</span>()</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>0.746 sec elapsed</code></pre>
+</div>
+</div>
+<p>This is our bitmap. It’s a matrix whose values correspond to the pixel intensities to be plotted. Now all we have to do is write the image. Because the data are already stored as a bitmap, we don’t even need {ggplot2}: we can use <code>image()</code> to draw the bitmap directly.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb23" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb23-1">render_image <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>(mat, <span class="at" style="color: #657422;">cols =</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="st" style="color: #20794D;">"white"</span>, <span class="st" style="color: #20794D;">"#800020"</span>)) {</span>
+<span id="cb23-2">  op <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">par</span>(<span class="at" style="color: #657422;">mar =</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="dv" style="color: #AD0000;">0</span>, <span class="dv" style="color: #AD0000;">0</span>, <span class="dv" style="color: #AD0000;">0</span>, <span class="dv" style="color: #AD0000;">0</span>))</span>
+<span id="cb23-3">  shades <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">colorRampPalette</span>(cols)</span>
+<span id="cb23-4">  <span class="fu" style="color: #4758AB;">image</span>(</span>
+<span id="cb23-5">    <span class="at" style="color: #657422;">z =</span> <span class="fu" style="color: #4758AB;">log10</span>(<span class="fu" style="color: #4758AB;">t</span>(mat <span class="sc" style="color: #5E5E5E;">+</span> <span class="dv" style="color: #AD0000;">1</span>)),</span>
+<span id="cb23-6">    <span class="at" style="color: #657422;">axes =</span> <span class="cn" style="color: #8f5902;">FALSE</span>,</span>
+<span id="cb23-7">    <span class="at" style="color: #657422;">asp =</span> <span class="dv" style="color: #AD0000;">1</span>,</span>
+<span id="cb23-8">    <span class="at" style="color: #657422;">col =</span> <span class="fu" style="color: #4758AB;">shades</span>(<span class="dv" style="color: #AD0000;">256</span>),</span>
+<span id="cb23-9">    <span class="at" style="color: #657422;">useRaster =</span> <span class="cn" style="color: #8f5902;">TRUE</span></span>
+<span id="cb23-10">  )</span>
+<span id="cb23-11">  <span class="fu" style="color: #4758AB;">par</span>(op)</span>
+<span id="cb23-12">}</span>
+<span id="cb23-13"></span>
+<span id="cb23-14"><span class="fu" style="color: #4758AB;">tic</span>()</span>
+<span id="cb23-15"><span class="fu" style="color: #4758AB;">render_image</span>(pickup_grid)</span></code></pre></div>
+<div class="cell-output-display">
+<p><img src="https://blog.djnavarro.net/posts/2022-08-23_visualising-a-billion-rows/index_files/figure-html/taxi-scatter-1.png" class="img-fluid" width="672"></p>
+</div>
+<div class="sourceCode cell-code" id="cb24" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb24-1"><span class="fu" style="color: #4758AB;">toc</span>()</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>2.425 sec elapsed</code></pre>
+</div>
+</div>
+<p>This method is slightly faster the {ggplot2} scatter plot approach, but the real advantage isn’t speed – it’s clarity. This version of the map is the clearest one so far. There’s less blurring in the denser parts of the plot (midtown Manhattan), and there’s also more clarity in the sparser areas (e.g., the Brooklyn streets are sharper).</p>
+<p>We can push it slightly further by tweaking the colour palette. Plotting the logarithm of the number of pickups ensures that all the streets are visible (not just the extremely common ones), but it does have the downside that it’s hard to tell the difference between moderately popular pickup locations and extremely popular ones. A well-chosen diverging palette helps rectify this a little:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb26" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb26-1"><span class="fu" style="color: #4758AB;">render_image</span>(pickup_grid, <span class="at" style="color: #657422;">cols =</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="st" style="color: #20794D;">"#002222"</span>, <span class="st" style="color: #20794D;">"white"</span>, <span class="st" style="color: #20794D;">"#800020"</span>))</span></code></pre></div>
+<div class="cell-output-display">
+<p><img src="https://blog.djnavarro.net/posts/2022-08-23_visualising-a-billion-rows/index_files/figure-html/taxi-scatter-2-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>At long last we have a visualisation that shows all the billion rows of data, crisply delineates all the streets on which taxi pickups are at least moderately frequent, <em>and</em> does a reasonable job of highlighting those locations where taxi pickups are extremely common.</p>
+<p>In real life we’d now want to go on to add legends, explanatory text, and other annotations, but I’m not going to bother with that here. After all, the point of this post was to give an example of how to draw the heat map itself!</p>
+</section>
+<section id="lessons-learned" class="level2">
+<h2 class="anchored" data-anchor-id="lessons-learned">Lessons learned?</h2>
+<p>To wrap this post up, I think it’s useful to reflect on the process I went through in constructing this image. In one sense, the process I’ve gone through here isn’t actually much different to what we do when creating any other data visualisation in R. For example, if you’re working in {tidyverse}, a typical work flow is to use {dplyr} to wrangle the data into an appropriate format and then use {ggplot2} to plot the data. What I’ve done here isn’t that different: okay yes, my {dplyr} code only works because it’s backed by the {arrow} engine, and in the end I decided to use base graphics rather than {ggplot2} to draw the final image, but I don’t think those differences constitute a major departure from my usual approach.</p>
+<p>That being said, I think there are two key principles I’ve taken away from this. When trying to visualise very large data sets in R, the things I’m going to try to keep in mind are:</p>
+<ul>
+<li><p>Push as much of the computational work onto {arrow} as possible. The {arrow} package is designed specifically to handle these kinds of data manipulation problems, and things go much more smoothly when I don’t make {ggplot2} do the computational heavy lifting.</p></li>
+<li><p>Think carefully about the data representation. The reason why the final plot drawn with <code>image()</code> is so much nicer than the earlier ones drawn with {ggplot2} has nothing at all to do with the “base R vs tidyverse” issue. Instead, it’s because the data structure I created (i.e., <code>pickup_grid</code>) is the exact bitmap that needed to be rendered, and that’s exactly what <code>image()</code> is good for.</p></li>
+</ul>
+<p>Oddly, the second point is something that came up in my rstudio::conf workshop when discussing <a href="https://art-from-code.netlify.app/day-2/session-1/#even-faster-chaos-with-raster-representation">raster representations in generative art</a>. Here’s what I had to say in that context:</p>
+<blockquote class="blockquote">
+<p>If you want your image rendering to go faster, well, maybe you should store the data in a format that mirrors the output you want? I mean, at this point we’re storing a data frame with 10 million coordinates, and then plotting circles in an abstract canvas that ggplot2 constructs with the help of the grid graphics system, and then… aren’t you tired already?</p>
+<p>If you want a bitmap that stores pixel values at the end of your generative process, why not start with the data in exactly the same format at the beginning? Don’t draw circles-as-polygons-around-a-coordinate. Just store the damned pixel values from the outset.</p>
+</blockquote>
+<p>This is not to say that {ggplot2} isn’t useful in generative art, and it’s not to say that we don’t need it when visualising large data sets. That’s not even remotely the point! It’s a powerful tool that serves us well. The point is much more low level: don’t make your plotting library fight <em>against</em> your data representation. If you’ve created a bitmap (as I did here), use a tool that writes bitmaps (so I used <code>image()</code>), but if you’ve created something else you should use something else. The main thing is to spend some time thinking about “what is it that I’m trying to draw?” and as a consequence “what data format is optimal for helping me draw that?”</p>
 <p><br><br></p>
 <!--------------- appendices go here ----------------->
 <div class="cell">
@@ -35,17 +303,25 @@
 </div>
 
 
+</section>
 
-<div id="quarto-appendix" class="default"><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
+
+<div id="quarto-appendix" class="default"><section class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
+
+<ol>
+<li id="fn1"><p>It’s worth noting that you can connect to remote data sets as well as local ones, but that’s a bit beyond the scope of this post.↩︎</p></li>
+</ol>
+</section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
   author = {Danielle Navarro},
-  title = {How to {Visualise} a {Billion} {Rows} of {Data}},
+  title = {How to Visualise a Billion Rows of Data in {R} with {Apache}
+    {Arrow}},
   date = {2022-08-23},
   url = {https://blog.djnavarro.net/posts/2022-08-23_visualising-a-billion-rows},
   langid = {en}
 }
 </code></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2022" class="csl-entry quarto-appendix-citeas">
-Danielle Navarro. 2022. <span>“How to Visualise a Billion Rows of
-Data.”</span> August 23, 2022. <a href="https://blog.djnavarro.net/posts/2022-08-23_visualising-a-billion-rows">https://blog.djnavarro.net/posts/2022-08-23_visualising-a-billion-rows</a>.
+Danielle Navarro. 2022. <span>“How to Visualise a Billion Rows of Data
+in R with Apache Arrow.”</span> August 23, 2022. <a href="https://blog.djnavarro.net/posts/2022-08-23_visualising-a-billion-rows">https://blog.djnavarro.net/posts/2022-08-23_visualising-a-billion-rows</a>.
 </div></div></section></div> ]]></description>
   <category>Apache Arrow</category>
   <category>Data Visualisation</category>
