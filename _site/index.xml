@@ -14,8 +14,700 @@
 <title>Notes from a data witch</title>
 <link>https://blog.djnavarro.net/index.html</link>
 </image>
-<generator>quarto-1.0.38</generator>
-<lastBuildDate>Mon, 22 Aug 2022 14:00:00 GMT</lastBuildDate>
+<generator>quarto-1.1.149</generator>
+<lastBuildDate>Sat, 27 Aug 2022 14:00:00 GMT</lastBuildDate>
+<item>
+  <title>Zero-copy data handover between R and Python, using Arrow and reticulate</title>
+  <dc:creator>Danielle Navarro</dc:creator>
+  <link>https://blog.djnavarro.net/posts/2022-08-25_zero-copy-data-handover-in-arrow/index.html</link>
+  <description><![CDATA[ 
+
+
+
+
+<!-- 
+cover img: https://unsplash.com/photos/k39RGHmLoV8
+artist: Claudio Schwarz
+licence: unsplash free-to-use 
+-->
+<!--------------- my typical setup ----------------->
+<!-- 
+the default python environment is this one:
+/home/danielle/.local/share/r-miniconda/envs/r-reticulate/bin/python
+--->
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[R code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><span class="fu" style="color: #4758AB;">library</span>(reticulate)</span></code></pre></div>
+</div>
+</div>
+<p>The {reticulate} package has an elaborate lookup mechanism that it uses to find a python environment. In this post and the next I want to make sure that I’m always using the <em>same</em> python environment regardless of whether my underlying quarto engine is knitr or jupyter. This is tricky because – thanks to the nightmare that is python environment managment – I’ve managed to accrue four different versions of python on my machine, and (don’t ask me how) two separate copies of miniconda!</p>
+<p>Rather than mess with paths, what I’m going to do in this post is be extremely specific. I’m going to make a point of <em>always</em> telling {reticulate} where to look in order to find python and miniconda.</p>
+<p>Okay, so the specific python environment I want to use is managed by miniconda, so I’m going to use the <code>use_miniconda()</code> command to tell {reticulate} to use it. To avoid all ambiguity I’m going to use the <code>condaenv</code> argument to explicitly specify the path to the python executable:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[R code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb2" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1"><span class="fu" style="color: #4758AB;">use_miniconda</span>(</span>
+<span id="cb2-2">  <span class="at" style="color: #657422;">condaenv =</span> <span class="st" style="color: #20794D;">"/home/danielle/miniconda3/bin/python"</span>, </span>
+<span id="cb2-3">  <span class="at" style="color: #657422;">required =</span> <span class="cn" style="color: #8f5902;">TRUE</span></span>
+<span id="cb2-4">)</span></code></pre></div>
+</div>
+</div>
+<p>The next step (if I hadn’t done this already) would be to install pyarrow in the relevant python environment. The {arrow} package supplies a helper function called <code>install_pyarrow()</code> that you can use to do this, but it’s just a convenience function that calls the relevant {reticulate} functions for you. For this post I’ll do it using {reticulate}, and since my python environment is managed by miniconda I’ll use <code>conda_install()</code>:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[R code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb3" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1"><span class="fu" style="color: #4758AB;">conda_install</span>(</span>
+<span id="cb3-2">  <span class="at" style="color: #657422;">packages =</span> <span class="st" style="color: #20794D;">"pyarrow"</span>, </span>
+<span id="cb3-3">  <span class="at" style="color: #657422;">envname =</span> <span class="st" style="color: #20794D;">"/home/danielle/miniconda3"</span>, </span>
+<span id="cb3-4">  <span class="at" style="color: #657422;">conda =</span> <span class="st" style="color: #20794D;">"/home/danielle/miniconda3/bin/conda"</span></span>
+<span id="cb3-5">)</span></code></pre></div>
+</div>
+</div>
+<p>In this code, <code>packages</code> is the name of the to-be-installed python module, <code>envname</code> is the path to the conda environment, and <code>conda</code> is the path to the conda executable. You probably don’t need to be this explicit because {reticulate} generally handles these things nicely and manages its own copies of python and miniconda, but I am deliberately <em>not</em> using the reticulate-installed versions here!</p>
+
+<!-- <blockquote class="twitter-tweet"><p lang="en" dir="ltr">And with an arrow table (or dataset) that handoff can be zero copy, zero serialization. We need to improve our docs around this but there’s an example in the tests that shows it off: <a href="https://t.co/ff5Am0fsCW">https://t.co/ff5Am0fsCW</a> (some) docs: <a href="https://t.co/hg9G2NenIM">https://t.co/hg9G2NenIM</a></p>&mdash; Jonathan Keane (@jonkeane) <a href="https://twitter.com/jonkeane/status/1560016227824721920?ref_src=twsrc%5Etfw">August 17, 2022</a></blockquote> <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>  -->
+<section id="check-my-installation" class="level2">
+<h2 class="anchored" data-anchor-id="check-my-installation">Check my installation</h2>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[python code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb4" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb4-1"><span class="im" style="color: #00769E;">import</span> sys</span>
+<span id="cb4-2"><span class="bu" style="color: null;">print</span>(sys.version)</span>
+<span id="cb4-3"><span class="bu" style="color: null;">print</span>(sys.executable)</span></code></pre></div>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>3.9.12 (main, Apr  5 2022, 07:05:27) 
+[GCC 7.5.0]
+/home/danielle/miniconda3/bin/python</code></pre>
+</div>
+</div>
+<p>Next let’s import {pyarrow} and check the version:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[python code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb6" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb6-1"><span class="im" style="color: #00769E;">import</span> pyarrow</span>
+<span id="cb6-2">pyarrow.__version__</span></code></pre></div>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>'8.0.0'</code></pre>
+</div>
+</div>
+<p>Because life on linux is dark and full of terrors, this didn’t actually work for me the first time I tried it and naturally I was filled with despair. Instead of the nice output above, I got an error saying:</p>
+<pre><code>libstdc++.so.6: version `GLIBCXX_3.4.22' not found</code></pre>
+<p>As usual, googling the error message led me to discover I needed to update the relevant library. It turned out to be an easy fix with this command:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[at the terminal]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb9" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb9-1"><span class="fu" style="color: #4758AB;">sudo</span> apt-get update</span>
+<span id="cb9-2"><span class="fu" style="color: #4758AB;">sudo</span> apt-get install libstdc++6</span></code></pre></div>
+</div>
+</div>
+</section>
+<section id="handover-from-r-to-python" class="level2">
+<h2 class="anchored" data-anchor-id="handover-from-r-to-python">Handover from R to Python</h2>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[R code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb10" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1"><span class="co" style="color: #5E5E5E;"># R</span></span>
+<span id="cb10-2">arr <span class="ot" style="color: #003B4F;">&lt;-</span> arrow<span class="sc" style="color: #5E5E5E;">::</span><span class="fu" style="color: #4758AB;">arrow_table</span>(iris)</span>
+<span id="cb10-3">arr</span></code></pre></div>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Table
+150 rows x 5 columns
+$Sepal.Length &lt;double&gt;
+$Sepal.Width &lt;double&gt;
+$Petal.Length &lt;double&gt;
+$Petal.Width &lt;double&gt;
+$Species &lt;dictionary&lt;values=string, indices=int8&gt;&gt;
+
+See $metadata for additional Schema metadata</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb12" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb12-1">py_arr <span class="ot" style="color: #003B4F;">&lt;-</span> reticulate<span class="sc" style="color: #5E5E5E;">::</span><span class="fu" style="color: #4758AB;">r_to_py</span>(arr)</span>
+<span id="cb12-2">py_arr</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>pyarrow.Table
+Sepal.Length: double
+Sepal.Width: double
+Petal.Length: double
+Petal.Width: double
+Species: dictionary&lt;values=string, indices=int8, ordered=0&gt;
+----
+Sepal.Length: [[5.1,4.9,4.7,4.6,5,...,6.7,6.3,6.5,6.2,5.9]]
+Sepal.Width: [[3.5,3,3.2,3.1,3.6,...,3,2.5,3,3.4,3]]
+Petal.Length: [[1.4,1.4,1.3,1.5,1.4,...,5.2,5,5.2,5.4,5.1]]
+Petal.Width: [[0.2,0.2,0.2,0.2,0.2,...,2.3,1.9,2,2.3,1.8]]
+Species: [  -- dictionary:
+["setosa","versicolor","virginica"]  -- indices:
+[0,0,0,0,0,...,2,2,2,2,2]]</code></pre>
+</div>
+</div>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[python code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb14" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb14-1"><span class="co" style="color: #5E5E5E;"># python</span></span>
+<span id="cb14-2">r.py_arr</span></code></pre></div>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>pyarrow.Table
+Sepal.Length: double
+Sepal.Width: double
+Petal.Length: double
+Petal.Width: double
+Species: dictionary&lt;values=string, indices=int8, ordered=0&gt;
+----
+Sepal.Length: [[5.1,4.9,4.7,4.6,5,...,6.7,6.3,6.5,6.2,5.9]]
+Sepal.Width: [[3.5,3,3.2,3.1,3.6,...,3,2.5,3,3.4,3]]
+Petal.Length: [[1.4,1.4,1.3,1.5,1.4,...,5.2,5,5.2,5.4,5.1]]
+Petal.Width: [[0.2,0.2,0.2,0.2,0.2,...,2.3,1.9,2,2.3,1.8]]
+Species: [  -- dictionary:
+["setosa","versicolor","virginica"]  -- indices:
+[0,0,0,0,0,...,2,2,2,2,2]]</code></pre>
+</div>
+</div>
+</section>
+<section id="handover-from-python-to-r" class="level2">
+<h2 class="anchored" data-anchor-id="handover-from-python-to-r">Handover from Python to R</h2>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[python code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb16" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb16-1">boring <span class="op" style="color: #5E5E5E;">=</span> pyarrow.array([<span class="dv" style="color: #AD0000;">1</span>,<span class="dv" style="color: #AD0000;">2</span>,<span class="dv" style="color: #AD0000;">3</span>])</span>
+<span id="cb16-2">boring</span></code></pre></div>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>&lt;pyarrow.lib.Int64Array object at 0x7f2fe18f3400&gt;
+[
+  1,
+  2,
+  3
+]</code></pre>
+</div>
+</div>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[R code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb18" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1">reticulate<span class="sc" style="color: #5E5E5E;">::</span>py<span class="sc" style="color: #5E5E5E;">$</span>boring</span></code></pre></div>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Array
+&lt;int64&gt;
+[
+  1,
+  2,
+  3
+]</code></pre>
+</div>
+</div>
+<p><br><br></p>
+<!--------------- appendices go here ----------------->
+<div class="cell">
+
+</div>
+
+
+</section>
+
+<div id="quarto-appendix" class="default"><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
+  author = {Danielle Navarro},
+  editor = {},
+  title = {Zero-Copy Data Handover Between {R} and {Python,} Using
+    {Arrow} and Reticulate},
+  date = {2022-08-28},
+  url = {https://blog.djnavarro.net/posts/2022-08-25_zero-copy-data-handover-in-arrow},
+  langid = {en}
+}
+</code></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2022" class="csl-entry quarto-appendix-citeas">
+Danielle Navarro. 2022. <span>“Zero-Copy Data Handover Between R and
+Python, Using Arrow and Reticulate.”</span> August 28, 2022. <a href="https://blog.djnavarro.net/posts/2022-08-25_zero-copy-data-handover-in-arrow">https://blog.djnavarro.net/posts/2022-08-25_zero-copy-data-handover-in-arrow</a>.
+</div></div></section></div> ]]></description>
+  <category>Apache Arrow</category>
+  <category>R</category>
+  <category>Python</category>
+  <guid>https://blog.djnavarro.net/posts/2022-08-25_zero-copy-data-handover-in-arrow/index.html</guid>
+  <pubDate>Sat, 27 Aug 2022 14:00:00 GMT</pubDate>
+  <media:content url="https://blog.djnavarro.net/posts/2022-08-25_zero-copy-data-handover-in-arrow/img/cover.jpg" medium="image" type="image/jpeg"/>
+</item>
+<item>
+  <title>Zero-copy data handover between R and Python, using Arrow and rpy2</title>
+  <dc:creator>Danielle Navarro</dc:creator>
+  <link>https://blog.djnavarro.net/posts/2022-08-25_zero-copy-data-handover-in-arrow-part-2/index.html</link>
+  <description><![CDATA[ 
+
+
+
+
+<!-- 
+cover img: https://unsplash.com/photos/k39RGHmLoV8
+artist: Claudio Schwarz
+licence: unsplash free-to-use 
+-->
+<!-- 
+AT THE TERMINAL:
+
+quarto render ~/GitHub/sites/quarto-blog/posts/2022-08-25_zero-copy-data-handover-in-arrow-part-2/index.qmd --execute-daemon-restart
+
+-->
+<p>https://rpy2.github.io/</p>
+<p>https://rviews.rstudio.com/2022/05/25/calling-r-from-python-with-rpy2/</p>
+<p>https://arrow.apache.org/docs/python/integration/python_r.html</p>
+<p>installing rpy2</p>
+<pre><code>pip install rpy2
+pip install rpy2-arrow</code></pre>
+<p>installing pyarrow</p>
+<pre><code>conda install pyarrow</code></pre>
+<pre><code>conda install pandas</code></pre>
+<section id="check-my-pyarrow" class="level2">
+<h2 class="anchored" data-anchor-id="check-my-pyarrow">Check my pyarrow</h2>
+<div class="cell" data-execution_count="1">
+<div class="sourceCode cell-code" id="cb4" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb4-1"><span class="co" style="color: #5E5E5E;"># python</span></span>
+<span id="cb4-2"><span class="im" style="color: #00769E;">import</span> sys</span>
+<span id="cb4-3"><span class="bu" style="color: null;">print</span>(sys.version)</span>
+<span id="cb4-4"><span class="bu" style="color: null;">print</span>(sys.executable)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>3.9.12 (main, Apr  5 2022, 06:56:58) 
+[GCC 7.5.0]
+/home/danielle/miniconda3/bin/python</code></pre>
+</div>
+</div>
+<div class="cell" data-execution_count="2">
+<div class="sourceCode cell-code" id="cb6" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb6-1"><span class="co" style="color: #5E5E5E;"># python</span></span>
+<span id="cb6-2"><span class="im" style="color: #00769E;">import</span> pyarrow</span>
+<span id="cb6-3">pyarrow.__version__</span></code></pre></div>
+<div class="cell-output cell-output-display" data-execution_count="2">
+<pre><code>'8.0.0'</code></pre>
+</div>
+</div>
+</section>
+<section id="panda-to-arrow-table" class="level2">
+<h2 class="anchored" data-anchor-id="panda-to-arrow-table">Panda to Arrow Table</h2>
+<p>https://cdhrdatasys.anu.edu.au/tobecontinued/</p>
+<div class="cell" data-execution_count="3">
+<div class="sourceCode cell-code" id="cb8" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb8-1"><span class="im" style="color: #00769E;">import</span> pandas</span>
+<span id="cb8-2">pandas.__version__</span></code></pre></div>
+<div class="cell-output cell-output-display" data-execution_count="3">
+<pre><code>'1.4.3'</code></pre>
+</div>
+</div>
+<div class="cell" data-execution_count="4">
+<div class="sourceCode cell-code" id="cb10" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb10-1">fiction <span class="op" style="color: #5E5E5E;">=</span> pandas.read_csv(<span class="st" style="color: #20794D;">"newspaper-fiction.csv"</span>, low_memory <span class="op" style="color: #5E5E5E;">=</span> <span class="va" style="color: #111111;">False</span>)</span>
+<span id="cb10-2">fiction.head()</span></code></pre></div>
+<div class="cell-output cell-output-display" data-execution_count="4">
+
+<div>
+
+<table class="dataframe table table-sm table-striped">
+  <thead>
+    <tr>
+      <th></th>
+      <th>Trove ID</th>
+      <th>Common Title</th>
+      <th>Publication Title</th>
+      <th>Start Date</th>
+      <th>End Date</th>
+      <th>Additional Info</th>
+      <th>Length</th>
+      <th>Curated Dataset</th>
+      <th>Identified Sources</th>
+      <th>Publication Source</th>
+      <th>...</th>
+      <th>Other Names</th>
+      <th>Publication Author</th>
+      <th>Gender</th>
+      <th>Nationality</th>
+      <th>Nationality Details</th>
+      <th>Author Details</th>
+      <th>Inscribed Gender</th>
+      <th>Inscribed Nationality</th>
+      <th>Signature</th>
+      <th>Name Category</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>0</th>
+      <td>1</td>
+      <td>The Mystery of Edwin Drood</td>
+      <td>The Mystery of Edwin Drood</td>
+      <td>1871-03-04</td>
+      <td>1871-06-03</td>
+      <td>NaN</td>
+      <td>0.0</td>
+      <td>Y</td>
+      <td>LCVF</td>
+      <td>NaN</td>
+      <td>...</td>
+      <td>NaN</td>
+      <td>Dickens, Charles</td>
+      <td>Male</td>
+      <td>British</td>
+      <td>NaN</td>
+      <td>LCVF</td>
+      <td>Male</td>
+      <td>British</td>
+      <td>NaN</td>
+      <td>Attributed</td>
+    </tr>
+    <tr>
+      <th>1</th>
+      <td>2</td>
+      <td>The Mystery of Edwin Drood</td>
+      <td>The Mystery of Edwin Drood</td>
+      <td>1871-03-07</td>
+      <td>1871-05-16</td>
+      <td>NaN</td>
+      <td>0.0</td>
+      <td>Y</td>
+      <td>LCVF</td>
+      <td>NaN</td>
+      <td>...</td>
+      <td>NaN</td>
+      <td>Dickens, Charles</td>
+      <td>Male</td>
+      <td>British</td>
+      <td>NaN</td>
+      <td>LCVF</td>
+      <td>Male</td>
+      <td>British</td>
+      <td>NaN</td>
+      <td>Attributed</td>
+    </tr>
+    <tr>
+      <th>2</th>
+      <td>3</td>
+      <td>Sporting Recollections in Various Countries</td>
+      <td>Sporting Recollections in Various Countries</td>
+      <td>1847-06-16</td>
+      <td>1847-07-07</td>
+      <td>NaN</td>
+      <td>0.0</td>
+      <td>Y</td>
+      <td>WPEDIA</td>
+      <td>Sunday Times</td>
+      <td>...</td>
+      <td>NaN</td>
+      <td>Viardot, M. Louis</td>
+      <td>Male</td>
+      <td>French</td>
+      <td>NaN</td>
+      <td>WPEDIA</td>
+      <td>Male</td>
+      <td>British</td>
+      <td>NaN</td>
+      <td>Attributed</td>
+    </tr>
+    <tr>
+      <th>3</th>
+      <td>4</td>
+      <td>Brownie's Triumph</td>
+      <td>The Jewels</td>
+      <td>1880-05-08</td>
+      <td>1880-08-14</td>
+      <td>NaN</td>
+      <td>0.0</td>
+      <td>Y</td>
+      <td>TJW</td>
+      <td>NaN</td>
+      <td>...</td>
+      <td>Sarah Elizabeth Forbush Downs; Downs, Mrs Geor...</td>
+      <td>Unattributed</td>
+      <td>Female</td>
+      <td>American</td>
+      <td>NaN</td>
+      <td>WPEDIA</td>
+      <td>Uninscribed</td>
+      <td>British</td>
+      <td>NaN</td>
+      <td>Unattributed</td>
+    </tr>
+    <tr>
+      <th>4</th>
+      <td>5</td>
+      <td>The Forsaken Bride</td>
+      <td>Abandoned</td>
+      <td>1880-08-21</td>
+      <td>1880-12-18</td>
+      <td>Fiction. From English, American and Other Peri...</td>
+      <td>0.0</td>
+      <td>Y</td>
+      <td>TJW</td>
+      <td>NaN</td>
+      <td>...</td>
+      <td>Sarah Elizabeth Forbush Downs; Downs, Mrs Geor...</td>
+      <td>Unattributed</td>
+      <td>Female</td>
+      <td>American</td>
+      <td>NaN</td>
+      <td>WPEDIA</td>
+      <td>Uninscribed</td>
+      <td>British</td>
+      <td>NaN</td>
+      <td>Unattributed</td>
+    </tr>
+  </tbody>
+</table>
+<p>5 rows × 28 columns</p>
+</div>
+</div>
+</div>
+<div class="cell" data-execution_count="5">
+<div class="sourceCode cell-code" id="cb11" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb11-1">pyarrow_fiction <span class="op" style="color: #5E5E5E;">=</span> pyarrow.Table.from_pandas(fiction)</span>
+<span id="cb11-2">pyarrow_fiction</span></code></pre></div>
+<div class="cell-output cell-output-display" data-execution_count="5">
+<pre><code>pyarrow.Table
+Trove ID: int64
+Common Title: string
+Publication Title: string
+Start Date: string
+End Date: string
+Additional Info: string
+Length: double
+Curated Dataset: string
+Identified Sources: string
+Publication Source: string
+Newspaper ID: int64
+Newspaper: string
+Newspaper Common Title: string
+Newspaper Location: string
+Newspaper Type: string
+Colony/State: string
+Author ID: int64
+Author: string
+Other Names: string
+Publication Author: string
+Gender: string
+Nationality: string
+Nationality Details: string
+Author Details: string
+Inscribed Gender: string
+Inscribed Nationality: string
+Signature: string
+Name Category : string
+----
+Trove ID: [[1,2,3,4,5,...,35491,35492,35493,35494,35495]]
+Common Title: [["The Mystery of Edwin Drood","The Mystery of Edwin Drood","Sporting Recollections in Various Countries","Brownie's Triumph","The Forsaken Bride",...,"The Heart of Maureen","His Lawful Wife","Love's Reward","Only a Flirt","The Doctor's Protegee"]]
+Publication Title: [["The Mystery of Edwin Drood","The Mystery of Edwin Drood","Sporting Recollections in Various Countries","The Jewels","Abandoned",...,"The Heart of Maureen","His Lawful Wife","Love's Reward","Only a Flirt","The Doctor's Protegee"]]
+Start Date: [["1871-03-04","1871-03-07","1847-06-16","1880-05-08","1880-08-21",...,"1914-01-06","1912-10-26","1911-02-04","1916-05-06","1911-11-25"]]
+End Date: [["1871-06-03","1871-05-16","1847-07-07","1880-08-14","1880-12-18",...,"1914-01-06","1912-10-26","1911-02-04","1916-05-06","1911-11-25"]]
+Additional Info: [[null,null,null,null,"Fiction. From English, American and Other Periodicals",...,"Published by special arrangement. All rights reserved.","Published by special arrangement. All rights reserved.","Published by special arrangement. All rights reserved.","All  Rights Reserved","Published by special arrangement. All rights reserved."]]
+Length: [[0,0,0,0,0,...,0,0,0,0,0]]
+Curated Dataset: [["Y","Y","Y","Y","Y",...,"N","N","N","N","N"]]
+Identified Sources: [["LCVF","LCVF","WPEDIA","TJW","TJW",...,null,null,null,null,null]]
+Publication Source: [[null,null,"Sunday Times",null,null,...,null,null,null,null,null]]
+...</code></pre>
+</div>
+</div>
+</section>
+<section id="introducing-rpy2" class="level2">
+<h2 class="anchored" data-anchor-id="introducing-rpy2">Introducing rpy2</h2>
+<div class="cell" data-execution_count="6">
+<div class="sourceCode cell-code" id="cb13" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb13-1"><span class="im" style="color: #00769E;">import</span> rpy2.robjects <span class="im" style="color: #00769E;">as</span> robjects</span>
+<span id="cb13-2"><span class="im" style="color: #00769E;">from</span> rpy2.robjects.packages <span class="im" style="color: #00769E;">import</span> importr, data</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+R version 4.2.1 (2022-06-23)
+</code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>🌈</code></pre>
+</div>
+</div>
+<div class="cell" data-execution_count="7">
+<div class="sourceCode cell-code" id="cb16" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb16-1">base <span class="op" style="color: #5E5E5E;">=</span> importr(<span class="st" style="color: #20794D;">'base'</span>)</span>
+<span id="cb16-2">base.R_version_string</span></code></pre></div>
+<div class="cell-output cell-output-display" data-execution_count="7">
+
+
+        <span>StrVector with 1 elements.</span>
+        <table>
+        <tbody>
+          <tr>
+          
+            <td>
+            'R version 4.2.1 (2022-06-23)'
+            </td>
+          
+          </tr>
+        </tbody>
+        </table>
+        
+</div>
+</div>
+</section>
+<section id="passing-tables-from-python-to-r" class="level2">
+<h2 class="anchored" data-anchor-id="passing-tables-from-python-to-r">Passing Tables from Python to R</h2>
+<p>https://rpy2.github.io/rpy2-arrow/version/main/html/index.html</p>
+<div class="cell" data-execution_count="8">
+<div class="sourceCode cell-code" id="cb17" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb17-1"><span class="im" style="color: #00769E;">import</span> rpy2_arrow.pyarrow_rarrow <span class="im" style="color: #00769E;">as</span> pyra</span>
+<span id="cb17-2"></span>
+<span id="cb17-3">rarrow_fiction <span class="op" style="color: #5E5E5E;">=</span> pyra.pyarrow_to_r_table(pyarrow_fiction)</span>
+<span id="cb17-4">rarrow_fiction</span></code></pre></div>
+<div class="cell-output cell-output-display" data-execution_count="8">
+<pre><code>&lt;rpy2.robjects.environments.Environment object at 0x7f55ed64f640&gt; [RTYPES.ENVSXP]
+R classes: ('Table', 'ArrowTabular', 'ArrowObject', 'R6')
+n items: 36</code></pre>
+</div>
+</div>
+</section>
+<section id="calling-r-code" class="level2">
+<h2 class="anchored" data-anchor-id="calling-r-code">Calling R code</h2>
+<div class="cell" data-execution_count="9">
+<div class="sourceCode cell-code" id="cb19" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb19-1"><span class="op" style="color: #5E5E5E;">%</span>load_ext rpy2.ipython</span></code></pre></div>
+</div>
+<div class="cell" data-execution_count="10">
+<div class="sourceCode cell-code" id="cb20" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb20-1"><span class="op" style="color: #5E5E5E;">%%</span>R</span>
+<span id="cb20-2">suppressMessages({</span>
+<span id="cb20-3">  library(dplyr)</span>
+<span id="cb20-4">  library(arrow)</span>
+<span id="cb20-5">})</span></code></pre></div>
+</div>
+<div class="cell" data-execution_count="11">
+<div class="sourceCode cell-code" id="cb21" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb21-1"><span class="op" style="color: #5E5E5E;">%%</span>R <span class="op" style="color: #5E5E5E;">-</span>i rarrow_fiction</span>
+<span id="cb21-2">gender <span class="op" style="color: #5E5E5E;">&lt;-</span> rarrow_fiction <span class="op" style="color: #5E5E5E;">|&gt;</span> </span>
+<span id="cb21-3">  count(Gender) <span class="op" style="color: #5E5E5E;">|&gt;</span></span>
+<span id="cb21-4">  compute()</span>
+<span id="cb21-5">  </span>
+<span id="cb21-6">gender</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Table</code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code></code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>6 rows x 2 columns
+$Gender &lt;string&gt;
+$n &lt;int64&gt;
+
+See $metadata for additional Schema metadata</code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code></code></pre>
+</div>
+</div>
+</section>
+<section id="passing-tables-from-r-to-python" class="level2">
+<h2 class="anchored" data-anchor-id="passing-tables-from-r-to-python">Passing Tables from R to Python</h2>
+<div class="cell" data-execution_count="12">
+<div class="sourceCode cell-code" id="cb26" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb26-1"><span class="im" style="color: #00769E;">import</span> rpy2.robjects <span class="im" style="color: #00769E;">as</span> robjects</span>
+<span id="cb26-2">r_gender <span class="op" style="color: #5E5E5E;">=</span> robjects.r(<span class="st" style="color: #20794D;">'gender'</span>)</span>
+<span id="cb26-3">r_gender</span></code></pre></div>
+<div class="cell-output cell-output-display" data-execution_count="12">
+<pre><code>&lt;rpy2.robjects.environments.Environment object at 0x7f55f88ff4c0&gt; [RTYPES.ENVSXP]
+R classes: ('Table', 'ArrowTabular', 'ArrowObject', 'R6')
+n items: 36</code></pre>
+</div>
+</div>
+<div class="cell" data-execution_count="13">
+<div class="sourceCode cell-code" id="cb28" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb28-1">py_gender <span class="op" style="color: #5E5E5E;">=</span> pyra.rarrow_to_py_table(r_gender)</span>
+<span id="cb28-2">py_gender</span></code></pre></div>
+<div class="cell-output cell-output-display" data-execution_count="13">
+<pre><code>pyarrow.Table
+Gender: string
+n: int64
+----
+Gender: [["Male","Female","Unknown","Both","Multiple",null]]
+n: [[11299,6878,15083,106,176,31]]</code></pre>
+</div>
+</div>
+</section>
+<section id="back-to-pandas" class="level2">
+<h2 class="anchored" data-anchor-id="back-to-pandas">Back to Pandas</h2>
+<div class="cell" data-execution_count="14">
+<div class="sourceCode cell-code" id="cb30" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb30-1">panda_gender <span class="op" style="color: #5E5E5E;">=</span> pyarrow.Table.to_pandas(py_gender)</span>
+<span id="cb30-2">panda_gender</span></code></pre></div>
+<div class="cell-output cell-output-display" data-execution_count="14">
+
+<div>
+
+<table class="dataframe table table-sm table-striped">
+  <thead>
+    <tr>
+      <th></th>
+      <th>Gender</th>
+      <th>n</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>0</th>
+      <td>Male</td>
+      <td>11299</td>
+    </tr>
+    <tr>
+      <th>1</th>
+      <td>Female</td>
+      <td>6878</td>
+    </tr>
+    <tr>
+      <th>2</th>
+      <td>Unknown</td>
+      <td>15083</td>
+    </tr>
+    <tr>
+      <th>3</th>
+      <td>Both</td>
+      <td>106</td>
+    </tr>
+    <tr>
+      <th>4</th>
+      <td>Multiple</td>
+      <td>176</td>
+    </tr>
+    <tr>
+      <th>5</th>
+      <td>None</td>
+      <td>31</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+</div>
+</div>
+
+
+</section>
+
+<div id="quarto-appendix" class="default"><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
+  author = {Danielle Navarro},
+  editor = {},
+  title = {Zero-Copy Data Handover Between {R} and {Python,} Using
+    {Arrow} and Rpy2},
+  date = {2022-08-28},
+  url = {https://blog.djnavarro.net/posts/2022-08-25_zero-copy-data-handover-in-arrow-part-2},
+  langid = {en}
+}
+</code></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2022" class="csl-entry quarto-appendix-citeas">
+Danielle Navarro. 2022. <span>“Zero-Copy Data Handover Between R and
+Python, Using Arrow and Rpy2.”</span> August 28, 2022. <a href="https://blog.djnavarro.net/posts/2022-08-25_zero-copy-data-handover-in-arrow-part-2">https://blog.djnavarro.net/posts/2022-08-25_zero-copy-data-handover-in-arrow-part-2</a>.
+</div></div></section></div> ]]></description>
+  <category>Apache Arrow</category>
+  <category>R</category>
+  <category>Python</category>
+  <guid>https://blog.djnavarro.net/posts/2022-08-25_zero-copy-data-handover-in-arrow-part-2/index.html</guid>
+  <pubDate>Sat, 27 Aug 2022 14:00:00 GMT</pubDate>
+  <media:content url="https://blog.djnavarro.net/posts/2022-08-25_zero-copy-data-handover-in-arrow-part-2/img/cover.jpg" medium="image" type="image/jpeg"/>
+</item>
 <item>
   <title>How to visualise a billion rows of data in R with Apache Arrow</title>
   <dc:creator>Danielle Navarro</dc:creator>
@@ -332,7 +1024,7 @@ $ pickup &lt;int&gt; 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 <p>Thank you to <a href="https://twitter.com/kae_suarez">Kae Suarez</a>, <a href="https://twitter.com/keithadambritt">Keith Britt</a>, and <a href="https://twitter.com/fmic_">François Michonneau</a> for reviewing this post.</p>
 
 
-</div></section><section class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
+</div></section><section id="footnotes" class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
 
 <ol>
 <li id="fn1"><p>This post is adapted from the <a href="https://github.com/djnavarro/arrow-nyc-taxi-scatter">NYC taxi scatter GitHub repository</a> that I put together to chat about on <a href="https://www.youtube.com/c/TheDataThread/about">The Data Thread</a> live interviews series, <em>Pulling the Thread</em>↩︎</p></li>
@@ -342,6 +1034,7 @@ $ pickup &lt;int&gt; 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 </ol>
 </section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
   author = {Danielle Navarro},
+  editor = {},
   title = {How to Visualise a Billion Rows of Data in {R} with {Apache}
     {Arrow}},
   date = {2022-08-23},
@@ -357,141 +1050,6 @@ in R with Apache Arrow.”</span> August 23, 2022. <a href="https://blog.djnavar
   <guid>https://blog.djnavarro.net/posts/2022-08-23_visualising-a-billion-rows/index.html</guid>
   <pubDate>Mon, 22 Aug 2022 14:00:00 GMT</pubDate>
   <media:content url="https://blog.djnavarro.net/posts/2022-08-23_visualising-a-billion-rows/img/cover.jpg" medium="image" type="image/jpeg"/>
-</item>
-<item>
-  <title>Zero-copy data handover between R and Python, using Arrow and reticulate</title>
-  <dc:creator>Danielle Navarro</dc:creator>
-  <link>https://blog.djnavarro.net/posts/2022-08-25_zero-copy-data-handover-in-arrow/index.html</link>
-  <description><![CDATA[ 
-
-
-
-
-<!-- 
-cover img: https://unsplash.com/photos/k39RGHmLoV8
-artist: Claudio Schwarz
-licence: unsplash free-to-use 
--->
-<!--------------- my typical setup ----------------->
-<!-- 
-the default python environment is this one:
-/home/danielle/.local/share/r-miniconda/envs/r-reticulate/bin/python
---->
-<!--
-conda_install("arrow_env", "pyarrow")
--->
-<div class="cell">
-<div class="sourceCode cell-code" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1">reticulate<span class="sc" style="color: #5E5E5E;">::</span><span class="fu" style="color: #4758AB;">use_virtualenv</span>(</span>
-<span id="cb1-2">  <span class="at" style="color: #657422;">virtualenv =</span> <span class="st" style="color: #20794D;">"/home/danielle/.virtualenvs/arrow-env"</span>, </span>
-<span id="cb1-3">  <span class="at" style="color: #657422;">required =</span> <span class="cn" style="color: #8f5902;">TRUE</span></span>
-<span id="cb1-4">)</span></code></pre></div>
-</div>
-<!--------------- post begins here ----------------->
-<p>BLAH</p>
-
-<!-- <blockquote class="twitter-tweet"><p lang="en" dir="ltr">And with an arrow table (or dataset) that handoff can be zero copy, zero serialization. We need to improve our docs around this but there’s an example in the tests that shows it off: <a href="https://t.co/ff5Am0fsCW">https://t.co/ff5Am0fsCW</a> (some) docs: <a href="https://t.co/hg9G2NenIM">https://t.co/hg9G2NenIM</a></p>&mdash; Jonathan Keane (@jonkeane) <a href="https://twitter.com/jonkeane/status/1560016227824721920?ref_src=twsrc%5Etfw">August 17, 2022</a></blockquote> <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>  -->
-<section id="check-my-pyarrow" class="level2">
-<h2 class="anchored" data-anchor-id="check-my-pyarrow">Check my pyarrow</h2>
-<!-- arrow::install_pyarrow() -->
-<div class="cell">
-<div class="sourceCode cell-code" id="cb2" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb2-1"><span class="co" style="color: #5E5E5E;"># python</span></span>
-<span id="cb2-2"><span class="im" style="color: #00769E;">import</span> sys</span>
-<span id="cb2-3"><span class="bu" style="color: null;">print</span>(sys.version)</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>3.8.10 (default, Jun 22 2022, 20:18:18) 
-[GCC 9.4.0]</code></pre>
-</div>
-<div class="sourceCode cell-code" id="cb4" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb4-1"><span class="bu" style="color: null;">print</span>(sys.executable)</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>/home/danielle/.virtualenvs/arrow-env/bin/python</code></pre>
-</div>
-</div>
-
-
-</section>
-
-<div id="quarto-appendix" class="default"><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
-  author = {Danielle Navarro},
-  title = {Zero-Copy Data Handover Between {R} and {Python,} Using
-    {Arrow} and Reticulate},
-  date = {2022-05-28},
-  url = {https://blog.djnavarro.net/posts/2022-08-25_zero-copy-data-handover-in-arrow},
-  langid = {en}
-}
-</code></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2022" class="csl-entry quarto-appendix-citeas">
-Danielle Navarro. 2022. <span>“Zero-Copy Data Handover Between R and
-Python, Using Arrow and Reticulate.”</span> May 28, 2022. <a href="https://blog.djnavarro.net/posts/2022-08-25_zero-copy-data-handover-in-arrow">https://blog.djnavarro.net/posts/2022-08-25_zero-copy-data-handover-in-arrow</a>.
-</div></div></section></div> ]]></description>
-  <category>Apache Arrow</category>
-  <category>R</category>
-  <category>Python</category>
-  <guid>https://blog.djnavarro.net/posts/2022-08-25_zero-copy-data-handover-in-arrow/index.html</guid>
-  <pubDate>Fri, 27 May 2022 14:00:00 GMT</pubDate>
-  <media:content url="https://blog.djnavarro.net/posts/2022-08-25_zero-copy-data-handover-in-arrow/img/cover.jpg" medium="image" type="image/jpeg"/>
-</item>
-<item>
-  <title>Zero-copy data handover between R and Python, using Arrow and rpy2</title>
-  <dc:creator>Danielle Navarro</dc:creator>
-  <link>https://blog.djnavarro.net/posts/2022-08-25_zero-copy-data-handover-in-arrow-part-2/index.html</link>
-  <description><![CDATA[ 
-
-
-
-
-<!-- 
-cover img: https://unsplash.com/photos/k39RGHmLoV8
-artist: Claudio Schwarz
-licence: unsplash free-to-use 
--->
-<!-- 
-TO MAKE SURE I USE THE RIGHT PYTHON ENVIRONMENT GR.
-
-quarto render ~/GitHub/sites/quarto-blog/posts/2022-08-25_zero-copy-data-handover-in-arrow-part-2/index.qmd 
-
--->
-<section id="check-my-pyarrow" class="level2">
-<h2 class="anchored" data-anchor-id="check-my-pyarrow">Check my pyarrow</h2>
-<div class="cell" data-execution_count="1">
-<div class="sourceCode cell-code" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb1-1"><span class="co" style="color: #5E5E5E;"># python</span></span>
-<span id="cb1-2"><span class="im" style="color: #00769E;">import</span> sys</span>
-<span id="cb1-3"><span class="bu" style="color: null;">print</span>(sys.version)</span>
-<span id="cb1-4"><span class="bu" style="color: null;">print</span>(sys.executable)</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>3.9.12 (main, Apr  5 2022, 06:56:58) 
-[GCC 7.5.0]
-/home/danielle/miniconda3/bin/python</code></pre>
-</div>
-</div>
-<div class="cell" data-execution_count="2">
-<div class="sourceCode cell-code" id="cb3" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb3-1"><span class="co" style="color: #5E5E5E;"># python</span></span>
-<span id="cb3-2"><span class="im" style="color: #00769E;">import</span> pyarrow</span>
-<span id="cb3-3">pyarrow.__version__</span></code></pre></div>
-<div class="cell-output cell-output-display" data-execution_count="2">
-<pre><code>'8.0.0'</code></pre>
-</div>
-</div>
-
-
-</section>
-
-<div id="quarto-appendix" class="default"><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
-  author = {Danielle Navarro},
-  title = {Zero-Copy Data Handover Between {R} and {Python,} Using
-    {Arrow} and Rpy2},
-  date = {2022-05-28},
-  url = {https://blog.djnavarro.net/posts/2022-08-25_zero-copy-data-handover-in-arrow-part-2},
-  langid = {en}
-}
-</code></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2022" class="csl-entry quarto-appendix-citeas">
-Danielle Navarro. 2022. <span>“Zero-Copy Data Handover Between R and
-Python, Using Arrow and Rpy2.”</span> May 28, 2022. <a href="https://blog.djnavarro.net/posts/2022-08-25_zero-copy-data-handover-in-arrow-part-2">https://blog.djnavarro.net/posts/2022-08-25_zero-copy-data-handover-in-arrow-part-2</a>.
-</div></div></section></div> ]]></description>
-  <category>Apache Arrow</category>
-  <category>R</category>
-  <category>Python</category>
-  <guid>https://blog.djnavarro.net/posts/2022-08-25_zero-copy-data-handover-in-arrow-part-2/index.html</guid>
-  <pubDate>Fri, 27 May 2022 14:00:00 GMT</pubDate>
-  <media:content url="https://blog.djnavarro.net/posts/2022-08-25_zero-copy-data-handover-in-arrow-part-2/img/cover.jpg" medium="image" type="image/jpeg"/>
 </item>
 <item>
   <title>Arrays and tables in Arrow</title>
@@ -1718,7 +2276,7 @@ See $metadata for additional Schema metadata</code></pre>
 </section>
 
 
-<div id="quarto-appendix" class="default"><section class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
+<div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
 
 <ol>
 <li id="fn1"><p>Me.↩︎</p></li>
@@ -1737,6 +2295,7 @@ See $metadata for additional Schema metadata</code></pre>
 </ol>
 </section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
   author = {Danielle Navarro},
+  editor = {},
   title = {Arrays and Tables in {Arrow}},
   date = {2022-05-25},
   url = {https://blog.djnavarro.net/posts/2022-05-25_arrays-and-tables-in-arrow},
@@ -2073,7 +2632,7 @@ Danielle Navarro. 2022. <span>“Arrays and Tables in Arrow.”</span> May
 </div></section><section id="details" class="level2 appendix"><h2 class="quarto-appendix-heading">Details</h2><div class="quarto-appendix-contents">
 
 <p><a href="https://github.com/djnavarro/quarto-blog/tree/main/posts/2022-04-20_porting-to-quarto/index.qmd">source code</a>, <a href="https://github.com/djnavarro/quarto-blog/tree/main/posts/2022-04-20_porting-to-quarto/renv.lock">R environment</a></p>
-</div></section><section class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
+</div></section><section id="footnotes" class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
 
 <ol>
 <li id="fn1"><p>Yes↩︎</p></li>
@@ -2083,6 +2642,7 @@ Danielle Navarro. 2022. <span>“Arrays and Tables in Arrow.”</span> May
 </ol>
 </section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
   author = {Danielle Navarro},
+  editor = {},
   title = {Porting a Distill Blog to Quarto},
   date = {2022-04-20},
   url = {https://blog.djnavarro.net/posts/2022-04-20_porting-to-quarto},
@@ -2248,7 +2808,7 @@ April 20, 2022. <a href="https://blog.djnavarro.net/posts/2022-04-20_porting-to-
 </section>
 
 
-<div id="quarto-appendix" class="default"><section class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
+<div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
 
 <ol>
 <li id="fn1"><p>Yeah, I’m currently dating an obnoxiously competent computational biologist, and her citation count <em>for last year</em> is perilously close to doubling my citation count for my entire career. I’ve given up on any illusion that my citations are even slightly impressive. I am very much the <a href="https://en.wikipedia.org/wiki/Kardashian_Index">Kardashian</a> of this relationship. But that is <em>so</em> not the point!↩︎</p></li>
@@ -2260,6 +2820,7 @@ April 20, 2022. <a href="https://blog.djnavarro.net/posts/2022-04-20_porting-to-
 </ol>
 </section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
   author = {Danielle Navarro},
+  editor = {},
   title = {Transitioning from Academia to Industry},
   date = {2022-04-01},
   url = {https://blog.djnavarro.net/academia-to-industry-transition},
@@ -3070,7 +3631,7 @@ attr(,"server")
 </section>
 
 
-<div id="quarto-appendix" class="default"><section class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
+<div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
 
 <ol>
 <li id="fn1"><p>It’s deeply important to me that you read this knowing that I was singing <a href="https://www.youtube.com/watch?v=OiwDHHcHPh0"><em>Tragedy</em></a> by Steps at the time I wrote this, complete with dramatic hand gestures↩︎</p></li>
@@ -3080,6 +3641,7 @@ attr(,"server")
 </ol>
 </section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
   author = {Danielle Navarro},
+  editor = {},
   title = {Using {Amazon} {S3} with {R}},
   date = {2022-03-17},
   url = {https://blog.djnavarro.net/using-aws-s3-in-r},
@@ -4759,7 +5321,7 @@ time64[ns]</code></pre>
 </section>
 
 
-<div id="quarto-appendix" class="default"><section class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
+<div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
 
 <ol>
 <li id="fn1"><p>To be honest, if my goal had been to read the data into Arrow, there was never a need to read it into R in the first place. The code <code>read_csv_arrow("magicians.csv", as_data_frame = FALSE)</code> would create the <em>Table</em> object directly with no need for an intermediary in R. However, for the purposes of this post I’m pretending that I have data in R that I want to transfer to Arrow in order to talk about the translation process, so I’m doing things in a rather inefficient way. On top of that, there’s a whole extra layer of complexity I’m hiding here that relates to ALTREP vectors backed by Arrow. However, that’s a topic for a future post. We can only unravel the magical cloak one thread at a time!↩︎</p></li>
@@ -4798,6 +5360,7 @@ time64[ns]</code></pre>
 </ol>
 </section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
   author = {Danielle Navarro},
+  editor = {},
   title = {Data Types in {Arrow} and {R}},
   date = {2022-03-04},
   url = {https://blog.djnavarro.net/data-types-in-arrow-and-r},
@@ -4998,7 +5561,7 @@ Danielle Navarro. 2022. <span>“Data Types in Arrow and R.”</span> March
 </section>
 
 
-<div id="quarto-appendix" class="default"><section class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
+<div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
 
 <ol>
 <li id="fn1"><p>I mean, what exactly do we mean by “at scale” here? In the context of data wrangling, a hundred thousand anything is rarely considered “at scale”. But mute/blocks on twitter are usually measured in the tens or hundreds at most. Doing things at the hundreds of thousands scale is a big step up from the typical use case, and as noted later, because of how the twitter API handles mutes it’s something that can take months to complete.↩︎</p></li>
@@ -5007,6 +5570,7 @@ Danielle Navarro. 2022. <span>“Data Types in Arrow and R.”</span> March
 </ol>
 </section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
   author = {Danielle Navarro},
+  editor = {},
   title = {R Scripts for Twitter Mutes and Blocks},
   date = {2022-02-11},
   url = {https://blog.djnavarro.net/r-scripts-for-twitter-blocks},
@@ -5704,7 +6268,7 @@ utf8_capitalize("A world as intricate as filigree")</code></pre>
 </section>
 
 
-<div id="quarto-appendix" class="default"><section class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
+<div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
 
 <ol>
 <li id="fn1"><p>I didn’t quite understand what “kernels” meant in this context until Nic Crane kindly explained it to me. The compute API contains a number of functions which are divided up into “kernels”, specialised functions designed to work on a specific data type. The <a href="https://arrow.apache.org/docs/cpp/compute.html">C++ Arrow compute documentation</a> explains this better.↩︎</p></li>
@@ -5712,6 +6276,7 @@ utf8_capitalize("A world as intricate as filigree")</code></pre>
 </ol>
 </section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
   author = {Danielle Navarro},
+  editor = {},
   title = {Binding {Apache} {Arrow} to {R}},
   date = {2022-01-18},
   url = {https://blog.djnavarro.net/binding-arrow-to-r},
@@ -5825,6 +6390,7 @@ January 18, 2022. <a href="https://blog.djnavarro.net/binding-arrow-to-r">https:
 
 <div id="quarto-appendix" class="default"><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
   author = {Danielle Navarro},
+  editor = {},
   title = {Setting {CRAN} Repository Options},
   date = {2022-01-10},
   url = {https://blog.djnavarro.net/setting-cran-repositories},
@@ -6176,7 +6742,7 @@ See $.data for the source Arrow object</code></pre>
 </section>
 
 
-<div id="quarto-appendix" class="default"><section class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
+<div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
 
 <ol>
 <li id="fn1"><p>Technically speaking, there’s a little ambiguity here. Usually when we’re talking about Arrow we’re talking about the in memory specification, but the term is also used to refer to the software implementing it, which includes a lot of compute functionality that goes beyond what the specification states. Similarly, the Arrow in-memory format doesn’t <em>have</em> to imply any particular serialisation format, but in practice it’s tightly connected to the IPC (“interprocess communication”) streaming and file format, and to the parquet file format. As a consequence, the term “Arrow” is sometimes used to refer to that broader suite of tools.↩︎</p></li>
@@ -6184,6 +6750,7 @@ See $.data for the source Arrow object</code></pre>
 </ol>
 </section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2021,
   author = {Danielle Navarro},
+  editor = {},
   title = {Getting Started with {Apache} {Arrow}},
   date = {2021-11-19},
   url = {https://blog.djnavarro.net/starting-apache-arrow-in-r},
@@ -7160,6 +7727,7 @@ c
 
 <div id="quarto-appendix" class="default"><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2021,
   author = {Danielle Navarro},
+  editor = {},
   title = {Data Serialisation in {R}},
   date = {2021-11-15},
   url = {https://blog.djnavarro.net/serialisation-with-rds},
@@ -7581,6 +8149,7 @@ Danielle Navarro. 2021. <span>“Data Serialisation in R.”</span> November
 
 <div id="quarto-appendix" class="default"><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2021,
   author = {Danielle Navarro},
+  editor = {},
   title = {Unpredictable Paintings},
   date = {2021-11-01},
   url = {https://blog.djnavarro.net/unpredictable-paintings},
@@ -7677,13 +8246,14 @@ Danielle Navarro. 2021. <span>“Unpredictable Paintings.”</span> November
 </section>
 
 
-<div id="quarto-appendix" class="default"><section class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
+<div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
 
 <ol>
 <li id="fn1"><p>A little bit of searching on twitter suggests that I proposed the hashtag on January 20th 2021 in a now-deleted tweet.↩︎</p></li>
 </ol>
 </section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2021,
   author = {Danielle Navarro},
+  editor = {},
   title = {Generative Art Resources in {R}},
   date = {2021-10-19},
   url = {https://blog.djnavarro.net/rtistry-posts},
@@ -8207,6 +8777,7 @@ I am attesting that this twitter handle <a href="https://twitter.com/djnavarro?r
 
 <div id="quarto-appendix" class="default"><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2021,
   author = {Danielle Navarro},
+  editor = {},
   title = {How to Mint Digital Art on {HEN}},
   date = {2021-09-26},
   url = {https://blog.djnavarro.net/setting-up-on-hic-et-nunc},
@@ -8697,6 +9268,7 @@ Falling back to ungrouped filter operation...</code></pre>
 
 <div id="quarto-appendix" class="default"><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2021,
   author = {Danielle Navarro},
+  editor = {},
   title = {Visualising the Hits of {Queen} {Britney}},
   date = {2021-09-14},
   url = {https://blog.djnavarro.net/tidy-tuesday-billboard},
@@ -9621,6 +10193,7 @@ Britney.”</span> September 14, 2021. <a href="https://blog.djnavarro.net/tidy-
 
 <div id="quarto-appendix" class="default"><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2021,
   author = {Danielle Navarro},
+  editor = {},
   title = {Art, Jasmines, and the Water Colours},
   date = {2021-09-07},
   url = {https://blog.djnavarro.net/water-colours},
@@ -9852,6 +10425,7 @@ Wickham, Hadley, and Jennifer Bryan. 2021. <em>Usethis: Automate Package and Pro
 </div>
 </div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2021,
   author = {Danielle Navarro},
+  editor = {},
   title = {Managing {GitHub} Credentials from {R,} Difficulty Level
     Linux},
   date = {2021-08-08},
@@ -9999,6 +10573,7 @@ Difficulty Level Linux.”</span> August 8, 2021. <a href="https://blog.djnavarr
 <p><a href="https://github.com/djnavarro/quarto-blog/tree/main/posts/2021-07-08_generative-art-in-r/index.qmd">source code</a>, <a href="https://github.com/djnavarro/quarto-blog/tree/main/posts/2021-07-08_generative-art-in-r/renv.lock">R environment</a></p>
 </div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2021,
   author = {Danielle Navarro},
+  editor = {},
   title = {Generative Art in {R}},
   date = {2021-07-08},
   url = {https://blog.djnavarro.net/generative-art-in-r},
