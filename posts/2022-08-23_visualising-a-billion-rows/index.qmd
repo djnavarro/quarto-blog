@@ -1,0 +1,307 @@
+---
+title: "How to visualise a billion rows of data in R with Apache Arrow"
+description: "In which the author grapples with the awkward question of what data visualisation really means when you have a staggering amount of data to work with"
+date: "2022-08-23"
+categories: [Apache Arrow, Data Visualisation]
+image: "img/cover.jpg"
+---
+
+<!--------------- my typical setup ----------------->
+
+```{r setup, include=FALSE}
+long_slug <- "2022-08-23_visualising-a-billion-rows"
+#renv::use(lockfile = "renv.lock")
+```
+
+<!--------------- post begins here ----------------->
+
+It's been a couple of months since I published anything on this blog. In my defence, I've been busy: I spent the month of June developing a workshop and website on [larger than memory workflows in R with Apache Arrow](https://arrow-user2022.netlify.app/) for the useR! conference, and I spent July doing the same thing for my [art from code](https://art-from-code.netlify.app/) workshop at rstudio::conf. But I am back to blogging now and I'm going to ease myself into it with a post that mixes some ideas from both of those workshops: how to use Arrow to assist in visualising large data sets. Specifically, I'm going to construct a map showing the geographic distribution of pickup locations for a billion or so taxi rides in New York.^[This post is adapted from the [NYC taxi scatter GitHub repository](https://github.com/djnavarro/arrow-nyc-taxi-scatter) that I put together to chat about on [The Data Thread](https://www.youtube.com/c/TheDataThread/about) live interviews series, *Pulling the Thread*]
+
+
+
+```{r packages, message=FALSE}
+library(arrow)
+library(dplyr)
+library(tictoc)
+library(tidyr)
+library(ggplot2)
+```
+
+
+
+## The NYC taxi data
+
+At this point in my life I have used the "NYC Taxi Data" for so many illustrative examples I feel like I don't need to explain it: doesn't "everyone" know about this data by now? Yeah, no dice sweetie. That's a terrible intuition. Most people don't know the data, and those that do can just skip to the next section! :-) 
+
+Here's a quick summary of the data set. In its full form, the data set takes the form of one very large table with about 1.7 billion rows and 24 columns. Each row corresponds to a single taxi ride sometime between 2009 and 2022. There's a complete [data dictionary for the NYC taxi data](https://arrow-user2022.netlify.app/packages-and-data.html#data) on the useR workshop site, but the columns that will be relevant for us are as follows:
+
+- `pickup_longitude` (double): Longitude data for the pickup location 
+- `pickup_latitude` (double): Latitude data for the pickup location
+- `dropoff_longitude` (double): Longitude data for the dropoff location 
+- `dropoff_latitude` (double): Latitude data for the dropoff location 
+
+On my laptop I have a copy of both the full data set, located at `"~/Datasets/nyc-taxi"` on my machine, and a much smaller "tiny" data set that contains 1 out of every 1000 records from the original, located at `"~/Datasets/nyc-taxi-tiny/"`. This tiny version has a mere 1.7 million rows of data, and as such is small enough that it will fit in memory. [Instructions for downloading both data sets](https://arrow-user2022.netlify.app/packages-and-data.html#data) are available at the same location as the data dictionary.
+
+## Loading the data
+
+Since I have local copies of the data, I'll use the `open_dataset()` function from the {arrow} package to connect to both versions of the NYC taxi data:^[It's worth noting that you can connect to remote data sets as well as local ones, but that's a bit beyond the scope of this post.]
+
+```{r load-data}
+nyc_taxi <- open_dataset("~/Datasets/nyc-taxi/")
+nyc_taxi_tiny <- open_dataset("~/Datasets/nyc-taxi-tiny/")
+```
+
+Starting with [Arrow 9.0.0](https://arrow.apache.org/docs/r/news/index.html#arrow-900) it's been possible to use the {dplyr} `glimpse()` function to take a look at the data sets, so let's do that:
+
+```{r glimpse-data, cache=TRUE}
+glimpse(nyc_taxi)
+```
+
+If you've used `glimpse()` before this output will look very familiar. Each line in the output show the name of one column in the data, followed by the first few entries in that column.^[There are a few small hints that the underlying data structure is different though. For instance, the data types associated with each column refer to Arrow data types (e.g., timestamp, int32, int64, etc) rather than R data types. I'm not going to talk about those here, but if you're looking for information about this topic, there's a short [summary of Arrow data types](https://arrow-user2022.netlify.app/advanced.html#how-are-scalar-types-mapped) on the workshop website, and a [longer blog post on Arrow data types](https://blog.djnavarro.net/posts/2022-03-04_data-types-in-arrow-and-r/) on this blog.] However, when you look at the size of the data set, you might begin to suspect that some magic is going on. Behind the scenes there are 1.7 billion rows of data in one huge table, and this is just too big to load into memory. Fortunately, the {arrow} package allows us to work with it anyway!
+
+## Plotting a million rows
+
+Okay, let's start with a data visualisation problem that wouldn't be too difficult to manage on a small data set. I want to draw an image that plots the pickup location for every taxi ride in the data set. Here's how I might go about that. First, I'll do a minimal amount of data wrangling in {arrow}. Specifically, I'll use the {dplyr} `select()` and `filter()` functions to limit the amount of data I have to `collect()` into R:
+
+```{r filtering, cache=TRUE}
+tic()
+nyc_pickups <- nyc_taxi_tiny |>
+  select(pickup_longitude, pickup_latitude) |>
+  filter(
+    !is.na(pickup_longitude),
+    !is.na(pickup_latitude)
+  ) |>
+  collect()
+toc()
+```
+
+At this point I have a regular R data frame, `nyc_pickups`, that contains only the data I need: the pickup locations for all those taxi rides (in the *tiny* taxi data set) that actually contain longitude and latitude data. Let's use `glimpse()` again:
+
+```{r glimpse-pickups, cache=TRUE}
+glimpse(nyc_pickups)
+```
+
+Compared to the full NYC taxi data, this is a relatively small data set. Drawing a scatter plot from 1.2 million observations isn't a trivial task, to be sure, but it is achievable. In fact the {ggplot2} package handles this task surprisingly well:
+
+```{r ggplot2-image, cache=TRUE}
+x0 <- -74.05 # minimum longitude to plot
+y0 <- 40.6   # minimum latitude to plot
+span <- 0.3  # size of the lat/long window to plot
+
+tic()
+pic <- ggplot(nyc_pickups) +
+  geom_point(
+    aes(pickup_longitude, pickup_latitude), 
+    size = .2, 
+    stroke = 0, 
+    colour = "#800020"
+  ) +
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  theme_void() +
+  coord_equal(
+    xlim = x0 + c(0, span), 
+    ylim = y0 + c(0, span)
+  )
+pic
+toc()
+```
+
+It's not lightning fast or anything, but it's still pretty quick!
+
+As neat as this visualisation is there are limitations.^[I'm not talking about the fact that there's no legend or explanatory text: although those are real failures of data visualisation, they're easily fixable. {ggplot2} has lots of tools for annotating plots appropriately.] In some parts of the plot -- notably midtown in Manhattan -- the data are so dense that you can't make out any fine detail. In other parts -- Brooklyn and Queens, for instance -- there are so few data points that you can't see much at all:
+
+```{r annotated-ggplot, echo=FALSE, cache=TRUE}
+pic + 
+  annotate(
+    geom = "curve", 
+    x = -74, 
+    y = 40.8, 
+    xend = -73.98, 
+    yend = 40.757, 
+    curvature = -.3, 
+    arrow = arrow(length = unit(2, "mm"))
+  ) +
+  annotate(
+    geom = "text", 
+    x = -74.005, 
+    y = 40.8, 
+    label = "Too Dense", 
+    hjust = "right"
+  ) +
+  annotate(
+    geom = "curve", 
+    x = -73.875, 
+    y = 40.7, 
+    xend = -73.95, 
+    yend = 40.66, 
+    curvature = .3, 
+    arrow = arrow(length = unit(2, "mm"))
+  ) +
+  annotate(
+    geom = "text", 
+    x = -73.825, 
+    y = 40.7, 
+    label = "Too Sparse", 
+    hjust = "right"
+  )
+```
+
+How do we improve this image?
+
+## Scaling to a billion rows
+
+To make a better version of this plot, we're going to have to do two things at once:
+
+- Use a lot more data. If we use the full NYC taxi data set, the visualisation will be a lot more detailed in areas where it is currently too sparse.
+- Show gradation at each location. In the dense areas there are too many points plotted atop one another. Instead of overplotting, we'll use shading to represent the number of pickups at each location.
+
+How do we do this? Let's say I want to create a 4000 x 4000 pixel image, and I want the "intensity" at each pixel to represent the number of pickups that fall in the geographic region spanned by that pixel. There are a total of 16 million pixels, so our task is to assign each of observation one of those those 16 million bins, and then count the number of observations in each bin. We'll have to rely on Arrow to do all the heavy lifting here. This binning cannot be done natively in R: the data set is just too big. Even after filtering out missing and out-of-bounds data points, there are still 1.2 billion rows, and R can't do that without assistance. 
+
+Here's what the solution looks like:
+
+```{r compute-pixels, cache=TRUE}
+tic()
+pixels <- 4000
+pickup <- nyc_taxi |>
+  filter(
+    !is.na(pickup_longitude),
+    !is.na(pickup_latitude),
+    pickup_longitude > x0,
+    pickup_longitude < x0 + span,
+    pickup_latitude > y0,
+    pickup_latitude < y0 + span
+  ) |>
+  mutate(
+    unit_scaled_x = (pickup_longitude - x0) / span,
+    unit_scaled_y = (pickup_latitude - y0) / span,
+    x = as.integer(round(pixels * unit_scaled_x)), 
+    y = as.integer(round(pixels * unit_scaled_y))
+  ) |>
+  count(x, y, name = "pickup") |>
+  collect()
+toc()
+```
+
+My laptop solves this binning problem in about 30 seconds. As before, I'll use `glimpse()` to take a peek at the results:
+
+```{r glimpse-pickup, cache=TRUE}
+glimpse(pickup)
+```
+
+This is a data frame where `x` and `y` specify the pixel, and and a `pickup` counts the number of pickups associated with that pixel. Note that the pixels aren't arranged in a meaningful order, and only those pixels with at least one pickup (a little under 30% of all pixels) are included in data. 
+
+We can visualise this in a number of ways. One possibility is to create a scatter plot, using the `pickup` value to specify the shading of each plot marker:
+
+```{r ggplot2-image-2, cache=TRUE}
+tic()
+ggplot(pickup) +
+  geom_point(
+    aes(x, y, colour = log10(pickup)), 
+    size = .01, 
+    stroke = 0, 
+    show.legend = FALSE
+  ) +
+  scale_colour_gradient(low = "white", high = "#800020") +
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  theme_void() +
+  coord_equal()
+toc()
+```
+
+As you can see, {ggplot2} has no problems drawing a scatter plot from a few million observations, and it's an improvement on our first attempt. However, we can do better. Instead of trying to draw a scatter plot of all the points listed in the `pickup` data frame, let's use it to populate a bitmap. We'll create a 4000x4000 matrix, and fill in the cells with the pickup counts at the corresponding pixel. 
+
+The computation is a two part process. First, we use `expand_grid()` to initialise a "grid like" tibble containing all combination of `x` and `y` values, and use `left_join()` to populate a column containing the `pickup` counts:
+
+```{r expand-to-grid, cache=TRUE}
+tic()
+grid <- expand_grid(x = 1:pixels, y = 1:pixels) |>
+  left_join(pickup, by = c("x", "y")) |>
+  mutate(pickup = replace_na(pickup,  0))
+toc()
+```
+
+Note that the elements of `grid` are complete (all 16 million pixels are there), and meaningfully ordered. We can check this by calling `glimpse()` again:
+
+```{r glimpse-grid}
+glimpse(grid)
+```
+
+Because the elements of `grid$pickup` are arranged in this fashion, it is easy to construct the required 4000x4000 matrix:
+
+```{r convert-to-matrix}
+tic()
+pickup_grid <- matrix(
+  data = grid$pickup,
+  nrow = pixels,
+  ncol = pixels
+)
+toc()
+```
+
+This is our bitmap. It's a matrix whose values correspond to the pixel intensities to be plotted. Just so you can see what it looks like, here's a tiny 10x10 pixel section from that matrix:
+
+```{r show-matrix}
+pickup_grid[2000:2009, 2000:2009]
+```
+
+Now that the data are in an image-like format, all we have to do is write the image file. We don't even need {ggplot2}: we can use `image()` to draw the bitmap directly. Here's a little helper function I wrote to do this:
+
+```{r taxi-scatter-fn}
+render_image <- function(mat, cols = c("white", "#800020")) {
+  op <- par(mar = c(0, 0, 0, 0))
+  shades <- colorRampPalette(cols)
+  image(
+    z = log10(t(mat + 1)),
+    axes = FALSE,
+    asp = 1,
+    col = shades(256),
+    useRaster = TRUE
+  )
+  par(op)
+}
+```
+
+Here's what happens when I call it:
+
+```{r taxi-scatter}
+tic()
+render_image(pickup_grid)
+toc()
+```
+
+This method is slightly faster the previous version, but the real advantage isn't speed -- it's clarity. There's less blurring in the denser parts of the plot (midtown Manhattan), and there's also more clarity in the sparser areas (e.g., the Brooklyn streets are sharper).
+
+We can push it slightly further by tweaking the colour palette. Plotting the logarithm of the number of pickups ensures that all the streets are visible (not just the extremely common ones), but it does have the downside that it's hard to tell the difference between moderately popular pickup locations and extremely popular ones. A well-chosen diverging palette helps rectify this a little:     
+
+```{r taxi-scatter-2}
+render_image(pickup_grid, cols = c("#002222", "white", "#800020"))
+```
+
+At long last we have a visualisation that shows all the billion rows of data, crisply delineates all the streets on which taxi pickups are at least moderately frequent, *and* does a reasonable job of highlighting those locations where taxi pickups are extremely common. Yay! 🎉
+
+
+## Lessons learned?
+
+To wrap this post up, I think it's useful to reflect on the process I went through in constructing this image. In one sense, the process I've gone through here isn't actually much different to what we do when creating any other data visualisation in R. For example, if you're working in {tidyverse}, a typical work flow is to use {dplyr} to wrangle the data into an appropriate format and then use {ggplot2} to plot the data. What I've done here isn't that different: okay yes, my {dplyr} code only works because it's backed by the {arrow} engine, and in the end I decided to use base graphics rather than {ggplot2} to draw the final image, but I don't think those differences constitute a major departure from my usual approach.
+
+That being said, I think there are two key principles I've taken away from this. When trying to visualise very large data sets in R, the things I'm going to try to keep in mind are:
+
+- Push as much of the computational work onto {arrow} as possible. The {arrow} package is designed specifically to handle these kinds of data manipulation problems, and things go much more smoothly when I don't make {ggplot2} do the computational heavy lifting.
+
+- Think carefully about the data representation. The reason why the final plot drawn with `image()` is nicer than the earlier ones drawn with {ggplot2} has nothing at all to do with the "base R vs tidyverse" issue. Instead, it's because the data structure I created (i.e., `pickup_grid`) is the exact bitmap that needed to be rendered, and that's exactly what `image()` is good for. 
+
+
+
+<br><br>
+
+
+
+<!--------------- appendices go here ----------------->
+
+## Acknowledgments {.appendix}
+
+Thank you to [Kae Suarez](https://twitter.com/kae_suarez), [Keith Britt](https://twitter.com/keithadambritt), and [François Michonneau](https://twitter.com/fmic_) for reviewing this post.
+
+
