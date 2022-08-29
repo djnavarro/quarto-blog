@@ -1,7 +1,7 @@
 ---
 title: "Zero-copy data handover between R and Python, using Arrow and reticulate"
-description: ""
-date: "2022-05-28"
+description: "A neat trick"
+date: "2022-08-28"
 categories: [Apache Arrow, R, Python]
 image: "img/cover.jpg"
 engine: knitr
@@ -25,53 +25,74 @@ the default python environment is this one:
 /home/danielle/.local/share/r-miniconda/envs/r-reticulate/bin/python
 --->
 
-<!--
-conda_install("arrow_env", "pyarrow")
--->
+```{r, filename="[R code]"}
+library(reticulate)
+```
 
-```{r}
-reticulate::use_miniconda(
+The {reticulate} package has an elaborate lookup mechanism that it uses to find a python environment. In this post and the next I want to make sure that I'm always using the *same* python environment regardless of whether my underlying quarto engine is knitr or jupyter. This is tricky because -- thanks to the nightmare that is python environment managment -- I've managed to accrue four different versions of python on my machine, and (don't ask me how) two separate copies of miniconda!
+
+Rather than mess with paths, what I'm going to do in this post is be extremely specific. I'm going to make a point of *always* telling {reticulate} where to look in order to find python and miniconda. 
+
+Okay, so the specific python environment I want to use is managed by miniconda, so I'm going to use the `use_miniconda()` command to tell {reticulate} to use it. To avoid all ambiguity I'm going to use the `condaenv` argument to explicitly specify the path to the python executable:
+
+```{r, filename="[R code]"}
+use_miniconda(
   condaenv = "/home/danielle/miniconda3/bin/python", 
   required = TRUE
 )
 ```
 
-```{r, eval=FALSE}
-reticulate::conda_install(packages = "pyarrow")
+The next step (if I hadn't done this already) would be to install pyarrow in the relevant python environment. The {arrow} package supplies a helper function called `install_pyarrow()` that you can use to do this, but it's just a convenience function that calls the relevant {reticulate} functions for you. For this post I'll do it using {reticulate}, and since my python environment is managed by miniconda I'll use `conda_install()`: 
+
+```{r, eval=FALSE, filename="[R code]"}
+conda_install(
+  packages = "pyarrow", 
+  envname = "/home/danielle/miniconda3", 
+  conda = "/home/danielle/miniconda3/bin/conda"
+)
 ```
 
-<!--------------- post begins here ----------------->
-
-BLAH 
+In this code, `packages` is the name of the to-be-installed python module, `envname` is the path to the conda environment, and `conda` is the path to the conda executable. You probably don't need to be this explicit because {reticulate} generally handles these things nicely and manages its own copies of python and miniconda, but I am deliberately *not* using the reticulate-installed versions here!  
 
 
 <!-- <blockquote class="twitter-tweet"><p lang="en" dir="ltr">And with an arrow table (or dataset) that handoff can be zero copy, zero serialization. We need to improve our docs around this but there’s an example in the tests that shows it off: <a href="https://t.co/ff5Am0fsCW">https://t.co/ff5Am0fsCW</a> (some) docs: <a href="https://t.co/hg9G2NenIM">https://t.co/hg9G2NenIM</a></p>&mdash; Jonathan Keane (@jonkeane) <a href="https://twitter.com/jonkeane/status/1560016227824721920?ref_src=twsrc%5Etfw">August 17, 2022</a></blockquote> <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>  -->
 
-## Check my pyarrow
+## Check my installation
 
-<!-- arrow::install_pyarrow() -->
-
-```{python check-version}
-# python
+```{python check-version, filename="[python code]"}
+#| results: hold
 import sys
 print(sys.version)
 print(sys.executable)
 ```
 
+Next let's import {pyarrow} and check the version:
 
-
-
-```{python check-pyarrow}
-# python
+```{python check-pyarrow, filename="[python code]"}
 import pyarrow
 pyarrow.__version__
+```
+
+Because life on linux is dark and full of terrors, this didn't actually work for me the first time I tried it and naturally I was filled with despair. Instead of the nice output above, I got an error saying:
+
+```
+libstdc++.so.6: version `GLIBCXX_3.4.22' not found
+```
+
+As usual, googling the error message led me to discover I needed to update the relevant library. It turned out to be an easy fix with this command: 
+
+```{bash, filename="[at the terminal]"}
+#| eval: false
+#| results: hold
+sudo apt-get update
+sudo apt-get install libstdc++6
 ```
 
 
 
 ## Handover from R to Python
 
-```{r}
+```{r, filename="[R code]"}
 # R
 arr <- arrow::arrow_table(iris)
 arr
@@ -80,25 +101,22 @@ py_arr <- reticulate::r_to_py(arr)
 py_arr
 ```
 
-```{python}
+```{python, filename="[python code]"}
 # python
 r.py_arr
 ```
 
 ## Handover from Python to R
 
-```{python}
-# python
+```{python, filename="[python code]"}
 boring = pyarrow.array([1,2,3])
 boring
 ```
 
 
-```{r}
-# R
+```{r, filename="[R code]"}
 reticulate::py$boring
 ```
-
 
 
 <br><br>
