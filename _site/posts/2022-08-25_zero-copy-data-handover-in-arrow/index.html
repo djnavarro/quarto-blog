@@ -10,7 +10,7 @@
 <meta name="dcterms.date" content="2022-08-28">
 <meta name="description" content="A neat trick">
 
-<title>Notes from a data witch - Zero-copy data handover between R and Python, using Arrow and reticulate</title>
+<title>Notes from a data witch - Passing Arrow Tables between R and Python with reticulate</title>
 <style>
 code{white-space: pre-wrap;}
 span.smallcaps{font-variant: small-caps;}
@@ -127,11 +127,11 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
 
 
 <link rel="stylesheet" href="../../styles.css">
-<meta property="og:title" content="Notes from a data witch - Zero-copy data handover between R and Python, using Arrow and reticulate">
+<meta property="og:title" content="Notes from a data witch - Passing Arrow Tables between R and Python with reticulate">
 <meta property="og:description" content="A neat trick">
 <meta property="og:image" content="https://blog.djnavarro.net/posts/2022-08-25_zero-copy-data-handover-in-arrow/img/cover.jpg">
 <meta property="og:site-name" content="Notes from a data witch">
-<meta name="twitter:title" content="Notes from a data witch - Zero-copy data handover between R and Python, using Arrow and reticulate">
+<meta name="twitter:title" content="Notes from a data witch - Passing Arrow Tables between R and Python with reticulate">
 <meta name="twitter:description" content="A neat trick">
 <meta name="twitter:image" content="https://blog.djnavarro.net/posts/2022-08-25_zero-copy-data-handover-in-arrow/img/cover.jpg">
 <meta name="twitter:creator" content="@djnavarro">
@@ -187,7 +187,7 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
 <header id="title-block-header" class="quarto-title-block default toc-left page-columns page-full">
   <div class="quarto-title-banner page-columns page-full">
     <div class="quarto-title column-body">
-      <h1 class="title">Zero-copy data handover between R and Python, using Arrow and reticulate</h1>
+      <h1 class="title">Passing Arrow Tables between R and Python with reticulate</h1>
                   <div>
         <div class="description">
           A neat trick
@@ -237,9 +237,14 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
     <h2 id="toc-title">Table of contents</h2>
    
   <ul>
-  <li><a href="#check-my-installation" id="toc-check-my-installation" class="nav-link active" data-scroll-target="#check-my-installation">Check my installation</a></li>
-  <li><a href="#handover-from-r-to-python" id="toc-handover-from-r-to-python" class="nav-link" data-scroll-target="#handover-from-r-to-python">Handover from R to Python</a></li>
-  <li><a href="#handover-from-python-to-r" id="toc-handover-from-python-to-r" class="nav-link" data-scroll-target="#handover-from-python-to-r">Handover from Python to R</a></li>
+  <li><a href="#data-interchange-in-a-polyglot-world" id="toc-data-interchange-in-a-polyglot-world" class="nav-link active" data-scroll-target="#data-interchange-in-a-polyglot-world">Data interchange in a polyglot world</a></li>
+  <li><a href="#using-reticulate-to-call-python-from-r" id="toc-using-reticulate-to-call-python-from-r" class="nav-link" data-scroll-target="#using-reticulate-to-call-python-from-r">Using reticulate to call Python from R</a></li>
+  <li><a href="#r-to-pandas" id="toc-r-to-pandas" class="nav-link" data-scroll-target="#r-to-pandas">R to Pandas</a></li>
+  <li><a href="#lets-bring-apache-arrow-into-the-mix" id="toc-lets-bring-apache-arrow-into-the-mix" class="nav-link" data-scroll-target="#lets-bring-apache-arrow-into-the-mix">Let’s bring Apache Arrow into the mix</a></li>
+  <li><a href="#installing-pyarrow" id="toc-installing-pyarrow" class="nav-link" data-scroll-target="#installing-pyarrow">Installing pyarrow</a></li>
+  <li><a href="#passing-tables-to-python" id="toc-passing-tables-to-python" class="nav-link" data-scroll-target="#passing-tables-to-python">Passing Tables to Python</a></li>
+  <li><a href="#passing-tables-back-to-r" id="toc-passing-tables-back-to-r" class="nav-link" data-scroll-target="#passing-tables-back-to-r">Passing Tables back to R</a></li>
+  <li><a href="#is-there-a-more-pythonic-solution" id="toc-is-there-a-more-pythonic-solution" class="nav-link" data-scroll-target="#is-there-a-more-pythonic-solution">Is there a more pythonic solution?</a></li>
   </ul>
 </nav>
 </nav>
@@ -262,6 +267,20 @@ licence: unsplash free-to-use
 the default python environment is this one:
 /home/danielle/.local/share/r-miniconda/envs/r-reticulate/bin/python
 --->
+<p>As the 21st century gears up for its quarter-life crisis, the trend in data science is toward multi-language tools. I use <a href="https://quarto.org/">quarto</a> to write this blog, a document preparation system that supports code evaluation in R, Python, Julia, and more. My work revolves around <a href="https://arrow.apache.org/">Apache Arrow</a>, a toolbox for data analysis and interchange with implementations in multiple languages. You get the idea. In one sense this new development is fantastic – your language of choice is much more likely to be supported in the future than it ever was in the past. In another sense it is daunting – it sometimes feels like we need to learn <em>all the things</em> in order to get by in this brave new world. Meanwhile we all have our actual jobs to do and we don’t have the time. In the <a href="https://www.youtube.com/watch?v=1i739SyCu9I">immortal words of Bob Katter</a>,</p>
+<blockquote class="blockquote">
+<p>I mean, you know, people are entitled to their sexual proclivities. Let there be a thousand blossoms bloom as far as I’m concerned, you know…</p>
+<p>&nbsp; &nbsp; &nbsp; [<em>pauses, expression turns dark</em>]</p>
+<p>…but I ain’t spending any time on it because, in the meantime, every three months a person is torn to pieces by a crocodile in North Queensland</p>
+</blockquote>
+<p>I mean, he makes a good point?<a href="#fn1" class="footnote-ref" id="fnref1" role="doc-noteref"><sup>1</sup></a> There’s a lot going on in the data science world, none of us can keep pace with all of it, and we’re all trying our best not to be eaten by crocodiles.</p>
+<section id="data-interchange-in-a-polyglot-world" class="level2">
+<h2 class="anchored" data-anchor-id="data-interchange-in-a-polyglot-world">Data interchange in a polyglot world</h2>
+<p>In the spirit of saving you from at least one reptilian threat, this post is a quick primer on how to efficiently pass control of a large data set between R and Python <em>without</em> making any wasteful copies of the data. The idea to write this post came from a <a href="https://twitter.com/mxcatnap/status/1559991199494279169">twitter thread by Cass Wilkinson Saldaña</a>, and in particular a <a href="https://twitter.com/jonkeane/status/1560016227824721920">reply by Jon Keane</a> who mentioned that Apache Arrow provides a handy toolkit for doing this that isn’t as widely known as it perhaps deserves to be!</p>
+</section>
+<section id="using-reticulate-to-call-python-from-r" class="level2">
+<h2 class="anchored" data-anchor-id="using-reticulate-to-call-python-from-r">Using reticulate to call Python from R</h2>
+<p>The solution to the problem relies fundamentally on <a href="https://rstudio.github.io/reticulate/">the {reticulate} package</a>…</p>
 <div class="cell">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
@@ -270,7 +289,7 @@ the default python environment is this one:
 <div class="sourceCode cell-code" id="cb1"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(reticulate)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 </div>
-<p>The {reticulate} package has an elaborate lookup mechanism that it uses to find a python environment. In this post and the next I want to make sure that I’m always using the <em>same</em> python environment regardless of whether my underlying quarto engine is knitr or jupyter. This is tricky because – thanks to the nightmare that is python environment managment – I’ve managed to accrue four different versions of python on my machine, and (don’t ask me how) two separate copies of miniconda!</p>
+<p>The {reticulate} package has an elaborate lookup mechanism that it uses to find a python environment. In this post and the next I want to make sure that I’m always using the <em>same</em> python environment regardless of whether my underlying quarto engine is knitr or jupyter. This is tricky because – thanks to the nightmare that is python environment management – I’ve managed to accrue four different versions of python on my machine, and (don’t ask me how) two separate copies of miniconda!</p>
 <p>Rather than mess with paths, what I’m going to do in this post is be extremely specific. I’m going to make a point of <em>always</em> telling {reticulate} where to look in order to find python and miniconda.</p>
 <p>Okay, so the specific python environment I want to use is managed by miniconda, so I’m going to use the <code>use_miniconda()</code> command to tell {reticulate} to use it. To avoid all ambiguity I’m going to use the <code>condaenv</code> argument to explicitly specify the path to the python executable:</p>
 <div class="cell">
@@ -284,32 +303,15 @@ the default python environment is this one:
 <span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 </div>
-<p>The next step (if I hadn’t done this already) would be to install pyarrow in the relevant python environment. The {arrow} package supplies a helper function called <code>install_pyarrow()</code> that you can use to do this, but it’s just a convenience function that calls the relevant {reticulate} functions for you. For this post I’ll do it using {reticulate}, and since my python environment is managed by miniconda I’ll use <code>conda_install()</code>:</p>
-<div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>[R code]</strong></pre>
-</div>
-<div class="sourceCode cell-code" id="cb3"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="fu">conda_install</span>(</span>
-<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">packages =</span> <span class="st">"pyarrow"</span>, </span>
-<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">envname =</span> <span class="st">"/home/danielle/miniconda3"</span>, </span>
-<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">conda =</span> <span class="st">"/home/danielle/miniconda3/bin/conda"</span></span>
-<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-</div>
-</div>
-<p>In this code, <code>packages</code> is the name of the to-be-installed python module, <code>envname</code> is the path to the conda environment, and <code>conda</code> is the path to the conda executable. You probably don’t need to be this explicit because {reticulate} generally handles these things nicely and manages its own copies of python and miniconda, but I am deliberately <em>not</em> using the reticulate-installed versions here!</p>
-
-<!-- <blockquote class="twitter-tweet"><p lang="en" dir="ltr">And with an arrow table (or dataset) that handoff can be zero copy, zero serialization. We need to improve our docs around this but there’s an example in the tests that shows it off: <a href="https://t.co/ff5Am0fsCW">https://t.co/ff5Am0fsCW</a> (some) docs: <a href="https://t.co/hg9G2NenIM">https://t.co/hg9G2NenIM</a></p>&mdash; Jonathan Keane (@jonkeane) <a href="https://twitter.com/jonkeane/status/1560016227824721920?ref_src=twsrc%5Etfw">August 17, 2022</a></blockquote> <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>  -->
-<section id="check-my-installation" class="level2">
-<h2 class="anchored" data-anchor-id="check-my-installation">Check my installation</h2>
+<p>When calling python code from within R, some translation is necessary. As a simple example, let’s say I have my regular python session open and I want to check what version of python I am running and show the path to the python executable. To do this in native python code I’d use the {sys} library:</p>
 <div class="cell">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
 <pre><strong>[python code]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb4"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> sys</span>
-<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(sys.version)</span>
-<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(sys.executable)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb3"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> sys</span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(sys.version)</span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(sys.executable)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <div class="cell-output cell-output-stdout">
 <pre><code>3.9.12 (main, Apr  5 2022, 07:05:27) 
@@ -317,14 +319,149 @@ the default python environment is this one:
 /home/danielle/miniconda3/bin/python</code></pre>
 </div>
 </div>
+<p>To do this in R, the code is essentially the same except that the <code>import()</code> function supplied by {reticulate} replaces the <code>import</code> keyword, and <code>$</code> replaces <code>.</code> as the accessor:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[R code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb5"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a>sys <span class="ot">&lt;-</span> <span class="fu">import</span>(<span class="st">"sys"</span>)</span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>sys<span class="sc">$</span>version</span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>sys<span class="sc">$</span>executable</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] "3.9.12 (main, Apr  5 2022, 07:05:27) \n[GCC 7.5.0]"
+[1] "/home/danielle/miniconda3/bin/python"</code></pre>
+</div>
+</div>
+<p>Python functions supplied through reticulate can be used in conjunction with regular R code. As a simple example, let’s say I wanted to use the <a href="https://pypi.org/project/art/">python {art} library</a> to generate text decorations. It contains a <code>decor()</code> function that creates cute glyphs like this:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[R code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb7"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a>art <span class="ot">&lt;-</span> <span class="fu">import</span>(<span class="st">"art"</span>)</span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>art<span class="sc">$</span><span class="fu">decor</span>(<span class="st">"heart9"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] "´*•.¸(*•.¸♥¸.•*´)¸.•*´"</code></pre>
+</div>
+</div>
+<p>To illustrate the interoperability between R and Python, let’s say I want to create a modified version of the <code>decor()</code> function. The original <code>decor()</code> function takes a single string specifying the name of a glyph. That string could be <code>"heart9"</code>, <code>"wave3"</code>, or anything other pattern known to the <code>decor()</code> function. You can only pass one string: it does not accept vectors. What I’d like to do in a modified version is pass a numeric vector as input, and receive a vector of heart glyphs as output. Although the original <code>decor()</code> function is written in Python, I can do this entirely on the R side: I don’t have to write any Python code.</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[R code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb9"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a>decor_heart <span class="ot">&lt;-</span> <span class="cf">function</span>(x) {</span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a>  purrr<span class="sc">::</span><span class="fu">map_chr</span>(x, <span class="sc">~</span> art<span class="sc">$</span><span class="fu">decor</span>(<span class="fu">paste0</span>(<span class="st">"heart"</span>, .x)))</span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a><span class="fu">decor_heart</span>(<span class="dv">1</span><span class="sc">:</span><span class="dv">9</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] "~~&lt;💚&gt;~~"               "~~&gt;&lt;~~&gt;💖"              "─═ڿڿۣڿ═─💖─═ڿڿۣڿ═─"      
+[4] "༺♥༻❀༺♥༻💕﻿"              "💗💜.¸¸.•´¯`☆ºஇ•´♥"     "-♥-♡--^["              
+[7] "*•.¸♡"                  "╚»♡«╝"                  "´*•.¸(*•.¸♥¸.•*´)¸.•*´"</code></pre>
+</div>
+</div>
+<p>Prettiness! 😍</p>
+</section>
+<section id="r-to-pandas" class="level2">
+<h2 class="anchored" data-anchor-id="r-to-pandas">R to Pandas</h2>
+<p>Okay, now that we understand the basics of {reticulate}, let’s move on to the task of transferring data between R and Python.</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[R code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb11"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a>py_iris <span class="ot">&lt;-</span> <span class="fu">r_to_py</span>(iris)</span>
+<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a>py_iris</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>     Sepal.Length  Sepal.Width  Petal.Length  Petal.Width    Species
+0             5.1          3.5           1.4          0.2     setosa
+1             4.9          3.0           1.4          0.2     setosa
+2             4.7          3.2           1.3          0.2     setosa
+3             4.6          3.1           1.5          0.2     setosa
+4             5.0          3.6           1.4          0.2     setosa
+..            ...          ...           ...          ...        ...
+145           6.7          3.0           5.2          2.3  virginica
+146           6.3          2.5           5.0          1.9  virginica
+147           6.5          3.0           5.2          2.0  virginica
+148           6.2          3.4           5.4          2.3  virginica
+149           5.9          3.0           5.1          1.8  virginica
+
+[150 rows x 5 columns]</code></pre>
+</div>
+</div>
+<p>https://pandas.pydata.org/</p>
+<p>Within the Python session, an object called <code>r</code> has been created: the Pandas DataFrame object is stored as <code>r.py_iris</code></p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[python code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb13"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a>iris_means <span class="op">=</span> r.py_iris.groupby(<span class="st">"Species"</span>).mean()</span>
+<span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a>iris_means</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>            Sepal.Length  Sepal.Width  Petal.Length  Petal.Width
+Species                                                         
+setosa             5.006        3.428         1.462        0.246
+versicolor         5.936        2.770         4.260        1.326
+virginica          6.588        2.974         5.552        2.026</code></pre>
+</div>
+</div>
+<p>As you might hope, this data is accessible from the R session. {reticulate} exposes an object named <code>py</code> to the user, and – surprise, surprise – objects created in the Python session can be accessed using that object…</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[R code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb15"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a>py<span class="sc">$</span>iris_means</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>  Sepal.Length Sepal.Width Petal.Length Petal.Width
+1        5.006       3.428        1.462       0.246
+2        5.936       2.770        4.260       1.326
+3        6.588       2.974        5.552       2.026</code></pre>
+</div>
+</div>
+<p>…and by the magic of {reticulate} the Pandas DataFrame is magically interpreted as an R data frame.</p>
+</section>
+<section id="lets-bring-apache-arrow-into-the-mix" class="level2">
+<h2 class="anchored" data-anchor-id="lets-bring-apache-arrow-into-the-mix">Let’s bring Apache Arrow into the mix</h2>
+<p>So here’s the thing about magic, at least when it comes to code. There comes a point where you need to modify the spell. The example in the previous section looks smooth and seamless because the data set is small. However, it is fundamentally inefficient for the simple reason that a Pandas DataFrame looks different in memory to an R data frame. It’s not possible for the two languages to share a single copy of the data because they don’t agree on what “the data” are. To handover data from R to Python (or vice versa) it is necessary to copy the data set and convert it to a more appropriate format.</p>
+<p>When the data set is small, this is not a problem. But as your data set grows, it becomes ever more burdensome. These copy-and-convert operations are not cheap.</p>
+<p>Wouldn’t it be nice if R and Python could both agree to represent the data as, oh let’s say…. an Arrow Table? On the R side we could interact with it using the {arrow} package, and on the Python side we could interact with it using {pyarrow}. But regardless of which language we’re using, the thing in memory would be <em>exactly</em> the same… handing over the data set from one language to the other would no longer require any copying. A little metadata would change hands, and that’s all.</p>
+<p>That sounds much nicer.</p>
+</section>
+<section id="installing-pyarrow" class="level2">
+<h2 class="anchored" data-anchor-id="installing-pyarrow">Installing pyarrow</h2>
+<p>So let’s do this.</p>
+<p>In the previous example, the R data frame was handled on the Python side by the Pandas module. And as a consequence, you’d imagine that it was pretty important that my Python environment has Pandas installed right? Well, the same is true when passing an Arrow Table: you need to have {pyarrow} installed on the Python side as well as {arrow} installed on the R side.</p>
+<p>As a convenience, the {arrow} package supplies a helper function called <code>install_pyarrow()</code> that calls the relevant {reticulate} functions for you, but for the purposes of this post I’ll show you the {reticulate} functions. The python environment I’m using in this post is managed by miniconda, so I’ll use <code>conda_install()</code> to do the work:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[R code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb17"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="fu">conda_install</span>(</span>
+<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">packages =</span> <span class="st">"pyarrow"</span>, </span>
+<span id="cb17-3"><a href="#cb17-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">envname =</span> <span class="st">"/home/danielle/miniconda3"</span>, </span>
+<span id="cb17-4"><a href="#cb17-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">conda =</span> <span class="st">"/home/danielle/miniconda3/bin/conda"</span></span>
+<span id="cb17-5"><a href="#cb17-5" aria-hidden="true" tabindex="-1"></a>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+<p>In this code, <code>packages</code> is the name of the to-be-installed python module, <code>envname</code> is the path to the conda environment, and <code>conda</code> is the path to the conda executable. As a general rule you don’t need to be this explicit: {reticulate} will find the environment and conda executable for you. I’m being unusually particular in this post, for reasons that will be a little more obvious in the next post.</p>
 <p>Next let’s import {pyarrow} and check the version:</p>
 <div class="cell">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
 <pre><strong>[python code]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb6"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> pyarrow</span>
-<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a>pyarrow.__version__</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb18"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> pyarrow</span>
+<span id="cb18-2"><a href="#cb18-2" aria-hidden="true" tabindex="-1"></a>pyarrow.__version__</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <div class="cell-output cell-output-stdout">
 <pre><code>'8.0.0'</code></pre>
@@ -338,21 +475,21 @@ the default python environment is this one:
 <div class="code-with-filename-file">
 <pre><strong>[at the terminal]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb9"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> apt-get update</span>
-<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> apt-get install libstdc++6</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb21"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb21-1"><a href="#cb21-1" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> apt-get update</span>
+<span id="cb21-2"><a href="#cb21-2" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> apt-get install libstdc++6</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 </div>
 </section>
-<section id="handover-from-r-to-python" class="level2">
-<h2 class="anchored" data-anchor-id="handover-from-r-to-python">Handover from R to Python</h2>
+<section id="passing-tables-to-python" class="level2">
+<h2 class="anchored" data-anchor-id="passing-tables-to-python">Passing Tables to Python</h2>
 <div class="cell">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
 <pre><strong>[R code]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb10"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="co"># R</span></span>
-<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a>arr <span class="ot">&lt;-</span> arrow<span class="sc">::</span><span class="fu">arrow_table</span>(iris)</span>
-<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a>arr</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb22"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a><span class="co"># R</span></span>
+<span id="cb22-2"><a href="#cb22-2" aria-hidden="true" tabindex="-1"></a>arr <span class="ot">&lt;-</span> arrow<span class="sc">::</span><span class="fu">arrow_table</span>(iris)</span>
+<span id="cb22-3"><a href="#cb22-3" aria-hidden="true" tabindex="-1"></a>arr</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <div class="cell-output cell-output-stdout">
 <pre><code>Table
@@ -365,8 +502,8 @@ $Species &lt;dictionary&lt;values=string, indices=int8&gt;&gt;
 
 See $metadata for additional Schema metadata</code></pre>
 </div>
-<div class="sourceCode cell-code" id="cb12"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a>py_arr <span class="ot">&lt;-</span> reticulate<span class="sc">::</span><span class="fu">r_to_py</span>(arr)</span>
-<span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a>py_arr</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb24"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb24-1"><a href="#cb24-1" aria-hidden="true" tabindex="-1"></a>py_arr <span class="ot">&lt;-</span> reticulate<span class="sc">::</span><span class="fu">r_to_py</span>(arr)</span>
+<span id="cb24-2"><a href="#cb24-2" aria-hidden="true" tabindex="-1"></a>py_arr</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>pyarrow.Table
 Sepal.Length: double
@@ -389,8 +526,8 @@ Species: [  -- dictionary:
 <div class="code-with-filename-file">
 <pre><strong>[python code]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb14"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="co"># python</span></span>
-<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a>r.py_arr</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb26"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb26-1"><a href="#cb26-1" aria-hidden="true" tabindex="-1"></a><span class="co"># python</span></span>
+<span id="cb26-2"><a href="#cb26-2" aria-hidden="true" tabindex="-1"></a>r.py_arr</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <div class="cell-output cell-output-stdout">
 <pre><code>pyarrow.Table
@@ -410,18 +547,18 @@ Species: [  -- dictionary:
 </div>
 </div>
 </section>
-<section id="handover-from-python-to-r" class="level2">
-<h2 class="anchored" data-anchor-id="handover-from-python-to-r">Handover from Python to R</h2>
+<section id="passing-tables-back-to-r" class="level2">
+<h2 class="anchored" data-anchor-id="passing-tables-back-to-r">Passing Tables back to R</h2>
 <div class="cell">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
 <pre><strong>[python code]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb16"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a>boring <span class="op">=</span> pyarrow.array([<span class="dv">1</span>,<span class="dv">2</span>,<span class="dv">3</span>])</span>
-<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a>boring</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb28"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb28-1"><a href="#cb28-1" aria-hidden="true" tabindex="-1"></a>boring <span class="op">=</span> pyarrow.array([<span class="dv">1</span>,<span class="dv">2</span>,<span class="dv">3</span>])</span>
+<span id="cb28-2"><a href="#cb28-2" aria-hidden="true" tabindex="-1"></a>boring</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <div class="cell-output cell-output-stdout">
-<pre><code>&lt;pyarrow.lib.Int64Array object at 0x7f2fe18f3400&gt;
+<pre><code>&lt;pyarrow.lib.Int64Array object at 0x7f2c2fb11d60&gt;
 [
   1,
   2,
@@ -434,7 +571,7 @@ Species: [  -- dictionary:
 <div class="code-with-filename-file">
 <pre><strong>[R code]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb18"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a>reticulate<span class="sc">::</span>py<span class="sc">$</span>boring</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb30"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb30-1"><a href="#cb30-1" aria-hidden="true" tabindex="-1"></a>reticulate<span class="sc">::</span>py<span class="sc">$</span>boring</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <div class="cell-output cell-output-stdout">
 <pre><code>Array
@@ -446,6 +583,10 @@ Species: [  -- dictionary:
 ]</code></pre>
 </div>
 </div>
+</section>
+<section id="is-there-a-more-pythonic-solution" class="level2">
+<h2 class="anchored" data-anchor-id="is-there-a-more-pythonic-solution">Is there a more pythonic solution?</h2>
+<p>One thing you’ll notice about the framing throughout this post is that</p>
 <p><br><br></p>
 <!--------------- appendices go here ----------------->
 <div class="cell">
@@ -455,18 +596,24 @@ Species: [  -- dictionary:
 
 </section>
 
-<div id="quarto-appendix" class="default"><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
+
+<div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document" role="doc-endnotes"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
+
+<ol>
+<li id="fn1"><p>A good point about data science, that is. I’m not convinced it was a stellar contribution to the discussion of LGBT rights in the antipodes. Although frankly it wasn’t the worst comment on same sex marriage I saw an Australian politician make at the time, not by a loooooong margin.<a href="#fnref1" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+</ol>
+</section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
   author = {Danielle Navarro},
   editor = {},
-  title = {Zero-Copy Data Handover Between {R} and {Python,} Using
-    {Arrow} and Reticulate},
+  title = {Passing {Arrow} {Tables} Between {R} and {Python} with
+    Reticulate},
   date = {2022-08-28},
   url = {https://blog.djnavarro.net/posts/2022-08-25_zero-copy-data-handover-in-arrow},
   langid = {en}
 }
 </code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2022" class="csl-entry quarto-appendix-citeas" role="doc-biblioentry">
-Danielle Navarro. 2022. <span>“Zero-Copy Data Handover Between R and
-Python, Using Arrow and Reticulate.”</span> August 28, 2022. <a href="https://blog.djnavarro.net/posts/2022-08-25_zero-copy-data-handover-in-arrow">https://blog.djnavarro.net/posts/2022-08-25_zero-copy-data-handover-in-arrow</a>.
+Danielle Navarro. 2022. <span>“Passing Arrow Tables Between R and Python
+with Reticulate.”</span> August 28, 2022. <a href="https://blog.djnavarro.net/posts/2022-08-25_zero-copy-data-handover-in-arrow">https://blog.djnavarro.net/posts/2022-08-25_zero-copy-data-handover-in-arrow</a>.
 </div></div></section></div></main> <!-- /main -->
 <!-- plausible -->
 <script async="" defer="" data-domain="blog.djnavarro.net" src="https://plausible.io/js/plausible.js"></script>

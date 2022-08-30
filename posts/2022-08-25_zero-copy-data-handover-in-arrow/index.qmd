@@ -1,5 +1,5 @@
 ---
-title: "Zero-copy data handover between R and Python, using Arrow and reticulate"
+title: "Passing Arrow Tables between R and Python with reticulate"
 description: "A neat trick"
 date: "2022-08-28"
 categories: [Apache Arrow, R, Python]
@@ -20,16 +20,41 @@ long_slug <- "2022-05-28_zero-copy-data-handover-in-arrow"
 #renv::use(lockfile = "renv.lock")
 ```
 
+```{css, include=FALSE}
+h2 {
+  padding-top: 2em;
+}
+```
+
 <!-- 
 the default python environment is this one:
 /home/danielle/.local/share/r-miniconda/envs/r-reticulate/bin/python
 --->
 
+As the 21st century gears up for its quarter-life crisis, the trend in data science is toward multi-language tools. I use [quarto](https://quarto.org/) to write this blog, a document preparation system that supports code evaluation in R, Python, Julia, and more. My work revolves around [Apache Arrow](https://arrow.apache.org/), a toolbox for data analysis and interchange with implementations in multiple languages. You get the idea. In one sense this new development is fantastic -- your language of choice is much more likely to be supported in the future than it ever was in the past. In another sense it is daunting -- it sometimes feels like we need to learn *all the things* in order to get by in this brave new world. Meanwhile we all have our actual jobs to do and we don't have the time. In the [immortal words of Bob Katter](https://www.youtube.com/watch?v=1i739SyCu9I),
+
+> I mean, you know, people are entitled to their sexual proclivities. Let there be a thousand blossoms bloom as far as I'm concerned, you know... 
+>
+> &nbsp; &nbsp; &nbsp; [*pauses, expression turns dark*]
+>
+> ...but I ain't spending any time on it because, in the meantime, every three months a person is torn to pieces by a crocodile in North Queensland
+
+I mean, he makes a good point?^[A good point about data science, that is. I'm not convinced it was a stellar contribution to the discussion of LGBT rights in the antipodes. Although frankly it wasn't the worst comment on same sex marriage I saw an Australian politician make at the time, not by a loooooong margin.] There's a lot going on in the data science world, none of us can keep pace with all of it, and we're all trying our best not to be eaten by crocodiles. 
+
+## Data interchange in a polyglot world
+
+In the spirit of saving you from at least one reptilian threat, this post is a quick primer on how to efficiently pass control of a large data set between R and Python *without* making any wasteful copies of the data. The idea to write this post came from a [twitter thread by Cass Wilkinson Saldaña](https://twitter.com/mxcatnap/status/1559991199494279169), and in particular a [reply by Jon Keane](https://twitter.com/jonkeane/status/1560016227824721920) who mentioned that Apache Arrow provides a handy toolkit for doing this that isn't as widely known as it perhaps deserves to be! 
+
+
+## Using reticulate to call Python from R
+
+The solution to the problem relies fundamentally on [the {reticulate} package](https://rstudio.github.io/reticulate/)...
+
 ```{r, filename="[R code]"}
 library(reticulate)
 ```
 
-The {reticulate} package has an elaborate lookup mechanism that it uses to find a python environment. In this post and the next I want to make sure that I'm always using the *same* python environment regardless of whether my underlying quarto engine is knitr or jupyter. This is tricky because -- thanks to the nightmare that is python environment managment -- I've managed to accrue four different versions of python on my machine, and (don't ask me how) two separate copies of miniconda!
+The {reticulate} package has an elaborate lookup mechanism that it uses to find a python environment. In this post and the next I want to make sure that I'm always using the *same* python environment regardless of whether my underlying quarto engine is knitr or jupyter. This is tricky because -- thanks to the nightmare that is python environment management -- I've managed to accrue four different versions of python on my machine, and (don't ask me how) two separate copies of miniconda!
 
 Rather than mess with paths, what I'm going to do in this post is be extremely specific. I'm going to make a point of *always* telling {reticulate} where to look in order to find python and miniconda. 
 
@@ -42,7 +67,85 @@ use_miniconda(
 )
 ```
 
-The next step (if I hadn't done this already) would be to install pyarrow in the relevant python environment. The {arrow} package supplies a helper function called `install_pyarrow()` that you can use to do this, but it's just a convenience function that calls the relevant {reticulate} functions for you. For this post I'll do it using {reticulate}, and since my python environment is managed by miniconda I'll use `conda_install()`: 
+When calling python code from within R, some translation is necessary. As a simple example, let's say I have my regular python session open and I want to check what version of python I am running and show the path to the python executable. To do this in native python code I'd use the {sys} library:
+
+```{python check-version, filename="[python code]"}
+#| results: hold
+import sys
+print(sys.version)
+print(sys.executable)
+```
+
+To do this in R, the code is essentially the same except that the `import()` function supplied by {reticulate} replaces the `import` keyword, and `$` replaces `.` as the accessor: 
+
+```{r import-sys, filename="[R code]"}
+#| results: hold
+sys <- import("sys")
+sys$version
+sys$executable
+```
+
+Python functions supplied through reticulate can be used in conjunction with regular R code. As a simple example, let's say I wanted to use the [python {art} library](https://pypi.org/project/art/) to generate text decorations. It contains a `decor()` function that creates cute glyphs like this:
+
+```{r art, filename="[R code]"}
+art <- import("art")
+art$decor("heart9")
+```
+
+To illustrate the interoperability between R and Python, let's say I want to create a modified version of the `decor()` function. The original `decor()` function takes a single string specifying the name of a glyph. That string could be `"heart9"`, `"wave3"`, or anything other pattern known to the `decor()` function. You can only pass one string: it does not accept vectors. What I'd like to do in a modified version is pass a numeric vector as input, and receive a vector of heart glyphs as output. Although the original `decor()` function is written in Python, I can do this entirely on the R side: I don't have to write any Python code.
+
+```{r vectorised-decor, filename="[R code]"}
+decor_heart <- function(x) {
+  purrr::map_chr(x, ~ art$decor(paste0("heart", .x)))
+}
+decor_heart(1:9)
+```
+
+Prettiness! 😍
+
+## R to Pandas
+
+Okay, now that we understand the basics of {reticulate}, let's move on to the task of transferring data between R and Python. 
+
+```{r r-to-panda, filename="[R code]"}
+py_iris <- r_to_py(iris)
+py_iris
+```
+
+https://pandas.pydata.org/
+
+Within the Python session, an object called `r` has been created: the Pandas DataFrame object is stored as `r.py_iris` 
+
+```{python panda-from-r, filename="[python code]"}
+iris_means = r.py_iris.groupby("Species").mean()
+iris_means
+```
+
+As you might hope, this data is accessible from the R session. {reticulate} exposes an object named `py` to the user, and -- surprise, surprise -- objects created in the Python session can be accessed using that object...
+
+```{r back-to-r, filename="[R code]"}
+py$iris_means
+```
+
+...and by the magic of {reticulate} the Pandas DataFrame is magically interpreted as an R data frame.
+
+## Let's bring Apache Arrow into the mix
+
+So here's the thing about magic, at least when it comes to code. There comes a point where you need to modify the spell. The example in the previous section looks smooth and seamless because the data set is small. However, it is fundamentally inefficient for the simple reason that a Pandas DataFrame looks different in memory to an R data frame. It's not possible for the two languages to share a single copy of the data because they don't agree on what "the data" are. To handover data from R to Python (or vice versa) it is necessary to copy the data set and convert it to a more appropriate format. 
+
+When the data set is small, this is not a problem. But as your data set grows, it becomes ever more burdensome. These copy-and-convert operations are not cheap. 
+
+Wouldn't it be nice if R and Python could both agree to represent the data as, oh let's say.... an Arrow Table? On the R side we could interact with it using the {arrow} package, and on the Python side we could interact with it using {pyarrow}. But regardless of which language we're using, the thing in memory would be *exactly* the same... handing over the data set from one language to the other would no longer require any copying. A little metadata would change hands, and that's all. 
+
+That sounds much nicer. 
+
+## Installing pyarrow
+
+So let's do this. 
+
+In the previous example, the R data frame was handled on the Python side by the Pandas module. And as a consequence, you'd imagine that it was pretty important that my Python environment has Pandas installed right? Well, the same is true when passing an Arrow Table: you need to have {pyarrow} installed on the Python side as well as {arrow} installed on the R side. 
+
+As a convenience, the {arrow} package supplies a helper function called `install_pyarrow()` that calls the relevant {reticulate} functions for you, but for the purposes of this post I'll show you the {reticulate} functions. The python environment I'm using in this post is managed by miniconda, so I'll use `conda_install()` to do the work: 
 
 ```{r, eval=FALSE, filename="[R code]"}
 conda_install(
@@ -52,19 +155,7 @@ conda_install(
 )
 ```
 
-In this code, `packages` is the name of the to-be-installed python module, `envname` is the path to the conda environment, and `conda` is the path to the conda executable. You probably don't need to be this explicit because {reticulate} generally handles these things nicely and manages its own copies of python and miniconda, but I am deliberately *not* using the reticulate-installed versions here!  
-
-
-<!-- <blockquote class="twitter-tweet"><p lang="en" dir="ltr">And with an arrow table (or dataset) that handoff can be zero copy, zero serialization. We need to improve our docs around this but there’s an example in the tests that shows it off: <a href="https://t.co/ff5Am0fsCW">https://t.co/ff5Am0fsCW</a> (some) docs: <a href="https://t.co/hg9G2NenIM">https://t.co/hg9G2NenIM</a></p>&mdash; Jonathan Keane (@jonkeane) <a href="https://twitter.com/jonkeane/status/1560016227824721920?ref_src=twsrc%5Etfw">August 17, 2022</a></blockquote> <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>  -->
-
-## Check my installation
-
-```{python check-version, filename="[python code]"}
-#| results: hold
-import sys
-print(sys.version)
-print(sys.executable)
-```
+In this code, `packages` is the name of the to-be-installed python module, `envname` is the path to the conda environment, and `conda` is the path to the conda executable. As a general rule you don't need to be this explicit: {reticulate} will find the environment and conda executable for you. I'm being unusually particular in this post, for reasons that will be a little more obvious in the next post.
 
 Next let's import {pyarrow} and check the version:
 
@@ -90,7 +181,7 @@ sudo apt-get install libstdc++6
 
 
 
-## Handover from R to Python
+## Passing Tables to Python
 
 ```{r, filename="[R code]"}
 # R
@@ -106,7 +197,7 @@ py_arr
 r.py_arr
 ```
 
-## Handover from Python to R
+## Passing Tables back to R
 
 ```{python, filename="[python code]"}
 boring = pyarrow.array([1,2,3])
@@ -118,6 +209,9 @@ boring
 reticulate::py$boring
 ```
 
+## Is there a more pythonic solution?
+
+One thing you'll notice about the framing throughout this post is that 
 
 <br><br>
 
