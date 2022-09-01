@@ -31,37 +31,39 @@ artist: Reuben Juarez
 licence: unsplash free-to-use 
 -->
 <!-- 
-AT A TERMINAL NOT TIED TO THE RSTUDIO SESSION:
-
-quarto render ~/GitHub/sites/quarto-blog/posts/2022-09-02_arrow-and-rpy2/index.qmd --execute-daemon-restart
-
+# bash commands to build this post
+conda activate continuation
+cd ~/GitHub/sites/quarto-blog/posts/2022-09-02_arrow-and-rpy2
+quarto render index.qmd --execute-daemon-restart
 -->
-<p>https://rpy2.github.io/</p>
-<p>https://rviews.rstudio.com/2022/05/25/calling-r-from-python-with-rpy2/</p>
-<p>https://arrow.apache.org/docs/python/integration/python_r.html</p>
-<p>installing rpy2</p>
-<pre><code>pip install rpy2
-pip install rpy2-arrow</code></pre>
-<p>installing pyarrow</p>
-<pre><code>conda install pyarrow</code></pre>
-<pre><code>conda install pandas</code></pre>
+<p>In the <a href="../../posts/2022-09-01_reticulated-arrow/">last post on this blog</a> I showed how Apache Arrow makes it possible to hand over data sets from R to Python (and vice versa) without making wasteful copies of the data.</p>
+<p>The solution I outlined there was to use the <a href="https://rstudio.github.io/reticulate/">reticulate</a> package to conduct the handover, and rely on Arrow tools both sides to manage the data. In one sense it’s a perfectly good solution to the problem… but it’s a solution tailor made for R users who need access to Python. When viewed from the perspective of a Python user who needs access to R, it’s a little awkward to have an R package (reticulate) governing the handover.<sup>1</sup> Perhaps we can find a more Pythonic way to approach this?</p>
+<p>A solution to our problem is provided by the <a href="https://rpy2.github.io/">rpy2 module</a> that provides an interface to R from Python, and the <a href="https://rpy2.github.io/rpy2-arrow/version/main/html/index.html">rpy2-arrow extension module</a> that allows it to support Arrow objects. Let’s take a look, shall we?</p>
+<p>In writing this post I am heavily indebted to Isabella Velásquez, whose fabulous post on <a href="https://rviews.rstudio.com/2022/05/25/calling-r-from-python-with-rpy2/">calling R from Python with rpy2</a> helped me immensely. The <a href="https://arrow.apache.org/docs/python/integration/python_r.html">documentation on integrating PyArrow with R</a> was extremely helpful too!</p>
+<section id="setting-up-the-python-environment" class="level2">
+<h2 class="anchored" data-anchor-id="setting-up-the-python-environment">Setting up the Python environment</h2>
+<p>For the purposes of this post I’ll create a fresh conda environment that I’ll call “continuation”, both because this post is a continuation of the previous one and because the data set I’ll use later is called “To Be Continued…”. I was able install most packages I need through conda-forge, but for rpy2 and rpy2-arrow I was only able to do so from pypi so I had to use pip for that. So the complete code for setting up my environment was as follows:</p>
+<div class="sourceCode" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb1-1"><span class="ex" style="color: null;">conda</span> create <span class="at" style="color: #657422;">-n</span> continuation</span>
+<span id="cb1-2"><span class="ex" style="color: null;">conda</span> install <span class="at" style="color: #657422;">-n</span> continuation pip pyarrow pandas jupyter</span>
+<span id="cb1-3"><span class="ex" style="color: null;">conda</span> activate continuation</span>
+<span id="cb1-4"><span class="ex" style="color: null;">pip</span> install rpy2 rpy2-arrow</span></code></pre></div>
+</section>
 <section id="check-my-pyarrow" class="level2">
 <h2 class="anchored" data-anchor-id="check-my-pyarrow">Check my pyarrow</h2>
 <div class="cell" data-execution_count="1">
-<div class="sourceCode cell-code" id="cb4" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb4-1"><span class="co" style="color: #5E5E5E;"># python</span></span>
-<span id="cb4-2"><span class="im" style="color: #00769E;">import</span> sys</span>
-<span id="cb4-3"><span class="bu" style="color: null;">print</span>(sys.version)</span>
-<span id="cb4-4"><span class="bu" style="color: null;">print</span>(sys.executable)</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb2" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb2-1"><span class="co" style="color: #5E5E5E;"># python</span></span>
+<span id="cb2-2"><span class="im" style="color: #00769E;">import</span> sys</span>
+<span id="cb2-3"><span class="bu" style="color: null;">print</span>(sys.version)</span>
+<span id="cb2-4"><span class="bu" style="color: null;">print</span>(sys.executable)</span></code></pre></div>
 <div class="cell-output cell-output-stdout">
-<pre><code>3.9.12 (main, Apr  5 2022, 06:56:58) 
-[GCC 7.5.0]
-/home/danielle/miniconda3/bin/python</code></pre>
+<pre><code>3.10.4 (main, Mar 31 2022, 08:41:55) [GCC 7.5.0]
+/home/danielle/miniconda3/envs/continuation/bin/python</code></pre>
 </div>
 </div>
 <div class="cell" data-execution_count="2">
-<div class="sourceCode cell-code" id="cb6" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb6-1"><span class="co" style="color: #5E5E5E;"># python</span></span>
-<span id="cb6-2"><span class="im" style="color: #00769E;">import</span> pyarrow</span>
-<span id="cb6-3">pyarrow.__version__</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb4" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb4-1"><span class="co" style="color: #5E5E5E;"># python</span></span>
+<span id="cb4-2"><span class="im" style="color: #00769E;">import</span> pyarrow</span>
+<span id="cb4-3">pyarrow.__version__</span></code></pre></div>
 <div class="cell-output cell-output-display" data-execution_count="2">
 <pre><code>'8.0.0'</code></pre>
 </div>
@@ -71,9 +73,9 @@ pip install rpy2-arrow</code></pre>
 <h2 class="anchored" data-anchor-id="about-the-data">About the data</h2>
 <p>The data set for this post comes from the <a href="https://cdhrdatasys.anu.edu.au/tobecontinued/">To Be Continued</a> database of fiction published in Australian newspapers during the 19th and early 20th century. Originally collected using the incredibly cool <a href="https://trove.nla.gov.au/">Trove</a> resource run by the National Library of Australia, it’s released under a CC-BY-4.0 licence and maintained by Katherine Bode and Carol Hetherington.</p>
 <div class="cell" data-execution_count="3">
-<div class="sourceCode cell-code" id="cb8" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb8-1"><span class="im" style="color: #00769E;">import</span> pandas <span class="im" style="color: #00769E;">as</span> pd</span>
-<span id="cb8-2">fiction <span class="op" style="color: #5E5E5E;">=</span> pd.read_csv(<span class="st" style="color: #20794D;">"newspaper-fiction.csv"</span>, low_memory <span class="op" style="color: #5E5E5E;">=</span> <span class="va" style="color: #111111;">False</span>)</span>
-<span id="cb8-3">fiction.head()</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb6" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb6-1"><span class="im" style="color: #00769E;">import</span> pandas <span class="im" style="color: #00769E;">as</span> pd</span>
+<span id="cb6-2">fiction <span class="op" style="color: #5E5E5E;">=</span> pd.read_csv(<span class="st" style="color: #20794D;">"newspaper-fiction.csv"</span>, low_memory <span class="op" style="color: #5E5E5E;">=</span> <span class="va" style="color: #111111;">False</span>)</span>
+<span id="cb6-3">fiction.head()</span></code></pre></div>
 <div class="cell-output cell-output-display" data-execution_count="3">
 
 <div>
@@ -236,8 +238,8 @@ pip install rpy2-arrow</code></pre>
 <section id="panda-to-arrow-table" class="level2">
 <h2 class="anchored" data-anchor-id="panda-to-arrow-table">Panda to Arrow Table</h2>
 <div class="cell" data-execution_count="4">
-<div class="sourceCode cell-code" id="cb9" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb9-1">pyarrow_fiction <span class="op" style="color: #5E5E5E;">=</span> pyarrow.Table.from_pandas(fiction)</span>
-<span id="cb9-2">pyarrow_fiction</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb7" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb7-1">pyarrow_fiction <span class="op" style="color: #5E5E5E;">=</span> pyarrow.Table.from_pandas(fiction)</span>
+<span id="cb7-2">pyarrow_fiction</span></code></pre></div>
 <div class="cell-output cell-output-display" data-execution_count="4">
 <pre><code>pyarrow.Table
 Trove ID: int64
@@ -286,8 +288,8 @@ Publication Source: [[null,null,"Sunday Times",null,null,...,null,null,null,null
 <section id="introducing-rpy2" class="level2">
 <h2 class="anchored" data-anchor-id="introducing-rpy2">Introducing rpy2</h2>
 <div class="cell" data-execution_count="5">
-<div class="sourceCode cell-code" id="cb11" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb11-1"><span class="im" style="color: #00769E;">import</span> rpy2.robjects <span class="im" style="color: #00769E;">as</span> robjects</span>
-<span id="cb11-2"><span class="im" style="color: #00769E;">from</span> rpy2.robjects.packages <span class="im" style="color: #00769E;">import</span> importr, data</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb9" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb9-1"><span class="im" style="color: #00769E;">import</span> rpy2.robjects <span class="im" style="color: #00769E;">as</span> robjects</span>
+<span id="cb9-2"><span class="im" style="color: #00769E;">from</span> rpy2.robjects.packages <span class="im" style="color: #00769E;">import</span> importr, data</span></code></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>
 R version 4.2.1 (2022-06-23)
@@ -298,8 +300,8 @@ R version 4.2.1 (2022-06-23)
 </div>
 </div>
 <div class="cell" data-execution_count="6">
-<div class="sourceCode cell-code" id="cb14" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb14-1">base <span class="op" style="color: #5E5E5E;">=</span> importr(<span class="st" style="color: #20794D;">'base'</span>)</span>
-<span id="cb14-2">base.R_version_string</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb12" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb12-1">base <span class="op" style="color: #5E5E5E;">=</span> importr(<span class="st" style="color: #20794D;">'base'</span>)</span>
+<span id="cb12-2">base.R_version_string</span></code></pre></div>
 <div class="cell-output cell-output-display" data-execution_count="6">
 
 
@@ -323,12 +325,12 @@ R version 4.2.1 (2022-06-23)
 <h2 class="anchored" data-anchor-id="passing-tables-from-python-to-r">Passing Tables from Python to R</h2>
 <p>https://rpy2.github.io/rpy2-arrow/version/main/html/index.html</p>
 <div class="cell" data-execution_count="7">
-<div class="sourceCode cell-code" id="cb15" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb15-1"><span class="im" style="color: #00769E;">import</span> rpy2_arrow.pyarrow_rarrow <span class="im" style="color: #00769E;">as</span> pyra</span>
-<span id="cb15-2"></span>
-<span id="cb15-3">rarrow_fiction <span class="op" style="color: #5E5E5E;">=</span> pyra.pyarrow_to_r_table(pyarrow_fiction)</span>
-<span id="cb15-4">rarrow_fiction</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb13" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb13-1"><span class="im" style="color: #00769E;">import</span> rpy2_arrow.pyarrow_rarrow <span class="im" style="color: #00769E;">as</span> pyra</span>
+<span id="cb13-2"></span>
+<span id="cb13-3">rarrow_fiction <span class="op" style="color: #5E5E5E;">=</span> pyra.pyarrow_to_r_table(pyarrow_fiction)</span>
+<span id="cb13-4">rarrow_fiction</span></code></pre></div>
 <div class="cell-output cell-output-display" data-execution_count="7">
-<pre><code>&lt;rpy2.robjects.environments.Environment object at 0x7f0f2fbda440&gt; [RTYPES.ENVSXP]
+<pre><code>&lt;rpy2.robjects.environments.Environment object at 0x7f6346502840&gt; [RTYPES.ENVSXP]
 R classes: ('Table', 'ArrowTabular', 'ArrowObject', 'R6')
 n items: 36</code></pre>
 </div>
@@ -337,22 +339,22 @@ n items: 36</code></pre>
 <section id="calling-r-code" class="level2">
 <h2 class="anchored" data-anchor-id="calling-r-code">Calling R code</h2>
 <div class="cell" data-execution_count="8">
-<div class="sourceCode cell-code" id="cb17" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb17-1"><span class="op" style="color: #5E5E5E;">%</span>load_ext rpy2.ipython</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb15" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb15-1"><span class="op" style="color: #5E5E5E;">%</span>load_ext rpy2.ipython</span></code></pre></div>
 </div>
 <div class="cell" data-execution_count="9">
-<div class="sourceCode cell-code" id="cb18" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb18-1"><span class="op" style="color: #5E5E5E;">%%</span>R</span>
-<span id="cb18-2">suppressMessages({</span>
-<span id="cb18-3">  library(dplyr)</span>
-<span id="cb18-4">  library(arrow)</span>
-<span id="cb18-5">})</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb16" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb16-1"><span class="op" style="color: #5E5E5E;">%%</span>R</span>
+<span id="cb16-2">suppressMessages({</span>
+<span id="cb16-3">  library(dplyr)</span>
+<span id="cb16-4">  library(arrow)</span>
+<span id="cb16-5">})</span></code></pre></div>
 </div>
 <div class="cell" data-execution_count="10">
-<div class="sourceCode cell-code" id="cb19" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb19-1"><span class="op" style="color: #5E5E5E;">%%</span>R <span class="op" style="color: #5E5E5E;">-</span>i rarrow_fiction</span>
-<span id="cb19-2">gender <span class="op" style="color: #5E5E5E;">&lt;-</span> rarrow_fiction <span class="op" style="color: #5E5E5E;">|&gt;</span> </span>
-<span id="cb19-3">  count(Gender) <span class="op" style="color: #5E5E5E;">|&gt;</span></span>
-<span id="cb19-4">  compute()</span>
-<span id="cb19-5">  </span>
-<span id="cb19-6">gender</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb17" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb17-1"><span class="op" style="color: #5E5E5E;">%%</span>R <span class="op" style="color: #5E5E5E;">-</span>i rarrow_fiction</span>
+<span id="cb17-2">gender <span class="op" style="color: #5E5E5E;">&lt;-</span> rarrow_fiction <span class="op" style="color: #5E5E5E;">|&gt;</span> </span>
+<span id="cb17-3">  count(Gender) <span class="op" style="color: #5E5E5E;">|&gt;</span></span>
+<span id="cb17-4">  compute()</span>
+<span id="cb17-5">  </span>
+<span id="cb17-6">gender</span></code></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>Table</code></pre>
 </div>
@@ -374,18 +376,18 @@ See $metadata for additional Schema metadata</code></pre>
 <section id="passing-tables-from-r-to-python" class="level2">
 <h2 class="anchored" data-anchor-id="passing-tables-from-r-to-python">Passing Tables from R to Python</h2>
 <div class="cell" data-execution_count="11">
-<div class="sourceCode cell-code" id="cb24" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb24-1"><span class="im" style="color: #00769E;">import</span> rpy2.robjects <span class="im" style="color: #00769E;">as</span> robjects</span>
-<span id="cb24-2">r_gender <span class="op" style="color: #5E5E5E;">=</span> robjects.r(<span class="st" style="color: #20794D;">'gender'</span>)</span>
-<span id="cb24-3">r_gender</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb22" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb22-1"><span class="im" style="color: #00769E;">import</span> rpy2.robjects <span class="im" style="color: #00769E;">as</span> robjects</span>
+<span id="cb22-2">r_gender <span class="op" style="color: #5E5E5E;">=</span> robjects.r(<span class="st" style="color: #20794D;">'gender'</span>)</span>
+<span id="cb22-3">r_gender</span></code></pre></div>
 <div class="cell-output cell-output-display" data-execution_count="11">
-<pre><code>&lt;rpy2.robjects.environments.Environment object at 0x7f0f2f1efc00&gt; [RTYPES.ENVSXP]
+<pre><code>&lt;rpy2.robjects.environments.Environment object at 0x7f6340e2e200&gt; [RTYPES.ENVSXP]
 R classes: ('Table', 'ArrowTabular', 'ArrowObject', 'R6')
 n items: 36</code></pre>
 </div>
 </div>
 <div class="cell" data-execution_count="12">
-<div class="sourceCode cell-code" id="cb26" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb26-1">py_gender <span class="op" style="color: #5E5E5E;">=</span> pyra.rarrow_to_py_table(r_gender)</span>
-<span id="cb26-2">py_gender</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb24" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb24-1">py_gender <span class="op" style="color: #5E5E5E;">=</span> pyra.rarrow_to_py_table(r_gender)</span>
+<span id="cb24-2">py_gender</span></code></pre></div>
 <div class="cell-output cell-output-display" data-execution_count="12">
 <pre><code>pyarrow.Table
 Gender: string
@@ -399,8 +401,8 @@ n: [[11299,6878,15083,106,176,31]]</code></pre>
 <section id="back-to-pandas" class="level2">
 <h2 class="anchored" data-anchor-id="back-to-pandas">Back to Pandas</h2>
 <div class="cell" data-execution_count="13">
-<div class="sourceCode cell-code" id="cb28" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb28-1">panda_gender <span class="op" style="color: #5E5E5E;">=</span> pyarrow.Table.to_pandas(py_gender)</span>
-<span id="cb28-2">panda_gender</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb26" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb26-1">panda_gender <span class="op" style="color: #5E5E5E;">=</span> pyarrow.Table.to_pandas(py_gender)</span>
+<span id="cb26-2">panda_gender</span></code></pre></div>
 <div class="cell-output cell-output-display" data-execution_count="13">
 
 <div>
@@ -453,7 +455,13 @@ n: [[11299,6878,15083,106,176,31]]</code></pre>
 
 </section>
 
-<div id="quarto-appendix" class="default"><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
+
+<div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
+
+<ol>
+<li id="fn1"><p>Relatedly, if you’re a Python user blogging in quarto, you are very unlikely to be using the <a href="https://quarto.org/docs/reference/cells/cells-knitr.html">knitr engine</a> to execute code like I did in the last blog post. Instead you’re almost certainly using the <a href="https://quarto.org/docs/reference/cells/cells-jupyter.html">jupyter engine</a>. With that in mind, and with the goal of making this post a little more Pythonic, I’m using Jupyter this time.↩︎</p></li>
+</ol>
+</section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
   author = {Danielle Navarro},
   editor = {},
   title = {Our Saga Continues! {Passing} {Arrow} {Tables} Between {R}
@@ -512,11 +520,10 @@ the default python environment is this one:
 <p>Jon’s comment is the one that really caught my attention because they’re completely right: passing data back and forth between R and Python without making copies of the data<sup>3</sup> is something that’s <em>obnoxiously</em> easy to do using Apache Arrow…</p>
 <p>…but only if you know the trick, and the trick isn’t well documented yet.</p>
 <p><br><br></p>
-<section id="the-trick" class="level3">
-<h3 class="anchored" data-anchor-id="the-trick">The trick</h3>
-<p>The “trick” is simple: if your data are stored as an Arrow Table, and you use the <a href="https://rstudio.github.io/reticulate/">reticulate</a> package to pass it from R to Python (or vice versa), only the metadata changes hands. Because an Arrow Table has the <em>same</em> structure in-memory when accessed from Python as it does in R, the data set itself does not need to be touched at all. The only thing that needs to happen is the language on the receiving end needs to be told <em>where</em> the data are stored. Or, to put it another way, we just pass a pointer across. This all happens invisibly, so if you know how to use reticulate,<sup>4</sup> you already know how to do this!</p>
-<p>Yes yes Danielle, that’s all well and good, but what if I don’t know how to use reticulate? What if I’m one of those people who are vaguely aware that reticulate exists as an R package that provides an interface to Python, but haven’t actually used it and am not sure how to get started? What am I supposed to do then?</p>
-<p>As it happens, you’re in luck. Until quite recently I was one of those people, and I’m deeply sympathetic. I’d somehow convinced myself that using reticulate would be super hard and require magic powers that I don’t have. Thankfully, it turned out to be much less painful than I feared, and I’ll walk you through the process (or at least the process I followed!) now. <br><br></p>
+<section id="the-reticulate-trick" class="level3">
+<h3 class="anchored" data-anchor-id="the-reticulate-trick">The reticulate trick</h3>
+<p>The “trick” is simple: if your data are stored as an Arrow Table, and you use the <a href="https://rstudio.github.io/reticulate/">reticulate</a> package to pass it from R to Python (or vice versa), only the metadata changes hands. Because an Arrow Table has the <em>same</em> structure in-memory when accessed from Python as it does in R, the data set itself does not need to be touched at all. The only thing that needs to happen is the language on the receiving end needs to be told <em>where</em> the data are stored. Or, to put it another way, we just pass a pointer across. This all happens invisibly, so if you know how to use reticulate,<sup>4</sup> you already know almost everything you need to know and can skip straight to the section on passing Arrow objects. If you’re like me-from-last-week and have no idea how reticulate works, read on…</p>
+<p><br><br></p>
 </section>
 <section id="managing-the-python-environment-from-r" class="level3">
 <h3 class="anchored" data-anchor-id="managing-the-python-environment-from-r">Managing the Python environment from R</h3>
@@ -529,45 +536,48 @@ the default python environment is this one:
 <div class="sourceCode cell-code" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><span class="fu" style="color: #4758AB;">library</span>(reticulate)</span></code></pre></div>
 </div>
 </div>
+<p>What happens next depends a little on whether you already have a Python set up. If you don’t have a preferred Python configuration on your machine and would like to let reticulate manage everything for you, then you can do something like this:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[R code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb2" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1"><span class="fu" style="color: #4758AB;">install_python</span>()</span>
+<span id="cb2-2"><span class="fu" style="color: #4758AB;">install_miniconda</span>()</span></code></pre></div>
+</div>
+</div>
+<p>This will set you up with a default Python build, managed by a copy of <a href="https://docs.conda.io/en/latest/miniconda.html">Miniconda</a> that it installs in an OS-specific location that you can discover by calling <code>miniconda_path()</code>. This is a perfectly sensible way to use reticulate, but in the end the approach I took was slightly different.</p>
+<p>If you’re like me and already have Python and Miniconda configured, you probably <em>don’t</em> want reticulate installing new versions on your machine.<sup>5</sup> You probably want to use your existing set up and ensure that reticulate knows where to find everything. If that’s the case, what you want to do is edit your <code>.Renviron</code> file<sup>6</sup> and set the RETICULATE_MINICONDA_PATH variable. Add a line like this one,</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[within .Renviron]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb3" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb3-1"><span class="va" style="color: #111111;">RETICULATE_MINICONDA_PATH</span><span class="op" style="color: #5E5E5E;">=</span>/home/danielle/miniconda3/</span></code></pre></div>
+</div>
+</div>
+<p>where you should specify the path to your Miniconda installation, not mine 😁</p>
 <p>Next, we check that reticulate can find your Python environment if you have more than one make sure it’s finding the one you want to use! If you’re at all like me you’ll find you’ve managed to accumulate several different Python environments, often by accident. Currently I have four Python environments managed by <a href="https://docs.conda.io/en/latest/miniconda.html">miniconda</a>:</p>
 <div class="cell">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
-<pre><strong>[at the terminal]</strong></pre>
+<pre><strong>[R code]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb2" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb2-1"><span class="ex" style="color: null;">conda</span> env list</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb4" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><span class="fu" style="color: #4758AB;">conda_list</span>()</span></code></pre></div>
 </div>
-</div>
-<div class="cell">
 <div class="cell-output cell-output-stdout">
-<pre><code># conda environments:
-#
-                         /home/danielle/.local/share/r-miniconda
-                         /home/danielle/.local/share/r-miniconda/envs/arrow_env
-                         /home/danielle/.local/share/r-miniconda/envs/r-reticulate
-base                     /home/danielle/miniconda3</code></pre>
+<pre><code>          name                                                 python
+1         base                   /home/danielle/miniconda3/bin/python
+2 continuation /home/danielle/miniconda3/envs/continuation/bin/python</code></pre>
 </div>
 </div>
-<p>The three environments in the “r-miniconda” folder exist because when I first started using reticulate I let it manage its own Python and miniconda installation. The commands I used at the time were these:</p>
+<p>I can do this with <code>use_miniconda()</code>, explicitly specifying the <code>condaenv</code> to be used:</p>
 <div class="cell">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
 <pre><strong>[R code]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb4" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><span class="fu" style="color: #4758AB;">install_python</span>()</span>
-<span id="cb4-2"><span class="fu" style="color: #4758AB;">install_miniconda</span>()</span></code></pre></div>
-</div>
-</div>
-<p>When I did this, reticulate set me up with a default Python build, managed by the copy of miniconda that it installed. This isn’t a bad thing,<sup>5</sup> but also it isn’t the primary version of Python that I use when writing “everyday” Python code:<sup>6</sup> my usual Python environment is the fourth one on the list above, and for the purposes of this post that’s the one I want reticulate to use. I can do this with <code>use_miniconda()</code>, explicitly specifying the <code>condaenv</code> to be used:</p>
-<div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>[R code]</strong></pre>
-</div>
-<div class="sourceCode cell-code" id="cb5" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1"><span class="fu" style="color: #4758AB;">use_miniconda</span>(</span>
-<span id="cb5-2">  <span class="at" style="color: #657422;">condaenv =</span> <span class="st" style="color: #20794D;">"/home/danielle/miniconda3/bin/python"</span>, </span>
-<span id="cb5-3">  <span class="at" style="color: #657422;">required =</span> <span class="cn" style="color: #8f5902;">TRUE</span></span>
-<span id="cb5-4">)</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb6" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1"><span class="fu" style="color: #4758AB;">use_miniconda</span>(<span class="at" style="color: #657422;">condaenv =</span> <span class="st" style="color: #20794D;">"base"</span>, <span class="at" style="color: #657422;">required =</span> <span class="cn" style="color: #8f5902;">TRUE</span>)</span></code></pre></div>
 </div>
 </div>
 <p><br><br></p>
@@ -580,9 +590,9 @@ base                     /home/danielle/miniconda3</code></pre>
 <div class="code-with-filename-file">
 <pre><strong>[python code]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb6" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb6-1"><span class="im" style="color: #00769E;">import</span> sys</span>
-<span id="cb6-2"><span class="bu" style="color: null;">print</span>(sys.version)</span>
-<span id="cb6-3"><span class="bu" style="color: null;">print</span>(sys.executable)</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb7" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb7-1"><span class="im" style="color: #00769E;">import</span> sys</span>
+<span id="cb7-2"><span class="bu" style="color: null;">print</span>(sys.version)</span>
+<span id="cb7-3"><span class="bu" style="color: null;">print</span>(sys.executable)</span></code></pre></div>
 </div>
 <div class="cell-output cell-output-stdout">
 <pre><code>3.9.12 (main, Apr  5 2022, 07:05:27) 
@@ -596,9 +606,9 @@ base                     /home/danielle/miniconda3</code></pre>
 <div class="code-with-filename-file">
 <pre><strong>[R code]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb8" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1">sys <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">import</span>(<span class="st" style="color: #20794D;">"sys"</span>)</span>
-<span id="cb8-2">sys<span class="sc" style="color: #5E5E5E;">$</span>version</span>
-<span id="cb8-3">sys<span class="sc" style="color: #5E5E5E;">$</span>executable</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb9" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1">sys <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">import</span>(<span class="st" style="color: #20794D;">"sys"</span>)</span>
+<span id="cb9-2">sys<span class="sc" style="color: #5E5E5E;">$</span>version</span>
+<span id="cb9-3">sys<span class="sc" style="color: #5E5E5E;">$</span>executable</span></code></pre></div>
 </div>
 <div class="cell-output cell-output-stdout">
 <pre><code>[1] "3.9.12 (main, Apr  5 2022, 07:05:27) \n[GCC 7.5.0]"
@@ -617,8 +627,8 @@ base                     /home/danielle/miniconda3</code></pre>
 <div class="code-with-filename-file">
 <pre><strong>[R code]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb10" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1">taxa <span class="ot" style="color: #003B4F;">&lt;-</span> readr<span class="sc" style="color: #5E5E5E;">::</span><span class="fu" style="color: #4758AB;">read_csv2</span>(<span class="st" style="color: #20794D;">"taxa.csv"</span>)</span>
-<span id="cb10-2">taxa</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb11" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb11-1">taxa <span class="ot" style="color: #003B4F;">&lt;-</span> readr<span class="sc" style="color: #5E5E5E;">::</span><span class="fu" style="color: #4758AB;">read_csv2</span>(<span class="st" style="color: #20794D;">"taxa.csv"</span>)</span>
+<span id="cb11-2">taxa</span></code></pre></div>
 </div>
 <div class="cell-output cell-output-stdout">
 <pre><code># A tibble: 14,930 × 10
@@ -645,8 +655,8 @@ base                     /home/danielle/miniconda3</code></pre>
 <div class="code-with-filename-file">
 <pre><strong>[R code]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb12" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb12-1">py_taxa <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">r_to_py</span>(taxa)</span>
-<span id="cb12-2">py_taxa</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb13" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1">py_taxa <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">r_to_py</span>(taxa)</span>
+<span id="cb13-2">py_taxa</span></code></pre></div>
 </div>
 <div class="cell-output cell-output-stdout">
 <pre><code>                            taxon_id  ...    infraspecific_authority
@@ -671,11 +681,11 @@ base                     /home/danielle/miniconda3</code></pre>
 <div class="code-with-filename-file">
 <pre><strong>[python code]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb14" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb14-1">counts <span class="op" style="color: #5E5E5E;">=</span> r. <span class="op" style="color: #5E5E5E;">\</span></span>
-<span id="cb14-2">  py_taxa[[<span class="st" style="color: #20794D;">"family"</span>, <span class="st" style="color: #20794D;">"taxon_id"</span>]]. <span class="op" style="color: #5E5E5E;">\</span></span>
-<span id="cb14-3">  groupby(<span class="st" style="color: #20794D;">"family"</span>). <span class="op" style="color: #5E5E5E;">\</span></span>
-<span id="cb14-4">  agg(<span class="bu" style="color: null;">len</span>)</span>
-<span id="cb14-5">counts</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb15" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb15-1">counts <span class="op" style="color: #5E5E5E;">=</span> r. <span class="op" style="color: #5E5E5E;">\</span></span>
+<span id="cb15-2">  py_taxa[[<span class="st" style="color: #20794D;">"family"</span>, <span class="st" style="color: #20794D;">"taxon_id"</span>]]. <span class="op" style="color: #5E5E5E;">\</span></span>
+<span id="cb15-3">  groupby(<span class="st" style="color: #20794D;">"family"</span>). <span class="op" style="color: #5E5E5E;">\</span></span>
+<span id="cb15-4">  agg(<span class="bu" style="color: null;">len</span>)</span>
+<span id="cb15-5">counts</span></code></pre></div>
 </div>
 <div class="cell-output cell-output-stdout">
 <pre><code>                 taxon_id
@@ -702,7 +712,7 @@ Xenotyphlopidae         1
 <div class="code-with-filename-file">
 <pre><strong>[R code]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb16" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb16-1">py<span class="sc" style="color: #5E5E5E;">$</span>counts</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb17" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb17-1">py<span class="sc" style="color: #5E5E5E;">$</span>counts</span></code></pre></div>
 </div>
 <div class="cell-output cell-output-stdout">
 <pre><code>                   taxon_id
@@ -724,7 +734,7 @@ Anomochilidae             3
 <div class="code-with-filename-file">
 <pre><strong>[R code]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb18" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1"><span class="fu" style="color: #4758AB;">class</span>(py<span class="sc" style="color: #5E5E5E;">$</span>counts)</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb19" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb19-1"><span class="fu" style="color: #4758AB;">class</span>(py<span class="sc" style="color: #5E5E5E;">$</span>counts)</span></code></pre></div>
 </div>
 <div class="cell-output cell-output-stdout">
 <pre><code>[1] "data.frame"</code></pre>
@@ -748,7 +758,7 @@ Anomochilidae             3
 <div class="code-with-filename-file">
 <pre><strong>[R code]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb20" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb20-1"><span class="fu" style="color: #4758AB;">library</span>(arrow)</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb21" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb21-1"><span class="fu" style="color: #4758AB;">library</span>(arrow)</span></code></pre></div>
 </div>
 </div>
 <p>From there we’re good to go. Let’s start by reading the reptiles data directly from file into an Arrow Table:</p>
@@ -757,12 +767,12 @@ Anomochilidae             3
 <div class="code-with-filename-file">
 <pre><strong>[R code]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb21" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb21-1">taxa_arrow <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">read_delim_arrow</span>(</span>
-<span id="cb21-2">  <span class="at" style="color: #657422;">file =</span> <span class="st" style="color: #20794D;">"taxa.csv"</span>, </span>
-<span id="cb21-3">  <span class="at" style="color: #657422;">delim =</span> <span class="st" style="color: #20794D;">";"</span>, </span>
-<span id="cb21-4">  <span class="at" style="color: #657422;">as_data_frame =</span> <span class="cn" style="color: #8f5902;">FALSE</span></span>
-<span id="cb21-5">)</span>
-<span id="cb21-6">taxa_arrow</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb22" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb22-1">taxa_arrow <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">read_delim_arrow</span>(</span>
+<span id="cb22-2">  <span class="at" style="color: #657422;">file =</span> <span class="st" style="color: #20794D;">"taxa.csv"</span>, </span>
+<span id="cb22-3">  <span class="at" style="color: #657422;">delim =</span> <span class="st" style="color: #20794D;">";"</span>, </span>
+<span id="cb22-4">  <span class="at" style="color: #657422;">as_data_frame =</span> <span class="cn" style="color: #8f5902;">FALSE</span></span>
+<span id="cb22-5">)</span>
+<span id="cb22-6">taxa_arrow</span></code></pre></div>
 </div>
 <div class="cell-output cell-output-stdout">
 <pre><code>Table
@@ -790,11 +800,11 @@ $infraspecific_authority &lt;string&gt;</code></pre>
 <div class="code-with-filename-file">
 <pre><strong>[R code]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb23" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb23-1"><span class="fu" style="color: #4758AB;">conda_install</span>(</span>
-<span id="cb23-2">  <span class="at" style="color: #657422;">packages =</span> <span class="st" style="color: #20794D;">"pyarrow"</span>, </span>
-<span id="cb23-3">  <span class="at" style="color: #657422;">envname =</span> <span class="st" style="color: #20794D;">"/home/danielle/miniconda3"</span>, </span>
-<span id="cb23-4">  <span class="at" style="color: #657422;">conda =</span> <span class="st" style="color: #20794D;">"/home/danielle/miniconda3/bin/conda"</span></span>
-<span id="cb23-5">)</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb24" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb24-1"><span class="fu" style="color: #4758AB;">conda_install</span>(</span>
+<span id="cb24-2">  <span class="at" style="color: #657422;">packages =</span> <span class="st" style="color: #20794D;">"pyarrow"</span>, </span>
+<span id="cb24-3">  <span class="at" style="color: #657422;">envname =</span> <span class="st" style="color: #20794D;">"/home/danielle/miniconda3"</span>, </span>
+<span id="cb24-4">  <span class="at" style="color: #657422;">conda =</span> <span class="st" style="color: #20794D;">"/home/danielle/miniconda3/bin/conda"</span></span>
+<span id="cb24-5">)</span></code></pre></div>
 </div>
 </div>
 <p>In this code, <code>packages</code> is the name of the to-be-installed python module, <code>envname</code> is the path to the conda environment, and <code>conda</code> is the path to the conda executable. As a general rule you don’t need to be this explicit: reticulate will find the environment and conda executable for you.</p>
@@ -804,8 +814,8 @@ $infraspecific_authority &lt;string&gt;</code></pre>
 <div class="code-with-filename-file">
 <pre><strong>[python code]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb24" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb24-1"><span class="im" style="color: #00769E;">import</span> pyarrow</span>
-<span id="cb24-2">pyarrow.__version__</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb25" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb25-1"><span class="im" style="color: #00769E;">import</span> pyarrow</span>
+<span id="cb25-2">pyarrow.__version__</span></code></pre></div>
 </div>
 <div class="cell-output cell-output-stdout">
 <pre><code>'8.0.0'</code></pre>
@@ -819,8 +829,8 @@ $infraspecific_authority &lt;string&gt;</code></pre>
 <div class="code-with-filename-file">
 <pre><strong>[at the terminal]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb27" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb27-1"><span class="fu" style="color: #4758AB;">sudo</span> apt-get update</span>
-<span id="cb27-2"><span class="fu" style="color: #4758AB;">sudo</span> apt-get install libstdc++6</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb28" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb28-1"><span class="fu" style="color: #4758AB;">sudo</span> apt-get update</span>
+<span id="cb28-2"><span class="fu" style="color: #4758AB;">sudo</span> apt-get install libstdc++6</span></code></pre></div>
 </div>
 </div>
 <p>Yet another catastrophe averted by copy/pasting into a search engine 🙃</p>
@@ -834,7 +844,7 @@ $infraspecific_authority &lt;string&gt;</code></pre>
 <div class="code-with-filename-file">
 <pre><strong>[R code]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb28" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb28-1">py_taxa_arrow <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">r_to_py</span>(taxa_arrow)</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb29" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb29-1">py_taxa_arrow <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">r_to_py</span>(taxa_arrow)</span></code></pre></div>
 </div>
 </div>
 <p>Since we’re in Python now, let’s just switch languages and take a peek, shall we? Just like last time, objects created by reticulate are accessible on the Python side via the <code>r</code> object, so we access this object in Python with <code>r.py_taxa_arrow</code>:</p>
@@ -843,7 +853,7 @@ $infraspecific_authority &lt;string&gt;</code></pre>
 <div class="code-with-filename-file">
 <pre><strong>[python code]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb29" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb29-1">r.py_taxa_arrow</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb30" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb30-1">r.py_taxa_arrow</span></code></pre></div>
 </div>
 <div class="cell-output cell-output-stdout">
 <pre><code>pyarrow.Table
@@ -882,12 +892,12 @@ infraspecific_authority: [[null,"ELPATJEVSKY, 1901","NIKOLSKY, 1902","(EREMCHENK
 <div class="code-with-filename-file">
 <pre><strong>[python code]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb31" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb31-1">counts_arrow <span class="op" style="color: #5E5E5E;">=</span> r.py_taxa_arrow. <span class="op" style="color: #5E5E5E;">\</span></span>
-<span id="cb31-2">  group_by(<span class="st" style="color: #20794D;">"family"</span>). <span class="op" style="color: #5E5E5E;">\</span></span>
-<span id="cb31-3">  aggregate([(<span class="st" style="color: #20794D;">"taxon_id"</span>, <span class="st" style="color: #20794D;">"count"</span>)]). <span class="op" style="color: #5E5E5E;">\</span></span>
-<span id="cb31-4">  sort_by([(<span class="st" style="color: #20794D;">"family"</span>, <span class="st" style="color: #20794D;">"ascending"</span>)])</span>
-<span id="cb31-5">  </span>
-<span id="cb31-6">counts_arrow</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb32" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb32-1">counts_arrow <span class="op" style="color: #5E5E5E;">=</span> r.py_taxa_arrow. <span class="op" style="color: #5E5E5E;">\</span></span>
+<span id="cb32-2">  group_by(<span class="st" style="color: #20794D;">"family"</span>). <span class="op" style="color: #5E5E5E;">\</span></span>
+<span id="cb32-3">  aggregate([(<span class="st" style="color: #20794D;">"taxon_id"</span>, <span class="st" style="color: #20794D;">"count"</span>)]). <span class="op" style="color: #5E5E5E;">\</span></span>
+<span id="cb32-4">  sort_by([(<span class="st" style="color: #20794D;">"family"</span>, <span class="st" style="color: #20794D;">"ascending"</span>)])</span>
+<span id="cb32-5">  </span>
+<span id="cb32-6">counts_arrow</span></code></pre></div>
 </div>
 <div class="cell-output cell-output-stdout">
 <pre><code>pyarrow.Table
@@ -904,7 +914,7 @@ family: [["Acrochordidae","Agamidae","Alligatoridae","Alopoglossidae","Amphisbae
 <div class="code-with-filename-file">
 <pre><strong>[R code]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb33" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb33-1">py<span class="sc" style="color: #5E5E5E;">$</span>counts_arrow</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb34" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb34-1">py<span class="sc" style="color: #5E5E5E;">$</span>counts_arrow</span></code></pre></div>
 </div>
 <div class="cell-output cell-output-stdout">
 <pre><code>Table
@@ -927,12 +937,12 @@ $family &lt;string&gt;</code></pre>
 <div class="code-with-filename-file">
 <pre><strong>[R code]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb35" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb35-1"><span class="fu" style="color: #4758AB;">library</span>(tictoc)</span>
-<span id="cb35-2"><span class="fu" style="color: #4758AB;">library</span>(dplyr)</span>
-<span id="cb35-3"><span class="fu" style="color: #4758AB;">library</span>(tibble)</span>
-<span id="cb35-4"><span class="fu" style="color: #4758AB;">library</span>(purrr)</span>
-<span id="cb35-5"><span class="fu" style="color: #4758AB;">library</span>(tidyr)</span>
-<span id="cb35-6"><span class="fu" style="color: #4758AB;">library</span>(ggplot2)</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb36" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb36-1"><span class="fu" style="color: #4758AB;">library</span>(tictoc)</span>
+<span id="cb36-2"><span class="fu" style="color: #4758AB;">library</span>(dplyr)</span>
+<span id="cb36-3"><span class="fu" style="color: #4758AB;">library</span>(tibble)</span>
+<span id="cb36-4"><span class="fu" style="color: #4758AB;">library</span>(purrr)</span>
+<span id="cb36-5"><span class="fu" style="color: #4758AB;">library</span>(tidyr)</span>
+<span id="cb36-6"><span class="fu" style="color: #4758AB;">library</span>(ggplot2)</span></code></pre></div>
 </div>
 </div>
 <p>Next, I’ll define a <code>handover_time()</code> function that takes two arguments. The first argument <code>n</code> specifies the number of rows in the to-be-transferred data set. The second argument <code>arrow</code> is a logical value: setting <code>arrow = FALSE</code> means that an R data frame will be passed to Python as a Panda DataFrame, wheras <code>arrow = TRUE</code> means that an Arrow Table in R will be passed to Python and remain an Arrow Table. The actual data set is constructed by randomly sampling <code>n</code> rows from the <code>taxa</code> data set (with replacement):</p>
@@ -941,16 +951,16 @@ $family &lt;string&gt;</code></pre>
 <div class="code-with-filename-file">
 <pre><strong>[R code]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb36" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb36-1">handover_time <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>(n, <span class="at" style="color: #657422;">arrow =</span> <span class="cn" style="color: #8f5902;">FALSE</span>) {</span>
-<span id="cb36-2">  data_in_r <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">slice_sample</span>(taxa, <span class="at" style="color: #657422;">n =</span> n, <span class="at" style="color: #657422;">replace =</span> <span class="cn" style="color: #8f5902;">TRUE</span>)</span>
-<span id="cb36-3">  <span class="cf" style="color: #003B4F;">if</span>(arrow) {</span>
-<span id="cb36-4">    data_in_r <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">arrow_table</span>(data_in_r)</span>
-<span id="cb36-5">  }</span>
-<span id="cb36-6">  <span class="fu" style="color: #4758AB;">tic</span>()</span>
-<span id="cb36-7">  data_in_python <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">r_to_py</span>(data_in_r)</span>
-<span id="cb36-8">  t <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">toc</span>(<span class="at" style="color: #657422;">quiet =</span> <span class="cn" style="color: #8f5902;">TRUE</span>)</span>
-<span id="cb36-9">  <span class="fu" style="color: #4758AB;">return</span>(t<span class="sc" style="color: #5E5E5E;">$</span>toc <span class="sc" style="color: #5E5E5E;">-</span> t<span class="sc" style="color: #5E5E5E;">$</span>tic)</span>
-<span id="cb36-10">}</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb37" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb37-1">handover_time <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>(n, <span class="at" style="color: #657422;">arrow =</span> <span class="cn" style="color: #8f5902;">FALSE</span>) {</span>
+<span id="cb37-2">  data_in_r <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">slice_sample</span>(taxa, <span class="at" style="color: #657422;">n =</span> n, <span class="at" style="color: #657422;">replace =</span> <span class="cn" style="color: #8f5902;">TRUE</span>)</span>
+<span id="cb37-3">  <span class="cf" style="color: #003B4F;">if</span>(arrow) {</span>
+<span id="cb37-4">    data_in_r <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">arrow_table</span>(data_in_r)</span>
+<span id="cb37-5">  }</span>
+<span id="cb37-6">  <span class="fu" style="color: #4758AB;">tic</span>()</span>
+<span id="cb37-7">  data_in_python <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">r_to_py</span>(data_in_r)</span>
+<span id="cb37-8">  t <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">toc</span>(<span class="at" style="color: #657422;">quiet =</span> <span class="cn" style="color: #8f5902;">TRUE</span>)</span>
+<span id="cb37-9">  <span class="fu" style="color: #4758AB;">return</span>(t<span class="sc" style="color: #5E5E5E;">$</span>toc <span class="sc" style="color: #5E5E5E;">-</span> t<span class="sc" style="color: #5E5E5E;">$</span>tic)</span>
+<span id="cb37-10">}</span></code></pre></div>
 </div>
 </div>
 <p>Now that I’ve defined the test function, let’s see what happens. I’ll vary the number of rows from 10000 to 1000000 for both the native data frame version and the Arrow Table version, and store the result as <code>times</code>:</p>
@@ -959,11 +969,11 @@ $family &lt;string&gt;</code></pre>
 <div class="code-with-filename-file">
 <pre><strong>[R code]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb37" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb37-1">times <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">tibble</span>(</span>
-<span id="cb37-2">  <span class="at" style="color: #657422;">n =</span> <span class="fu" style="color: #4758AB;">seq</span>(<span class="dv" style="color: #AD0000;">10000</span>, <span class="dv" style="color: #AD0000;">1000000</span>, <span class="at" style="color: #657422;">length.out =</span> <span class="dv" style="color: #AD0000;">100</span>),</span>
-<span id="cb37-3">  <span class="at" style="color: #657422;">data_frame =</span> <span class="fu" style="color: #4758AB;">map_dbl</span>(n, handover_time),</span>
-<span id="cb37-4">  <span class="at" style="color: #657422;">arrow_table =</span> <span class="fu" style="color: #4758AB;">map_dbl</span>(n, handover_time, <span class="at" style="color: #657422;">arrow =</span> <span class="cn" style="color: #8f5902;">TRUE</span>),</span>
-<span id="cb37-5">)</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb38" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb38-1">times <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">tibble</span>(</span>
+<span id="cb38-2">  <span class="at" style="color: #657422;">n =</span> <span class="fu" style="color: #4758AB;">seq</span>(<span class="dv" style="color: #AD0000;">10000</span>, <span class="dv" style="color: #AD0000;">1000000</span>, <span class="at" style="color: #657422;">length.out =</span> <span class="dv" style="color: #AD0000;">100</span>),</span>
+<span id="cb38-3">  <span class="at" style="color: #657422;">data_frame =</span> <span class="fu" style="color: #4758AB;">map_dbl</span>(n, handover_time),</span>
+<span id="cb38-4">  <span class="at" style="color: #657422;">arrow_table =</span> <span class="fu" style="color: #4758AB;">map_dbl</span>(n, handover_time, <span class="at" style="color: #657422;">arrow =</span> <span class="cn" style="color: #8f5902;">TRUE</span>),</span>
+<span id="cb38-5">)</span></code></pre></div>
 </div>
 </div>
 <p>Now let’s plot the data:</p>
@@ -972,28 +982,28 @@ $family &lt;string&gt;</code></pre>
 <div class="code-with-filename-file">
 <pre><strong>[R code]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb38" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb38-1">times <span class="sc" style="color: #5E5E5E;">|&gt;</span> </span>
-<span id="cb38-2">  <span class="fu" style="color: #4758AB;">pivot_longer</span>(</span>
-<span id="cb38-3">    <span class="at" style="color: #657422;">cols =</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="st" style="color: #20794D;">"data_frame"</span>, <span class="st" style="color: #20794D;">"arrow_table"</span>), </span>
-<span id="cb38-4">    <span class="at" style="color: #657422;">names_to =</span> <span class="st" style="color: #20794D;">"type"</span>, </span>
-<span id="cb38-5">    <span class="at" style="color: #657422;">values_to =</span> <span class="st" style="color: #20794D;">"time"</span></span>
-<span id="cb38-6">  ) <span class="sc" style="color: #5E5E5E;">|&gt;</span> </span>
-<span id="cb38-7">  <span class="fu" style="color: #4758AB;">mutate</span>(</span>
-<span id="cb38-8">    <span class="at" style="color: #657422;">type =</span> type <span class="sc" style="color: #5E5E5E;">|&gt;</span> </span>
-<span id="cb38-9">      <span class="fu" style="color: #4758AB;">factor</span>(</span>
-<span id="cb38-10">        <span class="at" style="color: #657422;">levels =</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="st" style="color: #20794D;">"data_frame"</span>, <span class="st" style="color: #20794D;">"arrow_table"</span>),</span>
-<span id="cb38-11">        <span class="at" style="color: #657422;">labels =</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="st" style="color: #20794D;">"Data Frames"</span>, <span class="st" style="color: #20794D;">"Arrow Tables"</span>)</span>
-<span id="cb38-12">      )</span>
-<span id="cb38-13">  ) <span class="sc" style="color: #5E5E5E;">|&gt;</span></span>
-<span id="cb38-14">  <span class="fu" style="color: #4758AB;">ggplot</span>(<span class="fu" style="color: #4758AB;">aes</span>(n, time)) <span class="sc" style="color: #5E5E5E;">+</span> </span>
-<span id="cb38-15">  <span class="fu" style="color: #4758AB;">geom_point</span>() <span class="sc" style="color: #5E5E5E;">+</span> </span>
-<span id="cb38-16">  <span class="fu" style="color: #4758AB;">facet_wrap</span>(<span class="sc" style="color: #5E5E5E;">~</span>type) <span class="sc" style="color: #5E5E5E;">+</span> </span>
-<span id="cb38-17">  <span class="fu" style="color: #4758AB;">theme_bw</span>() <span class="sc" style="color: #5E5E5E;">+</span> </span>
-<span id="cb38-18">  <span class="fu" style="color: #4758AB;">labs</span>(</span>
-<span id="cb38-19">    <span class="at" style="color: #657422;">x =</span> <span class="st" style="color: #20794D;">"Number of Rows"</span>,</span>
-<span id="cb38-20">    <span class="at" style="color: #657422;">y =</span> <span class="st" style="color: #20794D;">"Handover Time (Seconds)"</span>, </span>
-<span id="cb38-21">    <span class="at" style="color: #657422;">title =</span> <span class="st" style="color: #20794D;">"How long does it take to pass data from R to Python?"</span></span>
-<span id="cb38-22">  )</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb39" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb39-1">times <span class="sc" style="color: #5E5E5E;">|&gt;</span> </span>
+<span id="cb39-2">  <span class="fu" style="color: #4758AB;">pivot_longer</span>(</span>
+<span id="cb39-3">    <span class="at" style="color: #657422;">cols =</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="st" style="color: #20794D;">"data_frame"</span>, <span class="st" style="color: #20794D;">"arrow_table"</span>), </span>
+<span id="cb39-4">    <span class="at" style="color: #657422;">names_to =</span> <span class="st" style="color: #20794D;">"type"</span>, </span>
+<span id="cb39-5">    <span class="at" style="color: #657422;">values_to =</span> <span class="st" style="color: #20794D;">"time"</span></span>
+<span id="cb39-6">  ) <span class="sc" style="color: #5E5E5E;">|&gt;</span> </span>
+<span id="cb39-7">  <span class="fu" style="color: #4758AB;">mutate</span>(</span>
+<span id="cb39-8">    <span class="at" style="color: #657422;">type =</span> type <span class="sc" style="color: #5E5E5E;">|&gt;</span> </span>
+<span id="cb39-9">      <span class="fu" style="color: #4758AB;">factor</span>(</span>
+<span id="cb39-10">        <span class="at" style="color: #657422;">levels =</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="st" style="color: #20794D;">"data_frame"</span>, <span class="st" style="color: #20794D;">"arrow_table"</span>),</span>
+<span id="cb39-11">        <span class="at" style="color: #657422;">labels =</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="st" style="color: #20794D;">"Data Frames"</span>, <span class="st" style="color: #20794D;">"Arrow Tables"</span>)</span>
+<span id="cb39-12">      )</span>
+<span id="cb39-13">  ) <span class="sc" style="color: #5E5E5E;">|&gt;</span></span>
+<span id="cb39-14">  <span class="fu" style="color: #4758AB;">ggplot</span>(<span class="fu" style="color: #4758AB;">aes</span>(n, time)) <span class="sc" style="color: #5E5E5E;">+</span> </span>
+<span id="cb39-15">  <span class="fu" style="color: #4758AB;">geom_point</span>() <span class="sc" style="color: #5E5E5E;">+</span> </span>
+<span id="cb39-16">  <span class="fu" style="color: #4758AB;">facet_wrap</span>(<span class="sc" style="color: #5E5E5E;">~</span>type) <span class="sc" style="color: #5E5E5E;">+</span> </span>
+<span id="cb39-17">  <span class="fu" style="color: #4758AB;">theme_bw</span>() <span class="sc" style="color: #5E5E5E;">+</span> </span>
+<span id="cb39-18">  <span class="fu" style="color: #4758AB;">labs</span>(</span>
+<span id="cb39-19">    <span class="at" style="color: #657422;">x =</span> <span class="st" style="color: #20794D;">"Number of Rows"</span>,</span>
+<span id="cb39-20">    <span class="at" style="color: #657422;">y =</span> <span class="st" style="color: #20794D;">"Handover Time (Seconds)"</span>, </span>
+<span id="cb39-21">    <span class="at" style="color: #657422;">title =</span> <span class="st" style="color: #20794D;">"How long does it take to pass data from R to Python?"</span></span>
+<span id="cb39-22">  )</span></code></pre></div>
 </div>
 <div class="cell-output-display">
 <p><img src="https://blog.djnavarro.net/posts/2022-09-01_reticulated-arrow/index_files/figure-html/plot-speed-1.png" class="img-fluid" width="672"></p>
@@ -1018,8 +1028,8 @@ $family &lt;string&gt;</code></pre>
 <li id="fn2"><p>I’ve edited the exchange ever so slightly to improve clarity and to insert readable link text to assist screenreaders.↩︎</p></li>
 <li id="fn3"><p>I’ll talk more about this later, but for now it’s enough to note that when you have really big data sets the absolute last thing you want to do is make unnecessary copies – it eats up a looooot of your compute time!↩︎</p></li>
 <li id="fn4"><p>Something to note here is that the reticulate solution implicitly assumes R is your “primary” language and Python is the “secondary” language. That is, reticulate is an R package that calls Python, not a Python module that calls R. Simularly, this quarto document uses the <a href="https://quarto.org/docs/computations/r.html">knitr engine</a> (also an R package) to integrate code from the two languages. Yes the tools are multi-language, but the setup is pretty R-centric. Arguably this is typical for how an R user would set up a multi-language project, and since R is my primary language it’s my preferred solution. However, it’s not a particularly Pythonic way of approaching the problem. But fear not, Python fans. In the next post I’m going to describe an approach that solves the same problem in a Python-centric way.↩︎</p></li>
-<li id="fn5"><p>In fact, it’s often a good idea to let reticulate do its own thing!↩︎</p></li>
-<li id="fn6"><p>Okay fine I don’t write Python code every day but you know what I mean…↩︎</p></li>
+<li id="fn5"><p>Okay, in the spirit of total honesty when I first started using reticulate I actually did let reticulate install its own version of Miniconda and everything was a total mess there for a while. My bash profile was set to find my original version of Miniconda, but reticulate was configured to look for the version it had installed. Hijinx ensued. As amusing as that little episode was, I’m much happier now that reticulate and bash are in agreement as to where Miniconda lives.↩︎</p></li>
+<li id="fn6"><p>The easiest way to edit this file, if you don’t already know how, is to call <code>usethis::edit_r_environ()</code> at the R console.↩︎</p></li>
 <li id="fn7"><p>As an aside it’s worth noting that reticulate exports an object called <code>py</code>, from which Python objects can be accessed: the <code>sys</code> object can also be referred to as <code>py$sys</code>.↩︎</p></li>
 <li id="fn8"><p>Note that the website does not explicitly specify a particular licence, but <a href="https://www.researchgate.net/publication/352462027_A_Quarter_Century_of_Reptile_and_Amphibian_Databases">journal articles documenting the database</a> written by the maintainers do refer to it as “open and freely available”. With that in mind I take it that the use of the data in this post is permitted. Naturally, should I discover that it is not I’ll immediately remove it!↩︎</p></li>
 </ol>

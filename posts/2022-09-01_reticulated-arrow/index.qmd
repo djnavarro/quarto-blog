@@ -72,13 +72,11 @@ Jon's comment is the one that really caught my attention because they're complet
 
 <br><br>  
 
-### The trick
+### The reticulate trick
 
-The "trick" is simple: if your data are stored as an Arrow Table, and you use the [reticulate](https://rstudio.github.io/reticulate/) package to pass it from R to Python (or vice versa), only the metadata changes hands. Because an Arrow Table has the *same* structure in-memory when accessed from Python as it does in R, the data set itself does not need to be touched at all. The only thing that needs to happen is the language on the receiving end needs to be told *where* the data are stored. Or, to put it another way, we just pass a pointer across. This all happens invisibly, so if you know how to use reticulate,^[Something to note here is that the reticulate solution implicitly assumes R is your "primary" language and Python is the "secondary" language. That is, reticulate is an R package that calls Python, not a Python module that calls R. Simularly, this quarto document uses the [knitr engine](https://quarto.org/docs/computations/r.html) (also an R package) to integrate code from the two languages. Yes the tools are multi-language, but the setup is pretty R-centric. Arguably this is typical for how an R user would set up a multi-language project, and since R is my primary language it's my preferred solution. However, it's not a particularly Pythonic way of approaching the problem. But fear not, Python fans. In the next post I'm going to describe an approach that solves the same problem in a Python-centric way.] you already know how to do this! 
+The "trick" is simple: if your data are stored as an Arrow Table, and you use the [reticulate](https://rstudio.github.io/reticulate/) package to pass it from R to Python (or vice versa), only the metadata changes hands. Because an Arrow Table has the *same* structure in-memory when accessed from Python as it does in R, the data set itself does not need to be touched at all. The only thing that needs to happen is the language on the receiving end needs to be told *where* the data are stored. Or, to put it another way, we just pass a pointer across. This all happens invisibly, so if you know how to use reticulate,^[Something to note here is that the reticulate solution implicitly assumes R is your "primary" language and Python is the "secondary" language. That is, reticulate is an R package that calls Python, not a Python module that calls R. Simularly, this quarto document uses the [knitr engine](https://quarto.org/docs/computations/r.html) (also an R package) to integrate code from the two languages. Yes the tools are multi-language, but the setup is pretty R-centric. Arguably this is typical for how an R user would set up a multi-language project, and since R is my primary language it's my preferred solution. However, it's not a particularly Pythonic way of approaching the problem. But fear not, Python fans. In the next post I'm going to describe an approach that solves the same problem in a Python-centric way.] you already know almost everything you need to know and can skip straight to the [section on passing Arrow objects](#data-interchange-with-arrow-in-the-polyglot-world). If you're like me-from-last-week and have no idea how reticulate works, read on... 
 
-Yes yes Danielle, that's all well and good, but what if I don't know how to use reticulate? What if I'm one of those people who are vaguely aware that reticulate exists as an R package that provides an interface to Python, but haven't actually used it and am not sure how to get started? What am I supposed to do then? 
 
-As it happens, you're in luck. Until quite recently I was one of those people, and I'm deeply sympathetic. I'd somehow convinced myself that using reticulate would be super hard and require magic powers that I don't have. Thankfully, it turned out to be much less painful than I feared, and I'll walk you through the process (or at least the process I followed!) now.
 <br><br>   
 
 ### Managing the Python environment from R
@@ -89,30 +87,33 @@ If reticulate is not already on your system, you can install it from CRAN with `
 library(reticulate)
 ```
 
-Next, we check that reticulate can find your Python environment if you have more than one make sure it's finding the one you want to use! If you're at all like me you'll find you've managed to accumulate several different Python environments, often by accident. Currently I have four Python environments managed by [miniconda](https://docs.conda.io/en/latest/miniconda.html):
+What happens next depends a little on whether you already have a Python set up. If you don't have a preferred Python configuration on your machine and would like to let reticulate manage everything for you, then you can do something like this:
 
-```{bash check-conda-env, filename="[at the terminal]", eval=FALSE}
-conda env list
-```
-```{bash check-conda-env-sigh, echo=FALSE}
-# bloody reticulate keeps using the wrong miniconda copy 
-/home/danielle/miniconda3/bin/conda env list
-```
-
-The three environments in the "r-miniconda" folder exist because when I first started using reticulate I let it manage its own Python and miniconda installation. The commands I used at the time were these:
-
-```{r reticulate-python-setup, eval=FALSE, filename="[R code]"}
+```{r reticulate-fresh-python, eval=FALSE, filename="[R code]"}
 install_python()
 install_miniconda()
 ```
 
-When I did this, reticulate set me up with a default Python build, managed by the copy of miniconda that it installed. This isn't a bad thing,^[In fact, it's often a good idea to let reticulate do its own thing!] but also it isn't the primary version of Python that I use when writing "everyday" Python code:^[Okay fine I don't write Python code every day but you know what I mean...] my usual Python environment is the fourth one on the list above, and for the purposes of this post that's the one I want reticulate to use. I can do this with `use_miniconda()`, explicitly specifying the `condaenv` to be used:
+This will set you up with a default Python build, managed by a copy of [Miniconda](https://docs.conda.io/en/latest/miniconda.html) that it installs in an OS-specific location that you can discover by calling `miniconda_path()`. This is a perfectly sensible way to use reticulate, but in the end the approach I took was slightly different. 
+
+If you're like me and already have Python and Miniconda configured, you probably *don't* want reticulate installing new versions on your machine.^[Okay, in the spirit of total honesty when I first started using reticulate I actually did let reticulate install its own version of Miniconda and everything was a total mess there for a while. My bash profile was set to find my original version of Miniconda, but reticulate was configured to look for the version it had installed. Hijinx ensued. As amusing as that little episode was, I'm much happier now that reticulate and bash are in agreement as to where Miniconda lives.] You probably want to use your existing set up and ensure that reticulate knows where to find everything. If that's the case, what you want to do is edit your `.Renviron` file^[The easiest way to edit this file, if you don't already know how, is to call `usethis::edit_r_environ()` at the R console.] and set the RETICULATE_MINICONDA_PATH variable. Add a line like this one,
+
+```{bash set-miniconda-path, filename="[within .Renviron]", eval=FALSE}
+RETICULATE_MINICONDA_PATH=/home/danielle/miniconda3/
+```
+
+where you should specify the path to your Miniconda installation, not mine 😁
+
+Next, we check that reticulate can find your Python environment if you have more than one make sure it's finding the one you want to use! If you're at all like me you'll find you've managed to accumulate several different Python environments, often by accident. Currently I have four Python environments managed by [miniconda](https://docs.conda.io/en/latest/miniconda.html):
+
+```{r list-conda-env, filename="[R code]"}
+conda_list()
+```
+
+I can do this with `use_miniconda()`, explicitly specifying the `condaenv` to be used:
 
 ```{r, filename="[R code]"}
-use_miniconda(
-  condaenv = "/home/danielle/miniconda3/bin/python", 
-  required = TRUE
-)
+use_miniconda(condaenv = "base", required = TRUE)
 ```
 
 <br><br>   
