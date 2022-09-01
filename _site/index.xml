@@ -17,7 +17,7 @@
 <generator>quarto-1.1.149</generator>
 <lastBuildDate>Thu, 01 Sep 2022 14:00:00 GMT</lastBuildDate>
 <item>
-  <title>Our saga continues! Passing Arrow Tables between R and Python with rpy2</title>
+  <title>Passing Arrow data between Python and R with rpy2</title>
   <dc:creator>Danielle Navarro</dc:creator>
   <link>https://blog.djnavarro.net/posts/2022-09-02_arrow-and-rpy2/index.html</link>
   <description><![CDATA[ 
@@ -42,41 +42,65 @@ quarto render index.qmd --execute-daemon-restart
 <p>In writing this post I am heavily indebted to Isabella Velásquez, whose fabulous post on <a href="https://rviews.rstudio.com/2022/05/25/calling-r-from-python-with-rpy2/">calling R from Python with rpy2</a> helped me immensely. The <a href="https://arrow.apache.org/docs/python/integration/python_r.html">documentation on integrating PyArrow with R</a> was extremely helpful too!</p>
 <section id="setting-up-the-python-environment" class="level2">
 <h2 class="anchored" data-anchor-id="setting-up-the-python-environment">Setting up the Python environment</h2>
-<p>For the purposes of this post I’ll create a fresh conda environment that I’ll call “continuation”, both because this post is a continuation of the previous one and because the data set I’ll use later is called “To Be Continued…”. I was able install most packages I need through conda-forge, but for rpy2 and rpy2-arrow I was only able to do so from pypi so I had to use pip for that. So the complete code for setting up my environment was as follows:</p>
+<p>For the purposes of this post I’ll create a fresh conda environment that I’ll call “continuation”, both because this post is a continuation of the previous one and because the data set I’ll use later is called “To Be Continued…”. I was able install most packages I need through conda-forge, but for rpy2 and rpy2-arrow I was only able to do so from pypi so I had to use pip for that. So the code for setting up my Python environment was as follows:</p>
 <div class="sourceCode" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb1-1"><span class="ex" style="color: null;">conda</span> create <span class="at" style="color: #657422;">-n</span> continuation</span>
 <span id="cb1-2"><span class="ex" style="color: null;">conda</span> install <span class="at" style="color: #657422;">-n</span> continuation pip pyarrow pandas jupyter</span>
 <span id="cb1-3"><span class="ex" style="color: null;">conda</span> activate continuation</span>
 <span id="cb1-4"><span class="ex" style="color: null;">pip</span> install rpy2 rpy2-arrow</span></code></pre></div>
 </section>
-<section id="check-my-pyarrow" class="level2">
-<h2 class="anchored" data-anchor-id="check-my-pyarrow">Check my pyarrow</h2>
+<section id="introducing-rpy2" class="level2">
+<h2 class="anchored" data-anchor-id="introducing-rpy2">Introducing rpy2</h2>
+<p>This just imports the package</p>
 <div class="cell" data-execution_count="1">
-<div class="sourceCode cell-code" id="cb2" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb2-1"><span class="co" style="color: #5E5E5E;"># python</span></span>
-<span id="cb2-2"><span class="im" style="color: #00769E;">import</span> sys</span>
-<span id="cb2-3"><span class="bu" style="color: null;">print</span>(sys.version)</span>
-<span id="cb2-4"><span class="bu" style="color: null;">print</span>(sys.executable)</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>3.10.4 (main, Mar 31 2022, 08:41:55) [GCC 7.5.0]
-/home/danielle/miniconda3/envs/continuation/bin/python</code></pre>
+<div class="sourceCode cell-code" id="cb2" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb2-1"><span class="im" style="color: #00769E;">import</span> rpy2</span>
+<span id="cb2-2">rpy2.__version__</span></code></pre></div>
+<div class="cell-output cell-output-display" data-execution_count="1">
+<pre><code>'3.5.4'</code></pre>
 </div>
 </div>
+<p>Importing the robjects submodule also starts the embedded R session:</p>
 <div class="cell" data-execution_count="2">
-<div class="sourceCode cell-code" id="cb4" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb4-1"><span class="co" style="color: #5E5E5E;"># python</span></span>
-<span id="cb4-2"><span class="im" style="color: #00769E;">import</span> pyarrow</span>
-<span id="cb4-3">pyarrow.__version__</span></code></pre></div>
-<div class="cell-output cell-output-display" data-execution_count="2">
-<pre><code>'8.0.0'</code></pre>
+<div class="sourceCode cell-code" id="cb4" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb4-1"><span class="im" style="color: #00769E;">import</span> rpy2.robjects <span class="im" style="color: #00769E;">as</span> robjects</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code></code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>R version 4.2.1 (2022-06-23) 🌈</code></pre>
+</div>
+</div>
+<p>Normally you’d see a more verbose startup message from R but I prefer to keep mine quieter so all it does is print the version string and a pretty little rainbow.</p>
+<p>Meanwhile let’s going with some packages. Importing the packages submodule gives us acces to <code>importr()</code>, which is allows us to load pacakges inside the R session:</p>
+<div class="cell" data-execution_count="3">
+<div class="sourceCode cell-code" id="cb7" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb7-1"><span class="im" style="color: #00769E;">import</span> rpy2.robjects.packages <span class="im" style="color: #00769E;">as</span> rpackages</span>
+<span id="cb7-2"></span>
+<span id="cb7-3">base <span class="op" style="color: #5E5E5E;">=</span> rpackages.importr(<span class="st" style="color: #20794D;">"base"</span>)</span>
+<span id="cb7-4">utils <span class="op" style="color: #5E5E5E;">=</span> rpackages.importr(<span class="st" style="color: #20794D;">"utils"</span>)</span></code></pre></div>
+</div>
+<p>Once we have access to utils we can call the native R function <code>install.packages()</code> to install additional packages from CRAN. A fun example:</p>
+<div class="sourceCode" id="cb8" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb8-1">utils.install_packages(<span class="st" style="color: #20794D;">"fortunes"</span>)</span></code></pre></div>
+<p>Let’s sample a fortune</p>
+<div class="cell" data-execution_count="4">
+<div class="sourceCode cell-code" id="cb9" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb9-1">fortunes <span class="op" style="color: #5E5E5E;">=</span> rpackages.importr(<span class="st" style="color: #20794D;">"fortunes"</span>)</span>
+<span id="cb9-2">fortune <span class="op" style="color: #5E5E5E;">=</span> fortunes.fortune(<span class="dv" style="color: #AD0000;">3</span>)</span>
+<span id="cb9-3"><span class="bu" style="color: null;">print</span>(fortune)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+I'm always thrilled when people discover what lexical scoping really means.
+   -- Robert Gentleman
+      Statistical Computing 2003, Reisensburg (June 2003)
+
+</code></pre>
 </div>
 </div>
 </section>
 <section id="about-the-data" class="level2">
 <h2 class="anchored" data-anchor-id="about-the-data">About the data</h2>
 <p>The data set for this post comes from the <a href="https://cdhrdatasys.anu.edu.au/tobecontinued/">To Be Continued</a> database of fiction published in Australian newspapers during the 19th and early 20th century. Originally collected using the incredibly cool <a href="https://trove.nla.gov.au/">Trove</a> resource run by the National Library of Australia, it’s released under a CC-BY-4.0 licence and maintained by Katherine Bode and Carol Hetherington.</p>
-<div class="cell" data-execution_count="3">
-<div class="sourceCode cell-code" id="cb6" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb6-1"><span class="im" style="color: #00769E;">import</span> pandas <span class="im" style="color: #00769E;">as</span> pd</span>
-<span id="cb6-2">fiction <span class="op" style="color: #5E5E5E;">=</span> pd.read_csv(<span class="st" style="color: #20794D;">"newspaper-fiction.csv"</span>, low_memory <span class="op" style="color: #5E5E5E;">=</span> <span class="va" style="color: #111111;">False</span>)</span>
-<span id="cb6-3">fiction.head()</span></code></pre></div>
-<div class="cell-output cell-output-display" data-execution_count="3">
+<div class="cell" data-execution_count="5">
+<div class="sourceCode cell-code" id="cb11" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb11-1"><span class="im" style="color: #00769E;">import</span> pandas <span class="im" style="color: #00769E;">as</span> pd</span>
+<span id="cb11-2">fiction <span class="op" style="color: #5E5E5E;">=</span> pd.read_csv(<span class="st" style="color: #20794D;">"newspaper-fiction.csv"</span>, low_memory <span class="op" style="color: #5E5E5E;">=</span> <span class="va" style="color: #111111;">False</span>)</span>
+<span id="cb11-3">fiction.head()</span></code></pre></div>
+<div class="cell-output cell-output-display" data-execution_count="5">
 
 <div>
 
@@ -237,10 +261,11 @@ quarto render index.qmd --execute-daemon-restart
 </section>
 <section id="panda-to-arrow-table" class="level2">
 <h2 class="anchored" data-anchor-id="panda-to-arrow-table">Panda to Arrow Table</h2>
-<div class="cell" data-execution_count="4">
-<div class="sourceCode cell-code" id="cb7" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb7-1">pyarrow_fiction <span class="op" style="color: #5E5E5E;">=</span> pyarrow.Table.from_pandas(fiction)</span>
-<span id="cb7-2">pyarrow_fiction</span></code></pre></div>
-<div class="cell-output cell-output-display" data-execution_count="4">
+<div class="cell" data-execution_count="6">
+<div class="sourceCode cell-code" id="cb12" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb12-1"><span class="im" style="color: #00769E;">import</span> pyarrow</span>
+<span id="cb12-2">pyarrow_fiction <span class="op" style="color: #5E5E5E;">=</span> pyarrow.Table.from_pandas(fiction)</span>
+<span id="cb12-3">pyarrow_fiction</span></code></pre></div>
+<div class="cell-output cell-output-display" data-execution_count="6">
 <pre><code>pyarrow.Table
 Trove ID: int64
 Common Title: string
@@ -285,52 +310,16 @@ Publication Source: [[null,null,"Sunday Times",null,null,...,null,null,null,null
 </div>
 </div>
 </section>
-<section id="introducing-rpy2" class="level2">
-<h2 class="anchored" data-anchor-id="introducing-rpy2">Introducing rpy2</h2>
-<div class="cell" data-execution_count="5">
-<div class="sourceCode cell-code" id="cb9" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb9-1"><span class="im" style="color: #00769E;">import</span> rpy2.robjects <span class="im" style="color: #00769E;">as</span> robjects</span>
-<span id="cb9-2"><span class="im" style="color: #00769E;">from</span> rpy2.robjects.packages <span class="im" style="color: #00769E;">import</span> importr, data</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>
-R version 4.2.1 (2022-06-23)
-</code></pre>
-</div>
-<div class="cell-output cell-output-stdout">
-<pre><code>🌈</code></pre>
-</div>
-</div>
-<div class="cell" data-execution_count="6">
-<div class="sourceCode cell-code" id="cb12" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb12-1">base <span class="op" style="color: #5E5E5E;">=</span> importr(<span class="st" style="color: #20794D;">'base'</span>)</span>
-<span id="cb12-2">base.R_version_string</span></code></pre></div>
-<div class="cell-output cell-output-display" data-execution_count="6">
-
-
-        <span>StrVector with 1 elements.</span>
-        <table>
-        <tbody>
-          <tr>
-          
-            <td>
-            'R version 4.2.1 (2022-06-23)'
-            </td>
-          
-          </tr>
-        </tbody>
-        </table>
-        
-</div>
-</div>
-</section>
 <section id="passing-tables-from-python-to-r" class="level2">
 <h2 class="anchored" data-anchor-id="passing-tables-from-python-to-r">Passing Tables from Python to R</h2>
-<p>https://rpy2.github.io/rpy2-arrow/version/main/html/index.html</p>
+<p>This is done with the <a href="https://rpy2.github.io/rpy2-arrow/version/main/html/index.html">rpy2-arrow module</a></p>
 <div class="cell" data-execution_count="7">
-<div class="sourceCode cell-code" id="cb13" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb13-1"><span class="im" style="color: #00769E;">import</span> rpy2_arrow.pyarrow_rarrow <span class="im" style="color: #00769E;">as</span> pyra</span>
-<span id="cb13-2"></span>
-<span id="cb13-3">rarrow_fiction <span class="op" style="color: #5E5E5E;">=</span> pyra.pyarrow_to_r_table(pyarrow_fiction)</span>
-<span id="cb13-4">rarrow_fiction</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb14" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb14-1"><span class="im" style="color: #00769E;">import</span> rpy2_arrow.pyarrow_rarrow <span class="im" style="color: #00769E;">as</span> pyra</span>
+<span id="cb14-2"></span>
+<span id="cb14-3">rarrow_fiction <span class="op" style="color: #5E5E5E;">=</span> pyra.pyarrow_to_r_table(pyarrow_fiction)</span>
+<span id="cb14-4">rarrow_fiction</span></code></pre></div>
 <div class="cell-output cell-output-display" data-execution_count="7">
-<pre><code>&lt;rpy2.robjects.environments.Environment object at 0x7f6346502840&gt; [RTYPES.ENVSXP]
+<pre><code>&lt;rpy2.robjects.environments.Environment object at 0x7f0ac8764980&gt; [RTYPES.ENVSXP]
 R classes: ('Table', 'ArrowTabular', 'ArrowObject', 'R6')
 n items: 36</code></pre>
 </div>
@@ -339,22 +328,22 @@ n items: 36</code></pre>
 <section id="calling-r-code" class="level2">
 <h2 class="anchored" data-anchor-id="calling-r-code">Calling R code</h2>
 <div class="cell" data-execution_count="8">
-<div class="sourceCode cell-code" id="cb15" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb15-1"><span class="op" style="color: #5E5E5E;">%</span>load_ext rpy2.ipython</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb16" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb16-1"><span class="op" style="color: #5E5E5E;">%</span>load_ext rpy2.ipython</span></code></pre></div>
 </div>
 <div class="cell" data-execution_count="9">
-<div class="sourceCode cell-code" id="cb16" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb16-1"><span class="op" style="color: #5E5E5E;">%%</span>R</span>
-<span id="cb16-2">suppressMessages({</span>
-<span id="cb16-3">  library(dplyr)</span>
-<span id="cb16-4">  library(arrow)</span>
-<span id="cb16-5">})</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb17" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb17-1"><span class="op" style="color: #5E5E5E;">%%</span>R</span>
+<span id="cb17-2">suppressMessages({</span>
+<span id="cb17-3">  library(dplyr)</span>
+<span id="cb17-4">  library(arrow)</span>
+<span id="cb17-5">})</span></code></pre></div>
 </div>
 <div class="cell" data-execution_count="10">
-<div class="sourceCode cell-code" id="cb17" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb17-1"><span class="op" style="color: #5E5E5E;">%%</span>R <span class="op" style="color: #5E5E5E;">-</span>i rarrow_fiction</span>
-<span id="cb17-2">gender <span class="op" style="color: #5E5E5E;">&lt;-</span> rarrow_fiction <span class="op" style="color: #5E5E5E;">|&gt;</span> </span>
-<span id="cb17-3">  count(Gender) <span class="op" style="color: #5E5E5E;">|&gt;</span></span>
-<span id="cb17-4">  compute()</span>
-<span id="cb17-5">  </span>
-<span id="cb17-6">gender</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb18" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb18-1"><span class="op" style="color: #5E5E5E;">%%</span>R <span class="op" style="color: #5E5E5E;">-</span>i rarrow_fiction</span>
+<span id="cb18-2">gender <span class="op" style="color: #5E5E5E;">&lt;-</span> rarrow_fiction <span class="op" style="color: #5E5E5E;">|&gt;</span> </span>
+<span id="cb18-3">  count(Gender) <span class="op" style="color: #5E5E5E;">|&gt;</span></span>
+<span id="cb18-4">  compute()</span>
+<span id="cb18-5">  </span>
+<span id="cb18-6">gender</span></code></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>Table</code></pre>
 </div>
@@ -375,19 +364,20 @@ See $metadata for additional Schema metadata</code></pre>
 </section>
 <section id="passing-tables-from-r-to-python" class="level2">
 <h2 class="anchored" data-anchor-id="passing-tables-from-r-to-python">Passing Tables from R to Python</h2>
+<p>Earlier we imported <code>robjects</code> to start the embedded R session. We can access the R objects using <code>robjects.r</code>. For example:</p>
 <div class="cell" data-execution_count="11">
-<div class="sourceCode cell-code" id="cb22" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb22-1"><span class="im" style="color: #00769E;">import</span> rpy2.robjects <span class="im" style="color: #00769E;">as</span> robjects</span>
-<span id="cb22-2">r_gender <span class="op" style="color: #5E5E5E;">=</span> robjects.r(<span class="st" style="color: #20794D;">'gender'</span>)</span>
-<span id="cb22-3">r_gender</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb23" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb23-1">r_gender <span class="op" style="color: #5E5E5E;">=</span> robjects.r(<span class="st" style="color: #20794D;">'gender'</span>)</span>
+<span id="cb23-2">r_gender</span></code></pre></div>
 <div class="cell-output cell-output-display" data-execution_count="11">
-<pre><code>&lt;rpy2.robjects.environments.Environment object at 0x7f6340e2e200&gt; [RTYPES.ENVSXP]
+<pre><code>&lt;rpy2.robjects.environments.Environment object at 0x7f0ac9177d40&gt; [RTYPES.ENVSXP]
 R classes: ('Table', 'ArrowTabular', 'ArrowObject', 'R6')
 n items: 36</code></pre>
 </div>
 </div>
+<p>Note that the <code>r_gender</code> variable refers to the Arrow Table in R. It’s not a pyarrow table. We can use pyra to make the converson:</p>
 <div class="cell" data-execution_count="12">
-<div class="sourceCode cell-code" id="cb24" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb24-1">py_gender <span class="op" style="color: #5E5E5E;">=</span> pyra.rarrow_to_py_table(r_gender)</span>
-<span id="cb24-2">py_gender</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb25" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb25-1">py_gender <span class="op" style="color: #5E5E5E;">=</span> pyra.rarrow_to_py_table(r_gender)</span>
+<span id="cb25-2">py_gender</span></code></pre></div>
 <div class="cell-output cell-output-display" data-execution_count="12">
 <pre><code>pyarrow.Table
 Gender: string
@@ -400,9 +390,10 @@ n: [[11299,6878,15083,106,176,31]]</code></pre>
 </section>
 <section id="back-to-pandas" class="level2">
 <h2 class="anchored" data-anchor-id="back-to-pandas">Back to Pandas</h2>
+<p>If we really want to, we can now convert this back to a Pandas DataFrame</p>
 <div class="cell" data-execution_count="13">
-<div class="sourceCode cell-code" id="cb26" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb26-1">panda_gender <span class="op" style="color: #5E5E5E;">=</span> pyarrow.Table.to_pandas(py_gender)</span>
-<span id="cb26-2">panda_gender</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb27" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb27-1">panda_gender <span class="op" style="color: #5E5E5E;">=</span> pyarrow.Table.to_pandas(py_gender)</span>
+<span id="cb27-2">panda_gender</span></code></pre></div>
 <div class="cell-output cell-output-display" data-execution_count="13">
 
 <div>
