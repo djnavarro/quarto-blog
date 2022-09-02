@@ -127,20 +127,36 @@ Now that we have our data represented as an Arrow Table, we can move onto the re
 
 ## Passing Tables from Python to R
 
-This is done with the [rpy2-arrow module](https://rpy2.github.io/rpy2-arrow/version/main/html/index.html)
+To pass Arrow objects between Python and R, rpy2 needs a little help because it doesn't know how to handle Arrow data structures on its own. That's where the [rpy2-arrow module](https://rpy2.github.io/rpy2-arrow/version/main/html/index.html) comes in handy. I'll quote from the package documentation here:
+
+> The package allows the sharing of Apache Arrow data structures (Array, ChunkedArray, Field, RecordBatch, RecordBatchReader, Table, Schema) between Python and R within the same process. The underlying C/C++ pointer is shared, meaning potentially large gain in performance compared to regular arrays or data frames shared between Python and R through the conversion rules included in rpy2. 
+
+As with rpy2 itself, I'm not going to attempt a proper tutorial in this post, and instead just restrict myself to showing you how to solve the problem at hand. We want to first import the conversion tools from rpy_arrow:
+
+```{python import pyra}
+import rpy2_arrow.pyarrow_rarrow as pyra
+```
+
+Having done that, we use the `pyarrow_to_r_table()` function to pass an Arrow Table from Python to R, like so:
 
 ```{python use-rpy2-arrow}
-import rpy2_arrow.pyarrow_rarrow as pyra
-
 rarrow_fiction = pyra.pyarrow_to_r_table(pyarrow_fiction)
 rarrow_fiction
 ```
 
-## Calling R code 
+The printed output isn't the prettiest thing in the world, but nevertheless it does represent the object of interest. On the Python side we have `pyarrow_fiction`, a data structure that points to an Arrow Table and enables various compute operations supplied through pyarrow. On the R side we now have `rarrow_fiction`, a data structure that points to the *same* Arrow Table and enables compute operations supplied by the R arrow package. 
+
+## Accessing the Table from the R side
+
+We're almost done, but the tour isn't really complete until we've stepped out of Python entirely, manipulated the object on the R side, and then passed something back to Python. So let's do that next.
+
+In order to pull off that trick within this quarto document -- which is running jupyter under the hood -- we'll need to use a little notebook magic. The rpy2 module supplies an [interface for interactive work](https://rpy2.github.io/doc/latest/html/interactive.html) that we can enable in a notebook context like this: 
 
 ```{python py-dplyr}
 %load_ext rpy2.ipython
 ```
+
+Now that we've done this, all I have to do is preface each cell with `%%R` and the subsequent "Python" code will be passed to R and interpreted there.^[Okay, so some R users might be wondering about what was going on in the last post where I was flipping back and forth between R and Python without apparently doing anything like this. The answer is that when using knitr as the engine (rather than jupyter), python code is automatically interpreted with the help of reticulate. That's already a feature in knitr, so I didn't need to invoke it explicitly.] To start with I'll load the dplyr and arrow packages, using `suppressMessages()` to prevent them being chatty and warning me about namespace masking: 
 
 ```{python call-r}
 %%R
@@ -149,6 +165,8 @@ suppressMessages({
   library(arrow)
 })
 ```
+
+Now that I've done that, I'll use the dplyr/arrow toolkit to do a little data wrangling on the `rarrow_fiction` Table. I'm not doing anything fancy, just a little cross-tabulation counting the joint distribution of genders and nationalities represented in the data using the `count()` function, and using `arrange()` to sort the results. The part that actually matters for our purposes is the first line:
 
 ```{python more-r, results='asis'}
 %%R -i rarrow_fiction
@@ -160,6 +178,7 @@ gender <- rarrow_fiction |>
 gender
 ```
 
+By using `%%R -i rarrow_fiction` to specify the cell magic, we're able to access the `rarrow_fiction` object from R within this cell and perform the required computations. 
 
 ## Passing Tables from R to Python
 
