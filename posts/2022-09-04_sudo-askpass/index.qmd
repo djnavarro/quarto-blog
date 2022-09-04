@@ -1,0 +1,244 @@
+---
+title: "Sudo ask me a password"
+description: "Resolving a little quirk in managing packages with pak on linux"
+date: "2022-09-04"
+categories: [Linux, Credentials, R]
+image: "img/cover.jpg"
+---
+
+<!--------------- my typical setup ----------------->
+
+```{r setup, include=FALSE}
+long_slug <- "2022-09-04_sudo-askpass"
+#renv::use(lockfile = "renv.lock")
+```
+
+<!--------------- post begins here ----------------->
+
+```{r pkg-install-fail}
+#| eval: false
+pak::pkg_install("quarto")
+```
+
+So pak starts doing its job, resolving the R dependencies and then asking if I want to continue:
+
+```
+✓ Loading metadata database ... done
+                                                                            
+→ Will install 2 packages.
+→ Will update 1 package.
+→ Will download 3 packages with unknown size.
++ packrat         0.8.1  [bld][dl]
++ quarto    1.1 → 1.2    [bld][dl]
++ rsconnect       0.8.27 [bld][dl]
+? Do you want to continue (Y/n) 
+```
+
+I agree to continue, so off pak goes, fetching the appropriate R packages:
+
+```
+ℹ Getting 3 pkgs with unknown sizes
+✓ Got quarto 1.2 (source) (67.58 kB)                                             
+✓ Got rsconnect 0.8.27 (source) (685.57 kB)                                      
+✓ Got packrat 0.8.1 (source) (681.50 kB)                                         
+✓ Downloaded 3 packages (1.43 MB)in 6.7s
+```
+
+So far, so good. But then this happens:
+
+```
+ℹ Installing system requirements
+ℹ Executing `sudo sh -c apt-get install -y make`
+Error: System command 'sudo' failed, exit status: 1, stdout + stderr:
+E> sudo: a terminal is required to read the password; either use the -S option to read from standard input or configure an askpass helper
+```
+
+Ah. 
+
+<br><br>
+
+## Configuring sudo
+
+A little bit of digging revealed that sudo is much more configurable than I had realised, and you can deal with this in a few different ways. One possibility would be to [enable passwordless sudo](https://www.simplified.guide/linux/enable-passwordless-sudo), in which case the system dependencies would be installed without requiring a password at all. That would certainly minimise the amount of hassle at my end, but it's also a hell of a security risk. Even if I personally felt willing to take the risk with my own property, this is a work laptop and I think a little risk-aversion might be a good idea.^[Okay sure, I haven't *technically* asked DevOps for their opinion about the possibility of me dumping the authentication requirements on superuser privileges on my machine, I have a suspicion I know what their answer would be. Perhaps a different approach is in order...]
+
+Fortunately, the error message itself contains some hints that there is an alternative fix that doesn't require you to weaken your security settings. You can set up a `sudo.conf` file -- located at `/etc/sudo.conf` -- to specify the "askpass helper" referred to in the error message. From `man sudo.conf` (the [manual page](https://www.sudo.ws/docs/man/1.9.9/sudo.conf.man/) is also online):
+
+:::{.pre}
+  
+     askpass   The fully qualified path to a helper program used to read the
+               user's password when no terminal is available.  This may be
+               the case when sudo is executed from a graphical (as opposed to
+               text-based) application.  The program specified by askpass
+               should display the argument passed to it as the prompt and
+               write the user's password to the standard output.  The value
+               of askpass may be overridden by the SUDO_ASKPASS environment
+               variable.
+:::
+
+So where do I find one of these askpass helper programs:
+
+``` bash
+sudo apt-get install ssh-askpass ssh-askpass-gnome
+```
+
+I've installed both ssh-askpass and ssh-askpass-gnome purely for the sake of prettiness. Initially I only installed ssh-askpass and it did work but the X11 screen it brought up when asking me to enter the password was not very pretty. When I also installed ssh-askpass-gnome the dialog box that comes up is much nicer.
+
+At the terminal:
+
+``` bash
+ssh-askpass
+```
+
+This brings up the dialog box asking for your password. If you do this manually you'll see that whatever you type at the dialog box gets passed to the terminal (it will actually print it on screen in this instance)
+
+So now I edit sudo.conf (I actually had to create it because it didn't already exist) and added the following lines:
+
+``` bash
+# specify ssh-askpass as my helper
+Path askpass /usr/bin/ssh-askpass
+```
+
+(As an aside, I had to use `whereis ssh-askpass` in order to find this path because the advice I'd seen on a stackoverflow page had a different path and, shockingly, it doesn't work if you don't provide the correct path)
+
+Anyway, once I did this and tried to install quarto using `pkg_install()` sudo no longer errored when pak tried to install system dependencies. Instead it brought up the askpass dialog box:
+
+![](img/askpass-screen.png)
+
+When I typed in my password, the installation worked just fine. The only problem is that quarto installation requires *five* system dependencies to be installed, and as the output below shows, pak creates a separate shell command for each one...
+
+``` bash
+ℹ Executing `sudo sh -c apt-get install -y make`
+ℹ Executing `sudo sh -c apt-get install -y libcurl4-openssl-dev`
+ℹ Executing `sudo sh -c apt-get install -y libicu-dev`
+ℹ Executing `sudo sh -c apt-get install -y libssl-dev`
+ℹ Executing `sudo sh -c apt-get install -y pandoc`
+```
+
+...and yes, I had to enter my password five times. That's mildly irritating, and so far I haven't figured out how to fix that. My initial expectation was that entering the password once would invoke the caching mechanism so sudo wouldn't ask again for another 15 minutes, but that's not quite true here. This little gem in `man sudo` explains the issue: 
+
+```
+     Security policies may support credential caching to allow the
+     user to run sudo again for a period of time without requiring
+     authentication.  By default, the sudoers policy caches creden‐
+     tials on a per-terminal basis for 15 minutes.  See the
+     timestamp_type and timestamp_timeout options in sudoers(5) for
+     more information.  By running sudo with the -v option, a user
+     can update the cached credentials without running a command.
+
+```
+
+The reason why the "15 minutes" rule doesn't apply here is that the credentials are cached on a "per-terminal" basis. Each `sh` command invoked by pak effectively runs a new shell instance so the caching doesn't transfer. Gr.
+
+
+## Editing sudoers
+
+```
+     timestamp_type    sudoers uses per-user time stamp files for
+                       credential caching.  The timestamp_type op‐
+                       tion can be used to specify the type of time
+                       stamp record used.  It has the following
+                       possible values:
+
+                       global  A single time stamp record is used
+                               for all of a user's login sessions,
+                               regardless of the terminal or parent
+                               process ID.  An additional record is
+                               used to serialize password prompts
+                               when sudo is used multiple times in
+                               a pipeline, but this does not affect
+                               authentication.
+
+                       ppid    A single time stamp record is used
+                               for all processes with the same par‐
+                               ent process ID (usually the shell).
+                               Commands run from the same shell (or
+                               other common parent process) will
+                               not require a password for
+                               timestamp_timeout minutes (15 by
+                               default).  Commands run via sudo
+                               with a different parent process ID,
+                               for example from a shell script,
+                               will be authenticated separately.
+
+                       tty     One time stamp record is used for
+                               each terminal, which means that a
+                               user's login sessions are authenti‐
+                               cated separately.  If no terminal is
+                               present, the behavior is the same as
+                               ppid.  Commands run from the same
+                               terminal will not require a password
+                               for timestamp_timeout minutes (15 by
+                               default).
+
+                       kernel  The time stamp is stored in the ker‐
+                               nel as an attribute of the terminal
+                               device.  If no terminal is present,
+                               the behavior is the same as ppid.
+                               Negative timestamp_timeout values
+                               are not supported and positive val‐
+                               ues are limited to a maximum of 60
+                               minutes.  This is currently only
+                               supported on OpenBSD.
+
+                       The default value is tty.
+
+                       This setting is only supported by version
+                       1.8.21 or higher.
+
+```
+
+
+
+First, read this article on [how to edit the sudoers file](https://www.digitalocean.com/community/tutorials/how-to-edit-the-sudoers-file) carefully. Editing policies for sudo needs to be done with care: you really, really don't want to mess it up and lose the ability to invoke sudo because it's been incorrectly configured. So please, please read the linked page.
+
+Rather than edit the "core" sudoers file, what I've done is add a file to the sudoers.d directory (by default, files in this folder are automatically included when the sudoers plugin is loaded). I created one that exists solely to manage the timestamp settings for my primary user:
+
+```
+sudo visudo -f /etc/sudoers.d/timestamp_type
+```
+
+Notice that I've used visudo, and not some other editor. If you read the linked article you know why I id that and why it is astonishingly important to do it this way. If you didn't read the linked article... well, you would be *extremely* ill-advised to try the next step without actually reading it. 
+
+Okay, that feels like enough warning. Let's look at what I included in this file:
+
+```
+# specify the timeout type (usual default=tty)
+Defaults:danielle timestamp_type=global
+
+# specify the timeout interval (usual default=15)
+Defaults:danielle timestamp_timeout=5
+```
+
+I've done two things. First, in order to allow the sudo password cache to work everywhere regardless of which process invokes it, I set `timestamp_type=global`.^[Okay here's the weird thing: I really feel like the `timestamp_type=ppid` option *should* have worked here since the `sh` commands invoked by pak all come from a common source and should therefore have the same parent id, but apparently not. That one is beyond me, and I couldn't work out why. Hence: global.] Second, because this makes me a tiny bit nervous (it's a very mild softening of security policies), I shortened the cache expiry time from 15 minutes to 5 minutes by setting `timestamp_timeout=5`.
+
+## You're a star
+
+Was it worth it? Well, let me just say this: I installed the "stars" package with one line of code -- ON LINUX, WITH ALL THE HORRIFYING GEOSPATIAL DEPENDENCIES IT ENTAILS -- and it *just worked*. It worked fast. Unbelievable. I am horrified.
+
+```{r pkg-install-success}
+#| eval: false
+pak::pkg_install("stars")
+```
+
+``` bash
+→ Will install 1 package.
+→ Will download 1 package with unknown size.
++ stars   0.5-6 [bld][dl]
+ℹ Getting 1 pkg with unknown size
+✓ Got stars 0.5-6 (source) (3.42 MB)                                  
+✓ Downloaded 1 package (3.42 MB)in 4.2s                               
+ℹ Installing system requirements
+ℹ Executing `sudo sh -c apt-get install -y libgdal-dev`
+ℹ Executing `sudo sh -c apt-get install -y gdal-bin`
+ℹ Executing `sudo sh -c apt-get install -y libgeos-dev`
+ℹ Executing `sudo sh -c apt-get install -y libssl-dev`
+ℹ Executing `sudo sh -c apt-get install -y libproj-dev`
+ℹ Executing `sudo sh -c apt-get install -y libudunits2-dev`
+ℹ Building stars 0.5-6
+✓ Built stars 0.5-6 (1.4s)                                       
+✓ Installed stars 0.5-6  (98ms)                                    
+✓ 1 pkg + 16 deps: kept 12, added 1, dld 1 (3.42 MB) [20.7s]    
+```
+
+
+
