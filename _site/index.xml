@@ -15,7 +15,254 @@
 <link>https://blog.djnavarro.net/index.html</link>
 </image>
 <generator>quarto-1.1.149</generator>
-<lastBuildDate>Mon, 22 Aug 2022 14:00:00 GMT</lastBuildDate>
+<lastBuildDate>Sat, 03 Sep 2022 14:00:00 GMT</lastBuildDate>
+<item>
+  <title>Sudo ask me a password</title>
+  <dc:creator>Danielle Navarro</dc:creator>
+  <link>https://blog.djnavarro.net/posts/2022-09-04_sudo-askpass/index.html</link>
+  <description><![CDATA[ 
+
+
+
+
+<!--
+cover image:
+author: Ola Mishchenko
+url: https://unsplash.com/photos/VRB1LJoTZ6w
+licence: Free to use under the Unsplash License
+
+-->
+<!--------------- my typical setup ----------------->
+<!--------------- post begins here ----------------->
+<p>One peculiar feature of earning one’s keep in society by writing a data science blog is that it provides the opportunity to be unabashedly weird. Personality is important. Other developers will read your strange content – no matter how weird and unprofessional it is – because professional corporate style is very nearly as dull as academic writing, and it is a relief to learn a new thing from an actual human being who write with a certain level of human character.</p>
+<p>Even if she is an irredeemably catty bitch.</p>
+<p>All of which is by way of preamble, and a way to acknowlege that when the topic is package dependencies in R, the queer double entendres kind of write themselves.<sup>1</sup> And so without further ado, today’s unhinged rambling…</p>
+<section id="managing-package-dependencies-in-r" class="level2">
+<h2 class="anchored" data-anchor-id="managing-package-dependencies-in-r">Managing package dependencies in R</h2>
+<p>Okay so you’ve done your due diligence. You’ve read his pkgdown site, checked out his repo, and you still like him. You really, <em>really</em> want to install his package. You’ve inspected the documentation and it is a very impressive package. I mean, I get it babe.</p>
+<p>I. have. been. there.</p>
+<p>There’s a thing with packages though. When you’re installing them into wherever you like to put packages (the precise location doesn’t matter for this post<sup>2</sup>), what you see isn’t necessarily all you get.</p>
+<p>I’ll give a concrete example. For reasons unknown even to me I woke up this morning and decided today was the day I’d explore the <a href="https://github.com/r-lib/rig">rig installation manager</a> for R that lets you manage multiple R installations on the one machine. It’s very nice, and possibly the topic for a future post. However, one side consequence to adopting rig is that I ended up with adorably fresh copies of R that had no installed packages and needed to be properly set up. In the process, I started thinking a little about the tools I use to install packages. When I first started using R my go to method was to use the <code>install.packages()</code> function supplied by the utils package: after all, it comes bundled with R, which makes it an easy place to start. As I matured as an R user I found myself switching to the <a href="https://remotes.r-lib.org/">remotes package</a> because it provides a coherent set of functions for installing packages from CRAN, Bioconductor, GitHub, and more. I’m a huge fan of remotes, but for reasons I’ll explain in a moment I’m starting to prefer the <a href="https://pak.r-lib.org/">pak package</a> developed by Gábor Csárdi and Jim Hester. When using pak, the function you use to install packages is called <code>pkg_install()</code>. I’ll walk you through it. Here’s what happens when I try to install the <a href="https://quarto-dev.github.io/quarto-r/">quarto R package</a> without properly configuring my setup. First I call the function:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1">pak<span class="sc" style="color: #5E5E5E;">::</span><span class="fu" style="color: #4758AB;">pkg_install</span>(<span class="st" style="color: #20794D;">"quarto"</span>)</span></code></pre></div>
+</div>
+<p>When I hit enter, pak starts doing its job, resolving the R dependencies and then asking if I want to continue:</p>
+<pre><code>✓ Loading metadata database ... done
+                                                                            
+→ Will install 2 packages.
+→ Will update 1 package.
+→ Will download 3 packages with unknown size.
++ packrat         0.8.1  [bld][dl]
++ quarto    1.1 → 1.2    [bld][dl]
++ rsconnect       0.8.27 [bld][dl]
+? Do you want to continue (Y/n) </code></pre>
+<p>I really like this approach. The interface is very clear about precisely what is happening, and pak doesn’t download any more packages than is absolutely necessary to give you what you asked for (unless you specify <code>upgrade = TRUE</code> in the install command).</p>
+<p>I agree to continue, so off pak goes, fetching the appropriate R packages:</p>
+<pre><code>ℹ Getting 3 pkgs with unknown sizes
+✓ Got quarto 1.2 (source) (67.58 kB)                                             
+✓ Got rsconnect 0.8.27 (source) (685.57 kB)                                      
+✓ Got packrat 0.8.1 (source) (681.50 kB)                                         
+✓ Downloaded 3 packages (1.43 MB)in 6.7s</code></pre>
+<p>So far, so good. The output is informative and succinct at the same time. It appeals to my aesthetic sensibilities. But then pak – which is very diligent about managing all dependencies including system dependencies – attempts to install the external libraries upon which quarto depends,<sup>3</sup> and this happens:</p>
+<pre><code>ℹ Installing system requirements
+ℹ Executing `sudo sh -c apt-get install -y make`
+Error: System command 'sudo' failed, exit status: 1, stdout + stderr:
+E&gt; sudo: a terminal is required to read the password; either use the -S option to read from standard input or configure an askpass helper</code></pre>
+<p>Ah.</p>
+<p><br><br></p>
+</section>
+<section id="what-went-wrong-here" class="level2">
+<h2 class="anchored" data-anchor-id="what-went-wrong-here">What went wrong here?</h2>
+<p>An important thing to understand here is that neither pak nor <a href="https://www.sudo.ws/">sudo</a> are to blame for the installation failure.<sup>4</sup> On the pak side, it’s a <em>good</em> thing that it tries to uncover and install system dependencies: the package isn’t going to work if you don’t have those dependencies installed, and it can be a nightmare trying to track them all down when the package manager doesn’t help identify them for you.<sup>5</sup> On the sudo side, it is extremely reasonable to expect the user to authenticate <em>before</em> enabling superuser privileges. Speaking for myself, I have a very strong expectation that I will be explicitly asked for my consent before packages are installed on my system.<sup>6</sup></p>
+<p>The breakdown happens because pak has invoked sudo outside of the terminal context. If you haven’t configured sudo to handle this situation, there’s no opportunity for the user to authenticate, and sudo throws an error.</p>
+<p>How can we resolve this?</p>
+<p><br><br></p>
+</section>
+<section id="configuring-sudo" class="level2">
+<h2 class="anchored" data-anchor-id="configuring-sudo">Configuring sudo</h2>
+<p>A little bit of digging revealed that sudo is a lot more configurable than I had preciously realised, and you can deal with this issue in a few different ways. One possibility would be to <a href="https://www.simplified.guide/linux/enable-passwordless-sudo">enable passwordless sudo</a>, in which case the system dependencies would be installed without requiring a password at all. That would certainly minimise the amount of hassle at my end, but it’s also a hell of a security risk. Even if I personally felt willing to take that risk with my own property, this is a work laptop and I think a little risk-aversion is a good idea in this case.<sup>7</sup></p>
+<p>Fortunately, the error message itself contains some hints that there is an alternative fix that doesn’t require you to weaken your security settings (or not by very much, at any rate). Specifically, the error message refers to an “askpass helper”: a program, usually with a GUI, that sudo will invoke whenever it needs authentication from the user but is not running in a terminal. However, in order to get sudo to invoke one of these helpers, you have to explicitly configure it within the sudo configuration file, <code>sudo.conf</code>. This configuration file is located at <code>/etc/sudo.conf</code> is discussed pretty thoroughly in the sudo help documentation. Here’s the relevant part of the output when I type <code>man sudo.conf</code>:<sup>8</sup></p>
+<div class="pre">
+<pre><code> askpass   The fully qualified path to a helper program used to read the
+           user's password when no terminal is available.  This may be
+           the case when sudo is executed from a graphical (as opposed to
+           text-based) application.  The program specified by askpass
+           should display the argument passed to it as the prompt and
+           write the user's password to the standard output.  The value
+           of askpass may be overridden by the SUDO_ASKPASS environment
+           variable.</code></pre>
+</div>
+<p>Okay, so I need to do two things. I need to edit <code>sudo.conf</code> to configure sudo to use the askpass helper, and I also need the askpass helper itself. So where do I find one of these askpass helper programs? The one I chose to go with is <a href="https://man.openbsd.org/ssh-askpass.1">ssh-askpass</a>, which I installed on my system using the following:</p>
+<div class="sourceCode" id="cb6" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb6-1"><span class="fu" style="color: #4758AB;">sudo</span> apt-get install ssh-askpass ssh-askpass-gnome</span></code></pre></div>
+<p>Notice that I installed both ssh-askpass and <a href="https://manpages.debian.org/testing/ssh-askpass-gnome/gnome-ssh-askpass.1.en.html">ssh-askpass-gnome</a>. The latter isn’t the askpass helper itself, and isn’t intended to be invoked separately from ssh-askpass. Rather it’s there because ssh-askpass on its own uses <a href="https://x.org/wiki/">X11</a> to do the graphical user interface part and it’s not very pretty on my Ubuntu installation. By installing ssh-askpass-gnome as well, the dialog box that comes up when ssh-askpass is invoked is much nicer.</p>
+<p>At the terminal, I can invoke ssh-askpass manually if I want to. It doesn’t do much by itself: all it does is create the dialog box and return the text input by the user.</p>
+<div class="sourceCode" id="cb7" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb7-1"><span class="ex" style="color: null;">ssh-askpass</span></span></code></pre></div>
+<p>In practice you don’t actually call this directly. Instead, you configure sudo to that whenever it needs authentication but doesn’t have access to a terminal. In order to accomplish this, here’s the lines I added to my sudo.conf file:<sup>9</sup></p>
+<div class="sourceCode" id="cb8" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb8-1"><span class="co" style="color: #5E5E5E;"># specify ssh-askpass as my helper</span></span>
+<span id="cb8-2"><span class="ex" style="color: null;">Path</span> askpass /usr/bin/ssh-askpass</span></code></pre></div>
+<p>So I did this and then<sup>10</sup> tried to install quarto using <code>pkg_install()</code>. This time around sudo no longer errored when pak tried to install system dependencies. Instead it brought up the askpass dialog box:</p>
+<p><img src="https://blog.djnavarro.net/posts/2022-09-04_sudo-askpass/img/askpass-screen.png" class="img-fluid"></p>
+<p>When I typed in my password, pak and sudo were able to play nicely together and the installation worked just fine. Well, mostly..</p>
+</section>
+<section id="can-we-relax-just-a-little-sweetie" class="level2">
+<h2 class="anchored" data-anchor-id="can-we-relax-just-a-little-sweetie">Can we relax just a little sweetie?</h2>
+<p>The only problem is that quarto installation requires <em>five</em> system dependencies to be installed, and as the output below shows, pak starts a new shell process every single time…</p>
+<div class="sourceCode" id="cb9" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb9-1"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> make<span class="kw" style="color: #003B4F;">`</span></span>
+<span id="cb9-2"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> libcurl4-openssl-dev<span class="kw" style="color: #003B4F;">`</span></span>
+<span id="cb9-3"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> libicu-dev<span class="kw" style="color: #003B4F;">`</span></span>
+<span id="cb9-4"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> libssl-dev<span class="kw" style="color: #003B4F;">`</span></span>
+<span id="cb9-5"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> pandoc<span class="kw" style="color: #003B4F;">`</span></span></code></pre></div>
+<p>…and as a consequence of this I had to enter my password five times.</p>
+<p>That’s mildly irritating, and I was not expecting it. My original assumption would be that entering the password the first time would invoke the sudo password cache: that is, after entering my password once, the elevated permissions<sup>11</sup> would persist for about 15 minutes. That’s what happens by default at the terminal, and I had presumed the same would apply when the call to sudo occurs within an R session. However, that’s not <em>quite</em> accurate. This little gem in <code>man sudo</code> explains the relevant security policy issue:</p>
+<pre><code>     Security policies may support credential caching to allow the
+     user to run sudo again for a period of time without requiring
+     authentication.  By default, the sudoers policy caches creden‐
+     tials on a per-terminal basis for 15 minutes.  See the
+     timestamp_type and timestamp_timeout options in sudoers(5) for
+     more information.  By running sudo with the -v option, a user
+     can update the cached credentials without running a command.
+</code></pre>
+<p>The reason why the “15 minutes” rule doesn’t apply here is that the credentials are cached on a “per-terminal” basis. Each <code>sudo sh</code> command invoked by pak effectively runs a new instance of the shell and the password caching doesn’t transfer. Gr.</p>
+</section>
+<section id="editing-the-sudoers-file" class="level2">
+<h2 class="anchored" data-anchor-id="editing-the-sudoers-file">Editing the sudoers file</h2>
+<p>As a general rule I can understand why sudo is conservative and does not permit the credential cache to transfer across processes. Who knows what other processes are running and what they might be doing? But in this instance I’m willing to slightly relax the security policy to ensure that the pak/sudo combination doesn’t drive me crazy by relentlessly asking for permission on every little thing.</p>
+<p>The security policies in sudo are managed by plugins<sup>12</sup> configured using the “sudoers” file(s) located at <code>/etc/sudoers</code>. I’ll talk about this file momentarily, but first here’s the relevant extract from <code>man sudoers</code> that tells us what setting we need to modify:</p>
+<pre><code>     timestamp_type    sudoers uses per-user time stamp files for
+                       credential caching.  The timestamp_type op‐
+                       tion can be used to specify the type of time
+                       stamp record used.  It has the following
+                       possible values:
+
+                       global  A single time stamp record is used
+                               for all of a user's login sessions,
+                               regardless of the terminal or parent
+                               process ID.  An additional record is
+                               used to serialize password prompts
+                               when sudo is used multiple times in
+                               a pipeline, but this does not affect
+                               authentication.
+
+                       ppid    A single time stamp record is used
+                               for all processes with the same par‐
+                               ent process ID (usually the shell).
+                               Commands run from the same shell (or
+                               other common parent process) will
+                               not require a password for
+                               timestamp_timeout minutes (15 by
+                               default).  Commands run via sudo
+                               with a different parent process ID,
+                               for example from a shell script,
+                               will be authenticated separately.
+
+                       tty     One time stamp record is used for
+                               each terminal, which means that a
+                               user's login sessions are authenti‐
+                               cated separately.  If no terminal is
+                               present, the behavior is the same as
+                               ppid.  Commands run from the same
+                               terminal will not require a password
+                               for timestamp_timeout minutes (15 by
+                               default).
+
+                       kernel  The time stamp is stored in the ker‐
+                               nel as an attribute of the terminal
+                               device.  If no terminal is present,
+                               the behavior is the same as ppid.
+                               Negative timestamp_timeout values
+                               are not supported and positive val‐
+                               ues are limited to a maximum of 60
+                               minutes.  This is currently only
+                               supported on OpenBSD.
+
+                       The default value is tty.
+
+                       This setting is only supported by version
+                       1.8.21 or higher.
+</code></pre>
+<p>This documentation makes clear where the problem lies. When pak invokes sudo, a new process is spawned and unless the value of <code>timestamp_type</code> is set to <code>global</code>, the sudo credential cache doesn’t get shared across processes.</p>
+<p>It’s possible to modify this setting, and I’ll show you how to do that below, but first I strongly recommend that you read this article on <a href="https://www.digitalocean.com/community/tutorials/how-to-edit-the-sudoers-file">how to edit the sudoers file</a> carefully. <em>For realsies, my dears, read it</em>. Editing policies for sudo needs to be done with a lot of care. You don’t want to mess it up and lose the ability to invoke sudo because it’s been incorrectly configured. So please, please read the linked page.</p>
+<p>You read it, right?</p>
+<p>Good.</p>
+<p>After reading through the linked article, I made the decision that instead of editing the main sudoers file, I would instead add a small file to the <code>/etc/sudoers.d/</code> directory. By default, files in this folder are automatically included when the sudoers plugin is loaded, so it’s a convenient place to add your customisations rather than editing the main file. I created one that exists solely to manage the timestamp settings for my primary user:</p>
+<pre><code>sudo visudo -f /etc/sudoers.d/timestamp_type</code></pre>
+<p>Notice that I’ve used <a href="https://www.sudo.ws/docs/man/1.8.13/visudo.man/">visudo</a>, and not some other editor. If you read the linked article you know why I did that, and why it is astonishingly important to do it this way in order to practice safe sudo<sup>13</sup> policy editing. If you didn’t read the linked article… well, you would be <em>extremely</em> ill-advised to try the next step without actually reading it.</p>
+<p>Okay, that feels like enough warning. Let’s look at what I included in my new <code>/etc/sudoers.d/timestamp_type</code> file:</p>
+<pre><code># specify the timeout type (usual default=tty)
+Defaults:danielle timestamp_type=global
+
+# specify the timeout interval (usual default=15)
+Defaults:danielle timestamp_timeout=2</code></pre>
+<p>I’ve done two things. First, in order to allow the sudo password cache to work everywhere regardless of which process invokes it, I set <code>timestamp_type=global</code>. Second, because this makes me a tiny bit nervous (it’s a very mild softening of security policies), I shortened the cache expiry time from 15 minutes to 2 minutes by setting <code>timestamp_timeout=2</code>. In practice, I very rarely do anything requiring superuser privileges that requires more than two minutes, and it seems best to let those privileges expire quickly.</p>
+</section>
+<section id="youre-a-star" class="level2">
+<h2 class="anchored" data-anchor-id="youre-a-star">You’re a star</h2>
+<p>At this point I have a set up that lets me use pak without needing to weaken my security policies (well, not by much) and won’t cause me to lose my mind by typing in my password over and over until I beg for the sweet release<sup>14</sup> of death. Was it all worth it?</p>
+<p>Well, let me just say this: out of curiosity I decided to try installing the stars package, which necessarily entails installing a lot of geospatial dependencies. Back when I first tried installing these tools on linux a couple of years ago it was a nightmare. I had to track down the dependencies myself and manually install them, which was pretty daunting at the time because I was very new to the whole business.<sup>15</sup> Here’s what happened when I tried it with pak after configuring sudo to ask for my password only the once:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb14" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb14-1">pak<span class="sc" style="color: #5E5E5E;">::</span><span class="fu" style="color: #4758AB;">pkg_install</span>(<span class="st" style="color: #20794D;">"stars"</span>)</span></code></pre></div>
+</div>
+<div class="sourceCode" id="cb15" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb15-1"><span class="ex" style="color: null;">→</span> Will install 1 package.</span>
+<span id="cb15-2"><span class="ex" style="color: null;">→</span> Will download 1 package with unknown size.</span>
+<span id="cb15-3"><span class="ex" style="color: null;">+</span> stars   0.5-6 [bld][dl]</span>
+<span id="cb15-4"><span class="ex" style="color: null;">ℹ</span> Getting 1 pkg with unknown size</span>
+<span id="cb15-5"><span class="ex" style="color: null;">✓</span> Got stars 0.5-6 <span class="er" style="color: #AD0000;">(</span><span class="bu" style="color: null;">source</span><span class="kw" style="color: #003B4F;">)</span> <span class="kw" style="color: #003B4F;">(</span><span class="ex" style="color: null;">3.42</span> MB<span class="kw" style="color: #003B4F;">)</span>                                  </span>
+<span id="cb15-6"><span class="ex" style="color: null;">✓</span> Downloaded 1 package <span class="er" style="color: #AD0000;">(</span><span class="ex" style="color: null;">3.42</span> MB<span class="kw" style="color: #003B4F;">)</span><span class="er" style="color: #AD0000;">in</span> <span class="ex" style="color: null;">4.2s</span>                               </span>
+<span id="cb15-7"><span class="ex" style="color: null;">ℹ</span> Installing system requirements</span>
+<span id="cb15-8"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> libgdal-dev<span class="kw" style="color: #003B4F;">`</span></span>
+<span id="cb15-9"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> gdal-bin<span class="kw" style="color: #003B4F;">`</span></span>
+<span id="cb15-10"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> libgeos-dev<span class="kw" style="color: #003B4F;">`</span></span>
+<span id="cb15-11"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> libssl-dev<span class="kw" style="color: #003B4F;">`</span></span>
+<span id="cb15-12"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> libproj-dev<span class="kw" style="color: #003B4F;">`</span></span>
+<span id="cb15-13"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> libudunits2-dev<span class="kw" style="color: #003B4F;">`</span></span>
+<span id="cb15-14"><span class="ex" style="color: null;">ℹ</span> Building stars 0.5-6</span>
+<span id="cb15-15"><span class="ex" style="color: null;">✓</span> Built stars 0.5-6 <span class="er" style="color: #AD0000;">(</span><span class="ex" style="color: null;">1.4s</span><span class="kw" style="color: #003B4F;">)</span>                                       </span>
+<span id="cb15-16"><span class="ex" style="color: null;">✓</span> Installed stars 0.5-6  <span class="er" style="color: #AD0000;">(</span><span class="ex" style="color: null;">98ms</span><span class="kw" style="color: #003B4F;">)</span>                                    </span>
+<span id="cb15-17"><span class="ex" style="color: null;">✓</span> 1 pkg + 16 deps: kept 12, added 1, dld 1 <span class="er" style="color: #AD0000;">(</span><span class="ex" style="color: null;">3.42</span> MB<span class="kw" style="color: #003B4F;">)</span> <span class="ex" style="color: null;">[20.7s]</span>    </span></code></pre></div>
+<p>One line of code. One line of code, that worked the first time. One line of code that worked the first time and installed everything quickly. It’s a true Christmas miracle.</p>
+
+
+</section>
+
+
+<div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
+
+<ol>
+<li id="fn1"><p>Like so many moments in life when I get this way, <a href="https://twitter.com/dan_p_simpson/status/1565948834542669826">Dan Simpson</a> is at least partially to blame.↩︎</p></li>
+<li id="fn2"><p>Per <em>Lawrence v Texas</em>.↩︎</p></li>
+<li id="fn3"><p>It took all the self-restraint I possess not to refer to this as “the undisclosed viagra problem” in the title. Footnotes are the place for such things Danielle. Footnotes.↩︎</p></li>
+<li id="fn4"><p>These things happen to everyone sometimes honey, it’s no big deal, etc.↩︎</p></li>
+<li id="fn5"><p>Conveniently, pak also allows you to identify these dependencies separately from the R package installation. To do this, use the <code>pkg_system_requirements()</code> function.↩︎</p></li>
+<li id="fn6"><p>There’s an unpleasant name for people who break that convention, and I can’t think of a joke for this one because it’s astonishingly horrible. If you don’t know from personal experience what it feels like, well, consider yourself fortunate. Sigh.↩︎</p></li>
+<li id="fn7"><p>Okay sure, I haven’t <em>technically</em> asked DevOps for their opinion about the possibility of me dumping the authentication requirements on superuser privileges on a work machine. Nevertheless I do have a suspicion I know what their answer would be. So, in the interests of not causing unnecessary distress, perhaps a different approach is in order…↩︎</p></li>
+<li id="fn8"><p>The <a href="https://www.sudo.ws/docs/man/1.9.9/sudo.conf.man/">manual page</a> is online at the linked URL.↩︎</p></li>
+<li id="fn9"><p>In the interests of strict accuracy, I should add that had to create this file myself because it didn’t already exist on my system: prior to making this edit, sudo was using all the default settings. Relatedly, I had to use <code>whereis ssh-askpass</code> in order to find the path to ssh-askpass because the advice I’d seen online listed a different path and, shockingly, it doesn’t work if you don’t provide the correct path.↩︎</p></li>
+<li id="fn10"><p>After restarting R, just in case.↩︎</p></li>
+<li id="fn11"><p>Negotiations are vital and CNC isn’t for newbies.↩︎</p></li>
+<li id="fn12"><p>With flared bases one hopes.↩︎</p></li>
+<li id="fn13"><p>Surely you cannot have expected me to pass up the opportunity to make a safe sudo joke?↩︎</p></li>
+<li id="fn14"><p>Nah, too obvious. Feel free to come up with your own joke here, you don’t need my help.↩︎</p></li>
+<li id="fn15"><p>We all were at one time.↩︎</p></li>
+</ol>
+</section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
+  author = {Danielle Navarro},
+  editor = {},
+  title = {Sudo Ask Me a Password},
+  date = {2022-09-04},
+  url = {https://blog.djnavarro.net/posts/2022-09-04_sudo-askpass},
+  langid = {en}
+}
+</code></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2022" class="csl-entry quarto-appendix-citeas">
+Danielle Navarro. 2022. <span>“Sudo Ask Me a Password.”</span> September
+4, 2022. <a href="https://blog.djnavarro.net/posts/2022-09-04_sudo-askpass">https://blog.djnavarro.net/posts/2022-09-04_sudo-askpass</a>.
+</div></div></section></div> ]]></description>
+  <category>Linux</category>
+  <category>Credentials</category>
+  <category>R</category>
+  <guid>https://blog.djnavarro.net/posts/2022-09-04_sudo-askpass/index.html</guid>
+  <pubDate>Sat, 03 Sep 2022 14:00:00 GMT</pubDate>
+  <media:content url="https://blog.djnavarro.net/posts/2022-09-04_sudo-askpass/img/cover.jpg" medium="image" type="image/jpeg"/>
+</item>
 <item>
   <title>How to visualise a billion rows of data in R with Apache Arrow</title>
   <dc:creator>Danielle Navarro</dc:creator>
@@ -10082,448 +10329,6 @@ Danielle Navarro. 2021. <span>“Bootstrap Cards in Distill.”</span> April
   <guid>https://blog.djnavarro.net/posts/2021-04-19_bs4cards-in-distill/index.html</guid>
   <pubDate>Sun, 18 Apr 2021 14:00:00 GMT</pubDate>
   <media:content url="https://blog.djnavarro.net/posts/2021-04-19_bs4cards-in-distill/bs4cards-logo.png" medium="image" type="image/png" height="83" width="144"/>
-</item>
-<item>
-  <title>Pretty little CLIs</title>
-  <dc:creator>Danielle Navarro</dc:creator>
-  <link>https://blog.djnavarro.net/posts/2021-04-18_pretty-little-clis/index.html</link>
-  <description><![CDATA[ 
-
-
-
-
-<!--------------- my typical setup ----------------->
-<!--------------- post begins here ----------------->
-<div class="cell">
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2021-04-18_pretty-little-clis/output/secrets.svg" class="img-fluid"></p>
-</div>
-</div>
-
-<div class="no-row-height column-margin column-container"><div class="">
-<p>Lyrics to the title theme of the US TV show, <a href="https://prettylittleliars.fandom.com/"><em>Pretty Little Liars</em></a>. The song is called <em>Secrets</em>, taken from the fabulous <a href="https://en.wikipedia.org/wiki/Thirteen_Tales_of_Love_and_Revenge">Thirteen Tales of Love and Revenge</a> album by <em>The Pierces</em></p>
-</div></div><p>Anytime you write R code whose output needs to be understood by a human being, it is an act of kindness to spend a little time making sure that the output shown to the human being properly communicates with that human. As a consequence of this, you often find yourself needing to write information to the R console, just to cater to those precious human sensibilities. Perhaps the simplest way to do this is to use the <code>cat()</code> function. It’s a simple tool and it gets the job done in most cases.</p>
-<p>For example, consider the use case for the antagonist character “A” from <em>Pretty Little Liars</em>, whose stalking and threats were delivered mostly via text message. Had she used R to craft her threatening text messages, she could have written code like this:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1">wait <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>(<span class="at" style="color: #657422;">seconds =</span> <span class="dv" style="color: #AD0000;">2</span>) {</span>
-<span id="cb1-2">  <span class="fu" style="color: #4758AB;">Sys.sleep</span>(seconds)</span>
-<span id="cb1-3">}</span>
-<span id="cb1-4"></span>
-<span id="cb1-5">send_cat_threat <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>() {</span>
-<span id="cb1-6">  <span class="fu" style="color: #4758AB;">cat</span>(<span class="st" style="color: #20794D;">"Dead girls walking.</span><span class="sc" style="color: #5E5E5E;">\n</span><span class="st" style="color: #20794D;">"</span>); <span class="fu" style="color: #4758AB;">wait</span>()</span>
-<span id="cb1-7">  <span class="fu" style="color: #4758AB;">cat</span>(<span class="st" style="color: #20794D;">"--A.</span><span class="sc" style="color: #5E5E5E;">\n</span><span class="st" style="color: #20794D;">"</span>)</span>
-<span id="cb1-8">}</span></code></pre></div>
-</div>
-<p>Equipped with a function that specifies her threat, complete with a dramatic pause for effect, she’s ready to go. When her unwitting victim does something to trigger the <code>send_cat_threat()</code> function, a two part message is displayed on the console. The first part shows up immediately</p>
-<div class="cell">
-<div class="cell-output cell-output-stdout">
-<pre><code>Dead girls walking.</code></pre>
-</div>
-</div>
-<p>and after a two second delay, her call sign is revealed</p>
-<div class="cell">
-<div class="cell-output cell-output-stdout">
-<pre><code>Dead girls walking.
---A.</code></pre>
-</div>
-</div>
-<p>It’s not too difficult to imagine what this message might look like at the R console, but where’s the fun in that? Thanks to the <a href="https://github.com/r-lib/asciicast">asciicast</a> package <span class="citation" data-cites="asciiicast">(Csárdi et al. 2019)</span>, there’s no need to leave anything to the imagination, and we can see the malevolent message in screencast form:</p>
-<div class="cell">
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2021-04-18_pretty-little-clis/output/cat-example.svg" class="img-fluid"></p>
-</div>
-</div>
-
-<div class="no-row-height column-margin column-container"><div class="">
-<p>The ominous text messages used in this post are taken from <em>Pretty Little Liars</em>. This one is from episode two in season one. It’s important that one documents ones sources, right?</p>
-</div></div><p>Using <code>cat()</code> to craft messages works perfectly well for simple text communication, but sometimes you want something that looks a little fancier. After all, if the big picture plan here is to impersonate a dead teenager and terrorise her friends - and for some reason you’ve chosen R to do so - you might as well put a little effort into the details, right?</p>
-<section id="meet-the-cli-package" class="level2">
-<h2 class="anchored" data-anchor-id="meet-the-cli-package">Meet the cli package</h2>
-<p>One thing I love about the R community is that if you search long enough you’ll find that someone else has already written a package that solves the problem you’re facing. If your problem is “how to craft nicely formatted messages” then you’ll be delighted to learn that many wonderful things become possible if you have the <a href="https://cli.r-lib.org">cli</a> package <span class="citation" data-cites="cli">(Csárdi 2021a)</span> as your talented assistant. To craft a beautiful command line interface (CLI) of her very own, the first thing A will need to do is load the package:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb4" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><span class="fu" style="color: #4758AB;">library</span>(cli)</span></code></pre></div>
-</div>
-<p>Once this is done, it is a very trivial task for A to write the same threatening text message using <code>cli_text()</code>…</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb5" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1">send_cli_threat <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>() {</span>
-<span id="cb5-2">  <span class="fu" style="color: #4758AB;">cli_text</span>(<span class="st" style="color: #20794D;">"Dead girls walking."</span>); <span class="fu" style="color: #4758AB;">wait</span>()</span>
-<span id="cb5-3">  <span class="fu" style="color: #4758AB;">cli_text</span>(<span class="st" style="color: #20794D;">"--A."</span>)</span>
-<span id="cb5-4">}</span>
-<span id="cb5-5"><span class="fu" style="color: #4758AB;">send_cli_threat</span>()</span></code></pre></div>
-</div>
-<div class="cell">
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2021-04-18_pretty-little-clis/output/cli-example-1.svg" class="img-fluid"></p>
-</div>
-</div>
-<p>…which is nice and all, but it doesn’t make much of a case for using cli. Stalking and threatening is busy work, and I’d imagine that A would want a more compelling justification before deciding to switch her evil workflow. However - much like A herself - the R console has many dark secrets, and fancier tricks than this are possible once you know how to expose them using cli.</p>
-</section>
-<section id="using-the-status-bar" class="level2 page-columns page-full">
-<h2 class="anchored" data-anchor-id="using-the-status-bar">Using the status bar</h2>
-<p>One piece of magic that I have wondered about for a long time is how fancy progress bars work: often when you’re doing something that takes a long time, you’ll see an ASCII progress bar rendered in text on the screen, which suddenly vanishes once the process is complete. How exactly does this work? Normally you can’t “unprint” a message from the console, so how is it possible for the progress bar to update without leaving an ugly trail of earlier messages behind it?</p>
-<p>While teaching myself cli, I found the answer. The most recent line of text generated at the terminal is speciall. It’s called the <em>status bar</em>: the state of the status bar can be manipulated, and the cli package provides a neat toolkit for doing so. So let’s say I were trying to convince A to switch to the cli tools. Right now, she’s writing a function that will send a four-part message, using <code>cli_text()</code> because I’ve at least convinced her to <em>try</em> the new tools:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb6" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1">message_scroll <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>() {</span>
-<span id="cb6-2">  <span class="fu" style="color: #4758AB;">cli_text</span>(<span class="st" style="color: #20794D;">"You found my bracelet."</span>); <span class="fu" style="color: #4758AB;">wait</span>()</span>
-<span id="cb6-3">  <span class="fu" style="color: #4758AB;">cli_text</span>(<span class="st" style="color: #20794D;">"Now come find me."</span>); <span class="fu" style="color: #4758AB;">wait</span>()</span>
-<span id="cb6-4">  <span class="fu" style="color: #4758AB;">cli_text</span>(<span class="st" style="color: #20794D;">"Good luck bitches."</span>); <span class="fu" style="color: #4758AB;">wait</span>()</span>
-<span id="cb6-5">  <span class="fu" style="color: #4758AB;">cli_text</span>(<span class="st" style="color: #20794D;">"-A"</span>); <span class="fu" style="color: #4758AB;">wait</span>()</span>
-<span id="cb6-6">}</span>
-<span id="cb6-7"><span class="fu" style="color: #4758AB;">message_scroll</span>()</span></code></pre></div>
-</div>
-<p>When her victim triggers this message the lines will appear on screen, one after the other with an appropriate dramatic pause separating them. The victim might see something that looks like this:</p>
-<div class="cell">
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2021-04-18_pretty-little-clis/output/status-bar-1.svg" class="img-fluid"></p>
-</div>
-</div>
-<p>The problem – when viewed from an evil point of view – is that this message stays on screen after delivery.<sup>1</sup> The victim has time to think about it, take a screenshot to show her friends, that kind of thing. Wouldn’t the gaslighting be so much more effective if she were to send the message piece by piece, each part disappearing as the next one appears, only to have the whole thing vanish without a trace and leaving the victim wondering if she imagined the whole thing? This is where the status bar comes in handy. Here’s how it would work:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb7" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1">message_inline <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>() {</span>
-<span id="cb7-2">  id <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">cli_status</span>(<span class="st" style="color: #20794D;">""</span>)</span>
-<span id="cb7-3">  <span class="fu" style="color: #4758AB;">cli_status_update</span>(id, <span class="st" style="color: #20794D;">"You found my bracelet."</span>); <span class="fu" style="color: #4758AB;">wait</span>()</span>
-<span id="cb7-4">  <span class="fu" style="color: #4758AB;">cli_status_update</span>(id, <span class="st" style="color: #20794D;">"Now come find me."</span>); <span class="fu" style="color: #4758AB;">wait</span>()</span>
-<span id="cb7-5">  <span class="fu" style="color: #4758AB;">cli_status_update</span>(id, <span class="st" style="color: #20794D;">"Good luck bitches."</span>); <span class="fu" style="color: #4758AB;">wait</span>()</span>
-<span id="cb7-6">  <span class="fu" style="color: #4758AB;">cli_status_update</span>(id, <span class="st" style="color: #20794D;">"-A"</span>); <span class="fu" style="color: #4758AB;">wait</span>()</span>
-<span id="cb7-7">  <span class="fu" style="color: #4758AB;">cli_status_clear</span>(id)</span>
-<span id="cb7-8">}</span></code></pre></div>
-</div>
-<p>The first line in this function uses <code>cli_status()</code> to create a blank message on the status bar, and returns an identifier that refers to the status bar. The next four lines all use <code>cli_status_update()</code> to overwrite the current state of the status bar, and then pause dramatically for two seconds. In a final act of malice, the last line in the function clears the status bar using <code>cli_status_clear()</code>, leaving nothing except a blank space behind. So what the victim sees is something more like this:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb8" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1"><span class="fu" style="color: #4758AB;">message_inline</span>()</span></code></pre></div>
-</div>
-<div class="cell">
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2021-04-18_pretty-little-clis/output/status-bar-2.svg" class="img-fluid"></p>
-</div>
-</div>
-
-<div class="no-row-height column-margin column-container"><div class="">
-<p>This message was sent to Aria in episode 10 of season one. I’m sure it is deeply important to everyone that I mention this.</p>
-</div></div></section>
-<section id="creating-spinners" class="level2 page-columns page-full">
-<h2 class="anchored" data-anchor-id="creating-spinners">Creating spinners</h2>
-<p>The ability to control the status bar opens up a world of new possibilities. Progress bars are one such possibility, but the <a href="https://github.com/r-lib/progress">progress</a> package <span class="citation" data-cites="progress">(Csárdi and FitzJohn 2019)</span> already does this nicely, and in any case I suspect that A might be more intrigued by the possibility of spinners, since they just spin and spin and give the victim no clue about when the process is going to end. Much more appealing when the developer doesn’t know (or doesn’t want to reveal) when the wait will end. The cli package has a nice <code>makes_spinner</code> function that serves this purpose. Here’s an example:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb9" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1">spinny <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">make_spinner</span>(</span>
-<span id="cb9-2">  <span class="at" style="color: #657422;">which =</span> <span class="st" style="color: #20794D;">"dots2"</span>,</span>
-<span id="cb9-3">  <span class="at" style="color: #657422;">template =</span> <span class="st" style="color: #20794D;">"{spin} It's not over until I say it is."</span></span>
-<span id="cb9-4">)</span></code></pre></div>
-</div>
-<p>The <code>which</code> argument is used to choose how the spinner would look, and the <code>template</code> argument is used to define how the “spinny bit” is placed relative to the rest of the text. The spinny object includes functions to update the state of the spinner (in this case <code>spinny$spin()</code> would be that function), and a function to clear the spinner from the status bar. So here’s how A might define a function that uses a spinner to keep the victim in suspense…</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb10" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1">theatrics <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>(which) {</span>
-<span id="cb10-2">  </span>
-<span id="cb10-3">  <span class="co" style="color: #5E5E5E;"># define the spinner</span></span>
-<span id="cb10-4">  spinny <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">make_spinner</span>(</span>
-<span id="cb10-5">    <span class="at" style="color: #657422;">which =</span> which,</span>
-<span id="cb10-6">    <span class="at" style="color: #657422;">template =</span> <span class="st" style="color: #20794D;">"{spin} It's not over until I say it is."</span></span>
-<span id="cb10-7">  )</span>
-<span id="cb10-8">  </span>
-<span id="cb10-9">  <span class="co" style="color: #5E5E5E;"># update the spinner 100 times</span></span>
-<span id="cb10-10">  <span class="cf" style="color: #003B4F;">for</span>(i <span class="cf" style="color: #003B4F;">in</span> <span class="dv" style="color: #AD0000;">1</span><span class="sc" style="color: #5E5E5E;">:</span><span class="dv" style="color: #AD0000;">100</span>) {</span>
-<span id="cb10-11">    spinny<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">spin</span>()</span>
-<span id="cb10-12">    <span class="fu" style="color: #4758AB;">wait</span>(.<span class="dv" style="color: #AD0000;">05</span>)</span>
-<span id="cb10-13">  }</span>
-<span id="cb10-14">  </span>
-<span id="cb10-15">  <span class="co" style="color: #5E5E5E;"># clear the spinner from the status bar</span></span>
-<span id="cb10-16">  spinny<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">finish</span>()</span>
-<span id="cb10-17">  </span>
-<span id="cb10-18">  <span class="co" style="color: #5E5E5E;"># send the final part of the message</span></span>
-<span id="cb10-19">  <span class="fu" style="color: #4758AB;">cli_alert_success</span>(<span class="st" style="color: #20794D;">"Sleep tight while you still can, bitches. -A"</span>)</span>
-<span id="cb10-20">}</span></code></pre></div>
-</div>
-<p>Here’s what happens:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb11" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb11-1"><span class="fu" style="color: #4758AB;">theatrics</span>(<span class="st" style="color: #20794D;">"dots2"</span>)</span></code></pre></div>
-</div>
-<div class="cell">
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2021-04-18_pretty-little-clis/output/spinner-1.svg" class="img-fluid"></p>
-</div>
-</div>
-
-<div class="no-row-height column-margin column-container"><div class="">
-<p>This message was sent to all four of the liars in the final episode of season one. I don’t think A used a spinner though, which feels like a missed opportunity to me</p>
-</div></div><p>Setting <code>which = "dots2"</code> is only one possibility. There are quite a lot of different spinner types that come bundled with the cli package, and I’d imagine A would want to look around to see which one suits her needs. Personally, I’m a fan of hearts:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb12" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb12-1"><span class="fu" style="color: #4758AB;">theatrics</span>(<span class="st" style="color: #20794D;">"hearts"</span>)</span></code></pre></div>
-</div>
-<div class="cell">
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2021-04-18_pretty-little-clis/output/spinner-2.svg" class="img-fluid"></p>
-</div>
-</div>
-<p>To see the full list use the <code>list_spinners()</code> function:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb13" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1"><span class="fu" style="color: #4758AB;">list_spinners</span>()</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code> [1] "dots"                "dots2"               "dots3"              
- [4] "dots4"               "dots5"               "dots6"              
- [7] "dots7"               "dots8"               "dots9"              
-[10] "dots10"              "dots11"              "dots12"             
-[13] "line"                "line2"               "pipe"               
-[16] "simpleDots"          "simpleDotsScrolling" "star"               
-[19] "star2"               "flip"                "hamburger"          
-[22] "growVertical"        "growHorizontal"      "balloon"            
-[25] "balloon2"            "noise"               "bounce"             
-[28] "boxBounce"           "boxBounce2"          "triangle"           
-[31] "arc"                 "circle"              "squareCorners"      
-[34] "circleQuarters"      "circleHalves"        "squish"             
-[37] "toggle"              "toggle2"             "toggle3"            
-[40] "toggle4"             "toggle5"             "toggle6"            
-[43] "toggle7"             "toggle8"             "toggle9"            
-[46] "toggle10"            "toggle11"            "toggle12"           
-[49] "toggle13"            "arrow"               "arrow2"             
-[52] "arrow3"              "bouncingBar"         "bouncingBall"       
-[55] "smiley"              "monkey"              "hearts"             
-[58] "clock"               "earth"               "moon"               
-[61] "runner"              "pong"                "shark"              
-[64] "dqpb"               </code></pre>
-</div>
-</div>
-</section>
-<section id="showing-cli-messages-in-r-markdown" class="level2 page-columns page-full">
-<h2 class="anchored" data-anchor-id="showing-cli-messages-in-r-markdown">Showing cli messages in R markdown</h2>
-<p>Throughout this post I’ve relied on asciicast to display screencasts of the R console as animated SVG files, rather than what I might normally do and rely on regular R markdown code chunks to do the work. There’s a reason for this: the R console is a terminal, and its behaviour doesn’t always translate nicely to HTML. Part of the magic of the <a href="https://rmarkdown.rstudio.com/">rmarkdown</a> package <span class="citation" data-cites="rmarkdown">(Xie, Allaire, and Grolemund 2018)</span> is that <em>most</em> of the time it is able to capture terminal output and translate it seamlessly into HTML, and we mere mortal users never notice how clever this is. However, when dealing with cli output, we run into cases where this breaks down and the <a href="https://www.joelonsoftware.com/2002/11/11/the-law-of-leaky-abstractions/">law of leaky abstractions</a> comes into play: text generated at the R console does not follow the same rules as text inserted into an HTML document, and R Markdown sometimes needs a little help when transforming one to the other.</p>
-<p>An important thing to remember about cli is that the text it produces is a <em>message</em>, so its visibility in R Markdown depends on the chunk option for messages. As long as the message option is set to <code>TRUE</code>, R Markdown will include them as part of the output.<sup>2</sup> In the simplest case, R Markdown works nicely, so as long as all A wants to do is send an unformatted threat within an R Markdown document, then this works:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb15" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb15-1"><span class="fu" style="color: #4758AB;">cli_text</span>(<span class="st" style="color: #20794D;">"I'm still here bitches, and I know everything. -A"</span>)</span></code></pre></div>
-<div class="cell-output cell-output-stderr">
-<pre><code>I'm still here bitches, and I know everything. -A</code></pre>
-</div>
-</div>
-<p>However, the moment A tries to use any fancy formatting, things will go haywire for her. For example, suppose she wanted to send the message above as a simple “alert” message using <code>cli_alert()</code>, which uses fancy symbols and colours in the output. It is at this point that the cracks in the R Markdown pipeline start to leak. In this case, the leak would result in the document failing to knit and an error message complaining about</p>
-<pre><code>PCDATA invalid Char value</code></pre>
-<p>Intuitively she might guess that somewhere in the R Markdown pipeline, an invalid or malformed character has been created.<sup>3</sup> The reason this happens is that the colours and symbols used by cli, and supported in the R console, rely on <a href="https://en.wikipedia.org/wiki/ANSI_escape_code">ANSI escape codes</a>, but those escape codes aren’t recognised in HTML and – apparently – they can wreak havoc when R markdown writes those characters into the HTML document. ANSI colours in R are usually generated with the help of the <a href="https://github.com/r-lib/crayon">crayon</a> package <span class="citation" data-cites="crayon">(Csárdi 2021b)</span>, and per the <a href="https://github.com/r-lib/crayon/issues/24">issue #24</a> thread that I encounter on a semi-regular basis, it can be tricky to manage the process of translating these to HTML via R Markdown.</p>
-<p>Solving this issue requires A to jump through a few hoops. It’s annoying I know, but no-one ever said that running an unhinged stalking campaign via text messages was easy, right? Her first task is to make sure that the R Markdown document turns on crayon support:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb18" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1"><span class="fu" style="color: #4758AB;">options</span>(<span class="at" style="color: #657422;">crayon.enabled =</span> <span class="cn" style="color: #8f5902;">TRUE</span>)</span></code></pre></div>
-</div>
-<p>This isn’t the whole solution, however, because while that tells R Markdown to stop <em>ignoring</em> all the ANSI stuff, it doesn’t necessarily allow it to render ANSI sequences properly. To fix this she needs to specify the knit hooks that explicitly tell R Markdown what to do. She can do this with the help of the <a href="https://github.com/brodieG/fansi">fansi</a> package <span class="citation" data-cites="fansi">(Gaslam 2021)</span>, which contains an obscurely-named function <code>sgr_to_html()</code> that translates a subset of the ANSI control sequences to HTML, and strips out all the others. Using this, she can write an <code>ansi_aware_handler()</code> function that will take an input string <code>x</code> and return HTML output appropriate for the R Markdown context:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb19" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb19-1">ansi_aware_handler <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>(x, options) {</span>
-<span id="cb19-2">  <span class="fu" style="color: #4758AB;">paste0</span>(</span>
-<span id="cb19-3">    <span class="st" style="color: #20794D;">"&lt;pre class=</span><span class="sc" style="color: #5E5E5E;">\"</span><span class="st" style="color: #20794D;">r-output</span><span class="sc" style="color: #5E5E5E;">\"</span><span class="st" style="color: #20794D;">&gt;&lt;code&gt;"</span>,</span>
-<span id="cb19-4">    fansi<span class="sc" style="color: #5E5E5E;">::</span><span class="fu" style="color: #4758AB;">sgr_to_html</span>(<span class="at" style="color: #657422;">x =</span> x, <span class="at" style="color: #657422;">warn =</span> <span class="cn" style="color: #8f5902;">FALSE</span>, <span class="at" style="color: #657422;">term.cap =</span> <span class="st" style="color: #20794D;">"256"</span>),</span>
-<span id="cb19-5">    <span class="st" style="color: #20794D;">"&lt;/code&gt;&lt;/pre&gt;"</span></span>
-<span id="cb19-6">  )</span>
-<span id="cb19-7">}</span></code></pre></div>
-</div>
-<p>From there, it’s relatively easy. All she needs to do is tell <a href="https://yihui.org/knitr/">knitr</a> <span class="citation" data-cites="knitr">(Xie 2021)</span> to use this function whenever it needs to handle output. Just for good measure she might do the same for messages, errors, and warnings:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb20" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb20-1">knitr<span class="sc" style="color: #5E5E5E;">::</span>knit_hooks<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">set</span>(</span>
-<span id="cb20-2">  <span class="at" style="color: #657422;">output =</span> ansi_aware_handler, </span>
-<span id="cb20-3">  <span class="at" style="color: #657422;">message =</span> ansi_aware_handler, </span>
-<span id="cb20-4">  <span class="at" style="color: #657422;">warning =</span> ansi_aware_handler,</span>
-<span id="cb20-5">  <span class="at" style="color: #657422;">error =</span> ansi_aware_handler</span>
-<span id="cb20-6">)</span></code></pre></div>
-</div>
-<p>At long last she is done.<sup>4</sup> Her campaign of bullying and cruelty can continue:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb21" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb21-1"><span class="fu" style="color: #4758AB;">cli_alert</span>(<span class="st" style="color: #20794D;">"I'm still here bitches, and I know everything. -A"</span>)</span></code></pre></div>
-<pre class="r-output"><code>→ I'm still here bitches, and I know everything. -A
-</code></pre>
-</div>
-
-<div class="no-row-height column-margin column-container"><div class="">
-<p>This message was sent in the pilot episode. Yes, the quotes I’ve used are all from season one: I’ve just started a rewatch of the show, so the early episodes are quite fresh in my memory!</p>
-</div></div></section>
-<section id="writing-longer-messages" class="level2 page-columns page-full">
-<h2 class="anchored" data-anchor-id="writing-longer-messages">Writing longer messages</h2>
-<p>Up to this point the threatening messages that A has been sending have been short, only one line long. In several cases the messages have been cleverly constructed so that the <em>same</em> line (the status bar) is used to display multiple pieces of text, but ultimately it’s still one line messaging. A needs to take a little care when she wants to branch out. Conceptually, a message should correspond to “one semantically meaningful bundle of information” that might be split over several lines. However, as far as R is concerned, each call to <code>cli_text()</code> creates a distinct message. To see how this might cause A some grief, here’s the letter that she sent to Aria’s mother announcing the infidelity of Aria’s father:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb22" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb22-1">send_cruel_letter_piecewise <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>() {</span>
-<span id="cb22-2">  <span class="fu" style="color: #4758AB;">cli_text</span>(<span class="st" style="color: #20794D;">'Your husband, Byron, is involved with another woman'</span>)</span>
-<span id="cb22-3">  <span class="fu" style="color: #4758AB;">cli_text</span>(<span class="st" style="color: #20794D;">'and when I say involved I mean in a "romantic" way.'</span>)</span>
-<span id="cb22-4">  <span class="fu" style="color: #4758AB;">cli_text</span>(<span class="st" style="color: #20794D;">'This is not something recent. It started before your'</span>)</span>
-<span id="cb22-5">  <span class="fu" style="color: #4758AB;">cli_text</span>(<span class="st" style="color: #20794D;">'family went away to Iceland and from the look of'</span>)</span>
-<span id="cb22-6">  <span class="fu" style="color: #4758AB;">cli_text</span>(<span class="st" style="color: #20794D;">'things, it may be starting up again now that you</span><span class="sc" style="color: #5E5E5E;">\'</span><span class="st" style="color: #20794D;">re'</span>)</span>
-<span id="cb22-7">  <span class="fu" style="color: #4758AB;">cli_text</span>(<span class="st" style="color: #20794D;">'back. I know this is hard to hear, but it is the'</span>)</span>
-<span id="cb22-8">  <span class="fu" style="color: #4758AB;">cli_text</span>(<span class="st" style="color: #20794D;">'truth. If you don</span><span class="sc" style="color: #5E5E5E;">\'</span><span class="st" style="color: #20794D;">t believe this about your husband,'</span>)</span>
-<span id="cb22-9">  <span class="fu" style="color: #4758AB;">cli_text</span>(<span class="st" style="color: #20794D;">'ask your daughter. She knows all about it.'</span>)</span>
-<span id="cb22-10">  <span class="fu" style="color: #4758AB;">cli_text</span>(<span class="st" style="color: #20794D;">'Sincerely,'</span>)</span>
-<span id="cb22-11">  <span class="fu" style="color: #4758AB;">cli_text</span>(<span class="st" style="color: #20794D;">'A'</span>)</span>
-<span id="cb22-12">}</span>
-<span id="cb22-13"></span>
-<span id="cb22-14"><span class="fu" style="color: #4758AB;">send_cruel_letter_piecewise</span>()</span></code></pre></div>
-<pre class="r-output"><code>Your husband, Byron, is involved with another woman
-</code></pre>
-<pre class="r-output"><code>and when I say involved I mean in a "romantic" way.
-</code></pre>
-<pre class="r-output"><code>This is not something recent. It started before your
-</code></pre>
-<pre class="r-output"><code>family went away to Iceland and from the look of
-</code></pre>
-<pre class="r-output"><code>things, it may be starting up again now that you're
-</code></pre>
-<pre class="r-output"><code>back. I know this is hard to hear, but it is the
-</code></pre>
-<pre class="r-output"><code>truth. If you don't believe this about your husband,
-</code></pre>
-<pre class="r-output"><code>ask your daughter. She knows all about it.
-</code></pre>
-<pre class="r-output"><code>Sincerely,
-</code></pre>
-<pre class="r-output"><code>A
-</code></pre>
-</div>
-<p>This is not an ideal implementation. What A wants to send is one message spanning 10 lines not 10 separate one-line messages, but it’s the latter that she has actually implemented here. This is where the <code>cli()</code> function is handy: to takes an expression as input and collects all the constituent parts into a single message. This version of the function now sends a single message:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb23" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb23-1">send_cruel_letter_singly <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>() {</span>
-<span id="cb23-2">  <span class="fu" style="color: #4758AB;">cli</span>({</span>
-<span id="cb23-3">    <span class="fu" style="color: #4758AB;">cli_text</span>(<span class="st" style="color: #20794D;">'Your husband, Byron, is involved with another woman'</span>)</span>
-<span id="cb23-4">    <span class="fu" style="color: #4758AB;">cli_text</span>(<span class="st" style="color: #20794D;">'and when I say involved I mean in a "romantic" way.'</span>)</span>
-<span id="cb23-5">    <span class="fu" style="color: #4758AB;">cli_text</span>(<span class="st" style="color: #20794D;">'This is not something recent. It started before your'</span>)</span>
-<span id="cb23-6">    <span class="fu" style="color: #4758AB;">cli_text</span>(<span class="st" style="color: #20794D;">'family went away to Iceland and from the look of'</span>)</span>
-<span id="cb23-7">    <span class="fu" style="color: #4758AB;">cli_text</span>(<span class="st" style="color: #20794D;">'things, it may be starting up again now that you</span><span class="sc" style="color: #5E5E5E;">\'</span><span class="st" style="color: #20794D;">re'</span>)</span>
-<span id="cb23-8">    <span class="fu" style="color: #4758AB;">cli_text</span>(<span class="st" style="color: #20794D;">'back. I know this is hard to hear, but it is the'</span>)</span>
-<span id="cb23-9">    <span class="fu" style="color: #4758AB;">cli_text</span>(<span class="st" style="color: #20794D;">'truth. If you don</span><span class="sc" style="color: #5E5E5E;">\'</span><span class="st" style="color: #20794D;">t believe this about your husband,'</span>)</span>
-<span id="cb23-10">    <span class="fu" style="color: #4758AB;">cli_text</span>(<span class="st" style="color: #20794D;">'ask your daughter. She knows all about it.'</span>)</span>
-<span id="cb23-11">    <span class="fu" style="color: #4758AB;">cli_text</span>(<span class="st" style="color: #20794D;">'Sincerely,'</span>)</span>
-<span id="cb23-12">    <span class="fu" style="color: #4758AB;">cli_text</span>(<span class="st" style="color: #20794D;">'A'</span>)</span>
-<span id="cb23-13">  })</span>
-<span id="cb23-14">}</span>
-<span id="cb23-15"></span>
-<span id="cb23-16"><span class="fu" style="color: #4758AB;">send_cruel_letter_singly</span>()</span></code></pre></div>
-<pre class="r-output"><code>Your husband, Byron, is involved with another woman
-and when I say involved I mean in a "romantic" way.
-This is not something recent. It started before your
-family went away to Iceland and from the look of
-things, it may be starting up again now that you're
-back. I know this is hard to hear, but it is the
-truth. If you don't believe this about your husband,
-ask your daughter. She knows all about it.
-Sincerely,
-A
-</code></pre>
-</div>
-
-<div class="no-row-height column-margin column-container"><div class="">
-<p>The letter was sent to Ella in episode four season one. Even on a rewatch I’m finding it impossible to imagine <a href="https://en.wikipedia.org/wiki/Holly_Marie_Combs">Holly Marie Combs</a> as anyone other than Piper from <a href="https://en.wikipedia.org/wiki/Charmed"><em>Charmed</em></a> and I keep expecting “Ella” to stop time and, idk, shave off her husbands eyebrows or something?</p>
-</div></div><p>Much nicer. As every would-be tormenter knows, it’s important to pay attention to the details.</p>
-</section>
-<section id="creating-structured-messages" class="level2">
-<h2 class="anchored" data-anchor-id="creating-structured-messages">Creating structured messages</h2>
-<p>Writing long messages when sending a threatening letter is a simple enough thing, but at some point A will likely find herself wanting to add some structure to these missives. Lists are nice. Stalkers like keeping lists, I hear. With that in mind, a nice property of cli is that it allows you to separate style from structure using an HTML-like syntax. Top level headings are specified using <code>cli_h1()</code>, and second level headings are produced by <code>cli_h2()</code>. Unordered lists are produced using <code>cli_ul()</code> and ordered lists by <code>cli_ol()</code>. This make it easy to write structured messages to the R console:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb24" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb24-1"><span class="fu" style="color: #4758AB;">cli</span>({</span>
-<span id="cb24-2">  <span class="fu" style="color: #4758AB;">cli_h1</span>(<span class="st" style="color: #20794D;">"Characters"</span>)</span>
-<span id="cb24-3">  <span class="fu" style="color: #4758AB;">cli_h2</span>(<span class="st" style="color: #20794D;">"The Liars"</span>)</span>
-<span id="cb24-4">  <span class="fu" style="color: #4758AB;">cli_ul</span>(<span class="fu" style="color: #4758AB;">c</span>(</span>
-<span id="cb24-5">    <span class="st" style="color: #20794D;">"Alison DiLaurentis"</span>,</span>
-<span id="cb24-6">    <span class="st" style="color: #20794D;">"Spencer Hastings"</span>,</span>
-<span id="cb24-7">    <span class="st" style="color: #20794D;">"Aria Montgomery"</span>,</span>
-<span id="cb24-8">    <span class="st" style="color: #20794D;">"Hanna Marin"</span>,</span>
-<span id="cb24-9">    <span class="st" style="color: #20794D;">"Emily Fields"</span></span>
-<span id="cb24-10">  ))</span>
-<span id="cb24-11">  <span class="fu" style="color: #4758AB;">cli_h2</span>(<span class="st" style="color: #20794D;">"The A-Team"</span>)</span>
-<span id="cb24-12">  <span class="fu" style="color: #4758AB;">cli_ul</span>(<span class="fu" style="color: #4758AB;">c</span>(</span>
-<span id="cb24-13">    <span class="st" style="color: #20794D;">"Mona Vanderwaal"</span>,</span>
-<span id="cb24-14">    <span class="st" style="color: #20794D;">"Lucas Gottesman"</span>,</span>
-<span id="cb24-15">    <span class="st" style="color: #20794D;">"Melissa Hastings"</span></span>
-<span id="cb24-16">  ))</span>
-<span id="cb24-17">})</span></code></pre></div>
-<pre class="r-output"><code>
-<span style="color: #00BBBB;">──</span> <span style="font-weight: bold;">Characters</span> <span style="color: #00BBBB;">──────────────────────────────────────────────────────────────────</span>
-
-── <span style="font-weight: bold;">The Liars</span> ──
-
-• Alison DiLaurentis
-• Spencer Hastings
-• Aria Montgomery
-• Hanna Marin
-• Emily Fields
-
-── <span style="font-weight: bold;">The A-Team</span> ──
-
-• Mona Vanderwaal
-• Lucas Gottesman
-• Melissa Hastings
-</code></pre>
-</div>
-<p>Better yet, the cli package has a whole swathe of other utilities that follow this same HTML-like naming scheme, making it possible to send elaborate and disturbing messages in so many different ways.</p>
-</section>
-<section id="epilogue" class="level2">
-<h2 class="anchored" data-anchor-id="epilogue">Epilogue</h2>
-<p>There is a lot more to the cli package that I haven’t talked about in this post. I’ve not talked about how to modify the themes, how to create custom cli “apps” that use different themes or send output to different connections. I’ve not talked about how to use conditional logic within a cli call, displaying different messages depending on whether a process succeeds or fails. Those will have to remain secret for now, because this post is quite long enough already and quite frankly I’m still learning myself. Besides, these powers would no doubt would be put to terrible purposes in an R-themed <em>Pretty Little Liars</em> spinoff show, and I’m not entirely sure that all secrets need sharing…</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb25" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb25-1"><span class="fu" style="color: #4758AB;">cli</span>(</span>
-<span id="cb25-2">  <span class="fu" style="color: #4758AB;">cli_blockquote</span>(</span>
-<span id="cb25-3">    <span class="at" style="color: #657422;">quote =</span> <span class="st" style="color: #20794D;">"Friends share secrets, that's what keeps us close"</span>,</span>
-<span id="cb25-4">    <span class="at" style="color: #657422;">citation =</span> <span class="st" style="color: #20794D;">"Alison"</span></span>
-<span id="cb25-5">  )</span>
-<span id="cb25-6">)</span></code></pre></div>
-<pre class="r-output"><code>
-    <span style="font-style: italic;">“Friends share secrets, that's what keeps us close”</span>
-    <span style="font-weight: bold; font-style: italic;">— Alison</span>
-</code></pre>
-</div>
-<!--------------- appendices go here ----------------->
-</section>
-<div class="cell">
-<div class="cell-output-display">
-
-
-</div>
-</div>
-
-
-
-
-
-<div id="quarto-appendix" class="default"><section id="last-updated" class="level2 appendix"><h2 class="quarto-appendix-heading">Last updated</h2><div class="quarto-appendix-contents">
-
-<p>2022-08-23 13:12:32 AEST</p>
-</div></section><section id="details" class="level2 appendix"><h2 class="quarto-appendix-heading">Details</h2><div class="quarto-appendix-contents">
-
-<p><a href="https://github.com/djnavarro/quarto-blog/tree/main/posts/2021-04-18_pretty-little-clis/index.qmd">source code</a>, <a href="https://github.com/djnavarro/quarto-blog/tree/main/posts/2021-04-18_pretty-little-clis/renv.lock">R environment</a></p>
-</div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">References</h2><div id="refs" class="references csl-bib-body hanging-indent">
-<div id="ref-cli" class="csl-entry">
-Csárdi, Gábor. 2021a. <em>Cli: Helpers for Developing Command Line Interfaces</em>. <a href="https://CRAN.R-project.org/package=cli">https://CRAN.R-project.org/package=cli</a>.
-</div>
-<div id="ref-crayon" class="csl-entry">
-———. 2021b. <em>Crayon: Colored Terminal Output</em>. <a href="https://CRAN.R-project.org/package=crayon">https://CRAN.R-project.org/package=crayon</a>.
-</div>
-<div id="ref-progress" class="csl-entry">
-Csárdi, Gábor, and Rich FitzJohn. 2019. <em>Progress: Terminal Progress Bars</em>. <a href="https://CRAN.R-project.org/package=progress">https://CRAN.R-project.org/package=progress</a>.
-</div>
-<div id="ref-asciiicast" class="csl-entry">
-Csárdi, Gábor, Romain Francois, Mario Nebl, and Marcin Kulik. 2019. <em>Asciicast: Create ’Ascii’ Screen Casts from r Scripts</em>. <a href="https://CRAN.R-project.org/package=asciicast">https://CRAN.R-project.org/package=asciicast</a>.
-</div>
-<div id="ref-fansi" class="csl-entry">
-Gaslam, Brodie. 2021. <em>Fansi: ANSI Control Sequence Aware String Functions</em>. <a href="https://CRAN.R-project.org/package=fansi">https://CRAN.R-project.org/package=fansi</a>.
-</div>
-<div id="ref-knitr" class="csl-entry">
-Xie, Yihui. 2021. <em>Knitr: A General-Purpose Package for Dynamic Report Generation in r</em>. <a href="https://yihui.org/knitr/">https://yihui.org/knitr/</a>.
-</div>
-<div id="ref-rmarkdown" class="csl-entry">
-Xie, Yihui, J. J. Allaire, and Garrett Grolemund. 2018. <em>R Markdown: The Definitive Guide</em>. Boca Raton, Florida: Chapman; Hall/CRC. <a href="https://bookdown.org/yihui/rmarkdown">https://bookdown.org/yihui/rmarkdown</a>.
-</div>
-</div></section><section id="footnotes" class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
-
-<ol>
-<li id="fn1"><p>Yes, it does disappear in this screencast, but that’s just the screencast. If it were the R console it would stay on screen the whole time.↩︎</p></li>
-<li id="fn2"><p>Somewhat counterintuitively, although cli emits messages that can be suppressed by <code>suppressMessages()</code>, they don’t behave <em>precisely</em> the same as the messages produced by <code>message()</code>. The default handler for base R messages sends the output to the <code>stderr()</code> connection and so they are often shown as the dreaded “red text” that users learn to fear. To avoid this, the default behaviour in cli sends messages to the <code>stdout()</code> connection, thereby avoiding this issue. However, cli does allow you to control this behaviour: see the <code>start_app()</code> and <code>stop_app()</code> functions for more information.↩︎</p></li>
-<li id="fn3"><p>As an aside, if you’re running a site with an RSS feed it may also write malformed characters into the index.xml file as well as any generated .html file. When I encountered this problem I found that even when I “fixed” my .Rmd file the document wouldn’t re-knit, because of the problems with the xml file. Eventually I realised that I could solve the problem by deleting the index.xml file for the RSS feed and <em>then</em> knitting again. Sigh↩︎</p></li>
-<li id="fn4"><p>Note that there is also the <code>fansi::set_knit_hooks()</code> function which will set the hooks in a more user-friendly way. I don’t think there’s any reason not to use it: the only reason I didn’t is that I found it convenient to write things from scratch here so that I understood what was happening.↩︎</p></li>
-</ol>
-</section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2021,
-  author = {Danielle Navarro},
-  editor = {},
-  title = {Pretty Little {CLIs}},
-  date = {2021-04-18},
-  url = {https://blog.djnavarro.net/pretty-little-clis},
-  langid = {en}
-}
-</code></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2021" class="csl-entry quarto-appendix-citeas">
-Danielle Navarro. 2021. <span>“Pretty Little CLIs.”</span> April 18,
-2021. <a href="https://blog.djnavarro.net/pretty-little-clis">https://blog.djnavarro.net/pretty-little-clis</a>.
-</div></div></section></div> ]]></description>
-  <category>Command line</category>
-  <guid>https://blog.djnavarro.net/posts/2021-04-18_pretty-little-clis/index.html</guid>
-  <pubDate>Sat, 17 Apr 2021 14:00:00 GMT</pubDate>
-  <media:content url="https://blog.djnavarro.net/posts/2021-04-18_pretty-little-clis/pretty-little-clis.jpg" medium="image" type="image/jpeg"/>
 </item>
 </channel>
 </rss>
