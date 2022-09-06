@@ -15,7 +15,254 @@
 <link>https://blog.djnavarro.net/index.html</link>
 </image>
 <generator>quarto-1.1.149</generator>
-<lastBuildDate>Thu, 01 Sep 2022 14:00:00 GMT</lastBuildDate>
+<lastBuildDate>Sat, 03 Sep 2022 14:00:00 GMT</lastBuildDate>
+<item>
+  <title>Sudo ask me a password</title>
+  <dc:creator>Danielle Navarro</dc:creator>
+  <link>https://blog.djnavarro.net/posts/2022-09-04_sudo-askpass/index.html</link>
+  <description><![CDATA[ 
+
+
+
+
+<!--
+cover image:
+author: Ola Mishchenko
+url: https://unsplash.com/photos/VRB1LJoTZ6w
+licence: Free to use under the Unsplash License
+
+-->
+<!--------------- my typical setup ----------------->
+<!--------------- post begins here ----------------->
+<p>One peculiar feature of earning one’s keep in society by writing a data science blog is that it provides the opportunity to be unabashedly weird. Personality is important. Other developers will read your strange content – no matter how weird and unprofessional it is – because professional corporate style is very nearly as dull as academic writing, and it is a relief to learn a new thing from an actual human being who write with a certain level of human character.</p>
+<p>Even if she is an irredeemably catty bitch.</p>
+<p>All of which is by way of preamble, and a way to acknowlege that when the topic is package dependencies in R, the queer double entendres kind of write themselves.<sup>1</sup> And so without further ado, today’s unhinged rambling…</p>
+<section id="managing-package-dependencies-in-r" class="level2">
+<h2 class="anchored" data-anchor-id="managing-package-dependencies-in-r">Managing package dependencies in R</h2>
+<p>Okay so you’ve done your due diligence. You’ve read his pkgdown site, checked out his repo, and you still like him. You really, <em>really</em> want to install his package. You’ve inspected the documentation and it is a very impressive package. I mean, I get it babe.</p>
+<p>I. have. been. there.</p>
+<p>There’s a thing with packages though. When you’re installing them into wherever you like to put packages (the precise location doesn’t matter for this post<sup>2</sup>), what you see isn’t necessarily all you get.</p>
+<p>I’ll give a concrete example. For reasons unknown even to me I woke up this morning and decided today was the day I’d explore the <a href="https://github.com/r-lib/rig">rig installation manager</a> for R that lets you manage multiple R installations on the one machine. It’s very nice, and possibly the topic for a future post. However, one side consequence to adopting rig is that I ended up with adorably fresh copies of R that had no installed packages and needed to be properly set up. In the process, I started thinking a little about the tools I use to install packages. When I first started using R my go to method was to use the <code>install.packages()</code> function supplied by the utils package: after all, it comes bundled with R, which makes it an easy place to start. As I matured as an R user I found myself switching to the <a href="https://remotes.r-lib.org/">remotes package</a> because it provides a coherent set of functions for installing packages from CRAN, Bioconductor, GitHub, and more. I’m a huge fan of remotes, but for reasons I’ll explain in a moment I’m starting to prefer the <a href="https://pak.r-lib.org/">pak package</a> developed by Gábor Csárdi and Jim Hester. When using pak, the function you use to install packages is called <code>pkg_install()</code>. I’ll walk you through it. Here’s what happens when I try to install the <a href="https://quarto-dev.github.io/quarto-r/">quarto R package</a> without properly configuring my setup. First I call the function:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1">pak<span class="sc" style="color: #5E5E5E;">::</span><span class="fu" style="color: #4758AB;">pkg_install</span>(<span class="st" style="color: #20794D;">"quarto"</span>)</span></code></pre></div>
+</div>
+<p>When I hit enter, pak starts doing its job, resolving the R dependencies and then asking if I want to continue:</p>
+<pre><code>✓ Loading metadata database ... done
+                                                                            
+→ Will install 2 packages.
+→ Will update 1 package.
+→ Will download 3 packages with unknown size.
++ packrat         0.8.1  [bld][dl]
++ quarto    1.1 → 1.2    [bld][dl]
++ rsconnect       0.8.27 [bld][dl]
+? Do you want to continue (Y/n) </code></pre>
+<p>I really like this approach. The interface is very clear about precisely what is happening, and pak doesn’t download any more packages than is absolutely necessary to give you what you asked for (unless you specify <code>upgrade = TRUE</code> in the install command).</p>
+<p>I agree to continue, so off pak goes, fetching the appropriate R packages:</p>
+<pre><code>ℹ Getting 3 pkgs with unknown sizes
+✓ Got quarto 1.2 (source) (67.58 kB)                                             
+✓ Got rsconnect 0.8.27 (source) (685.57 kB)                                      
+✓ Got packrat 0.8.1 (source) (681.50 kB)                                         
+✓ Downloaded 3 packages (1.43 MB)in 6.7s</code></pre>
+<p>So far, so good. The output is informative and succinct at the same time. It appeals to my aesthetic sensibilities. But then pak – which is very diligent about managing all dependencies including system dependencies – attempts to install the external libraries upon which quarto depends,<sup>3</sup> and this happens:</p>
+<pre><code>ℹ Installing system requirements
+ℹ Executing `sudo sh -c apt-get install -y make`
+Error: System command 'sudo' failed, exit status: 1, stdout + stderr:
+E&gt; sudo: a terminal is required to read the password; either use the -S option to read from standard input or configure an askpass helper</code></pre>
+<p>Ah.</p>
+<p><br><br></p>
+</section>
+<section id="what-went-wrong-here" class="level2">
+<h2 class="anchored" data-anchor-id="what-went-wrong-here">What went wrong here?</h2>
+<p>An important thing to understand here is that neither pak nor <a href="https://www.sudo.ws/">sudo</a> are to blame for the installation failure.<sup>4</sup> On the pak side, it’s a <em>good</em> thing that it tries to uncover and install system dependencies: the package isn’t going to work if you don’t have those dependencies installed, and it can be a nightmare trying to track them all down when the package manager doesn’t help identify them for you.<sup>5</sup> On the sudo side, it is extremely reasonable to expect the user to authenticate <em>before</em> enabling superuser privileges. Speaking for myself, I have a very strong expectation that I will be explicitly asked for my consent before packages are installed on my system.<sup>6</sup></p>
+<p>The breakdown happens because pak has invoked sudo outside of the terminal context. If you haven’t configured sudo to handle this situation, there’s no opportunity for the user to authenticate, and sudo throws an error.</p>
+<p>How can we resolve this?</p>
+<p><br><br></p>
+</section>
+<section id="configuring-sudo" class="level2">
+<h2 class="anchored" data-anchor-id="configuring-sudo">Configuring sudo</h2>
+<p>A little bit of digging revealed that sudo is a lot more configurable than I had preciously realised, and you can deal with this issue in a few different ways. One possibility would be to <a href="https://www.simplified.guide/linux/enable-passwordless-sudo">enable passwordless sudo</a>, in which case the system dependencies would be installed without requiring a password at all. That would certainly minimise the amount of hassle at my end, but it’s also a hell of a security risk. Even if I personally felt willing to take that risk with my own property, this is a work laptop and I think a little risk-aversion is a good idea in this case.<sup>7</sup></p>
+<p>Fortunately, the error message itself contains some hints that there is an alternative fix that doesn’t require you to weaken your security settings (or not by very much, at any rate). Specifically, the error message refers to an “askpass helper”: a program, usually with a GUI, that sudo will invoke whenever it needs authentication from the user but is not running in a terminal. However, in order to get sudo to invoke one of these helpers, you have to explicitly configure it within the sudo configuration file, <code>sudo.conf</code>. This configuration file is located at <code>/etc/sudo.conf</code> is discussed pretty thoroughly in the sudo help documentation. Here’s the relevant part of the output when I type <code>man sudo.conf</code>:<sup>8</sup></p>
+<div class="pre">
+<pre><code> askpass   The fully qualified path to a helper program used to read the
+           user's password when no terminal is available.  This may be
+           the case when sudo is executed from a graphical (as opposed to
+           text-based) application.  The program specified by askpass
+           should display the argument passed to it as the prompt and
+           write the user's password to the standard output.  The value
+           of askpass may be overridden by the SUDO_ASKPASS environment
+           variable.</code></pre>
+</div>
+<p>Okay, so I need to do two things. I need to edit <code>sudo.conf</code> to configure sudo to use the askpass helper, and I also need the askpass helper itself. So where do I find one of these askpass helper programs? The one I chose to go with is <a href="https://man.openbsd.org/ssh-askpass.1">ssh-askpass</a>, which I installed on my system using the following:</p>
+<div class="sourceCode" id="cb6" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb6-1"><span class="fu" style="color: #4758AB;">sudo</span> apt-get install ssh-askpass ssh-askpass-gnome</span></code></pre></div>
+<p>Notice that I installed both ssh-askpass and <a href="https://manpages.debian.org/testing/ssh-askpass-gnome/gnome-ssh-askpass.1.en.html">ssh-askpass-gnome</a>. The latter isn’t the askpass helper itself, and isn’t intended to be invoked separately from ssh-askpass. Rather it’s there because ssh-askpass on its own uses <a href="https://x.org/wiki/">X11</a> to do the graphical user interface part and it’s not very pretty on my Ubuntu installation. By installing ssh-askpass-gnome as well, the dialog box that comes up when ssh-askpass is invoked is much nicer.</p>
+<p>At the terminal, I can invoke ssh-askpass manually if I want to. It doesn’t do much by itself: all it does is create the dialog box and return the text input by the user.</p>
+<div class="sourceCode" id="cb7" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb7-1"><span class="ex" style="color: null;">ssh-askpass</span></span></code></pre></div>
+<p>In practice you don’t actually call this directly. Instead, you configure sudo to that whenever it needs authentication but doesn’t have access to a terminal. In order to accomplish this, here’s the lines I added to my sudo.conf file:<sup>9</sup></p>
+<div class="sourceCode" id="cb8" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb8-1"><span class="co" style="color: #5E5E5E;"># specify ssh-askpass as my helper</span></span>
+<span id="cb8-2"><span class="ex" style="color: null;">Path</span> askpass /usr/bin/ssh-askpass</span></code></pre></div>
+<p>So I did this and then<sup>10</sup> tried to install quarto using <code>pkg_install()</code>. This time around sudo no longer errored when pak tried to install system dependencies. Instead it brought up the askpass dialog box:</p>
+<p><img src="https://blog.djnavarro.net/posts/2022-09-04_sudo-askpass/img/askpass-screen.png" class="img-fluid"></p>
+<p>When I typed in my password, pak and sudo were able to play nicely together and the installation worked just fine. Well, mostly..</p>
+</section>
+<section id="can-we-relax-just-a-little-sweetie" class="level2">
+<h2 class="anchored" data-anchor-id="can-we-relax-just-a-little-sweetie">Can we relax just a little sweetie?</h2>
+<p>The only problem is that quarto installation requires <em>five</em> system dependencies to be installed, and as the output below shows, pak starts a new shell process every single time…</p>
+<div class="sourceCode" id="cb9" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb9-1"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> make<span class="kw" style="color: #003B4F;">`</span></span>
+<span id="cb9-2"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> libcurl4-openssl-dev<span class="kw" style="color: #003B4F;">`</span></span>
+<span id="cb9-3"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> libicu-dev<span class="kw" style="color: #003B4F;">`</span></span>
+<span id="cb9-4"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> libssl-dev<span class="kw" style="color: #003B4F;">`</span></span>
+<span id="cb9-5"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> pandoc<span class="kw" style="color: #003B4F;">`</span></span></code></pre></div>
+<p>…and as a consequence of this I had to enter my password five times.</p>
+<p>That’s mildly irritating, and I was not expecting it. My original assumption would be that entering the password the first time would invoke the sudo password cache: that is, after entering my password once, the elevated permissions<sup>11</sup> would persist for about 15 minutes. That’s what happens by default at the terminal, and I had presumed the same would apply when the call to sudo occurs within an R session. However, that’s not <em>quite</em> accurate. This little gem in <code>man sudo</code> explains the relevant security policy issue:</p>
+<pre><code>     Security policies may support credential caching to allow the
+     user to run sudo again for a period of time without requiring
+     authentication.  By default, the sudoers policy caches creden‐
+     tials on a per-terminal basis for 15 minutes.  See the
+     timestamp_type and timestamp_timeout options in sudoers(5) for
+     more information.  By running sudo with the -v option, a user
+     can update the cached credentials without running a command.
+</code></pre>
+<p>The reason why the “15 minutes” rule doesn’t apply here is that the credentials are cached on a “per-terminal” basis. Each <code>sudo sh</code> command invoked by pak effectively runs a new instance of the shell and the password caching doesn’t transfer. Gr.</p>
+</section>
+<section id="editing-the-sudoers-file" class="level2">
+<h2 class="anchored" data-anchor-id="editing-the-sudoers-file">Editing the sudoers file</h2>
+<p>As a general rule I can understand why sudo is conservative and does not permit the credential cache to transfer across processes. Who knows what other processes are running and what they might be doing? But in this instance I’m willing to slightly relax the security policy to ensure that the pak/sudo combination doesn’t drive me crazy by relentlessly asking for permission on every little thing.</p>
+<p>The security policies in sudo are managed by plugins<sup>12</sup> configured using the “sudoers” file(s) located at <code>/etc/sudoers</code>. I’ll talk about this file momentarily, but first here’s the relevant extract from <code>man sudoers</code> that tells us what setting we need to modify:</p>
+<pre><code>     timestamp_type    sudoers uses per-user time stamp files for
+                       credential caching.  The timestamp_type op‐
+                       tion can be used to specify the type of time
+                       stamp record used.  It has the following
+                       possible values:
+
+                       global  A single time stamp record is used
+                               for all of a user's login sessions,
+                               regardless of the terminal or parent
+                               process ID.  An additional record is
+                               used to serialize password prompts
+                               when sudo is used multiple times in
+                               a pipeline, but this does not affect
+                               authentication.
+
+                       ppid    A single time stamp record is used
+                               for all processes with the same par‐
+                               ent process ID (usually the shell).
+                               Commands run from the same shell (or
+                               other common parent process) will
+                               not require a password for
+                               timestamp_timeout minutes (15 by
+                               default).  Commands run via sudo
+                               with a different parent process ID,
+                               for example from a shell script,
+                               will be authenticated separately.
+
+                       tty     One time stamp record is used for
+                               each terminal, which means that a
+                               user's login sessions are authenti‐
+                               cated separately.  If no terminal is
+                               present, the behavior is the same as
+                               ppid.  Commands run from the same
+                               terminal will not require a password
+                               for timestamp_timeout minutes (15 by
+                               default).
+
+                       kernel  The time stamp is stored in the ker‐
+                               nel as an attribute of the terminal
+                               device.  If no terminal is present,
+                               the behavior is the same as ppid.
+                               Negative timestamp_timeout values
+                               are not supported and positive val‐
+                               ues are limited to a maximum of 60
+                               minutes.  This is currently only
+                               supported on OpenBSD.
+
+                       The default value is tty.
+
+                       This setting is only supported by version
+                       1.8.21 or higher.
+</code></pre>
+<p>This documentation makes clear where the problem lies. When pak invokes sudo, a new process is spawned and unless the value of <code>timestamp_type</code> is set to <code>global</code>, the sudo credential cache doesn’t get shared across processes.</p>
+<p>It’s possible to modify this setting, and I’ll show you how to do that below, but first I strongly recommend that you read this article on <a href="https://www.digitalocean.com/community/tutorials/how-to-edit-the-sudoers-file">how to edit the sudoers file</a> carefully. <em>For realsies, my dears, read it</em>. Editing policies for sudo needs to be done with a lot of care. You don’t want to mess it up and lose the ability to invoke sudo because it’s been incorrectly configured. So please, please read the linked page.</p>
+<p>You read it, right?</p>
+<p>Good.</p>
+<p>After reading through the linked article, I made the decision that instead of editing the main sudoers file, I would instead add a small file to the <code>/etc/sudoers.d/</code> directory. By default, files in this folder are automatically included when the sudoers plugin is loaded, so it’s a convenient place to add your customisations rather than editing the main file. I created one that exists solely to manage the timestamp settings for my primary user:</p>
+<pre><code>sudo visudo -f /etc/sudoers.d/timestamp_type</code></pre>
+<p>Notice that I’ve used <a href="https://www.sudo.ws/docs/man/1.8.13/visudo.man/">visudo</a>, and not some other editor. If you read the linked article you know why I did that, and why it is astonishingly important to do it this way in order to practice safe sudo<sup>13</sup> policy editing. If you didn’t read the linked article… well, you would be <em>extremely</em> ill-advised to try the next step without actually reading it.</p>
+<p>Okay, that feels like enough warning. Let’s look at what I included in my new <code>/etc/sudoers.d/timestamp_type</code> file:</p>
+<pre><code># specify the timeout type (usual default=tty)
+Defaults:danielle timestamp_type=global
+
+# specify the timeout interval (usual default=15)
+Defaults:danielle timestamp_timeout=2</code></pre>
+<p>I’ve done two things. First, in order to allow the sudo password cache to work everywhere regardless of which process invokes it, I set <code>timestamp_type=global</code>. Second, because this makes me a tiny bit nervous (it’s a very mild softening of security policies), I shortened the cache expiry time from 15 minutes to 2 minutes by setting <code>timestamp_timeout=2</code>. In practice, I very rarely do anything requiring superuser privileges that requires more than two minutes, and it seems best to let those privileges expire quickly.</p>
+</section>
+<section id="youre-a-star" class="level2">
+<h2 class="anchored" data-anchor-id="youre-a-star">You’re a star</h2>
+<p>At this point I have a set up that lets me use pak without needing to weaken my security policies (well, not by much) and won’t cause me to lose my mind by typing in my password over and over until I beg for the sweet release<sup>14</sup> of death. Was it all worth it?</p>
+<p>Well, let me just say this: out of curiosity I decided to try installing the stars package, which necessarily entails installing a lot of geospatial dependencies. Back when I first tried installing these tools on linux a couple of years ago it was a nightmare. I had to track down the dependencies myself and manually install them, which was pretty daunting at the time because I was very new to the whole business.<sup>15</sup> Here’s what happened when I tried it with pak after configuring sudo to ask for my password only the once:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb14" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb14-1">pak<span class="sc" style="color: #5E5E5E;">::</span><span class="fu" style="color: #4758AB;">pkg_install</span>(<span class="st" style="color: #20794D;">"stars"</span>)</span></code></pre></div>
+</div>
+<div class="sourceCode" id="cb15" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb15-1"><span class="ex" style="color: null;">→</span> Will install 1 package.</span>
+<span id="cb15-2"><span class="ex" style="color: null;">→</span> Will download 1 package with unknown size.</span>
+<span id="cb15-3"><span class="ex" style="color: null;">+</span> stars   0.5-6 [bld][dl]</span>
+<span id="cb15-4"><span class="ex" style="color: null;">ℹ</span> Getting 1 pkg with unknown size</span>
+<span id="cb15-5"><span class="ex" style="color: null;">✓</span> Got stars 0.5-6 <span class="er" style="color: #AD0000;">(</span><span class="bu" style="color: null;">source</span><span class="kw" style="color: #003B4F;">)</span> <span class="kw" style="color: #003B4F;">(</span><span class="ex" style="color: null;">3.42</span> MB<span class="kw" style="color: #003B4F;">)</span>                                  </span>
+<span id="cb15-6"><span class="ex" style="color: null;">✓</span> Downloaded 1 package <span class="er" style="color: #AD0000;">(</span><span class="ex" style="color: null;">3.42</span> MB<span class="kw" style="color: #003B4F;">)</span><span class="er" style="color: #AD0000;">in</span> <span class="ex" style="color: null;">4.2s</span>                               </span>
+<span id="cb15-7"><span class="ex" style="color: null;">ℹ</span> Installing system requirements</span>
+<span id="cb15-8"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> libgdal-dev<span class="kw" style="color: #003B4F;">`</span></span>
+<span id="cb15-9"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> gdal-bin<span class="kw" style="color: #003B4F;">`</span></span>
+<span id="cb15-10"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> libgeos-dev<span class="kw" style="color: #003B4F;">`</span></span>
+<span id="cb15-11"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> libssl-dev<span class="kw" style="color: #003B4F;">`</span></span>
+<span id="cb15-12"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> libproj-dev<span class="kw" style="color: #003B4F;">`</span></span>
+<span id="cb15-13"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> libudunits2-dev<span class="kw" style="color: #003B4F;">`</span></span>
+<span id="cb15-14"><span class="ex" style="color: null;">ℹ</span> Building stars 0.5-6</span>
+<span id="cb15-15"><span class="ex" style="color: null;">✓</span> Built stars 0.5-6 <span class="er" style="color: #AD0000;">(</span><span class="ex" style="color: null;">1.4s</span><span class="kw" style="color: #003B4F;">)</span>                                       </span>
+<span id="cb15-16"><span class="ex" style="color: null;">✓</span> Installed stars 0.5-6  <span class="er" style="color: #AD0000;">(</span><span class="ex" style="color: null;">98ms</span><span class="kw" style="color: #003B4F;">)</span>                                    </span>
+<span id="cb15-17"><span class="ex" style="color: null;">✓</span> 1 pkg + 16 deps: kept 12, added 1, dld 1 <span class="er" style="color: #AD0000;">(</span><span class="ex" style="color: null;">3.42</span> MB<span class="kw" style="color: #003B4F;">)</span> <span class="ex" style="color: null;">[20.7s]</span>    </span></code></pre></div>
+<p>One line of code. One line of code, that worked the first time. One line of code that worked the first time and installed everything quickly. It’s a true Christmas miracle.</p>
+
+
+</section>
+
+
+<div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
+
+<ol>
+<li id="fn1"><p>Like so many moments in life when I get this way, <a href="https://twitter.com/dan_p_simpson/status/1565948834542669826">Dan Simpson</a> is at least partially to blame.↩︎</p></li>
+<li id="fn2"><p>Per <em>Lawrence v Texas</em>.↩︎</p></li>
+<li id="fn3"><p>It took all the self-restraint I possess not to refer to this as “the undisclosed viagra problem” in the title. Footnotes are the place for such things Danielle. Footnotes.↩︎</p></li>
+<li id="fn4"><p>These things happen to everyone sometimes honey, it’s no big deal, etc.↩︎</p></li>
+<li id="fn5"><p>Conveniently, pak also allows you to identify these dependencies separately from the R package installation. To do this, use the <code>pkg_system_requirements()</code> function.↩︎</p></li>
+<li id="fn6"><p>There’s an unpleasant name for people who break that convention, and I can’t think of a joke for this one because it’s astonishingly horrible. If you don’t know from personal experience what it feels like, well, consider yourself fortunate. Sigh.↩︎</p></li>
+<li id="fn7"><p>Okay sure, I haven’t <em>technically</em> asked DevOps for their opinion about the possibility of me dumping the authentication requirements on superuser privileges on a work machine. Nevertheless I do have a suspicion I know what their answer would be. So, in the interests of not causing unnecessary distress, perhaps a different approach is in order…↩︎</p></li>
+<li id="fn8"><p>The <a href="https://www.sudo.ws/docs/man/1.9.9/sudo.conf.man/">manual page</a> is online at the linked URL.↩︎</p></li>
+<li id="fn9"><p>In the interests of strict accuracy, I should add that had to create this file myself because it didn’t already exist on my system: prior to making this edit, sudo was using all the default settings. Relatedly, I had to use <code>whereis ssh-askpass</code> in order to find the path to ssh-askpass because the advice I’d seen online listed a different path and, shockingly, it doesn’t work if you don’t provide the correct path.↩︎</p></li>
+<li id="fn10"><p>After restarting R, just in case.↩︎</p></li>
+<li id="fn11"><p>Negotiations are vital and CNC isn’t for newbies.↩︎</p></li>
+<li id="fn12"><p>With flared bases one hopes.↩︎</p></li>
+<li id="fn13"><p>Surely you cannot have expected me to pass up the opportunity to make a safe sudo joke?↩︎</p></li>
+<li id="fn14"><p>Nah, too obvious. Feel free to come up with your own joke here, you don’t need my help.↩︎</p></li>
+<li id="fn15"><p>We all were at one time.↩︎</p></li>
+</ol>
+</section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
+  author = {Danielle Navarro},
+  editor = {},
+  title = {Sudo Ask Me a Password},
+  date = {2022-09-04},
+  url = {https://blog.djnavarro.net/posts/2022-09-04_sudo-askpass},
+  langid = {en}
+}
+</code></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2022" class="csl-entry quarto-appendix-citeas">
+Danielle Navarro. 2022. <span>“Sudo Ask Me a Password.”</span> September
+4, 2022. <a href="https://blog.djnavarro.net/posts/2022-09-04_sudo-askpass">https://blog.djnavarro.net/posts/2022-09-04_sudo-askpass</a>.
+</div></div></section></div> ]]></description>
+  <category>Linux</category>
+  <category>Credentials</category>
+  <category>R</category>
+  <guid>https://blog.djnavarro.net/posts/2022-09-04_sudo-askpass/index.html</guid>
+  <pubDate>Sat, 03 Sep 2022 14:00:00 GMT</pubDate>
+  <media:content url="https://blog.djnavarro.net/posts/2022-09-04_sudo-askpass/img/cover.jpg" medium="image" type="image/jpeg"/>
+</item>
 <item>
   <title>Passing Arrow data between Python and R with rpy2</title>
   <dc:creator>Danielle Navarro</dc:creator>
@@ -11025,152 +11272,6 @@ Difficulty Level Linux.”</span> August 8, 2021. <a href="https://blog.djnavarr
   <guid>https://blog.djnavarro.net/posts/2021-08-08_git-credential-helpers/index.html</guid>
   <pubDate>Sat, 07 Aug 2021 14:00:00 GMT</pubDate>
   <media:content url="https://blog.djnavarro.net/posts/2021-08-08_git-credential-helpers/credentials.jpg" medium="image" type="image/jpeg"/>
-</item>
-<item>
-  <title>Generative art in R</title>
-  <dc:creator>Danielle Navarro</dc:creator>
-  <link>https://blog.djnavarro.net/posts/2021-07-08_generative-art-in-r/index.html</link>
-  <description><![CDATA[ 
-
-
-
-
-<!--------------- my typical setup ----------------->
-<!--------------- post begins here ----------------->
-<p>A little while ago I was invited by <a href="https://twitter.com/MortaraSara">Sara Mortara</a> to contribute art as part of an exhibit to be presented at the <a href="https://user2021.r-project.org/">2021 useR! conference</a>, along with several artists who I admire greatly. I could hardly say no to that, now could I? So I sent some pieces that I’m fond of, most of which are posted somewhere on my <a href="https://art.djnavarro.net/">art website</a>. I realised later though that I was going to have to talk a little about my art too, and Sara suggested an informal Q&amp;A during the timeslot allocated to the exhibit. Naturally, I agreed since that meant I didn’t have to prepare anything formal, and like all artists I am extremely lazy. Later though, it occurred to me that it actually wouldn’t be terrible if I wrote a blog post to accompany my contribution to the exhibit, loosely based on the questions Sara suggested. And so here we are…</p>
-<p><strong>When did you start using R for art? Do you remember your first piece?</strong></p>
-<p>I started making art in R some time in late 2019. I’d discovered some of the art that <a href="https://www.data-imaginist.com/art">Thomas Lin Pedersen</a> had been making – at the time he was posting pieces from his <em>Genesis</em> series – and at the same time I found the <a href="https://github.com/thomasp85/ambient">ambient</a> package that he was using to create the pieces. Thomas famously does not post source code for his art, and being stubborn and curious I wanted to work out how he was doing it, so I started playing with ambient to see if I could reverse engineer his system. My very first piece was <em>Constellations</em>, shown below. It’s certainly not the prettiest thing I’ve created, and there are a lot of things I’d like to change about it now, but it’s nice to have your early work lying around to see how you’ve changed since then:</p>
-<div class="cell-output-display">
-<img src="https://blog.djnavarro.net/posts/2021-07-08_generative-art-in-r/other/constellations.png" width="100%">
-</div>
-
-<div class="no-row-height column-margin column-container"><div class="">
-<p>Constellations</p>
-</div></div><p>If you follow the link above and look at Thomas’ <em>Genesis</em> pieces you can tell that it’s not even remotely close to the mark, but I did eventually get the hang of it and managed to produce a few pieces like <em>Rainbow Prisms</em> which are closer to the kind of work he was producing:</p>
-<div class="cell-output-display">
-<img src="https://blog.djnavarro.net/posts/2021-07-08_generative-art-in-r/other/rainbow_prisms.png" width="100%">
-</div>
-
-<div class="no-row-height column-margin column-container"><div class="">
-<p>Rainbow Prisms</p>
-</div></div><p>It’s still not quite the same as Thomas’ in style, but by the time I’d worked out how to produce these I decided it was time to change my approach and branch out a bit. I love Thomas’ work of course, but I didn’t want my art to be just a low quality imitation of his! And besides, by that point I’d started discovering a whole lot of other people making generative art in R, such as <a href="https://www.williamrchase.com/">Will Chase</a>, <a href="https://hen.link/antonio">Antonio Sánchez Chinchón</a>, <a href="https://marcusvolz.com/">Marcus Volz</a>, and (somewhat later) <a href="https://ijeamaka-anyene.netlify.app/">Ijeamaka Anyene</a>. Each has their own style and – following the famous advice that <em>art is theft</em> – have shamelessly taken ideas and inspiration from each at different times.</p>
-<p>Some of those early pieces are still around, as part of the <a href="https://art.djnavarro.net/gallery/rosemary/">Rosemary</a> gallery.</p>
-<p><br><br> <strong>Were you an artist before making generative art in R?</strong></p>
-<p>Not really. I always wanted to do more artistic and creative things, but the only thing I’d ever done that required any kind of mix of aesthetic sensibility and craftwork was gardening. I used to have a lovely garden in Adelaide with a mix of Mediterranean and Australian native plants, and I had the same kind of enthusiasm for gardening then as I do for art now. Maybe one day I’ll garden again but there’s no space for that in my Sydney apartment!</p>
-<p><br><br> <strong>Can you talk about your creative process? Do you begin from code or from the outcome you are looking for? Do you start with the color palette in mind, or is it an iterative process?</strong></p>
-<p>I’m honestly not sure I have a consistent process? I spend a lot of time browsing artwork by other people on twitter and instagram, and from time to time I read posts about the techniques that they use. Whenever I do this I end up thinking a bit about how I might use this technique or wondering what methods other artists use to create their work, but I don’t usually act on that information until I think of something I <em>want</em> to do with it. That kind of technical or stylistic information is like background knowledge that lies dormant until I need it.</p>
-<p>Most of the time the starting point for my art is an emotion. I might be angry or lonely or tired, or just in need of something to occupy my mind and distract me from something else. When I start implementing a new system it’s often (though not always) a modification of a previous one. In principle this modification process <em>could</em> go in any direction, but my aesthetic sensibilities depend a lot on my state of mind, and that imposes a bias. I tweak the code one way, and see what it produces. If I like it, I keep the change, if I don’t I reject it. It’s a lot like a <a href="https://en.wikipedia.org/wiki/Metropolis%E2%80%93Hastings_algorithm">Metropolis-Hastings sampler</a> that way, but my mood strongly shapes the accept/reject decision, so the same starting point can lead to different outcomes. As a concrete example, the <a href="https://art.djnavarro.net/gallery/pollen/">Pollen</a>, <a href="https://art.djnavarro.net/gallery/bursts/">Bursts</a> and <a href="https://art.djnavarro.net/gallery/embers/">Embers</a> series are all based on the same underlying engine, the <a href="https://en.wikipedia.org/wiki/Fractal_flame">fractal flame</a> algorithm created by Scott Draves, but my emotional state was very different at the time I coded each version. For example, the <em>Pollen Cloud</em> piece I contributed to the useR exhibit is soft and gentle largely because I was feeling peaceful and relaxed at the time:</p>
-<div class="cell-output-display">
-<img src="https://blog.djnavarro.net/posts/2021-07-08_generative-art-in-r/exhibit/pollen_cloud.jpg" width="100%">
-</div>
-
-<div class="no-row-height column-margin column-container"><div class="">
-<p>Pollen Cloud</p>
-</div></div><p>By way of contrast, the <em>Geometry in a Hurricane</em> piece from <em>Bursts</em> is layered in jagged textures with a chaotic energy because I was angry at the time I was coding:</p>
-<div class="cell-output-display">
-<img src="https://blog.djnavarro.net/posts/2021-07-08_generative-art-in-r/other/geometry_in_a_hurricane.png" width="100%">
-</div>
-
-<div class="no-row-height column-margin column-container"><div class="">
-<p>Geometry in a Hurricane</p>
-</div></div><p>The <em>Soft Ember</em> piece below (also included in the exhibit) has a different feel again. There’s more energy to it than the pollen pieces, but it’s not as chaotic as the bursts series. Again, that’s very much a reflection of my mood. I wasn’t angry when I coded this system, but I wasn’t relaxed either. At the time, something exciting had happened in my life that I wasn’t quite able to do anything about, but I was indulging in the anticipation of a new thing, and some of that emotion ended up showing through in the pieces that I made at the time:</p>
-<div class="cell-output-display">
-<img src="https://blog.djnavarro.net/posts/2021-07-08_generative-art-in-r/exhibit/soft_ember.jpg" width="100%">
-</div>
-
-<div class="no-row-height column-margin column-container"><div class="">
-<p>Soft Ember</p>
-</div></div><p>To bring all this back to the question, it’s very much an iterative process. The driver behind the process is usually an emotion, and the colour choices, the shapes, and the code are all adapted on the fly to meet with how I’m feeling.</p>
-<p><br><br> <strong>What is your inspiration?</strong></p>
-<p>To the extent that my art is driven by emotion, the inspiration for it tends to be tied to sources of strong emotion in my life. Sometimes that emotion comes from the sources of love and joy: family, intimate partners, and so on. The <a href="https://art.djnavarro.net/gallery/heartbleed/">Heartbleed</a> series is one of those. The background texture to these images is generated by simulating a simple Turing machine known as a <a href="https://en.wikipedia.org/wiki/Turmite">turmite</a> and the swirly hearts in the foreground are generated using the toolkit provided by the ambient package. This system is very much motivated from emotional responses to the loved ones in my life. One of the pieces in the exhibit is from this series:</p>
-<div class="cell-output-display">
-<img src="https://blog.djnavarro.net/posts/2021-07-08_generative-art-in-r/exhibit/turmite59_in_red.jpg" width="100%">
-</div>
-
-<div class="no-row-height column-margin column-container"><div class="">
-<p>Turmite 59 in Red</p>
-</div></div><p>Other times the emotional motivation comes from sources of pain - sometimes things that were physically painful, sometimes that were psychologically painful. The <em>Orchid Thorn</em> piece I included in the exhibit is one of those, linked to an intense physically painful experience.</p>
-<div class="cell-output-display">
-<img src="https://blog.djnavarro.net/posts/2021-07-08_generative-art-in-r/exhibit/orchid_thorn.png" width="100%">
-</div>
-
-<div class="no-row-height column-margin column-container"><div class="">
-<p>Orchid Thorn</p>
-</div></div><p>The <em>Bitterness</em> piece below, which I haven’t done much with other than post to my <a href="https://www.instagram.com/daniellenavarro77/">instagram</a>, is strongly tied to the psychological stresses associated with my gender transition. Yes, there’s a softness to the piece, but there’s also a sandpaper-like texture there that makes me think of abrasion. The colour shifts make me think about transitions, but the roughness at some of the boundaries reminds me that change is often painful.</p>
-<div class="cell-output-display">
-<img src="https://blog.djnavarro.net/posts/2021-07-08_generative-art-in-r/other/bitterness.jpg" width="100%">
-</div>
-
-<div class="no-row-height column-margin column-container"><div class="">
-<p>Bitterness</p>
-</div></div><p>One odd property of the art, at least from my point of view, is that looking at a given piece recalls to mind the events and emotions that inspired the work, and to some extent that recollection becomes a way of re-experiencing the events. Sometimes that’s a good thing. Not always though.</p>
-<p><br><br> <strong>What is your advice for people who wants to create art in R?</strong></p>
-<p>I think I’d suggest three things. Find artists you like, read about their processes. Sometimes they’ll show source code or link to algorithms like I’ve done in a few places in this piece, and it can be really valuable to try to retrace their steps. There’s nothing wrong with learning technique by initially copying other artists and then developing your own style as you go.</p>
-<p>The second thing I’d suggest, for R folks specifically, is to take advantage of the skills you already have. Most of us have skills in simulation, data wrangling, and data visualisation, and those skills can be repurposed for artistic work quite easily. A lot of my pieces are created using that specific combination. I’ll often define a stochastic process and sample data from it using tools in base R, use <a href="https://dplyr.tidyverse.org/">dplyr</a> to transform and manipulate it, then use <a href="https://ggplot2.tidyverse.org/">ggplot2</a> to map the data structure onto a visualisation. One of the nice things about dplyr and ggplot2 being compositional grammars is the fact that you can “reuse” their parts for different purposes. I get a lot of artistic mileage out of <code>geom_point()</code> and <code>geom_polygon()</code>, and quite frankly <a href="https://purrr.tidyverse.org/">purrr</a> is an absolute godsend when the generative process you’re working with is iterative in nature.</p>
-<p>The other thing would be try not to put pressure on yourself to be good at it immediately. I wasn’t, and I don’t think anyone else was either. Earlier I showed the <em>Constellations</em> piece and referred to it as the first piece I created. In a way that’s true, because it was the first time I reached a level that I felt comfortable showing to other people. But I made a lot of junk before that, and I made a lot of junk after that. I make some good art now (or so people tell me) precisely <em>because</em> I made a lot of bad art before. Even now, though, I can’t tell which systems will end up good and which will end up bad. It’s a bit of a lottery, and I’m trying my best not to worry too much about how the lottery works. I like to have fun playing with visual tools, and sometimes the tinkering takes me interesting places.</p>
-<p><br><br> <strong>Anything to add about your pieces in the exhibit?</strong></p>
-<p>Not a lot. Several of the pieces I’ve contributed are already linked above, but I might just say a little about the other pieces and how they were made. The <em>Silhouette in Teal</em> piece uses the <a href="https://flametree.djnavarro.net/">flametree</a> generative art package to create the tree shown in silhouette in the foreground, and a simple random walk to generate the texture in the background:</p>
-<div class="cell-output-display">
-<img src="https://blog.djnavarro.net/posts/2021-07-08_generative-art-in-r/exhibit/silhouette_in_teal.jpg" width="100%">
-</div>
-
-<div class="no-row-height column-margin column-container"><div class="">
-<p>Silhouette in Teal</p>
-</div></div><p>It has also been surprisingly popular on my <a href="https://society6.com/djnavarro">Society6</a> store, which you can visit if you want some of my art on random objects. I am not sure why, but I have sold a lot more shower curtains and yoga mats than I would have expected to sell in my lifetime.</p>
-<p><em>Leviathan</em> emerged from my first attempt to create simulated watercolours in R using this <a href="https://tylerxhobbs.com/essays/2017/a-generative-approach-to-simulating-watercolor-paints">guide</a> written by Tyler Hobbs. I was in a dark mood at the time and the ominous mood to the piece seems quite fitting to me.</p>
-<div class="cell-output-display">
-<img src="https://blog.djnavarro.net/posts/2021-07-08_generative-art-in-r/exhibit/leviathan.png" width="100%">
-</div>
-
-<div class="no-row-height column-margin column-container"><div class="">
-<p>Leviathan</p>
-</div></div><p>The <em>Floral Effect</em> piece is an odd one. It’s part of the <a href="https://art.djnavarro.net/gallery/viewports/">Viewports</a> series that I created by applying Thomas Lin Pedersen’s <a href="https://ggfx.data-imaginist.com/">ggfx</a> package over the top of the output of the same system I used to create the <a href="https://art.djnavarro.net/gallery/native-flora/">Native Flora</a> series, which in turn is an application of the flametree system I mentioned earlier. I quite like it when these systems build on top of one another.</p>
-<div class="cell-output-display">
-<img src="https://blog.djnavarro.net/posts/2021-07-08_generative-art-in-r/exhibit/floral_effect.png" width="100%">
-</div>
-
-<div class="no-row-height column-margin column-container"><div class="">
-<p>Floral Effect</p>
-</div></div><p>The last piece I included, <em>Fire and Ice</em>, is a little different from the others in that it’s not a “pure” generative system. It works by reading an image file into R, using Chris Marcum’s <a href="https://github.com/cmarcum/halftoner">halftoner</a> package to convert it to a <a href="https://en.wikipedia.org/wiki/Halftone">halftone image</a>, and then manipulate that image using the tools provided in the ambient package. The end result is something that still resembles the original image but has more of a painted feel:</p>
-<div class="cell-output-display">
-<img src="https://blog.djnavarro.net/posts/2021-07-08_generative-art-in-r/exhibit/fire_and_ice.jpg" width="100%">
-</div>
-
-<!--------------- appendices go here ----------------->
-<div class="no-row-height column-margin column-container"><div class="">
-<p>Fire and Ice</p>
-</div></div><div class="cell">
-<div class="cell-output-display">
-
-
-</div>
-</div>
-
-
-
-<div id="quarto-appendix" class="default"><section id="last-updated" class="level2 appendix"><h2 class="quarto-appendix-heading">Last updated</h2><div class="quarto-appendix-contents">
-
-<p>2022-08-23 13:12:01 AEST</p>
-</div></section><section id="details" class="level2 appendix"><h2 class="quarto-appendix-heading">Details</h2><div class="quarto-appendix-contents">
-
-<p><a href="https://github.com/djnavarro/quarto-blog/tree/main/posts/2021-07-08_generative-art-in-r/index.qmd">source code</a>, <a href="https://github.com/djnavarro/quarto-blog/tree/main/posts/2021-07-08_generative-art-in-r/renv.lock">R environment</a></p>
-</div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2021,
-  author = {Danielle Navarro},
-  editor = {},
-  title = {Generative Art in {R}},
-  date = {2021-07-08},
-  url = {https://blog.djnavarro.net/generative-art-in-r},
-  langid = {en}
-}
-</code></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2021" class="csl-entry quarto-appendix-citeas">
-Danielle Navarro. 2021. <span>“Generative Art in R.”</span> July 8,
-2021. <a href="https://blog.djnavarro.net/generative-art-in-r">https://blog.djnavarro.net/generative-art-in-r</a>.
-</div></div></section></div> ]]></description>
-  <category>Art</category>
-  <category>R</category>
-  <guid>https://blog.djnavarro.net/posts/2021-07-08_generative-art-in-r/index.html</guid>
-  <pubDate>Wed, 07 Jul 2021 14:00:00 GMT</pubDate>
-  <media:content url="https://blog.djnavarro.net/posts/2021-07-08_generative-art-in-r/turmite59-in-red.jpg" medium="image" type="image/jpeg"/>
 </item>
 </channel>
 </rss>
