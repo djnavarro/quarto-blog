@@ -15,258 +15,11 @@
 <link>https://blog.djnavarro.net/index.html</link>
 </image>
 <generator>quarto-1.1.149</generator>
-<lastBuildDate>Sat, 03 Sep 2022 14:00:00 GMT</lastBuildDate>
-<item>
-  <title>Sudo ask me a password</title>
-  <dc:creator>Danielle Navarro</dc:creator>
-  <link>https://blog.djnavarro.net/posts/2022-09-04_sudo-askpass/index.html</link>
-  <description><![CDATA[ 
-
-
-
-
-<!--
-cover image:
-author: Ola Mishchenko
-url: https://unsplash.com/photos/VRB1LJoTZ6w
-licence: Free to use under the Unsplash License
-
--->
-<!--------------- my typical setup ----------------->
-<!--------------- post begins here ----------------->
-<p>One peculiar feature of earning one’s keep in society by writing a data science blog is that it provides the opportunity to be unabashedly weird. Personality is important. Other developers will read your strange content – no matter how weird and unprofessional it is – because professional corporate style is very nearly as dull as academic writing, and it is a relief to learn a new thing from an actual human being who write with a certain level of human character.</p>
-<p>Even if she is an irredeemably catty bitch.</p>
-<p>All of which is by way of preamble, and a way to acknowlege that when the topic is package dependencies in R, the queer double entendres kind of write themselves.<sup>1</sup> And so without further ado, today’s unhinged rambling…</p>
-<section id="managing-package-dependencies-in-r" class="level2">
-<h2 class="anchored" data-anchor-id="managing-package-dependencies-in-r">Managing package dependencies in R</h2>
-<p>Okay so you’ve done your due diligence. You’ve read his pkgdown site, checked out his repo, and you still like him. You really, <em>really</em> want to install his package. You’ve inspected the documentation and it is a very impressive package. I mean, I get it babe.</p>
-<p>I. have. been. there.</p>
-<p>There’s a thing with packages though. When you’re installing them into wherever you like to put packages (the precise location doesn’t matter for this post<sup>2</sup>), what you see isn’t necessarily all you get.</p>
-<p>I’ll give a concrete example. For reasons unknown even to me I woke up this morning and decided today was the day I’d explore the <a href="https://github.com/r-lib/rig">rig installation manager</a> for R that lets you manage multiple R installations on the one machine. It’s very nice, and possibly the topic for a future post. However, one side consequence to adopting rig is that I ended up with adorably fresh copies of R that had no installed packages and needed to be properly set up. In the process, I started thinking a little about the tools I use to install packages. When I first started using R my go to method was to use the <code>install.packages()</code> function supplied by the utils package: after all, it comes bundled with R, which makes it an easy place to start. As I matured as an R user I found myself switching to the <a href="https://remotes.r-lib.org/">remotes package</a> because it provides a coherent set of functions for installing packages from CRAN, Bioconductor, GitHub, and more. I’m a huge fan of remotes, but for reasons I’ll explain in a moment I’m starting to prefer the <a href="https://pak.r-lib.org/">pak package</a> developed by Gábor Csárdi and Jim Hester. When using pak, the function you use to install packages is called <code>pkg_install()</code>. I’ll walk you through it. Here’s what happens when I try to install the <a href="https://quarto-dev.github.io/quarto-r/">quarto R package</a> without properly configuring my setup. First I call the function:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1">pak<span class="sc" style="color: #5E5E5E;">::</span><span class="fu" style="color: #4758AB;">pkg_install</span>(<span class="st" style="color: #20794D;">"quarto"</span>)</span></code></pre></div>
-</div>
-<p>When I hit enter, pak starts doing its job, resolving the R dependencies and then asking if I want to continue:</p>
-<pre><code>✓ Loading metadata database ... done
-                                                                            
-→ Will install 2 packages.
-→ Will update 1 package.
-→ Will download 3 packages with unknown size.
-+ packrat         0.8.1  [bld][dl]
-+ quarto    1.1 → 1.2    [bld][dl]
-+ rsconnect       0.8.27 [bld][dl]
-? Do you want to continue (Y/n) </code></pre>
-<p>I really like this approach. The interface is very clear about precisely what is happening, and pak doesn’t download any more packages than is absolutely necessary to give you what you asked for (unless you specify <code>upgrade = TRUE</code> in the install command).</p>
-<p>I agree to continue, so off pak goes, fetching the appropriate R packages:</p>
-<pre><code>ℹ Getting 3 pkgs with unknown sizes
-✓ Got quarto 1.2 (source) (67.58 kB)                                             
-✓ Got rsconnect 0.8.27 (source) (685.57 kB)                                      
-✓ Got packrat 0.8.1 (source) (681.50 kB)                                         
-✓ Downloaded 3 packages (1.43 MB)in 6.7s</code></pre>
-<p>So far, so good. The output is informative and succinct at the same time. It appeals to my aesthetic sensibilities. But then pak – which is very diligent about managing all dependencies including system dependencies – attempts to install the external libraries upon which quarto depends,<sup>3</sup> and this happens:</p>
-<pre><code>ℹ Installing system requirements
-ℹ Executing `sudo sh -c apt-get install -y make`
-Error: System command 'sudo' failed, exit status: 1, stdout + stderr:
-E&gt; sudo: a terminal is required to read the password; either use the -S option to read from standard input or configure an askpass helper</code></pre>
-<p>Ah.</p>
-<p><br><br></p>
-</section>
-<section id="what-went-wrong-here" class="level2">
-<h2 class="anchored" data-anchor-id="what-went-wrong-here">What went wrong here?</h2>
-<p>An important thing to understand here is that neither pak nor <a href="https://www.sudo.ws/">sudo</a> are to blame for the installation failure.<sup>4</sup> On the pak side, it’s a <em>good</em> thing that it tries to uncover and install system dependencies: the package isn’t going to work if you don’t have those dependencies installed, and it can be a nightmare trying to track them all down when the package manager doesn’t help identify them for you.<sup>5</sup> On the sudo side, it is extremely reasonable to expect the user to authenticate <em>before</em> enabling superuser privileges. Speaking for myself, I have a very strong expectation that I will be explicitly asked for my consent before packages are installed on my system.<sup>6</sup></p>
-<p>The breakdown happens because pak has invoked sudo outside of the terminal context. If you haven’t configured sudo to handle this situation, there’s no opportunity for the user to authenticate, and sudo throws an error.</p>
-<p>How can we resolve this?</p>
-<p><br><br></p>
-</section>
-<section id="configuring-sudo" class="level2">
-<h2 class="anchored" data-anchor-id="configuring-sudo">Configuring sudo</h2>
-<p>A little bit of digging revealed that sudo is a lot more configurable than I had preciously realised, and you can deal with this issue in a few different ways. One possibility would be to <a href="https://www.simplified.guide/linux/enable-passwordless-sudo">enable passwordless sudo</a>, in which case the system dependencies would be installed without requiring a password at all. That would certainly minimise the amount of hassle at my end, but it’s also a hell of a security risk. Even if I personally felt willing to take that risk with my own property, this is a work laptop and I think a little risk-aversion is a good idea in this case.<sup>7</sup></p>
-<p>Fortunately, the error message itself contains some hints that there is an alternative fix that doesn’t require you to weaken your security settings (or not by very much, at any rate). Specifically, the error message refers to an “askpass helper”: a program, usually with a GUI, that sudo will invoke whenever it needs authentication from the user but is not running in a terminal. However, in order to get sudo to invoke one of these helpers, you have to explicitly configure it within the sudo configuration file, <code>sudo.conf</code>. This configuration file is located at <code>/etc/sudo.conf</code> is discussed pretty thoroughly in the sudo help documentation. Here’s the relevant part of the output when I type <code>man sudo.conf</code>:<sup>8</sup></p>
-<div class="pre">
-<pre><code> askpass   The fully qualified path to a helper program used to read the
-           user's password when no terminal is available.  This may be
-           the case when sudo is executed from a graphical (as opposed to
-           text-based) application.  The program specified by askpass
-           should display the argument passed to it as the prompt and
-           write the user's password to the standard output.  The value
-           of askpass may be overridden by the SUDO_ASKPASS environment
-           variable.</code></pre>
-</div>
-<p>Okay, so I need to do two things. I need to edit <code>sudo.conf</code> to configure sudo to use the askpass helper, and I also need the askpass helper itself. So where do I find one of these askpass helper programs? The one I chose to go with is <a href="https://man.openbsd.org/ssh-askpass.1">ssh-askpass</a>, which I installed on my system using the following:</p>
-<div class="sourceCode" id="cb6" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb6-1"><span class="fu" style="color: #4758AB;">sudo</span> apt-get install ssh-askpass ssh-askpass-gnome</span></code></pre></div>
-<p>Notice that I installed both ssh-askpass and <a href="https://manpages.debian.org/testing/ssh-askpass-gnome/gnome-ssh-askpass.1.en.html">ssh-askpass-gnome</a>. The latter isn’t the askpass helper itself, and isn’t intended to be invoked separately from ssh-askpass. Rather it’s there because ssh-askpass on its own uses <a href="https://x.org/wiki/">X11</a> to do the graphical user interface part and it’s not very pretty on my Ubuntu installation. By installing ssh-askpass-gnome as well, the dialog box that comes up when ssh-askpass is invoked is much nicer.</p>
-<p>At the terminal, I can invoke ssh-askpass manually if I want to. It doesn’t do much by itself: all it does is create the dialog box and return the text input by the user.</p>
-<div class="sourceCode" id="cb7" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb7-1"><span class="ex" style="color: null;">ssh-askpass</span></span></code></pre></div>
-<p>In practice you don’t actually call this directly. Instead, you configure sudo to that whenever it needs authentication but doesn’t have access to a terminal. In order to accomplish this, here’s the lines I added to my sudo.conf file:<sup>9</sup></p>
-<div class="sourceCode" id="cb8" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb8-1"><span class="co" style="color: #5E5E5E;"># specify ssh-askpass as my helper</span></span>
-<span id="cb8-2"><span class="ex" style="color: null;">Path</span> askpass /usr/bin/ssh-askpass</span></code></pre></div>
-<p>So I did this and then<sup>10</sup> tried to install quarto using <code>pkg_install()</code>. This time around sudo no longer errored when pak tried to install system dependencies. Instead it brought up the askpass dialog box:</p>
-<p><img src="https://blog.djnavarro.net/posts/2022-09-04_sudo-askpass/img/askpass-screen.png" class="img-fluid"></p>
-<p>When I typed in my password, pak and sudo were able to play nicely together and the installation worked just fine. Well, mostly..</p>
-</section>
-<section id="can-we-relax-just-a-little-sweetie" class="level2">
-<h2 class="anchored" data-anchor-id="can-we-relax-just-a-little-sweetie">Can we relax just a little sweetie?</h2>
-<p>The only problem is that quarto installation requires <em>five</em> system dependencies to be installed, and as the output below shows, pak starts a new shell process every single time…</p>
-<div class="sourceCode" id="cb9" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb9-1"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> make<span class="kw" style="color: #003B4F;">`</span></span>
-<span id="cb9-2"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> libcurl4-openssl-dev<span class="kw" style="color: #003B4F;">`</span></span>
-<span id="cb9-3"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> libicu-dev<span class="kw" style="color: #003B4F;">`</span></span>
-<span id="cb9-4"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> libssl-dev<span class="kw" style="color: #003B4F;">`</span></span>
-<span id="cb9-5"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> pandoc<span class="kw" style="color: #003B4F;">`</span></span></code></pre></div>
-<p>…and as a consequence of this I had to enter my password five times.</p>
-<p>That’s mildly irritating, and I was not expecting it. My original assumption would be that entering the password the first time would invoke the sudo password cache: that is, after entering my password once, the elevated permissions<sup>11</sup> would persist for about 15 minutes. That’s what happens by default at the terminal, and I had presumed the same would apply when the call to sudo occurs within an R session. However, that’s not <em>quite</em> accurate. This little gem in <code>man sudo</code> explains the relevant security policy issue:</p>
-<pre><code>     Security policies may support credential caching to allow the
-     user to run sudo again for a period of time without requiring
-     authentication.  By default, the sudoers policy caches creden‐
-     tials on a per-terminal basis for 15 minutes.  See the
-     timestamp_type and timestamp_timeout options in sudoers(5) for
-     more information.  By running sudo with the -v option, a user
-     can update the cached credentials without running a command.
-</code></pre>
-<p>The reason why the “15 minutes” rule doesn’t apply here is that the credentials are cached on a “per-terminal” basis. Each <code>sudo sh</code> command invoked by pak effectively runs a new instance of the shell and the password caching doesn’t transfer. Gr.</p>
-</section>
-<section id="editing-the-sudoers-file" class="level2">
-<h2 class="anchored" data-anchor-id="editing-the-sudoers-file">Editing the sudoers file</h2>
-<p>As a general rule I can understand why sudo is conservative and does not permit the credential cache to transfer across processes. Who knows what other processes are running and what they might be doing? But in this instance I’m willing to slightly relax the security policy to ensure that the pak/sudo combination doesn’t drive me crazy by relentlessly asking for permission on every little thing.</p>
-<p>The security policies in sudo are managed by plugins<sup>12</sup> configured using the “sudoers” file(s) located at <code>/etc/sudoers</code>. I’ll talk about this file momentarily, but first here’s the relevant extract from <code>man sudoers</code> that tells us what setting we need to modify:</p>
-<pre><code>     timestamp_type    sudoers uses per-user time stamp files for
-                       credential caching.  The timestamp_type op‐
-                       tion can be used to specify the type of time
-                       stamp record used.  It has the following
-                       possible values:
-
-                       global  A single time stamp record is used
-                               for all of a user's login sessions,
-                               regardless of the terminal or parent
-                               process ID.  An additional record is
-                               used to serialize password prompts
-                               when sudo is used multiple times in
-                               a pipeline, but this does not affect
-                               authentication.
-
-                       ppid    A single time stamp record is used
-                               for all processes with the same par‐
-                               ent process ID (usually the shell).
-                               Commands run from the same shell (or
-                               other common parent process) will
-                               not require a password for
-                               timestamp_timeout minutes (15 by
-                               default).  Commands run via sudo
-                               with a different parent process ID,
-                               for example from a shell script,
-                               will be authenticated separately.
-
-                       tty     One time stamp record is used for
-                               each terminal, which means that a
-                               user's login sessions are authenti‐
-                               cated separately.  If no terminal is
-                               present, the behavior is the same as
-                               ppid.  Commands run from the same
-                               terminal will not require a password
-                               for timestamp_timeout minutes (15 by
-                               default).
-
-                       kernel  The time stamp is stored in the ker‐
-                               nel as an attribute of the terminal
-                               device.  If no terminal is present,
-                               the behavior is the same as ppid.
-                               Negative timestamp_timeout values
-                               are not supported and positive val‐
-                               ues are limited to a maximum of 60
-                               minutes.  This is currently only
-                               supported on OpenBSD.
-
-                       The default value is tty.
-
-                       This setting is only supported by version
-                       1.8.21 or higher.
-</code></pre>
-<p>This documentation makes clear where the problem lies. When pak invokes sudo, a new process is spawned and unless the value of <code>timestamp_type</code> is set to <code>global</code>, the sudo credential cache doesn’t get shared across processes.</p>
-<p>It’s possible to modify this setting, and I’ll show you how to do that below, but first I strongly recommend that you read this article on <a href="https://www.digitalocean.com/community/tutorials/how-to-edit-the-sudoers-file">how to edit the sudoers file</a> carefully. <em>For realsies, my dears, read it</em>. Editing policies for sudo needs to be done with a lot of care. You don’t want to mess it up and lose the ability to invoke sudo because it’s been incorrectly configured. So please, please read the linked page.</p>
-<p>You read it, right?</p>
-<p>Good.</p>
-<p>After reading through the linked article, I made the decision that instead of editing the main sudoers file, I would instead add a small file to the <code>/etc/sudoers.d/</code> directory. By default, files in this folder are automatically included when the sudoers plugin is loaded, so it’s a convenient place to add your customisations rather than editing the main file. I created one that exists solely to manage the timestamp settings for my primary user:</p>
-<pre><code>sudo visudo -f /etc/sudoers.d/timestamp_type</code></pre>
-<p>Notice that I’ve used <a href="https://www.sudo.ws/docs/man/1.8.13/visudo.man/">visudo</a>, and not some other editor. If you read the linked article you know why I did that, and why it is astonishingly important to do it this way in order to practice safe sudo<sup>13</sup> policy editing. If you didn’t read the linked article… well, you would be <em>extremely</em> ill-advised to try the next step without actually reading it.</p>
-<p>Okay, that feels like enough warning. Let’s look at what I included in my new <code>/etc/sudoers.d/timestamp_type</code> file:</p>
-<pre><code># specify the timeout type (usual default=tty)
-Defaults:danielle timestamp_type=global
-
-# specify the timeout interval (usual default=15)
-Defaults:danielle timestamp_timeout=2</code></pre>
-<p>I’ve done two things. First, in order to allow the sudo password cache to work everywhere regardless of which process invokes it, I set <code>timestamp_type=global</code>. Second, because this makes me a tiny bit nervous (it’s a very mild softening of security policies), I shortened the cache expiry time from 15 minutes to 2 minutes by setting <code>timestamp_timeout=2</code>. In practice, I very rarely do anything requiring superuser privileges that requires more than two minutes, and it seems best to let those privileges expire quickly.</p>
-</section>
-<section id="youre-a-star" class="level2">
-<h2 class="anchored" data-anchor-id="youre-a-star">You’re a star</h2>
-<p>At this point I have a set up that lets me use pak without needing to weaken my security policies (well, not by much) and won’t cause me to lose my mind by typing in my password over and over until I beg for the sweet release<sup>14</sup> of death. Was it all worth it?</p>
-<p>Well, let me just say this: out of curiosity I decided to try installing the stars package, which necessarily entails installing a lot of geospatial dependencies. Back when I first tried installing these tools on linux a couple of years ago it was a nightmare. I had to track down the dependencies myself and manually install them, which was pretty daunting at the time because I was very new to the whole business.<sup>15</sup> Here’s what happened when I tried it with pak after configuring sudo to ask for my password only the once:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb14" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb14-1">pak<span class="sc" style="color: #5E5E5E;">::</span><span class="fu" style="color: #4758AB;">pkg_install</span>(<span class="st" style="color: #20794D;">"stars"</span>)</span></code></pre></div>
-</div>
-<div class="sourceCode" id="cb15" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb15-1"><span class="ex" style="color: null;">→</span> Will install 1 package.</span>
-<span id="cb15-2"><span class="ex" style="color: null;">→</span> Will download 1 package with unknown size.</span>
-<span id="cb15-3"><span class="ex" style="color: null;">+</span> stars   0.5-6 [bld][dl]</span>
-<span id="cb15-4"><span class="ex" style="color: null;">ℹ</span> Getting 1 pkg with unknown size</span>
-<span id="cb15-5"><span class="ex" style="color: null;">✓</span> Got stars 0.5-6 <span class="er" style="color: #AD0000;">(</span><span class="bu" style="color: null;">source</span><span class="kw" style="color: #003B4F;">)</span> <span class="kw" style="color: #003B4F;">(</span><span class="ex" style="color: null;">3.42</span> MB<span class="kw" style="color: #003B4F;">)</span>                                  </span>
-<span id="cb15-6"><span class="ex" style="color: null;">✓</span> Downloaded 1 package <span class="er" style="color: #AD0000;">(</span><span class="ex" style="color: null;">3.42</span> MB<span class="kw" style="color: #003B4F;">)</span><span class="er" style="color: #AD0000;">in</span> <span class="ex" style="color: null;">4.2s</span>                               </span>
-<span id="cb15-7"><span class="ex" style="color: null;">ℹ</span> Installing system requirements</span>
-<span id="cb15-8"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> libgdal-dev<span class="kw" style="color: #003B4F;">`</span></span>
-<span id="cb15-9"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> gdal-bin<span class="kw" style="color: #003B4F;">`</span></span>
-<span id="cb15-10"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> libgeos-dev<span class="kw" style="color: #003B4F;">`</span></span>
-<span id="cb15-11"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> libssl-dev<span class="kw" style="color: #003B4F;">`</span></span>
-<span id="cb15-12"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> libproj-dev<span class="kw" style="color: #003B4F;">`</span></span>
-<span id="cb15-13"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> libudunits2-dev<span class="kw" style="color: #003B4F;">`</span></span>
-<span id="cb15-14"><span class="ex" style="color: null;">ℹ</span> Building stars 0.5-6</span>
-<span id="cb15-15"><span class="ex" style="color: null;">✓</span> Built stars 0.5-6 <span class="er" style="color: #AD0000;">(</span><span class="ex" style="color: null;">1.4s</span><span class="kw" style="color: #003B4F;">)</span>                                       </span>
-<span id="cb15-16"><span class="ex" style="color: null;">✓</span> Installed stars 0.5-6  <span class="er" style="color: #AD0000;">(</span><span class="ex" style="color: null;">98ms</span><span class="kw" style="color: #003B4F;">)</span>                                    </span>
-<span id="cb15-17"><span class="ex" style="color: null;">✓</span> 1 pkg + 16 deps: kept 12, added 1, dld 1 <span class="er" style="color: #AD0000;">(</span><span class="ex" style="color: null;">3.42</span> MB<span class="kw" style="color: #003B4F;">)</span> <span class="ex" style="color: null;">[20.7s]</span>    </span></code></pre></div>
-<p>One line of code. One line of code, that worked the first time. One line of code that worked the first time and installed everything quickly. It’s a true Christmas miracle.</p>
-
-
-</section>
-
-
-<div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
-
-<ol>
-<li id="fn1"><p>Like so many moments in life when I get this way, <a href="https://twitter.com/dan_p_simpson/status/1565948834542669826">Dan Simpson</a> is at least partially to blame.↩︎</p></li>
-<li id="fn2"><p>Per <em>Lawrence v Texas</em>.↩︎</p></li>
-<li id="fn3"><p>It took all the self-restraint I possess not to refer to this as “the undisclosed viagra problem” in the title. Footnotes are the place for such things Danielle. Footnotes.↩︎</p></li>
-<li id="fn4"><p>These things happen to everyone sometimes honey, it’s no big deal, etc.↩︎</p></li>
-<li id="fn5"><p>Conveniently, pak also allows you to identify these dependencies separately from the R package installation. To do this, use the <code>pkg_system_requirements()</code> function.↩︎</p></li>
-<li id="fn6"><p>There’s an unpleasant name for people who break that convention, and I can’t think of a joke for this one because it’s astonishingly horrible. If you don’t know from personal experience what it feels like, well, consider yourself fortunate. Sigh.↩︎</p></li>
-<li id="fn7"><p>Okay sure, I haven’t <em>technically</em> asked DevOps for their opinion about the possibility of me dumping the authentication requirements on superuser privileges on a work machine. Nevertheless I do have a suspicion I know what their answer would be. So, in the interests of not causing unnecessary distress, perhaps a different approach is in order…↩︎</p></li>
-<li id="fn8"><p>The <a href="https://www.sudo.ws/docs/man/1.9.9/sudo.conf.man/">manual page</a> is online at the linked URL.↩︎</p></li>
-<li id="fn9"><p>In the interests of strict accuracy, I should add that had to create this file myself because it didn’t already exist on my system: prior to making this edit, sudo was using all the default settings. Relatedly, I had to use <code>whereis ssh-askpass</code> in order to find the path to ssh-askpass because the advice I’d seen online listed a different path and, shockingly, it doesn’t work if you don’t provide the correct path.↩︎</p></li>
-<li id="fn10"><p>After restarting R, just in case.↩︎</p></li>
-<li id="fn11"><p>Negotiations are vital and CNC isn’t for newbies.↩︎</p></li>
-<li id="fn12"><p>With flared bases one hopes.↩︎</p></li>
-<li id="fn13"><p>Surely you cannot have expected me to pass up the opportunity to make a safe sudo joke?↩︎</p></li>
-<li id="fn14"><p>Nah, too obvious. Feel free to come up with your own joke here, you don’t need my help.↩︎</p></li>
-<li id="fn15"><p>We all were at one time.↩︎</p></li>
-</ol>
-</section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
-  author = {Danielle Navarro},
-  editor = {},
-  title = {Sudo Ask Me a Password},
-  date = {2022-09-04},
-  url = {https://blog.djnavarro.net/posts/2022-09-04_sudo-askpass},
-  langid = {en}
-}
-</code></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2022" class="csl-entry quarto-appendix-citeas">
-Danielle Navarro. 2022. <span>“Sudo Ask Me a Password.”</span> September
-4, 2022. <a href="https://blog.djnavarro.net/posts/2022-09-04_sudo-askpass">https://blog.djnavarro.net/posts/2022-09-04_sudo-askpass</a>.
-</div></div></section></div> ]]></description>
-  <category>Linux</category>
-  <category>Credentials</category>
-  <category>R</category>
-  <guid>https://blog.djnavarro.net/posts/2022-09-04_sudo-askpass/index.html</guid>
-  <pubDate>Sat, 03 Sep 2022 14:00:00 GMT</pubDate>
-  <media:content url="https://blog.djnavarro.net/posts/2022-09-04_sudo-askpass/img/cover.jpg" medium="image" type="image/jpeg"/>
-</item>
+<lastBuildDate>Thu, 15 Sep 2022 14:00:00 GMT</lastBuildDate>
 <item>
   <title>Passing Arrow data between Python and R with rpy2</title>
   <dc:creator>Danielle Navarro</dc:creator>
-  <link>https://blog.djnavarro.net/posts/2022-09-02_arrow-and-rpy2/index.html</link>
+  <link>https://blog.djnavarro.net/posts/2022-09-16_arrow-and-rpy2/index.html</link>
   <description><![CDATA[ 
 
 
@@ -280,13 +33,14 @@ licence: unsplash free-to-use
 <!-- 
 # bash commands to build this post
 conda activate continuation
-cd ~/GitHub/sites/quarto-blog/posts/2022-09-02_arrow-and-rpy2
+export LD_LIBRARY_PATH="$(python -m rpy2.situation LD_LIBRARY_PATH)":${LD_LIBRARY_PATH}
+cd ~/GitHub/sites/quarto-blog/posts/2022-09-16_arrow-and-rpy2
 quarto render index.qmd --execute-daemon-restart
 -->
 <blockquote class="blockquote">
 <p>Me: I’m tired I don’t wanna write my blog post you do it <br> 12yo: no <br> Me: pleeeeeeease? you just have to show people how to hand an Arrow Table from Python to R with rpy2 it’s just a smol post <br> 12yo: I don’t know what that is <br> 9yo: also that’s child labour <br> &nbsp; &nbsp; – my children, showing good personal boundaries</p>
 </blockquote>
-<p>In the <a href="../../posts/2022-09-01_reticulated-arrow/">last post on this blog</a> I showed how Apache Arrow makes it possible to hand over data sets from R to Python (and vice versa) without making wasteful copies of the data.</p>
+<p>In the <a href="../../posts/2022-09-09_reticulated-arrow/">last post on this blog</a> I showed how Apache Arrow makes it possible to hand over data sets from R to Python (and vice versa) without making wasteful copies of the data.</p>
 <p>The solution I outlined there was to use the <a href="https://rstudio.github.io/reticulate/">reticulate</a> package to conduct the handover, and rely on Arrow tools both sides to manage the data. In one sense it’s a perfectly good solution to the problem… but it’s a solution tailor made for R users who need access to Python. When viewed from the perspective of a Python user who needs access to R, it’s a little awkward to have an R package (reticulate) governing the handover.<sup>1</sup> Perhaps we can find a more Pythonic way to approach this?</p>
 <p>A solution to our problem is provided by the <a href="https://rpy2.github.io/">rpy2 module</a> that provides an interface to R from Python, and the <a href="https://rpy2.github.io/rpy2-arrow/version/main/html/index.html">rpy2-arrow extension module</a> that allows it to support Arrow objects. Let’s take a look, shall we?</p>
 <section id="setting-up-the-python-environment" class="level2">
@@ -317,7 +71,7 @@ quarto render index.qmd --execute-daemon-restart
 <pre><code>R version 4.2.1 (2022-06-23) 🌈</code></pre>
 </div>
 </div>
-<p>You’ll notice that this prints a little startup message. If you’re following along at home you’ll probably see something different: you’re most likely to see the typical R startup message. The only reason it’s truncated on my machine is that I’ve modified my <code>.Rprofile</code> so that R is less chatty on start up. Also I added a pretty little rainbow because why not?<sup>2</sup> Normally you’d see a more verbose startup message from R but I prefer to keep mine quieter so all it does is print the version string and a pretty little rainbow.</p>
+<p>You’ll notice that this prints a little startup message. If you’re following along at home you’ll probably see something different: you’re most likely to see the typical R startup message. The only reason it’s truncated on my machine is that I’ve modified my <code>.Rprofile</code> so that R is less chatty on start up. Also I added a pretty little rainbow because why not?<sup>2</sup> <sup>3</sup> Normally you’d see a more verbose startup message from R but I prefer to keep mine quieter so all it does is print the version string and a pretty little rainbow.</p>
 <p>Anyway, our next step is to load some packages. In native R code we’d use the <code>library()</code> function for this, but rpy2 provides a more Pythonic approach. Importing the packages submodule gives us acces to <code>importr()</code>, which is allows us to load packages. The code below illustrates how you can expose the base R package and the utils R package (both of which come bundled with any minimal R installation) to Python:</p>
 <div class="cell" data-execution_count="3">
 <div class="sourceCode cell-code" id="cb7" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb7-1"><span class="im" style="color: #00769E;">import</span> rpy2.robjects.packages <span class="im" style="color: #00769E;">as</span> rpackages</span>
@@ -325,7 +79,7 @@ quarto render index.qmd --execute-daemon-restart
 <span id="cb7-3">base <span class="op" style="color: #5E5E5E;">=</span> rpackages.importr(<span class="st" style="color: #20794D;">"base"</span>)</span>
 <span id="cb7-4">utils <span class="op" style="color: #5E5E5E;">=</span> rpackages.importr(<span class="st" style="color: #20794D;">"utils"</span>)</span></code></pre></div>
 </div>
-<p>Of particular note is that once we have access to utils we can call the native R function <code>install.packages()</code> to install additional packages from CRAN. However, at this point we need to talk a little about how names are translated by rpy2. As every Python user would note, the dot is special and not used within the name of a function. Though not generally recommended in R except in special circumstances,<sup>3</sup> functions containing dots (and various other characters not permitted by Python) are syntactically valid in R. To address this, rpy2 will automatically convert dots to underscores. So if I want to install the fortunes package – a toy package that contains various quotes vaguely related to R – using rpy, this is how I’d do it:<sup>4</sup></p>
+<p>Of particular note is that once we have access to utils we can call the native R function <code>install.packages()</code> to install additional packages from CRAN. However, at this point we need to talk a little about how names are translated by rpy2. As every Python user would note, the dot is special and not used within the name of a function. Though not generally recommended in R except in special circumstances,<sup>4</sup> functions containing dots (and various other characters not permitted by Python) are syntactically valid in R. To address this, rpy2 will automatically convert dots to underscores. So if I want to install the fortunes package – a toy package that contains various quotes vaguely related to R – using rpy, this is how I’d do it:<sup>5</sup></p>
 <div class="sourceCode" id="cb8" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb8-1">utils.install_packages(<span class="st" style="color: #20794D;">"fortunes"</span>)</span></code></pre></div>
 <p>Once installed the fortunes package can be imported, allowing me to call the <code>fortune()</code> function from the package:</p>
 <div class="cell" data-execution_count="4">
@@ -341,7 +95,7 @@ What we have is nice, but we need something very different.
 </code></pre>
 </div>
 </div>
-<p>I’m rather fond of this quote, and it seems very appropriate to the spirit underpinning polyglot data science. Whatever language or tools we’re working in, we’ve usually chosen them for good reason.<sup>5</sup> Sometimes though, we need access to something very different, and we want our tools to be able to talk fluently to each other.</p>
+<p>I’m rather fond of this quote, and it seems very appropriate to the spirit underpinning polyglot data science. Whatever language or tools we’re working in, we’ve usually chosen them for good reason.<sup>6</sup> Sometimes though, we need access to something very different, and we want our tools to be able to talk fluently to each other.</p>
 <p>In any case, although we’ve barely scratched the surface of what rpy2 is capable of, we’re now at the point where we can start tackling the problem of transferring data from Python to R. To do that, however, we’ll need some data.</p>
 </section>
 <section id="about-the-data" class="level2">
@@ -735,14 +489,12 @@ Publication Source: [[null,null,"Sunday Times",null,null,...,null,null,null,null
 <div class="cell" data-execution_count="8">
 <div class="sourceCode cell-code" id="cb15" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb15-1"><span class="im" style="color: #00769E;">import</span> rpy2_arrow.pyarrow_rarrow <span class="im" style="color: #00769E;">as</span> pyra</span></code></pre></div>
 </div>
-<p>Having done that, we use the <code>pyarrow_to_r_table()</code> function to pass an Arrow Table from Python to R, like so:</p>
+<p>Having done that, we use the <code>pyarrow_table_to_r_table()</code> function to pass an Arrow Table from Python to R, like so:</p>
 <div class="cell" data-execution_count="9">
-<div class="sourceCode cell-code" id="cb16" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb16-1">rarrow_fiction <span class="op" style="color: #5E5E5E;">=</span> pyra.pyarrow_to_r_table(pyarrow_fiction)</span>
+<div class="sourceCode cell-code" id="cb16" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb16-1">rarrow_fiction <span class="op" style="color: #5E5E5E;">=</span> pyra.pyarrow_table_to_r_table(pyarrow_fiction)</span>
 <span id="cb16-2">rarrow_fiction</span></code></pre></div>
 <div class="cell-output cell-output-display" data-execution_count="9">
-<pre><code>&lt;rpy2.robjects.environments.Environment object at 0x7f1a9eac3740&gt; [RTYPES.ENVSXP]
-R classes: ('Table', 'ArrowTabular', 'ArrowObject', 'R6')
-n items: 36</code></pre>
+<pre><code>&lt;rpy2.rinterface_lib.sexp.SexpEnvironment object at 0x7f433e5a60c0&gt; [RTYPES.ENVSXP]</code></pre>
 </div>
 </div>
 <p>The printed output isn’t the prettiest thing in the world, but nevertheless it does represent the object of interest. On the Python side we have <code>pyarrow_fiction</code>, a data structure that points to an Arrow Table and enables various compute operations supplied through pyarrow. On the R side we now have <code>rarrow_fiction</code>, a data structure that points to the <em>same</em> Arrow Table and enables compute operations supplied by the R arrow package.</p>
@@ -754,7 +506,7 @@ n items: 36</code></pre>
 <div class="cell" data-execution_count="10">
 <div class="sourceCode cell-code" id="cb18" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb18-1"><span class="op" style="color: #5E5E5E;">%</span>load_ext rpy2.ipython</span></code></pre></div>
 </div>
-<p>Now that we’ve done this, all I have to do is preface each cell with <code>%%R</code> and the subsequent “Python” code will be passed to R and interpreted there.<sup>6</sup> To start with I’ll load the dplyr and arrow packages, using <code>suppressMessages()</code> to prevent them being chatty and warning me about namespace masking:</p>
+<p>Now that we’ve done this, all I have to do is preface each cell with <code>%%R</code> and the subsequent “Python” code will be passed to R and interpreted there.<sup>7</sup> To start with I’ll load the dplyr and arrow packages, using <code>suppressMessages()</code> to prevent them being chatty and warning me about namespace masking:</p>
 <div class="cell" data-execution_count="11">
 <div class="sourceCode cell-code" id="cb19" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb19-1"><span class="op" style="color: #5E5E5E;">%%</span>R</span>
 <span id="cb19-2">suppressMessages({</span>
@@ -798,7 +550,7 @@ See $metadata for additional Schema metadata</code></pre>
 <div class="sourceCode cell-code" id="cb25" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb25-1">r_gender <span class="op" style="color: #5E5E5E;">=</span> robjects.r(<span class="st" style="color: #20794D;">'gender'</span>)</span>
 <span id="cb25-2">r_gender</span></code></pre></div>
 <div class="cell-output cell-output-display" data-execution_count="13">
-<pre><code>&lt;rpy2.robjects.environments.Environment object at 0x7f1aaf704a40&gt; [RTYPES.ENVSXP]
+<pre><code>&lt;rpy2.robjects.environments.Environment object at 0x7f4336520880&gt; [RTYPES.ENVSXP]
 R classes: ('Table', 'ArrowTabular', 'ArrowObject', 'R6')
 n items: 36</code></pre>
 </div>
@@ -923,34 +675,35 @@ n: [[12832,6420,3346,2537,1687,...,1,1,1,1,1]]</code></pre>
 <ol>
 <li id="fn1"><p>Relatedly, if you’re a Python user blogging in quarto, you are very unlikely to be using the <a href="https://quarto.org/docs/reference/cells/cells-knitr.html">knitr engine</a> to execute code like I did in the last blog post. Instead you’re almost certainly using the <a href="https://quarto.org/docs/reference/cells/cells-jupyter.html">jupyter engine</a>. With that in mind, and with the goal of making this post a little more Pythonic, I’m using Jupyter this time.↩︎</p></li>
 <li id="fn2"><p>As an aside, it’s worth noting that rpy2 has run R with my standard configuration. It hasn’t loaded any specific environment. I was half tempted to talk about how you a Python user could use rpy2 to configure the R environment using the <a href="https://rstudio.github.io/renv/index.html">renv</a> package for instance, but that felt a little beyond the scope of the post. The only thing I will mention is that in this particular use case (passing Arrow objects between R and Python) I would not recommend trying to configure the Python environment and the R environment within the same conda environment. I tried this and oh my… the number of unsolvable conflicts was truly impressive. Keep the Python environment and the R environment separate babes.↩︎</p></li>
-<li id="fn3"><p>The dot is typically used to denote an <a href="https://adv-r.hadley.nz/s3.html">S3</a> method in R, but because R embraces chaos this is not universally adhered to and in any case S3 is… look, I love S3 but as Hadley Wickham once observed it’s an object oriented programming system that absolutely allows you to shoot yourself in the foot if you want to. Anyway. This is not the post for ramblings about the chaotic splendour of R.↩︎</p></li>
-<li id="fn4"><p>Depending on how blank your R configuration is, you may need to specify which CRAN mirror you want to download the package from before attempting the installation. To do that, include a command like <code>utils.chooseCRANmirror(ind=1)</code> to select the first mirror on the list of known servers.↩︎</p></li>
-<li id="fn5"><p>Seriously. Few things in life annoy me more than “language wars”. Digging your heels in over the perceived superiority of your preferred tool is rarely a useful way to spend your time.↩︎</p></li>
-<li id="fn6"><p>Okay, so some R users might be wondering about what was going on in the last post where I was flipping back and forth between R and Python without apparently doing anything like this. The answer is that when using knitr as the engine (rather than jupyter), python code is automatically interpreted with the help of reticulate. That’s already a feature in knitr, so I didn’t need to invoke it explicitly.↩︎</p></li>
+<li id="fn3"><p>As another exciting aside, during the process of writing this post I decided to start using rig to manage multiple installations of R on my machine. This is fine, in the sense that rig manages the PATH to the default R version and rpy2 finds it… but there is an issue in the fine print (it’s in the rpy2 readme but naturally I did not read it until I encountered the problem). Sometimes this leads to a situation where some C libraries can’t be found, and you need to run the following line of code at the terminal before starting Python: <code>export LD_LIBRARY_PATH="$(python -m rpy2.situation LD_LIBRARY_PATH)":${LD_LIBRARY_PATH}</code>↩︎</p></li>
+<li id="fn4"><p>The dot is typically used to denote an <a href="https://adv-r.hadley.nz/s3.html">S3</a> method in R, but because R embraces chaos this is not universally adhered to and in any case S3 is… look, I love S3 but as Hadley Wickham once observed it’s an object oriented programming system that absolutely allows you to shoot yourself in the foot if you want to. Anyway. This is not the post for ramblings about the chaotic splendour of R.↩︎</p></li>
+<li id="fn5"><p>Depending on how blank your R configuration is, you may need to specify which CRAN mirror you want to download the package from before attempting the installation. To do that, include a command like <code>utils.chooseCRANmirror(ind=1)</code> to select the first mirror on the list of known servers.↩︎</p></li>
+<li id="fn6"><p>Seriously. Few things in life annoy me more than “language wars”. Digging your heels in over the perceived superiority of your preferred tool is rarely a useful way to spend your time.↩︎</p></li>
+<li id="fn7"><p>Okay, so some R users might be wondering about what was going on in the last post where I was flipping back and forth between R and Python without apparently doing anything like this. The answer is that when using knitr as the engine (rather than jupyter), python code is automatically interpreted with the help of reticulate. That’s already a feature in knitr, so I didn’t need to invoke it explicitly.↩︎</p></li>
 </ol>
 </section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
   author = {Danielle Navarro},
   editor = {},
   title = {Passing {Arrow} Data Between {Python} and {R} with Rpy2},
-  date = {2022-09-02},
-  url = {https://blog.djnavarro.net/posts/2022-09-02_arrow-and-rpy2},
+  date = {2022-09-16},
+  url = {https://blog.djnavarro.net/posts/2022-09-16_arrow-and-rpy2},
   langid = {en}
 }
 </code></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2022" class="csl-entry quarto-appendix-citeas">
 Danielle Navarro. 2022. <span>“Passing Arrow Data Between Python and R
-with Rpy2.”</span> September 2, 2022. <a href="https://blog.djnavarro.net/posts/2022-09-02_arrow-and-rpy2">https://blog.djnavarro.net/posts/2022-09-02_arrow-and-rpy2</a>.
+with Rpy2.”</span> September 16, 2022. <a href="https://blog.djnavarro.net/posts/2022-09-16_arrow-and-rpy2">https://blog.djnavarro.net/posts/2022-09-16_arrow-and-rpy2</a>.
 </div></div></section></div> ]]></description>
   <category>Apache Arrow</category>
   <category>R</category>
   <category>Python</category>
-  <guid>https://blog.djnavarro.net/posts/2022-09-02_arrow-and-rpy2/index.html</guid>
-  <pubDate>Thu, 01 Sep 2022 14:00:00 GMT</pubDate>
-  <media:content url="https://blog.djnavarro.net/posts/2022-09-02_arrow-and-rpy2/img/cover.jpg" medium="image" type="image/jpeg"/>
+  <guid>https://blog.djnavarro.net/posts/2022-09-16_arrow-and-rpy2/index.html</guid>
+  <pubDate>Thu, 15 Sep 2022 14:00:00 GMT</pubDate>
+  <media:content url="https://blog.djnavarro.net/posts/2022-09-16_arrow-and-rpy2/img/cover.jpg" medium="image" type="image/jpeg"/>
 </item>
 <item>
   <title>Passing Arrow data between R and Python with reticulate</title>
   <dc:creator>Danielle Navarro</dc:creator>
-  <link>https://blog.djnavarro.net/posts/2022-09-01_reticulated-arrow/index.html</link>
+  <link>https://blog.djnavarro.net/posts/2022-09-09_reticulated-arrow/index.html</link>
   <description><![CDATA[ 
 
 
@@ -1035,7 +788,8 @@ licence: unsplash free-to-use
 <div class="cell-output cell-output-stdout">
 <pre><code>          name                                                 python
 1         base                   /home/danielle/miniconda3/bin/python
-2 continuation /home/danielle/miniconda3/envs/continuation/bin/python</code></pre>
+2 continuation /home/danielle/miniconda3/envs/continuation/bin/python
+3 r-reticulate /home/danielle/miniconda3/envs/r-reticulate/bin/python</code></pre>
 </div>
 </div>
 <p>For the purposes of this post I’ll create a new environment that – in honour of Bob Katter and the reptilian terror in the north – I will call “reptilia”. To keep things neat I’ll install<sup>6</sup> the pandas and pyarrow packages that this post will be using at the same time:</p>
@@ -1062,7 +816,8 @@ licence: unsplash free-to-use
 <pre><code>          name                                                 python
 1         base                   /home/danielle/miniconda3/bin/python
 2 continuation /home/danielle/miniconda3/envs/continuation/bin/python
-3     reptilia     /home/danielle/miniconda3/envs/reptilia/bin/python</code></pre>
+3 r-reticulate /home/danielle/miniconda3/envs/r-reticulate/bin/python
+4     reptilia     /home/danielle/miniconda3/envs/reptilia/bin/python</code></pre>
 </div>
 </div>
 <p>and I can ensure that reticulate uses that environment when rendering this post by calling the <code>use_miniconda()</code> function and specifying the environment name:</p>
@@ -1475,7 +1230,7 @@ $family &lt;string&gt;</code></pre>
 <span id="cb40-22">  )</span></code></pre></div>
 </div>
 <div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2022-09-01_reticulated-arrow/index_files/figure-html/plot-speed-1.png" class="img-fluid" width="672"></p>
+<p><img src="https://blog.djnavarro.net/posts/2022-09-09_reticulated-arrow/index_files/figure-html/plot-speed-1.png" class="img-fluid" width="672"></p>
 </div>
 </div>
 <p>Okay yeah. I’ll be the first to admit that this isn’t a very sophisticated way to do benchmarking, but when the difference is this stark you really don’t have to be sophisticated. Without Arrow, the only way to hand data from R to Python is to copy and convert the data, and that’s time consuming. The time cost gets worse the larger your data set becomes. With Arrow, the problem goes away because you’re not copying the data at all. The time cost is tiny and it stays tiny even as the data set gets bigger.</p>
@@ -1508,20 +1263,267 @@ $family &lt;string&gt;</code></pre>
   editor = {},
   title = {Passing {Arrow} Data Between {R} and {Python} with
     Reticulate},
-  date = {2022-09-01},
-  url = {https://blog.djnavarro.net/posts/2022-09-01_reticulated-arrow},
+  date = {2022-09-09},
+  url = {https://blog.djnavarro.net/posts/2022-09-09_reticulated-arrow},
   langid = {en}
 }
 </code></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2022" class="csl-entry quarto-appendix-citeas">
 Danielle Navarro. 2022. <span>“Passing Arrow Data Between R and Python
-with Reticulate.”</span> September 1, 2022. <a href="https://blog.djnavarro.net/posts/2022-09-01_reticulated-arrow">https://blog.djnavarro.net/posts/2022-09-01_reticulated-arrow</a>.
+with Reticulate.”</span> September 9, 2022. <a href="https://blog.djnavarro.net/posts/2022-09-09_reticulated-arrow">https://blog.djnavarro.net/posts/2022-09-09_reticulated-arrow</a>.
 </div></div></section></div> ]]></description>
   <category>Apache Arrow</category>
   <category>R</category>
   <category>Python</category>
-  <guid>https://blog.djnavarro.net/posts/2022-09-01_reticulated-arrow/index.html</guid>
-  <pubDate>Wed, 31 Aug 2022 14:00:00 GMT</pubDate>
-  <media:content url="https://blog.djnavarro.net/posts/2022-09-01_reticulated-arrow/img/cover.jpg" medium="image" type="image/jpeg"/>
+  <guid>https://blog.djnavarro.net/posts/2022-09-09_reticulated-arrow/index.html</guid>
+  <pubDate>Thu, 08 Sep 2022 14:00:00 GMT</pubDate>
+  <media:content url="https://blog.djnavarro.net/posts/2022-09-09_reticulated-arrow/img/cover.jpg" medium="image" type="image/jpeg"/>
+</item>
+<item>
+  <title>Sudo ask me a password</title>
+  <dc:creator>Danielle Navarro</dc:creator>
+  <link>https://blog.djnavarro.net/posts/2022-09-04_sudo-askpass/index.html</link>
+  <description><![CDATA[ 
+
+
+
+
+<!--
+cover image:
+author: Ola Mishchenko
+url: https://unsplash.com/photos/VRB1LJoTZ6w
+licence: Free to use under the Unsplash License
+
+-->
+<!--------------- my typical setup ----------------->
+<!--------------- post begins here ----------------->
+<p>One peculiar feature of earning one’s keep in society by writing a data science blog is that it provides the opportunity to be unabashedly weird. Personality is important. Other developers will read your strange content – no matter how weird and unprofessional it is – because professional corporate style is very nearly as dull as academic writing, and it is a relief to learn a new thing from an actual human being who write with a certain level of human character.</p>
+<p>Even if she is an irredeemably catty bitch.</p>
+<p>All of which is by way of preamble, and a way to acknowlege that when the topic is package dependencies in R, the queer double entendres kind of write themselves.<sup>1</sup> And so without further ado, today’s unhinged rambling…</p>
+<section id="managing-package-dependencies-in-r" class="level2">
+<h2 class="anchored" data-anchor-id="managing-package-dependencies-in-r">Managing package dependencies in R</h2>
+<p>Okay so you’ve done your due diligence. You’ve read his pkgdown site, checked out his repo, and you still like him. You really, <em>really</em> want to install his package. You’ve inspected the documentation and it is a very impressive package. I mean, I get it babe.</p>
+<p>I. have. been. there.</p>
+<p>There’s a thing with packages though. When you’re installing them into wherever you like to put packages (the precise location doesn’t matter for this post<sup>2</sup>), what you see isn’t necessarily all you get.</p>
+<p>I’ll give a concrete example. For reasons unknown even to me I woke up this morning and decided today was the day I’d explore the <a href="https://github.com/r-lib/rig">rig installation manager</a> for R that lets you manage multiple R installations on the one machine. It’s very nice, and possibly the topic for a future post. However, one side consequence to adopting rig is that I ended up with adorably fresh copies of R that had no installed packages and needed to be properly set up. In the process, I started thinking a little about the tools I use to install packages. When I first started using R my go to method was to use the <code>install.packages()</code> function supplied by the utils package: after all, it comes bundled with R, which makes it an easy place to start. As I matured as an R user I found myself switching to the <a href="https://remotes.r-lib.org/">remotes package</a> because it provides a coherent set of functions for installing packages from CRAN, Bioconductor, GitHub, and more. I’m a huge fan of remotes, but for reasons I’ll explain in a moment I’m starting to prefer the <a href="https://pak.r-lib.org/">pak package</a> developed by Gábor Csárdi and Jim Hester. When using pak, the function you use to install packages is called <code>pkg_install()</code>. I’ll walk you through it. Here’s what happens when I try to install the <a href="https://quarto-dev.github.io/quarto-r/">quarto R package</a> without properly configuring my setup. First I call the function:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1">pak<span class="sc" style="color: #5E5E5E;">::</span><span class="fu" style="color: #4758AB;">pkg_install</span>(<span class="st" style="color: #20794D;">"quarto"</span>)</span></code></pre></div>
+</div>
+<p>When I hit enter, pak starts doing its job, resolving the R dependencies and then asking if I want to continue:</p>
+<pre><code>✓ Loading metadata database ... done
+                                                                            
+→ Will install 2 packages.
+→ Will update 1 package.
+→ Will download 3 packages with unknown size.
++ packrat         0.8.1  [bld][dl]
++ quarto    1.1 → 1.2    [bld][dl]
++ rsconnect       0.8.27 [bld][dl]
+? Do you want to continue (Y/n) </code></pre>
+<p>I really like this approach. The interface is very clear about precisely what is happening, and pak doesn’t download any more packages than is absolutely necessary to give you what you asked for (unless you specify <code>upgrade = TRUE</code> in the install command).</p>
+<p>I agree to continue, so off pak goes, fetching the appropriate R packages:</p>
+<pre><code>ℹ Getting 3 pkgs with unknown sizes
+✓ Got quarto 1.2 (source) (67.58 kB)                                             
+✓ Got rsconnect 0.8.27 (source) (685.57 kB)                                      
+✓ Got packrat 0.8.1 (source) (681.50 kB)                                         
+✓ Downloaded 3 packages (1.43 MB)in 6.7s</code></pre>
+<p>So far, so good. The output is informative and succinct at the same time. It appeals to my aesthetic sensibilities. But then pak – which is very diligent about managing all dependencies including system dependencies – attempts to install the external libraries upon which quarto depends,<sup>3</sup> and this happens:</p>
+<pre><code>ℹ Installing system requirements
+ℹ Executing `sudo sh -c apt-get install -y make`
+Error: System command 'sudo' failed, exit status: 1, stdout + stderr:
+E&gt; sudo: a terminal is required to read the password; either use the -S option to read from standard input or configure an askpass helper</code></pre>
+<p>Ah.</p>
+<p><br><br></p>
+</section>
+<section id="what-went-wrong-here" class="level2">
+<h2 class="anchored" data-anchor-id="what-went-wrong-here">What went wrong here?</h2>
+<p>An important thing to understand here is that neither pak nor <a href="https://www.sudo.ws/">sudo</a> are to blame for the installation failure.<sup>4</sup> On the pak side, it’s a <em>good</em> thing that it tries to uncover and install system dependencies: the package isn’t going to work if you don’t have those dependencies installed, and it can be a nightmare trying to track them all down when the package manager doesn’t help identify them for you.<sup>5</sup> On the sudo side, it is extremely reasonable to expect the user to authenticate <em>before</em> enabling superuser privileges. Speaking for myself, I have a very strong expectation that I will be explicitly asked for my consent before packages are installed on my system.<sup>6</sup></p>
+<p>The breakdown happens because pak has invoked sudo outside of the terminal context. If you haven’t configured sudo to handle this situation, there’s no opportunity for the user to authenticate, and sudo throws an error.</p>
+<p>How can we resolve this?</p>
+<p><br><br></p>
+</section>
+<section id="configuring-sudo" class="level2">
+<h2 class="anchored" data-anchor-id="configuring-sudo">Configuring sudo</h2>
+<p>A little bit of digging revealed that sudo is a lot more configurable than I had preciously realised, and you can deal with this issue in a few different ways. One possibility would be to <a href="https://www.simplified.guide/linux/enable-passwordless-sudo">enable passwordless sudo</a>, in which case the system dependencies would be installed without requiring a password at all. That would certainly minimise the amount of hassle at my end, but it’s also a hell of a security risk. Even if I personally felt willing to take that risk with my own property, this is a work laptop and I think a little risk-aversion is a good idea in this case.<sup>7</sup></p>
+<p>Fortunately, the error message itself contains some hints that there is an alternative fix that doesn’t require you to weaken your security settings (or not by very much, at any rate). Specifically, the error message refers to an “askpass helper”: a program, usually with a GUI, that sudo will invoke whenever it needs authentication from the user but is not running in a terminal. However, in order to get sudo to invoke one of these helpers, you have to explicitly configure it within the sudo configuration file, <code>sudo.conf</code>. This configuration file is located at <code>/etc/sudo.conf</code> is discussed pretty thoroughly in the sudo help documentation. Here’s the relevant part of the output when I type <code>man sudo.conf</code>:<sup>8</sup></p>
+<div class="pre">
+<pre><code> askpass   The fully qualified path to a helper program used to read the
+           user's password when no terminal is available.  This may be
+           the case when sudo is executed from a graphical (as opposed to
+           text-based) application.  The program specified by askpass
+           should display the argument passed to it as the prompt and
+           write the user's password to the standard output.  The value
+           of askpass may be overridden by the SUDO_ASKPASS environment
+           variable.</code></pre>
+</div>
+<p>Okay, so I need to do two things. I need to edit <code>sudo.conf</code> to configure sudo to use the askpass helper, and I also need the askpass helper itself. So where do I find one of these askpass helper programs? The one I chose to go with is <a href="https://man.openbsd.org/ssh-askpass.1">ssh-askpass</a>, which I installed on my system using the following:</p>
+<div class="sourceCode" id="cb6" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb6-1"><span class="fu" style="color: #4758AB;">sudo</span> apt-get install ssh-askpass ssh-askpass-gnome</span></code></pre></div>
+<p>Notice that I installed both ssh-askpass and <a href="https://manpages.debian.org/testing/ssh-askpass-gnome/gnome-ssh-askpass.1.en.html">ssh-askpass-gnome</a>. The latter isn’t the askpass helper itself, and isn’t intended to be invoked separately from ssh-askpass. Rather it’s there because ssh-askpass on its own uses <a href="https://x.org/wiki/">X11</a> to do the graphical user interface part and it’s not very pretty on my Ubuntu installation. By installing ssh-askpass-gnome as well, the dialog box that comes up when ssh-askpass is invoked is much nicer.</p>
+<p>At the terminal, I can invoke ssh-askpass manually if I want to. It doesn’t do much by itself: all it does is create the dialog box and return the text input by the user.</p>
+<div class="sourceCode" id="cb7" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb7-1"><span class="ex" style="color: null;">ssh-askpass</span></span></code></pre></div>
+<p>In practice you don’t actually call this directly. Instead, you configure sudo to that whenever it needs authentication but doesn’t have access to a terminal. In order to accomplish this, here’s the lines I added to my sudo.conf file:<sup>9</sup></p>
+<div class="sourceCode" id="cb8" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb8-1"><span class="co" style="color: #5E5E5E;"># specify ssh-askpass as my helper</span></span>
+<span id="cb8-2"><span class="ex" style="color: null;">Path</span> askpass /usr/bin/ssh-askpass</span></code></pre></div>
+<p>So I did this and then<sup>10</sup> tried to install quarto using <code>pkg_install()</code>. This time around sudo no longer errored when pak tried to install system dependencies. Instead it brought up the askpass dialog box:</p>
+<p><img src="https://blog.djnavarro.net/posts/2022-09-04_sudo-askpass/img/askpass-screen.png" class="img-fluid"></p>
+<p>When I typed in my password, pak and sudo were able to play nicely together and the installation worked just fine. Well, mostly..</p>
+</section>
+<section id="can-we-relax-just-a-little-sweetie" class="level2">
+<h2 class="anchored" data-anchor-id="can-we-relax-just-a-little-sweetie">Can we relax just a little sweetie?</h2>
+<p>The only problem is that quarto installation requires <em>five</em> system dependencies to be installed, and as the output below shows, pak starts a new shell process every single time…</p>
+<div class="sourceCode" id="cb9" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb9-1"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> make<span class="kw" style="color: #003B4F;">`</span></span>
+<span id="cb9-2"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> libcurl4-openssl-dev<span class="kw" style="color: #003B4F;">`</span></span>
+<span id="cb9-3"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> libicu-dev<span class="kw" style="color: #003B4F;">`</span></span>
+<span id="cb9-4"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> libssl-dev<span class="kw" style="color: #003B4F;">`</span></span>
+<span id="cb9-5"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> pandoc<span class="kw" style="color: #003B4F;">`</span></span></code></pre></div>
+<p>…and as a consequence of this I had to enter my password five times.</p>
+<p>That’s mildly irritating, and I was not expecting it. My original assumption would be that entering the password the first time would invoke the sudo password cache: that is, after entering my password once, the elevated permissions<sup>11</sup> would persist for about 15 minutes. That’s what happens by default at the terminal, and I had presumed the same would apply when the call to sudo occurs within an R session. However, that’s not <em>quite</em> accurate. This little gem in <code>man sudo</code> explains the relevant security policy issue:</p>
+<pre><code>     Security policies may support credential caching to allow the
+     user to run sudo again for a period of time without requiring
+     authentication.  By default, the sudoers policy caches creden‐
+     tials on a per-terminal basis for 15 minutes.  See the
+     timestamp_type and timestamp_timeout options in sudoers(5) for
+     more information.  By running sudo with the -v option, a user
+     can update the cached credentials without running a command.
+</code></pre>
+<p>The reason why the “15 minutes” rule doesn’t apply here is that the credentials are cached on a “per-terminal” basis. Each <code>sudo sh</code> command invoked by pak effectively runs a new instance of the shell and the password caching doesn’t transfer. Gr.</p>
+</section>
+<section id="editing-the-sudoers-file" class="level2">
+<h2 class="anchored" data-anchor-id="editing-the-sudoers-file">Editing the sudoers file</h2>
+<p>As a general rule I can understand why sudo is conservative and does not permit the credential cache to transfer across processes. Who knows what other processes are running and what they might be doing? But in this instance I’m willing to slightly relax the security policy to ensure that the pak/sudo combination doesn’t drive me crazy by relentlessly asking for permission on every little thing.</p>
+<p>The security policies in sudo are managed by plugins<sup>12</sup> configured using the “sudoers” file(s) located at <code>/etc/sudoers</code>. I’ll talk about this file momentarily, but first here’s the relevant extract from <code>man sudoers</code> that tells us what setting we need to modify:</p>
+<pre><code>     timestamp_type    sudoers uses per-user time stamp files for
+                       credential caching.  The timestamp_type op‐
+                       tion can be used to specify the type of time
+                       stamp record used.  It has the following
+                       possible values:
+
+                       global  A single time stamp record is used
+                               for all of a user's login sessions,
+                               regardless of the terminal or parent
+                               process ID.  An additional record is
+                               used to serialize password prompts
+                               when sudo is used multiple times in
+                               a pipeline, but this does not affect
+                               authentication.
+
+                       ppid    A single time stamp record is used
+                               for all processes with the same par‐
+                               ent process ID (usually the shell).
+                               Commands run from the same shell (or
+                               other common parent process) will
+                               not require a password for
+                               timestamp_timeout minutes (15 by
+                               default).  Commands run via sudo
+                               with a different parent process ID,
+                               for example from a shell script,
+                               will be authenticated separately.
+
+                       tty     One time stamp record is used for
+                               each terminal, which means that a
+                               user's login sessions are authenti‐
+                               cated separately.  If no terminal is
+                               present, the behavior is the same as
+                               ppid.  Commands run from the same
+                               terminal will not require a password
+                               for timestamp_timeout minutes (15 by
+                               default).
+
+                       kernel  The time stamp is stored in the ker‐
+                               nel as an attribute of the terminal
+                               device.  If no terminal is present,
+                               the behavior is the same as ppid.
+                               Negative timestamp_timeout values
+                               are not supported and positive val‐
+                               ues are limited to a maximum of 60
+                               minutes.  This is currently only
+                               supported on OpenBSD.
+
+                       The default value is tty.
+
+                       This setting is only supported by version
+                       1.8.21 or higher.
+</code></pre>
+<p>This documentation makes clear where the problem lies. When pak invokes sudo, a new process is spawned and unless the value of <code>timestamp_type</code> is set to <code>global</code>, the sudo credential cache doesn’t get shared across processes.</p>
+<p>It’s possible to modify this setting, and I’ll show you how to do that below, but first I strongly recommend that you read this article on <a href="https://www.digitalocean.com/community/tutorials/how-to-edit-the-sudoers-file">how to edit the sudoers file</a> carefully. <em>For realsies, my dears, read it</em>. Editing policies for sudo needs to be done with a lot of care. You don’t want to mess it up and lose the ability to invoke sudo because it’s been incorrectly configured. So please, please read the linked page.</p>
+<p>You read it, right?</p>
+<p>Good.</p>
+<p>After reading through the linked article, I made the decision that instead of editing the main sudoers file, I would instead add a small file to the <code>/etc/sudoers.d/</code> directory. By default, files in this folder are automatically included when the sudoers plugin is loaded, so it’s a convenient place to add your customisations rather than editing the main file. I created one that exists solely to manage the timestamp settings for my primary user:</p>
+<pre><code>sudo visudo -f /etc/sudoers.d/timestamp_type</code></pre>
+<p>Notice that I’ve used <a href="https://www.sudo.ws/docs/man/1.8.13/visudo.man/">visudo</a>, and not some other editor. If you read the linked article you know why I did that, and why it is astonishingly important to do it this way in order to practice safe sudo<sup>13</sup> policy editing. If you didn’t read the linked article… well, you would be <em>extremely</em> ill-advised to try the next step without actually reading it.</p>
+<p>Okay, that feels like enough warning. Let’s look at what I included in my new <code>/etc/sudoers.d/timestamp_type</code> file:</p>
+<pre><code># specify the timeout type (usual default=tty)
+Defaults:danielle timestamp_type=global
+
+# specify the timeout interval (usual default=15)
+Defaults:danielle timestamp_timeout=2</code></pre>
+<p>I’ve done two things. First, in order to allow the sudo password cache to work everywhere regardless of which process invokes it, I set <code>timestamp_type=global</code>. Second, because this makes me a tiny bit nervous (it’s a very mild softening of security policies), I shortened the cache expiry time from 15 minutes to 2 minutes by setting <code>timestamp_timeout=2</code>. In practice, I very rarely do anything requiring superuser privileges that requires more than two minutes, and it seems best to let those privileges expire quickly.</p>
+</section>
+<section id="youre-a-star" class="level2">
+<h2 class="anchored" data-anchor-id="youre-a-star">You’re a star</h2>
+<p>At this point I have a set up that lets me use pak without needing to weaken my security policies (well, not by much) and won’t cause me to lose my mind by typing in my password over and over until I beg for the sweet release<sup>14</sup> of death. Was it all worth it?</p>
+<p>Well, let me just say this: out of curiosity I decided to try installing the stars package, which necessarily entails installing a lot of geospatial dependencies. Back when I first tried installing these tools on linux a couple of years ago it was a nightmare. I had to track down the dependencies myself and manually install them, which was pretty daunting at the time because I was very new to the whole business.<sup>15</sup> Here’s what happened when I tried it with pak after configuring sudo to ask for my password only the once:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb14" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb14-1">pak<span class="sc" style="color: #5E5E5E;">::</span><span class="fu" style="color: #4758AB;">pkg_install</span>(<span class="st" style="color: #20794D;">"stars"</span>)</span></code></pre></div>
+</div>
+<div class="sourceCode" id="cb15" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb15-1"><span class="ex" style="color: null;">→</span> Will install 1 package.</span>
+<span id="cb15-2"><span class="ex" style="color: null;">→</span> Will download 1 package with unknown size.</span>
+<span id="cb15-3"><span class="ex" style="color: null;">+</span> stars   0.5-6 [bld][dl]</span>
+<span id="cb15-4"><span class="ex" style="color: null;">ℹ</span> Getting 1 pkg with unknown size</span>
+<span id="cb15-5"><span class="ex" style="color: null;">✓</span> Got stars 0.5-6 <span class="er" style="color: #AD0000;">(</span><span class="bu" style="color: null;">source</span><span class="kw" style="color: #003B4F;">)</span> <span class="kw" style="color: #003B4F;">(</span><span class="ex" style="color: null;">3.42</span> MB<span class="kw" style="color: #003B4F;">)</span>                                  </span>
+<span id="cb15-6"><span class="ex" style="color: null;">✓</span> Downloaded 1 package <span class="er" style="color: #AD0000;">(</span><span class="ex" style="color: null;">3.42</span> MB<span class="kw" style="color: #003B4F;">)</span><span class="er" style="color: #AD0000;">in</span> <span class="ex" style="color: null;">4.2s</span>                               </span>
+<span id="cb15-7"><span class="ex" style="color: null;">ℹ</span> Installing system requirements</span>
+<span id="cb15-8"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> libgdal-dev<span class="kw" style="color: #003B4F;">`</span></span>
+<span id="cb15-9"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> gdal-bin<span class="kw" style="color: #003B4F;">`</span></span>
+<span id="cb15-10"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> libgeos-dev<span class="kw" style="color: #003B4F;">`</span></span>
+<span id="cb15-11"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> libssl-dev<span class="kw" style="color: #003B4F;">`</span></span>
+<span id="cb15-12"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> libproj-dev<span class="kw" style="color: #003B4F;">`</span></span>
+<span id="cb15-13"><span class="ex" style="color: null;">ℹ</span> Executing <span class="kw" style="color: #003B4F;">`</span><span class="fu" style="color: #4758AB;">sudo</span> sh <span class="at" style="color: #657422;">-c</span> apt-get install <span class="at" style="color: #657422;">-y</span> libudunits2-dev<span class="kw" style="color: #003B4F;">`</span></span>
+<span id="cb15-14"><span class="ex" style="color: null;">ℹ</span> Building stars 0.5-6</span>
+<span id="cb15-15"><span class="ex" style="color: null;">✓</span> Built stars 0.5-6 <span class="er" style="color: #AD0000;">(</span><span class="ex" style="color: null;">1.4s</span><span class="kw" style="color: #003B4F;">)</span>                                       </span>
+<span id="cb15-16"><span class="ex" style="color: null;">✓</span> Installed stars 0.5-6  <span class="er" style="color: #AD0000;">(</span><span class="ex" style="color: null;">98ms</span><span class="kw" style="color: #003B4F;">)</span>                                    </span>
+<span id="cb15-17"><span class="ex" style="color: null;">✓</span> 1 pkg + 16 deps: kept 12, added 1, dld 1 <span class="er" style="color: #AD0000;">(</span><span class="ex" style="color: null;">3.42</span> MB<span class="kw" style="color: #003B4F;">)</span> <span class="ex" style="color: null;">[20.7s]</span>    </span></code></pre></div>
+<p>One line of code. One line of code, that worked the first time. One line of code that worked the first time and installed everything quickly. It’s a true Christmas miracle.</p>
+
+
+</section>
+
+
+<div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
+
+<ol>
+<li id="fn1"><p>Like so many moments in life when I get this way, <a href="https://twitter.com/dan_p_simpson/status/1565948834542669826">Dan Simpson</a> is at least partially to blame.↩︎</p></li>
+<li id="fn2"><p>Per <em>Lawrence v Texas</em>.↩︎</p></li>
+<li id="fn3"><p>It took all the self-restraint I possess not to refer to this as “the undisclosed viagra problem” in the title. Footnotes are the place for such things Danielle. Footnotes.↩︎</p></li>
+<li id="fn4"><p>These things happen to everyone sometimes honey, it’s no big deal, etc.↩︎</p></li>
+<li id="fn5"><p>Conveniently, pak also allows you to identify these dependencies separately from the R package installation. To do this, use the <code>pkg_system_requirements()</code> function.↩︎</p></li>
+<li id="fn6"><p>There’s an unpleasant name for people who break that convention, and I can’t think of a joke for this one because it’s astonishingly horrible. If you don’t know from personal experience what it feels like, well, consider yourself fortunate. Sigh.↩︎</p></li>
+<li id="fn7"><p>Okay sure, I haven’t <em>technically</em> asked DevOps for their opinion about the possibility of me dumping the authentication requirements on superuser privileges on a work machine. Nevertheless I do have a suspicion I know what their answer would be. So, in the interests of not causing unnecessary distress, perhaps a different approach is in order…↩︎</p></li>
+<li id="fn8"><p>The <a href="https://www.sudo.ws/docs/man/1.9.9/sudo.conf.man/">manual page</a> is online at the linked URL.↩︎</p></li>
+<li id="fn9"><p>In the interests of strict accuracy, I should add that had to create this file myself because it didn’t already exist on my system: prior to making this edit, sudo was using all the default settings. Relatedly, I had to use <code>whereis ssh-askpass</code> in order to find the path to ssh-askpass because the advice I’d seen online listed a different path and, shockingly, it doesn’t work if you don’t provide the correct path.↩︎</p></li>
+<li id="fn10"><p>After restarting R, just in case.↩︎</p></li>
+<li id="fn11"><p>Negotiations are vital and CNC isn’t for newbies.↩︎</p></li>
+<li id="fn12"><p>With flared bases one hopes.↩︎</p></li>
+<li id="fn13"><p>Surely you cannot have expected me to pass up the opportunity to make a safe sudo joke?↩︎</p></li>
+<li id="fn14"><p>Nah, too obvious. Feel free to come up with your own joke here, you don’t need my help.↩︎</p></li>
+<li id="fn15"><p>We all were at one time.↩︎</p></li>
+</ol>
+</section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
+  author = {Danielle Navarro},
+  editor = {},
+  title = {Sudo Ask Me a Password},
+  date = {2022-09-04},
+  url = {https://blog.djnavarro.net/posts/2022-09-04_sudo-askpass},
+  langid = {en}
+}
+</code></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2022" class="csl-entry quarto-appendix-citeas">
+Danielle Navarro. 2022. <span>“Sudo Ask Me a Password.”</span> September
+4, 2022. <a href="https://blog.djnavarro.net/posts/2022-09-04_sudo-askpass">https://blog.djnavarro.net/posts/2022-09-04_sudo-askpass</a>.
+</div></div></section></div> ]]></description>
+  <category>Linux</category>
+  <category>Credentials</category>
+  <category>R</category>
+  <guid>https://blog.djnavarro.net/posts/2022-09-04_sudo-askpass/index.html</guid>
+  <pubDate>Sat, 03 Sep 2022 14:00:00 GMT</pubDate>
+  <media:content url="https://blog.djnavarro.net/posts/2022-09-04_sudo-askpass/img/cover.jpg" medium="image" type="image/jpeg"/>
 </item>
 <item>
   <title>How to visualise a billion rows of data in R with Apache Arrow</title>
