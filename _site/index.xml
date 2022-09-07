@@ -15,691 +15,7 @@
 <link>https://blog.djnavarro.net/index.html</link>
 </image>
 <generator>quarto-1.1.149</generator>
-<lastBuildDate>Thu, 15 Sep 2022 14:00:00 GMT</lastBuildDate>
-<item>
-  <title>Passing Arrow data between Python and R with rpy2</title>
-  <dc:creator>Danielle Navarro</dc:creator>
-  <link>https://blog.djnavarro.net/posts/2022-09-16_arrow-and-rpy2/index.html</link>
-  <description><![CDATA[ 
-
-
-
-
-<!-- 
-cover img: https://unsplash.com/photos/C4sxVxcXEQg
-artist: Reuben Juarez
-licence: unsplash free-to-use 
--->
-<!-- 
-# bash commands to build this post
-conda activate continuation
-export LD_LIBRARY_PATH="$(python -m rpy2.situation LD_LIBRARY_PATH)":${LD_LIBRARY_PATH}
-cd ~/GitHub/sites/quarto-blog/posts/2022-09-16_arrow-and-rpy2
-quarto render index.qmd --execute-daemon-restart
--->
-<blockquote class="blockquote">
-<p>Me: I’m tired I don’t wanna write my blog post you do it <br> 12yo: no <br> Me: pleeeeeeease? you just have to show people how to hand an Arrow Table from Python to R with rpy2 it’s just a smol post <br> 12yo: I don’t know what that is <br> 9yo: also that’s child labour <br> &nbsp; &nbsp; – my children, showing good personal boundaries</p>
-</blockquote>
-<p>In the <a href="../../posts/2022-09-09_reticulated-arrow/">last post on this blog</a> I showed how Apache Arrow makes it possible to hand over data sets from R to Python (and vice versa) without making wasteful copies of the data.</p>
-<p>The solution I outlined there was to use the <a href="https://rstudio.github.io/reticulate/">reticulate</a> package to conduct the handover, and rely on Arrow tools both sides to manage the data. In one sense it’s a perfectly good solution to the problem… but it’s a solution tailor made for R users who need access to Python. When viewed from the perspective of a Python user who needs access to R, it’s a little awkward to have an R package (reticulate) governing the handover.<sup>1</sup> Perhaps we can find a more Pythonic way to approach this?</p>
-<p>A solution to our problem is provided by the <a href="https://rpy2.github.io/">rpy2 module</a> that provides an interface to R from Python, and the <a href="https://rpy2.github.io/rpy2-arrow/version/main/html/index.html">rpy2-arrow extension module</a> that allows it to support Arrow objects. Let’s take a look, shall we?</p>
-<section id="setting-up-the-python-environment" class="level2">
-<h2 class="anchored" data-anchor-id="setting-up-the-python-environment">Setting up the Python environment</h2>
-<p>For the purposes of this post I’ll create a fresh conda environment that I’ll call “continuation”, both because this post is a continuation of the previous one and because the data set I’ll use later is called <a href="https://cdhrdatasys.anu.edu.au/tobecontinued/">To Be Continued</a>. I was able install most packages I need through conda-forge, but for rpy2 and rpy2-arrow I was only able to do so from pypi so I had to use pip for that. So the code for setting up my Python environment was as follows:</p>
-<div class="sourceCode" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb1-1"><span class="ex" style="color: null;">conda</span> create <span class="at" style="color: #657422;">-n</span> continuation</span>
-<span id="cb1-2"><span class="ex" style="color: null;">conda</span> install <span class="at" style="color: #657422;">-n</span> continuation pip pyarrow pandas jupyter</span>
-<span id="cb1-3"><span class="ex" style="color: null;">conda</span> activate continuation</span>
-<span id="cb1-4"><span class="ex" style="color: null;">pip</span> install rpy2 rpy2-arrow</span></code></pre></div>
-</section>
-<section id="introducing-rpy2" class="level2">
-<h2 class="anchored" data-anchor-id="introducing-rpy2">Introducing rpy2</h2>
-<p>The purpose of the rpy2 library is to allow users to call R from Python, typically with the goal of allowing access to statistical packages distributed through CRAN. I’m currently using version 3.5.4, and while this blog post won’t even come close to documenting the full power of the library, the <a href="https://rpy2.github.io/doc/v3.5.x/html/index.html#">rpy2 documentation</a> is quite extensive. To give you a bit of a flavour of it, let’s import the module:</p>
-<div class="cell" data-execution_count="1">
-<div class="sourceCode cell-code" id="cb2" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb2-1"><span class="im" style="color: #00769E;">import</span> rpy2</span>
-<span id="cb2-2">rpy2.__version__</span></code></pre></div>
-<div class="cell-output cell-output-display" data-execution_count="1">
-<pre><code>'3.5.4'</code></pre>
-</div>
-</div>
-<p>This does not in itself give us access to R. In order to call R code rpy2 needs to start R as a child process, and that doesn’t happen until we import <code>rpy2.robjects</code>:</p>
-<div class="cell" data-execution_count="2">
-<div class="sourceCode cell-code" id="cb4" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb4-1"><span class="im" style="color: #00769E;">import</span> rpy2.robjects <span class="im" style="color: #00769E;">as</span> robjects</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code></code></pre>
-</div>
-<div class="cell-output cell-output-stdout">
-<pre><code>R version 4.2.1 (2022-06-23) 🌈</code></pre>
-</div>
-</div>
-<p>You’ll notice that this prints a little startup message. If you’re following along at home you’ll probably see something different: you’re most likely to see the typical R startup message. The only reason it’s truncated on my machine is that I’ve modified my <code>.Rprofile</code> so that R is less chatty on start up. Also I added a pretty little rainbow because why not?<sup>2</sup> <sup>3</sup> Normally you’d see a more verbose startup message from R but I prefer to keep mine quieter so all it does is print the version string and a pretty little rainbow.</p>
-<p>Anyway, our next step is to load some packages. In native R code we’d use the <code>library()</code> function for this, but rpy2 provides a more Pythonic approach. Importing the packages submodule gives us acces to <code>importr()</code>, which is allows us to load packages. The code below illustrates how you can expose the base R package and the utils R package (both of which come bundled with any minimal R installation) to Python:</p>
-<div class="cell" data-execution_count="3">
-<div class="sourceCode cell-code" id="cb7" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb7-1"><span class="im" style="color: #00769E;">import</span> rpy2.robjects.packages <span class="im" style="color: #00769E;">as</span> rpackages</span>
-<span id="cb7-2"></span>
-<span id="cb7-3">base <span class="op" style="color: #5E5E5E;">=</span> rpackages.importr(<span class="st" style="color: #20794D;">"base"</span>)</span>
-<span id="cb7-4">utils <span class="op" style="color: #5E5E5E;">=</span> rpackages.importr(<span class="st" style="color: #20794D;">"utils"</span>)</span></code></pre></div>
-</div>
-<p>Of particular note is that once we have access to utils we can call the native R function <code>install.packages()</code> to install additional packages from CRAN. However, at this point we need to talk a little about how names are translated by rpy2. As every Python user would note, the dot is special and not used within the name of a function. Though not generally recommended in R except in special circumstances,<sup>4</sup> functions containing dots (and various other characters not permitted by Python) are syntactically valid in R. To address this, rpy2 will automatically convert dots to underscores. So if I want to install the fortunes package – a toy package that contains various quotes vaguely related to R – using rpy, this is how I’d do it:<sup>5</sup></p>
-<div class="sourceCode" id="cb8" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb8-1">utils.install_packages(<span class="st" style="color: #20794D;">"fortunes"</span>)</span></code></pre></div>
-<p>Once installed the fortunes package can be imported, allowing me to call the <code>fortune()</code> function from the package:</p>
-<div class="cell" data-execution_count="4">
-<div class="sourceCode cell-code" id="cb9" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb9-1">fortunes <span class="op" style="color: #5E5E5E;">=</span> rpackages.importr(<span class="st" style="color: #20794D;">"fortunes"</span>)</span>
-<span id="cb9-2">fortune <span class="op" style="color: #5E5E5E;">=</span> fortunes.fortune(<span class="dv" style="color: #AD0000;">7</span>)</span>
-<span id="cb9-3"><span class="bu" style="color: null;">print</span>(fortune)</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>
-What we have is nice, but we need something very different.
-   -- Robert Gentleman
-      Statistical Computing 2003, Reisensburg (June 2003)
-
-</code></pre>
-</div>
-</div>
-<p>I’m rather fond of this quote, and it seems very appropriate to the spirit underpinning polyglot data science. Whatever language or tools we’re working in, we’ve usually chosen them for good reason.<sup>6</sup> Sometimes though, we need access to something very different, and we want our tools to be able to talk fluently to each other.</p>
-<p>In any case, although we’ve barely scratched the surface of what rpy2 is capable of, we’re now at the point where we can start tackling the problem of transferring data from Python to R. To do that, however, we’ll need some data.</p>
-</section>
-<section id="about-the-data" class="level2">
-<h2 class="anchored" data-anchor-id="about-the-data">About the data</h2>
-<p>The data set for this post comes from the <a href="https://cdhrdatasys.anu.edu.au/tobecontinued/">To Be Continued</a> database of fiction published in Australian newspapers during the 19th and early 20th century. Originally collected using the incredibly cool <a href="https://trove.nla.gov.au/">Trove</a> resource run by the National Library of Australia, it’s released under a CC-BY-4.0 licence and maintained by Katherine Bode and Carol Hetherington. To get a sense of what the data looks like, let’s use pandas to load the data set and inspect the first few rows:</p>
-<div class="cell" data-execution_count="5">
-<div class="sourceCode cell-code" id="cb11" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb11-1"><span class="im" style="color: #00769E;">import</span> pandas</span>
-<span id="cb11-2"></span>
-<span id="cb11-3">fiction <span class="op" style="color: #5E5E5E;">=</span> pandas.read_csv(<span class="st" style="color: #20794D;">"fiction.csv"</span>, low_memory <span class="op" style="color: #5E5E5E;">=</span> <span class="va" style="color: #111111;">False</span>)</span>
-<span id="cb11-4">fiction.head()</span></code></pre></div>
-<div class="cell-output cell-output-display" data-execution_count="5">
-
-<div>
-
-<table class="dataframe table table-sm table-striped">
-  <thead>
-    <tr>
-      <th></th>
-      <th>Trove ID</th>
-      <th>Common Title</th>
-      <th>Publication Title</th>
-      <th>Start Date</th>
-      <th>End Date</th>
-      <th>Additional Info</th>
-      <th>Length</th>
-      <th>Curated Dataset</th>
-      <th>Identified Sources</th>
-      <th>Publication Source</th>
-      <th>...</th>
-      <th>Other Names</th>
-      <th>Publication Author</th>
-      <th>Gender</th>
-      <th>Nationality</th>
-      <th>Nationality Details</th>
-      <th>Author Details</th>
-      <th>Inscribed Gender</th>
-      <th>Inscribed Nationality</th>
-      <th>Signature</th>
-      <th>Name Category</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <th>0</th>
-      <td>1</td>
-      <td>The Mystery of Edwin Drood</td>
-      <td>The Mystery of Edwin Drood</td>
-      <td>1871-03-04</td>
-      <td>1871-06-03</td>
-      <td>NaN</td>
-      <td>0.0</td>
-      <td>Y</td>
-      <td>LCVF</td>
-      <td>NaN</td>
-      <td>...</td>
-      <td>NaN</td>
-      <td>Dickens, Charles</td>
-      <td>Male</td>
-      <td>British</td>
-      <td>NaN</td>
-      <td>LCVF</td>
-      <td>Male</td>
-      <td>British</td>
-      <td>NaN</td>
-      <td>Attributed</td>
-    </tr>
-    <tr>
-      <th>1</th>
-      <td>2</td>
-      <td>The Mystery of Edwin Drood</td>
-      <td>The Mystery of Edwin Drood</td>
-      <td>1871-03-07</td>
-      <td>1871-05-16</td>
-      <td>NaN</td>
-      <td>0.0</td>
-      <td>Y</td>
-      <td>LCVF</td>
-      <td>NaN</td>
-      <td>...</td>
-      <td>NaN</td>
-      <td>Dickens, Charles</td>
-      <td>Male</td>
-      <td>British</td>
-      <td>NaN</td>
-      <td>LCVF</td>
-      <td>Male</td>
-      <td>British</td>
-      <td>NaN</td>
-      <td>Attributed</td>
-    </tr>
-    <tr>
-      <th>2</th>
-      <td>3</td>
-      <td>Sporting Recollections in Various Countries</td>
-      <td>Sporting Recollections in Various Countries</td>
-      <td>1847-06-16</td>
-      <td>1847-07-07</td>
-      <td>NaN</td>
-      <td>0.0</td>
-      <td>Y</td>
-      <td>WPEDIA</td>
-      <td>Sunday Times</td>
-      <td>...</td>
-      <td>NaN</td>
-      <td>Viardot, M. Louis</td>
-      <td>Male</td>
-      <td>French</td>
-      <td>NaN</td>
-      <td>WPEDIA</td>
-      <td>Male</td>
-      <td>British</td>
-      <td>NaN</td>
-      <td>Attributed</td>
-    </tr>
-    <tr>
-      <th>3</th>
-      <td>4</td>
-      <td>Brownie's Triumph</td>
-      <td>The Jewels</td>
-      <td>1880-05-08</td>
-      <td>1880-08-14</td>
-      <td>NaN</td>
-      <td>0.0</td>
-      <td>Y</td>
-      <td>TJW</td>
-      <td>NaN</td>
-      <td>...</td>
-      <td>Sarah Elizabeth Forbush Downs; Downs, Mrs Geor...</td>
-      <td>Unattributed</td>
-      <td>Female</td>
-      <td>American</td>
-      <td>NaN</td>
-      <td>WPEDIA</td>
-      <td>Uninscribed</td>
-      <td>British</td>
-      <td>NaN</td>
-      <td>Unattributed</td>
-    </tr>
-    <tr>
-      <th>4</th>
-      <td>5</td>
-      <td>The Forsaken Bride</td>
-      <td>Abandoned</td>
-      <td>1880-08-21</td>
-      <td>1880-12-18</td>
-      <td>Fiction. From English, American and Other Peri...</td>
-      <td>0.0</td>
-      <td>Y</td>
-      <td>TJW</td>
-      <td>NaN</td>
-      <td>...</td>
-      <td>Sarah Elizabeth Forbush Downs; Downs, Mrs Geor...</td>
-      <td>Unattributed</td>
-      <td>Female</td>
-      <td>American</td>
-      <td>NaN</td>
-      <td>WPEDIA</td>
-      <td>Uninscribed</td>
-      <td>British</td>
-      <td>NaN</td>
-      <td>Unattributed</td>
-    </tr>
-  </tbody>
-</table>
-<p>5 rows × 28 columns</p>
-</div>
-</div>
-</div>
-<p>We can take a look at the distribution of nationalities among published authors too. The table below counts the number of distinct publications (Trove IDs) and authors for each nationality represented in the data:</p>
-<div class="cell" data-execution_count="6">
-<div class="sourceCode cell-code" id="cb12" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb12-1">fiction[[<span class="st" style="color: #20794D;">"Nationality"</span>, <span class="st" style="color: #20794D;">"Trove ID"</span>, <span class="st" style="color: #20794D;">"Publication Author"</span>]]. <span class="op" style="color: #5E5E5E;">\</span></span>
-<span id="cb12-2">  groupby(<span class="st" style="color: #20794D;">"Nationality"</span>). <span class="op" style="color: #5E5E5E;">\</span></span>
-<span id="cb12-3">  nunique()</span></code></pre></div>
-<div class="cell-output cell-output-display" data-execution_count="6">
-
-<div>
-
-<table class="dataframe table table-sm table-striped">
-  <thead>
-    <tr>
-      <th></th>
-      <th>Trove ID</th>
-      <th>Publication Author</th>
-    </tr>
-    <tr>
-      <th>Nationality</th>
-      <th></th>
-      <th></th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <th>American</th>
-      <td>3399</td>
-      <td>618</td>
-    </tr>
-    <tr>
-      <th>Australian</th>
-      <td>4295</td>
-      <td>757</td>
-    </tr>
-    <tr>
-      <th>Australian/British</th>
-      <td>95</td>
-      <td>12</td>
-    </tr>
-    <tr>
-      <th>Austrian</th>
-      <td>3</td>
-      <td>2</td>
-    </tr>
-    <tr>
-      <th>British</th>
-      <td>10182</td>
-      <td>1351</td>
-    </tr>
-    <tr>
-      <th>British/American</th>
-      <td>2</td>
-      <td>2</td>
-    </tr>
-    <tr>
-      <th>Canadian</th>
-      <td>185</td>
-      <td>29</td>
-    </tr>
-    <tr>
-      <th>Dutch</th>
-      <td>1</td>
-      <td>1</td>
-    </tr>
-    <tr>
-      <th>English</th>
-      <td>2</td>
-      <td>2</td>
-    </tr>
-    <tr>
-      <th>French</th>
-      <td>187</td>
-      <td>64</td>
-    </tr>
-    <tr>
-      <th>German</th>
-      <td>39</td>
-      <td>15</td>
-    </tr>
-    <tr>
-      <th>Hungarian</th>
-      <td>2</td>
-      <td>1</td>
-    </tr>
-    <tr>
-      <th>Irish</th>
-      <td>63</td>
-      <td>33</td>
-    </tr>
-    <tr>
-      <th>Italian</th>
-      <td>12</td>
-      <td>1</td>
-    </tr>
-    <tr>
-      <th>Japanese</th>
-      <td>1</td>
-      <td>1</td>
-    </tr>
-    <tr>
-      <th>Multiple</th>
-      <td>3</td>
-      <td>2</td>
-    </tr>
-    <tr>
-      <th>New Zealand</th>
-      <td>67</td>
-      <td>23</td>
-    </tr>
-    <tr>
-      <th>Polish</th>
-      <td>1</td>
-      <td>1</td>
-    </tr>
-    <tr>
-      <th>Russian</th>
-      <td>18</td>
-      <td>13</td>
-    </tr>
-    <tr>
-      <th>Scottish</th>
-      <td>2</td>
-      <td>2</td>
-    </tr>
-    <tr>
-      <th>South African</th>
-      <td>14</td>
-      <td>5</td>
-    </tr>
-    <tr>
-      <th>Swedish</th>
-      <td>1</td>
-      <td>1</td>
-    </tr>
-    <tr>
-      <th>Swiss</th>
-      <td>2</td>
-      <td>1</td>
-    </tr>
-    <tr>
-      <th>United States</th>
-      <td>2</td>
-      <td>2</td>
-    </tr>
-    <tr>
-      <th>Unknown</th>
-      <td>13133</td>
-      <td>2692</td>
-    </tr>
-    <tr>
-      <th>Unknown, not Australian</th>
-      <td>882</td>
-      <td>88</td>
-    </tr>
-  </tbody>
-</table>
-</div>
-</div>
-</div>
-<p>Now that we have a sense of the data, let’s add Arrow to the mix!</p>
-</section>
-<section id="panda-to-arrow-table" class="level2">
-<h2 class="anchored" data-anchor-id="panda-to-arrow-table">Panda to Arrow Table</h2>
-<p>I’m relatively new to working with Arrow data on the Python side, but I’m pleased to discover that it’s straightforward to construct an Arrow Table from a Pandas DataFrame using pyarrow. Here’s how we do that:</p>
-<div class="cell" data-execution_count="7">
-<div class="sourceCode cell-code" id="cb13" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb13-1"><span class="im" style="color: #00769E;">import</span> pyarrow</span>
-<span id="cb13-2"></span>
-<span id="cb13-3">pyarrow_fiction <span class="op" style="color: #5E5E5E;">=</span> pyarrow.Table.from_pandas(fiction)</span>
-<span id="cb13-4">pyarrow_fiction</span></code></pre></div>
-<div class="cell-output cell-output-display" data-execution_count="7">
-<pre><code>pyarrow.Table
-Trove ID: int64
-Common Title: string
-Publication Title: string
-Start Date: string
-End Date: string
-Additional Info: string
-Length: double
-Curated Dataset: string
-Identified Sources: string
-Publication Source: string
-Newspaper ID: int64
-Newspaper: string
-Newspaper Common Title: string
-Newspaper Location: string
-Newspaper Type: string
-Colony/State: string
-Author ID: int64
-Author: string
-Other Names: string
-Publication Author: string
-Gender: string
-Nationality: string
-Nationality Details: string
-Author Details: string
-Inscribed Gender: string
-Inscribed Nationality: string
-Signature: string
-Name Category : string
-----
-Trove ID: [[1,2,3,4,5,...,35491,35492,35493,35494,35495]]
-Common Title: [["The Mystery of Edwin Drood","The Mystery of Edwin Drood","Sporting Recollections in Various Countries","Brownie's Triumph","The Forsaken Bride",...,"The Heart of Maureen","His Lawful Wife","Love's Reward","Only a Flirt","The Doctor's Protegee"]]
-Publication Title: [["The Mystery of Edwin Drood","The Mystery of Edwin Drood","Sporting Recollections in Various Countries","The Jewels","Abandoned",...,"The Heart of Maureen","His Lawful Wife","Love's Reward","Only a Flirt","The Doctor's Protegee"]]
-Start Date: [["1871-03-04","1871-03-07","1847-06-16","1880-05-08","1880-08-21",...,"1914-01-06","1912-10-26","1911-02-04","1916-05-06","1911-11-25"]]
-End Date: [["1871-06-03","1871-05-16","1847-07-07","1880-08-14","1880-12-18",...,"1914-01-06","1912-10-26","1911-02-04","1916-05-06","1911-11-25"]]
-Additional Info: [[null,null,null,null,"Fiction. From English, American and Other Periodicals",...,"Published by special arrangement. All rights reserved.","Published by special arrangement. All rights reserved.","Published by special arrangement. All rights reserved.","All  Rights Reserved","Published by special arrangement. All rights reserved."]]
-Length: [[0,0,0,0,0,...,0,0,0,0,0]]
-Curated Dataset: [["Y","Y","Y","Y","Y",...,"N","N","N","N","N"]]
-Identified Sources: [["LCVF","LCVF","WPEDIA","TJW","TJW",...,null,null,null,null,null]]
-Publication Source: [[null,null,"Sunday Times",null,null,...,null,null,null,null,null]]
-...</code></pre>
-</div>
-</div>
-<p>The output looks about right to me. It’s formatted slightly differently from what I expect when I’m working with Arrow Tables in R, but this is most definitely an Arrow Table, displayed according to pyarrow conventions.</p>
-<p>Now that we have our data represented as an Arrow Table, we can move onto the really fun part… seamlessly handing the reins back and forth between Python and R without ever making copies of the data object.</p>
-</section>
-<section id="passing-tables-from-python-to-r" class="level2">
-<h2 class="anchored" data-anchor-id="passing-tables-from-python-to-r">Passing Tables from Python to R</h2>
-<p>To pass Arrow objects between Python and R, rpy2 needs a little help because it doesn’t know how to handle Arrow data structures on its own. That’s where the <a href="https://rpy2.github.io/rpy2-arrow/version/main/html/index.html">rpy2-arrow module</a> comes in handy. I’ll quote from the package documentation here:</p>
-<blockquote class="blockquote">
-<p>The package allows the sharing of Apache Arrow data structures (Array, ChunkedArray, Field, RecordBatch, RecordBatchReader, Table, Schema) between Python and R within the same process. The underlying C/C++ pointer is shared, meaning potentially large gain in performance compared to regular arrays or data frames shared between Python and R through the conversion rules included in rpy2.</p>
-</blockquote>
-<p>As with rpy2 itself, I’m not going to attempt a proper tutorial in this post, and instead just restrict myself to showing you how to solve the problem at hand. We want to first import the conversion tools from rpy_arrow:</p>
-<div class="cell" data-execution_count="8">
-<div class="sourceCode cell-code" id="cb15" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb15-1"><span class="im" style="color: #00769E;">import</span> rpy2_arrow.pyarrow_rarrow <span class="im" style="color: #00769E;">as</span> pyra</span></code></pre></div>
-</div>
-<p>Having done that, we use the <code>pyarrow_table_to_r_table()</code> function to pass an Arrow Table from Python to R, like so:</p>
-<div class="cell" data-execution_count="9">
-<div class="sourceCode cell-code" id="cb16" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb16-1">rarrow_fiction <span class="op" style="color: #5E5E5E;">=</span> pyra.pyarrow_table_to_r_table(pyarrow_fiction)</span>
-<span id="cb16-2">rarrow_fiction</span></code></pre></div>
-<div class="cell-output cell-output-display" data-execution_count="9">
-<pre><code>&lt;rpy2.rinterface_lib.sexp.SexpEnvironment object at 0x7f433e5a60c0&gt; [RTYPES.ENVSXP]</code></pre>
-</div>
-</div>
-<p>The printed output isn’t the prettiest thing in the world, but nevertheless it does represent the object of interest. On the Python side we have <code>pyarrow_fiction</code>, a data structure that points to an Arrow Table and enables various compute operations supplied through pyarrow. On the R side we now have <code>rarrow_fiction</code>, a data structure that points to the <em>same</em> Arrow Table and enables compute operations supplied by the R arrow package.</p>
-</section>
-<section id="accessing-the-table-from-the-r-side" class="level2">
-<h2 class="anchored" data-anchor-id="accessing-the-table-from-the-r-side">Accessing the Table from the R side</h2>
-<p>We’re almost done, but the tour isn’t really complete until we’ve stepped out of Python entirely, manipulated the object on the R side, and then passed something back to Python. So let’s do that next.</p>
-<p>In order to pull off that trick within this quarto document – which is running jupyter under the hood – we’ll need to use a little notebook magic. The rpy2 module supplies an <a href="https://rpy2.github.io/doc/latest/html/interactive.html">interface for interactive work</a> that we can enable in a notebook context like this:</p>
-<div class="cell" data-execution_count="10">
-<div class="sourceCode cell-code" id="cb18" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb18-1"><span class="op" style="color: #5E5E5E;">%</span>load_ext rpy2.ipython</span></code></pre></div>
-</div>
-<p>Now that we’ve done this, all I have to do is preface each cell with <code>%%R</code> and the subsequent “Python” code will be passed to R and interpreted there.<sup>7</sup> To start with I’ll load the dplyr and arrow packages, using <code>suppressMessages()</code> to prevent them being chatty and warning me about namespace masking:</p>
-<div class="cell" data-execution_count="11">
-<div class="sourceCode cell-code" id="cb19" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb19-1"><span class="op" style="color: #5E5E5E;">%%</span>R</span>
-<span id="cb19-2">suppressMessages({</span>
-<span id="cb19-3">  library(dplyr)</span>
-<span id="cb19-4">  library(arrow)</span>
-<span id="cb19-5">})</span></code></pre></div>
-</div>
-<p>Now that I’ve done that, I’ll use the dplyr/arrow toolkit to do a little data wrangling on the <code>rarrow_fiction</code> Table. I’m not doing anything fancy, just a little cross-tabulation counting the joint distribution of genders and nationalities represented in the data using the <code>count()</code> function, and using <code>arrange()</code> to sort the results. The part that actually matters for our purposes is the first line:</p>
-<div class="cell" data-execution_count="12">
-<div class="sourceCode cell-code" id="cb20" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb20-1"><span class="op" style="color: #5E5E5E;">%%</span>R <span class="op" style="color: #5E5E5E;">-</span>i rarrow_fiction</span>
-<span id="cb20-2">gender <span class="op" style="color: #5E5E5E;">&lt;-</span> rarrow_fiction <span class="op" style="color: #5E5E5E;">|&gt;</span> </span>
-<span id="cb20-3">  count(Gender, Nationality) <span class="op" style="color: #5E5E5E;">|&gt;</span></span>
-<span id="cb20-4">  arrange(desc(n)) <span class="op" style="color: #5E5E5E;">|&gt;</span></span>
-<span id="cb20-5">  compute()</span>
-<span id="cb20-6">  </span>
-<span id="cb20-7">gender</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>Table</code></pre>
-</div>
-<div class="cell-output cell-output-stdout">
-<pre><code></code></pre>
-</div>
-<div class="cell-output cell-output-stdout">
-<pre><code>63 rows x 3 columns
-$Gender &lt;string&gt;
-$Nationality &lt;string&gt;
-$n &lt;int64&gt;
-
-See $metadata for additional Schema metadata</code></pre>
-</div>
-<div class="cell-output cell-output-stdout">
-<pre><code></code></pre>
-</div>
-</div>
-<p>By using <code>%%R -i rarrow_fiction</code> to specify the cell magic, we’re able to access the <code>rarrow_fiction</code> object from R within this cell and perform the required computations.</p>
-</section>
-<section id="the-journey-home" class="level2">
-<h2 class="anchored" data-anchor-id="the-journey-home">The journey home</h2>
-<p>We now have an object in the embedded R session that we might wish to access from the Python session and convert to a Python object: first an Arrow Table and then possibly a Pandas DataFrame. Here’s how that process works. If you recall from earlier in the post, we imported <code>robjects</code> to start the embedded R session. When we did so, we also exposed <code>robjects.r</code>, which provides access to all objects within that R session. For instance, to create a Python object <code>r_gender</code> that refers to the R data structure we created in the last section, here’s what we’d do:</p>
-<div class="cell" data-execution_count="13">
-<div class="sourceCode cell-code" id="cb25" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb25-1">r_gender <span class="op" style="color: #5E5E5E;">=</span> robjects.r(<span class="st" style="color: #20794D;">'gender'</span>)</span>
-<span id="cb25-2">r_gender</span></code></pre></div>
-<div class="cell-output cell-output-display" data-execution_count="13">
-<pre><code>&lt;rpy2.robjects.environments.Environment object at 0x7f4336520880&gt; [RTYPES.ENVSXP]
-R classes: ('Table', 'ArrowTabular', 'ArrowObject', 'R6')
-n items: 36</code></pre>
-</div>
-</div>
-<p>Notice that this is the same object. The <code>r_gender</code> variable refers to the Arrow Table in R: it’s not a pyarrow table. If we want to convert it to a data structure that pyarrow understands, we can use pyra to make the conversion. It supplies an <code>rarrow_to_py_table()</code> function that is suitable for our purposes:</p>
-<div class="cell" data-execution_count="14">
-<div class="sourceCode cell-code" id="cb27" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb27-1">py_gender <span class="op" style="color: #5E5E5E;">=</span> pyra.rarrow_to_py_table(r_gender)</span>
-<span id="cb27-2">py_gender</span></code></pre></div>
-<div class="cell-output cell-output-display" data-execution_count="14">
-<pre><code>pyarrow.Table
-Gender: string
-Nationality: string
-n: int64
-----
-Gender: [["Unknown","Male","Female","Male","Female",...,"Both","Female","Female","Female",null]]
-Nationality: [["Unknown","British","British","Australian","Australian",...,"Australian/British","British/American","South African","Polish","Australian"]]
-n: [[12832,6420,3346,2537,1687,...,1,1,1,1,1]]</code></pre>
-</div>
-</div>
-<p>Just like that, we’ve handed over the Arrow Table from R back to Python. If we really want to, we can now convert this back to a Pandas DataFrame using pyarrow:</p>
-<div class="cell" data-execution_count="15">
-<div class="sourceCode cell-code" id="cb29" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb29-1">panda_gender <span class="op" style="color: #5E5E5E;">=</span> pyarrow.Table.to_pandas(py_gender)</span>
-<span id="cb29-2">panda_gender</span></code></pre></div>
-<div class="cell-output cell-output-display" data-execution_count="15">
-
-<div>
-
-<table class="dataframe table table-sm table-striped">
-  <thead>
-    <tr>
-      <th></th>
-      <th>Gender</th>
-      <th>Nationality</th>
-      <th>n</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <th>0</th>
-      <td>Unknown</td>
-      <td>Unknown</td>
-      <td>12832</td>
-    </tr>
-    <tr>
-      <th>1</th>
-      <td>Male</td>
-      <td>British</td>
-      <td>6420</td>
-    </tr>
-    <tr>
-      <th>2</th>
-      <td>Female</td>
-      <td>British</td>
-      <td>3346</td>
-    </tr>
-    <tr>
-      <th>3</th>
-      <td>Male</td>
-      <td>Australian</td>
-      <td>2537</td>
-    </tr>
-    <tr>
-      <th>4</th>
-      <td>Female</td>
-      <td>Australian</td>
-      <td>1687</td>
-    </tr>
-    <tr>
-      <th>...</th>
-      <td>...</td>
-      <td>...</td>
-      <td>...</td>
-    </tr>
-    <tr>
-      <th>58</th>
-      <td>Both</td>
-      <td>Australian/British</td>
-      <td>1</td>
-    </tr>
-    <tr>
-      <th>59</th>
-      <td>Female</td>
-      <td>British/American</td>
-      <td>1</td>
-    </tr>
-    <tr>
-      <th>60</th>
-      <td>Female</td>
-      <td>South African</td>
-      <td>1</td>
-    </tr>
-    <tr>
-      <th>61</th>
-      <td>Female</td>
-      <td>Polish</td>
-      <td>1</td>
-    </tr>
-    <tr>
-      <th>62</th>
-      <td>None</td>
-      <td>Australian</td>
-      <td>1</td>
-    </tr>
-  </tbody>
-</table>
-<p>63 rows × 3 columns</p>
-</div>
-</div>
-</div>
-<p>And with that the journey is complete!</p>
-</section>
-
-
-
-<div id="quarto-appendix" class="default"><section id="acknowledgements" class="level2 appendix"><h2 class="quarto-appendix-heading">Acknowledgements</h2><div class="quarto-appendix-contents">
-
-<p>In writing this post I am heavily indebted to Isabella Velásquez, whose fabulous post on <a href="https://rviews.rstudio.com/2022/05/25/calling-r-from-python-with-rpy2/">calling R from Python with rpy2</a> helped me immensely. The <a href="https://arrow.apache.org/docs/python/integration/python_r.html">documentation on integrating PyArrow with R</a> was extremely helpful too!</p>
-
-
-</div></section><section id="footnotes" class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
-
-<ol>
-<li id="fn1"><p>Relatedly, if you’re a Python user blogging in quarto, you are very unlikely to be using the <a href="https://quarto.org/docs/reference/cells/cells-knitr.html">knitr engine</a> to execute code like I did in the last blog post. Instead you’re almost certainly using the <a href="https://quarto.org/docs/reference/cells/cells-jupyter.html">jupyter engine</a>. With that in mind, and with the goal of making this post a little more Pythonic, I’m using Jupyter this time.↩︎</p></li>
-<li id="fn2"><p>As an aside, it’s worth noting that rpy2 has run R with my standard configuration. It hasn’t loaded any specific environment. I was half tempted to talk about how you a Python user could use rpy2 to configure the R environment using the <a href="https://rstudio.github.io/renv/index.html">renv</a> package for instance, but that felt a little beyond the scope of the post. The only thing I will mention is that in this particular use case (passing Arrow objects between R and Python) I would not recommend trying to configure the Python environment and the R environment within the same conda environment. I tried this and oh my… the number of unsolvable conflicts was truly impressive. Keep the Python environment and the R environment separate babes.↩︎</p></li>
-<li id="fn3"><p>As another exciting aside, during the process of writing this post I decided to start using rig to manage multiple installations of R on my machine. This is fine, in the sense that rig manages the PATH to the default R version and rpy2 finds it… but there is an issue in the fine print (it’s in the rpy2 readme but naturally I did not read it until I encountered the problem). Sometimes this leads to a situation where some C libraries can’t be found, and you need to run the following line of code at the terminal before starting Python: <code>export LD_LIBRARY_PATH="$(python -m rpy2.situation LD_LIBRARY_PATH)":${LD_LIBRARY_PATH}</code>↩︎</p></li>
-<li id="fn4"><p>The dot is typically used to denote an <a href="https://adv-r.hadley.nz/s3.html">S3</a> method in R, but because R embraces chaos this is not universally adhered to and in any case S3 is… look, I love S3 but as Hadley Wickham once observed it’s an object oriented programming system that absolutely allows you to shoot yourself in the foot if you want to. Anyway. This is not the post for ramblings about the chaotic splendour of R.↩︎</p></li>
-<li id="fn5"><p>Depending on how blank your R configuration is, you may need to specify which CRAN mirror you want to download the package from before attempting the installation. To do that, include a command like <code>utils.chooseCRANmirror(ind=1)</code> to select the first mirror on the list of known servers.↩︎</p></li>
-<li id="fn6"><p>Seriously. Few things in life annoy me more than “language wars”. Digging your heels in over the perceived superiority of your preferred tool is rarely a useful way to spend your time.↩︎</p></li>
-<li id="fn7"><p>Okay, so some R users might be wondering about what was going on in the last post where I was flipping back and forth between R and Python without apparently doing anything like this. The answer is that when using knitr as the engine (rather than jupyter), python code is automatically interpreted with the help of reticulate. That’s already a feature in knitr, so I didn’t need to invoke it explicitly.↩︎</p></li>
-</ol>
-</section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
-  author = {Danielle Navarro},
-  editor = {},
-  title = {Passing {Arrow} Data Between {Python} and {R} with Rpy2},
-  date = {2022-09-16},
-  url = {https://blog.djnavarro.net/posts/2022-09-16_arrow-and-rpy2},
-  langid = {en}
-}
-</code></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2022" class="csl-entry quarto-appendix-citeas">
-Danielle Navarro. 2022. <span>“Passing Arrow Data Between Python and R
-with Rpy2.”</span> September 16, 2022. <a href="https://blog.djnavarro.net/posts/2022-09-16_arrow-and-rpy2">https://blog.djnavarro.net/posts/2022-09-16_arrow-and-rpy2</a>.
-</div></div></section></div> ]]></description>
-  <category>Apache Arrow</category>
-  <category>R</category>
-  <category>Python</category>
-  <guid>https://blog.djnavarro.net/posts/2022-09-16_arrow-and-rpy2/index.html</guid>
-  <pubDate>Thu, 15 Sep 2022 14:00:00 GMT</pubDate>
-  <media:content url="https://blog.djnavarro.net/posts/2022-09-16_arrow-and-rpy2/img/cover.jpg" medium="image" type="image/jpeg"/>
-</item>
+<lastBuildDate>Thu, 08 Sep 2022 14:00:00 GMT</lastBuildDate>
 <item>
   <title>Passing Arrow data between R and Python with reticulate</title>
   <dc:creator>Danielle Navarro</dc:creator>
@@ -11304,6 +10620,152 @@ Difficulty Level Linux.”</span> August 8, 2021. <a href="https://blog.djnavarr
   <guid>https://blog.djnavarro.net/posts/2021-08-08_git-credential-helpers/index.html</guid>
   <pubDate>Sat, 07 Aug 2021 14:00:00 GMT</pubDate>
   <media:content url="https://blog.djnavarro.net/posts/2021-08-08_git-credential-helpers/credentials.jpg" medium="image" type="image/jpeg"/>
+</item>
+<item>
+  <title>Generative art in R</title>
+  <dc:creator>Danielle Navarro</dc:creator>
+  <link>https://blog.djnavarro.net/posts/2021-07-08_generative-art-in-r/index.html</link>
+  <description><![CDATA[ 
+
+
+
+
+<!--------------- my typical setup ----------------->
+<!--------------- post begins here ----------------->
+<p>A little while ago I was invited by <a href="https://twitter.com/MortaraSara">Sara Mortara</a> to contribute art as part of an exhibit to be presented at the <a href="https://user2021.r-project.org/">2021 useR! conference</a>, along with several artists who I admire greatly. I could hardly say no to that, now could I? So I sent some pieces that I’m fond of, most of which are posted somewhere on my <a href="https://art.djnavarro.net/">art website</a>. I realised later though that I was going to have to talk a little about my art too, and Sara suggested an informal Q&amp;A during the timeslot allocated to the exhibit. Naturally, I agreed since that meant I didn’t have to prepare anything formal, and like all artists I am extremely lazy. Later though, it occurred to me that it actually wouldn’t be terrible if I wrote a blog post to accompany my contribution to the exhibit, loosely based on the questions Sara suggested. And so here we are…</p>
+<p><strong>When did you start using R for art? Do you remember your first piece?</strong></p>
+<p>I started making art in R some time in late 2019. I’d discovered some of the art that <a href="https://www.data-imaginist.com/art">Thomas Lin Pedersen</a> had been making – at the time he was posting pieces from his <em>Genesis</em> series – and at the same time I found the <a href="https://github.com/thomasp85/ambient">ambient</a> package that he was using to create the pieces. Thomas famously does not post source code for his art, and being stubborn and curious I wanted to work out how he was doing it, so I started playing with ambient to see if I could reverse engineer his system. My very first piece was <em>Constellations</em>, shown below. It’s certainly not the prettiest thing I’ve created, and there are a lot of things I’d like to change about it now, but it’s nice to have your early work lying around to see how you’ve changed since then:</p>
+<div class="cell-output-display">
+<img src="https://blog.djnavarro.net/posts/2021-07-08_generative-art-in-r/other/constellations.png" width="100%">
+</div>
+
+<div class="no-row-height column-margin column-container"><div class="">
+<p>Constellations</p>
+</div></div><p>If you follow the link above and look at Thomas’ <em>Genesis</em> pieces you can tell that it’s not even remotely close to the mark, but I did eventually get the hang of it and managed to produce a few pieces like <em>Rainbow Prisms</em> which are closer to the kind of work he was producing:</p>
+<div class="cell-output-display">
+<img src="https://blog.djnavarro.net/posts/2021-07-08_generative-art-in-r/other/rainbow_prisms.png" width="100%">
+</div>
+
+<div class="no-row-height column-margin column-container"><div class="">
+<p>Rainbow Prisms</p>
+</div></div><p>It’s still not quite the same as Thomas’ in style, but by the time I’d worked out how to produce these I decided it was time to change my approach and branch out a bit. I love Thomas’ work of course, but I didn’t want my art to be just a low quality imitation of his! And besides, by that point I’d started discovering a whole lot of other people making generative art in R, such as <a href="https://www.williamrchase.com/">Will Chase</a>, <a href="https://hen.link/antonio">Antonio Sánchez Chinchón</a>, <a href="https://marcusvolz.com/">Marcus Volz</a>, and (somewhat later) <a href="https://ijeamaka-anyene.netlify.app/">Ijeamaka Anyene</a>. Each has their own style and – following the famous advice that <em>art is theft</em> – have shamelessly taken ideas and inspiration from each at different times.</p>
+<p>Some of those early pieces are still around, as part of the <a href="https://art.djnavarro.net/gallery/rosemary/">Rosemary</a> gallery.</p>
+<p><br><br> <strong>Were you an artist before making generative art in R?</strong></p>
+<p>Not really. I always wanted to do more artistic and creative things, but the only thing I’d ever done that required any kind of mix of aesthetic sensibility and craftwork was gardening. I used to have a lovely garden in Adelaide with a mix of Mediterranean and Australian native plants, and I had the same kind of enthusiasm for gardening then as I do for art now. Maybe one day I’ll garden again but there’s no space for that in my Sydney apartment!</p>
+<p><br><br> <strong>Can you talk about your creative process? Do you begin from code or from the outcome you are looking for? Do you start with the color palette in mind, or is it an iterative process?</strong></p>
+<p>I’m honestly not sure I have a consistent process? I spend a lot of time browsing artwork by other people on twitter and instagram, and from time to time I read posts about the techniques that they use. Whenever I do this I end up thinking a bit about how I might use this technique or wondering what methods other artists use to create their work, but I don’t usually act on that information until I think of something I <em>want</em> to do with it. That kind of technical or stylistic information is like background knowledge that lies dormant until I need it.</p>
+<p>Most of the time the starting point for my art is an emotion. I might be angry or lonely or tired, or just in need of something to occupy my mind and distract me from something else. When I start implementing a new system it’s often (though not always) a modification of a previous one. In principle this modification process <em>could</em> go in any direction, but my aesthetic sensibilities depend a lot on my state of mind, and that imposes a bias. I tweak the code one way, and see what it produces. If I like it, I keep the change, if I don’t I reject it. It’s a lot like a <a href="https://en.wikipedia.org/wiki/Metropolis%E2%80%93Hastings_algorithm">Metropolis-Hastings sampler</a> that way, but my mood strongly shapes the accept/reject decision, so the same starting point can lead to different outcomes. As a concrete example, the <a href="https://art.djnavarro.net/gallery/pollen/">Pollen</a>, <a href="https://art.djnavarro.net/gallery/bursts/">Bursts</a> and <a href="https://art.djnavarro.net/gallery/embers/">Embers</a> series are all based on the same underlying engine, the <a href="https://en.wikipedia.org/wiki/Fractal_flame">fractal flame</a> algorithm created by Scott Draves, but my emotional state was very different at the time I coded each version. For example, the <em>Pollen Cloud</em> piece I contributed to the useR exhibit is soft and gentle largely because I was feeling peaceful and relaxed at the time:</p>
+<div class="cell-output-display">
+<img src="https://blog.djnavarro.net/posts/2021-07-08_generative-art-in-r/exhibit/pollen_cloud.jpg" width="100%">
+</div>
+
+<div class="no-row-height column-margin column-container"><div class="">
+<p>Pollen Cloud</p>
+</div></div><p>By way of contrast, the <em>Geometry in a Hurricane</em> piece from <em>Bursts</em> is layered in jagged textures with a chaotic energy because I was angry at the time I was coding:</p>
+<div class="cell-output-display">
+<img src="https://blog.djnavarro.net/posts/2021-07-08_generative-art-in-r/other/geometry_in_a_hurricane.png" width="100%">
+</div>
+
+<div class="no-row-height column-margin column-container"><div class="">
+<p>Geometry in a Hurricane</p>
+</div></div><p>The <em>Soft Ember</em> piece below (also included in the exhibit) has a different feel again. There’s more energy to it than the pollen pieces, but it’s not as chaotic as the bursts series. Again, that’s very much a reflection of my mood. I wasn’t angry when I coded this system, but I wasn’t relaxed either. At the time, something exciting had happened in my life that I wasn’t quite able to do anything about, but I was indulging in the anticipation of a new thing, and some of that emotion ended up showing through in the pieces that I made at the time:</p>
+<div class="cell-output-display">
+<img src="https://blog.djnavarro.net/posts/2021-07-08_generative-art-in-r/exhibit/soft_ember.jpg" width="100%">
+</div>
+
+<div class="no-row-height column-margin column-container"><div class="">
+<p>Soft Ember</p>
+</div></div><p>To bring all this back to the question, it’s very much an iterative process. The driver behind the process is usually an emotion, and the colour choices, the shapes, and the code are all adapted on the fly to meet with how I’m feeling.</p>
+<p><br><br> <strong>What is your inspiration?</strong></p>
+<p>To the extent that my art is driven by emotion, the inspiration for it tends to be tied to sources of strong emotion in my life. Sometimes that emotion comes from the sources of love and joy: family, intimate partners, and so on. The <a href="https://art.djnavarro.net/gallery/heartbleed/">Heartbleed</a> series is one of those. The background texture to these images is generated by simulating a simple Turing machine known as a <a href="https://en.wikipedia.org/wiki/Turmite">turmite</a> and the swirly hearts in the foreground are generated using the toolkit provided by the ambient package. This system is very much motivated from emotional responses to the loved ones in my life. One of the pieces in the exhibit is from this series:</p>
+<div class="cell-output-display">
+<img src="https://blog.djnavarro.net/posts/2021-07-08_generative-art-in-r/exhibit/turmite59_in_red.jpg" width="100%">
+</div>
+
+<div class="no-row-height column-margin column-container"><div class="">
+<p>Turmite 59 in Red</p>
+</div></div><p>Other times the emotional motivation comes from sources of pain - sometimes things that were physically painful, sometimes that were psychologically painful. The <em>Orchid Thorn</em> piece I included in the exhibit is one of those, linked to an intense physically painful experience.</p>
+<div class="cell-output-display">
+<img src="https://blog.djnavarro.net/posts/2021-07-08_generative-art-in-r/exhibit/orchid_thorn.png" width="100%">
+</div>
+
+<div class="no-row-height column-margin column-container"><div class="">
+<p>Orchid Thorn</p>
+</div></div><p>The <em>Bitterness</em> piece below, which I haven’t done much with other than post to my <a href="https://www.instagram.com/daniellenavarro77/">instagram</a>, is strongly tied to the psychological stresses associated with my gender transition. Yes, there’s a softness to the piece, but there’s also a sandpaper-like texture there that makes me think of abrasion. The colour shifts make me think about transitions, but the roughness at some of the boundaries reminds me that change is often painful.</p>
+<div class="cell-output-display">
+<img src="https://blog.djnavarro.net/posts/2021-07-08_generative-art-in-r/other/bitterness.jpg" width="100%">
+</div>
+
+<div class="no-row-height column-margin column-container"><div class="">
+<p>Bitterness</p>
+</div></div><p>One odd property of the art, at least from my point of view, is that looking at a given piece recalls to mind the events and emotions that inspired the work, and to some extent that recollection becomes a way of re-experiencing the events. Sometimes that’s a good thing. Not always though.</p>
+<p><br><br> <strong>What is your advice for people who wants to create art in R?</strong></p>
+<p>I think I’d suggest three things. Find artists you like, read about their processes. Sometimes they’ll show source code or link to algorithms like I’ve done in a few places in this piece, and it can be really valuable to try to retrace their steps. There’s nothing wrong with learning technique by initially copying other artists and then developing your own style as you go.</p>
+<p>The second thing I’d suggest, for R folks specifically, is to take advantage of the skills you already have. Most of us have skills in simulation, data wrangling, and data visualisation, and those skills can be repurposed for artistic work quite easily. A lot of my pieces are created using that specific combination. I’ll often define a stochastic process and sample data from it using tools in base R, use <a href="https://dplyr.tidyverse.org/">dplyr</a> to transform and manipulate it, then use <a href="https://ggplot2.tidyverse.org/">ggplot2</a> to map the data structure onto a visualisation. One of the nice things about dplyr and ggplot2 being compositional grammars is the fact that you can “reuse” their parts for different purposes. I get a lot of artistic mileage out of <code>geom_point()</code> and <code>geom_polygon()</code>, and quite frankly <a href="https://purrr.tidyverse.org/">purrr</a> is an absolute godsend when the generative process you’re working with is iterative in nature.</p>
+<p>The other thing would be try not to put pressure on yourself to be good at it immediately. I wasn’t, and I don’t think anyone else was either. Earlier I showed the <em>Constellations</em> piece and referred to it as the first piece I created. In a way that’s true, because it was the first time I reached a level that I felt comfortable showing to other people. But I made a lot of junk before that, and I made a lot of junk after that. I make some good art now (or so people tell me) precisely <em>because</em> I made a lot of bad art before. Even now, though, I can’t tell which systems will end up good and which will end up bad. It’s a bit of a lottery, and I’m trying my best not to worry too much about how the lottery works. I like to have fun playing with visual tools, and sometimes the tinkering takes me interesting places.</p>
+<p><br><br> <strong>Anything to add about your pieces in the exhibit?</strong></p>
+<p>Not a lot. Several of the pieces I’ve contributed are already linked above, but I might just say a little about the other pieces and how they were made. The <em>Silhouette in Teal</em> piece uses the <a href="https://flametree.djnavarro.net/">flametree</a> generative art package to create the tree shown in silhouette in the foreground, and a simple random walk to generate the texture in the background:</p>
+<div class="cell-output-display">
+<img src="https://blog.djnavarro.net/posts/2021-07-08_generative-art-in-r/exhibit/silhouette_in_teal.jpg" width="100%">
+</div>
+
+<div class="no-row-height column-margin column-container"><div class="">
+<p>Silhouette in Teal</p>
+</div></div><p>It has also been surprisingly popular on my <a href="https://society6.com/djnavarro">Society6</a> store, which you can visit if you want some of my art on random objects. I am not sure why, but I have sold a lot more shower curtains and yoga mats than I would have expected to sell in my lifetime.</p>
+<p><em>Leviathan</em> emerged from my first attempt to create simulated watercolours in R using this <a href="https://tylerxhobbs.com/essays/2017/a-generative-approach-to-simulating-watercolor-paints">guide</a> written by Tyler Hobbs. I was in a dark mood at the time and the ominous mood to the piece seems quite fitting to me.</p>
+<div class="cell-output-display">
+<img src="https://blog.djnavarro.net/posts/2021-07-08_generative-art-in-r/exhibit/leviathan.png" width="100%">
+</div>
+
+<div class="no-row-height column-margin column-container"><div class="">
+<p>Leviathan</p>
+</div></div><p>The <em>Floral Effect</em> piece is an odd one. It’s part of the <a href="https://art.djnavarro.net/gallery/viewports/">Viewports</a> series that I created by applying Thomas Lin Pedersen’s <a href="https://ggfx.data-imaginist.com/">ggfx</a> package over the top of the output of the same system I used to create the <a href="https://art.djnavarro.net/gallery/native-flora/">Native Flora</a> series, which in turn is an application of the flametree system I mentioned earlier. I quite like it when these systems build on top of one another.</p>
+<div class="cell-output-display">
+<img src="https://blog.djnavarro.net/posts/2021-07-08_generative-art-in-r/exhibit/floral_effect.png" width="100%">
+</div>
+
+<div class="no-row-height column-margin column-container"><div class="">
+<p>Floral Effect</p>
+</div></div><p>The last piece I included, <em>Fire and Ice</em>, is a little different from the others in that it’s not a “pure” generative system. It works by reading an image file into R, using Chris Marcum’s <a href="https://github.com/cmarcum/halftoner">halftoner</a> package to convert it to a <a href="https://en.wikipedia.org/wiki/Halftone">halftone image</a>, and then manipulate that image using the tools provided in the ambient package. The end result is something that still resembles the original image but has more of a painted feel:</p>
+<div class="cell-output-display">
+<img src="https://blog.djnavarro.net/posts/2021-07-08_generative-art-in-r/exhibit/fire_and_ice.jpg" width="100%">
+</div>
+
+<!--------------- appendices go here ----------------->
+<div class="no-row-height column-margin column-container"><div class="">
+<p>Fire and Ice</p>
+</div></div><div class="cell">
+<div class="cell-output-display">
+
+
+</div>
+</div>
+
+
+
+<div id="quarto-appendix" class="default"><section id="last-updated" class="level2 appendix"><h2 class="quarto-appendix-heading">Last updated</h2><div class="quarto-appendix-contents">
+
+<p>2022-08-23 13:12:01 AEST</p>
+</div></section><section id="details" class="level2 appendix"><h2 class="quarto-appendix-heading">Details</h2><div class="quarto-appendix-contents">
+
+<p><a href="https://github.com/djnavarro/quarto-blog/tree/main/posts/2021-07-08_generative-art-in-r/index.qmd">source code</a>, <a href="https://github.com/djnavarro/quarto-blog/tree/main/posts/2021-07-08_generative-art-in-r/renv.lock">R environment</a></p>
+</div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2021,
+  author = {Danielle Navarro},
+  editor = {},
+  title = {Generative Art in {R}},
+  date = {2021-07-08},
+  url = {https://blog.djnavarro.net/generative-art-in-r},
+  langid = {en}
+}
+</code></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2021" class="csl-entry quarto-appendix-citeas">
+Danielle Navarro. 2021. <span>“Generative Art in R.”</span> July 8,
+2021. <a href="https://blog.djnavarro.net/generative-art-in-r">https://blog.djnavarro.net/generative-art-in-r</a>.
+</div></div></section></div> ]]></description>
+  <category>Art</category>
+  <category>R</category>
+  <guid>https://blog.djnavarro.net/posts/2021-07-08_generative-art-in-r/index.html</guid>
+  <pubDate>Wed, 07 Jul 2021 14:00:00 GMT</pubDate>
+  <media:content url="https://blog.djnavarro.net/posts/2021-07-08_generative-art-in-r/turmite59-in-red.jpg" medium="image" type="image/jpeg"/>
 </item>
 </channel>
 </rss>
