@@ -1,6 +1,6 @@
 ---
 title: "Passing Arrow data between Python and R with rpy2"
-description: "Part two of the data-sharing post. An approach to sharing Arrow Tables between R and Python, using the rpy2 Python module in place of the reticulate R package. The same goal is achieved, using a slightly more Pythonic toolkit"
+description: "Part two of the data-sharing post. An approach to sharing Arrow Tables between R and Python, using the rpy2 Python library in place of the reticulate R package. The same goal is achieved, using a slightly more Pythonic toolkit"
 date: "2022-09-16"
 categories: [Apache Arrow, R, Python]
 image: "img/cover.jpg"
@@ -32,7 +32,7 @@ In the [last post on this blog](/posts/2022-09-09_reticulated-arrow/) I showed h
 
 The solution I outlined there was to use the [reticulate](https://rstudio.github.io/reticulate/) package to conduct the handover, and rely on Arrow tools both sides to manage the data. In one sense it's a perfectly good solution to the problem... but it's a solution tailor made for R users who need access to Python. When viewed from the perspective of a Python user who needs access to R, it's a little awkward to have an R package (reticulate) governing the handover.^[Relatedly, if you're a Python user blogging in quarto, you are very unlikely to be using the [knitr engine](https://quarto.org/docs/reference/cells/cells-knitr.html) to execute code like I did in the last blog post. Instead you're almost certainly using the [jupyter engine](https://quarto.org/docs/reference/cells/cells-jupyter.html). With that in mind, and with the goal of making this post a little more Pythonic, I'm using Jupyter this time.] Perhaps we can find a more Pythonic way to approach this?
 
-A solution to our problem is provided by the [rpy2 module](https://rpy2.github.io/) that provides an interface to R from Python, and the [rpy2-arrow extension module](https://rpy2.github.io/rpy2-arrow/version/main/html/index.html) that allows it to support Arrow objects. Let's take a look, shall we?
+A solution to our problem is provided by the [rpy2 library](https://rpy2.github.io/) that provides an interface to R from Python, and the [rpy2-arrow extension](https://rpy2.github.io/rpy2-arrow/version/main/html/index.html) that allows it to support Arrow objects. Let's take a look, shall we?
 
 ## Setting up the Python environment
 
@@ -48,28 +48,28 @@ pip install rpy2 rpy2-arrow
 
 ## Introducing rpy2
 
-The purpose of the rpy2 library is to allow users to call R from Python, typically with the goal of allowing access to statistical packages distributed through CRAN. I'm currently using version 3.5.4, and while this blog post won't even come close to documenting the full power of the library, the [rpy2 documentation](https://rpy2.github.io/doc/v3.5.x/html/index.html#) is quite extensive. To give you a bit of a flavour of it, let's import the module:
+The purpose of the rpy2 library is to allow users to call R from Python, typically with the goal of allowing access to statistical packages distributed through [CRAN](https://cran.r-project.org/). I'm currently using version 3.5.4, and while this blog post won't even come close to documenting the full power of the library, the [rpy2 documentation](https://rpy2.github.io/doc/v3.5.x/html/index.html#) is quite extensive. To give you a bit of a flavour of it, let's import the library:
 
 ```{python import-rpy2}
 import rpy2
 rpy2.__version__
 ```
 
-This does not in itself give us access to R. In order to call R code rpy2 needs to start R as a child process, and that doesn't happen until we import `rpy2.robjects`:
+This does not in itself give us access to R. That doesn't happen until we explicitly import either the `robjects` module (a high level interface to R) or import the `rinterface` model (a low level interface) and call `rinterface.initr()`. This post won't cover `rinterface` at all; we can accomplish everything we need to using only the high level interface provided by `robjects`. So let's import the module and, in doing so, start R running as a child process:
 
 ```{python import-robjects}
 import rpy2.robjects as robjects
 ```
 
-You'll notice that this prints a little startup message. If you're following along at home you'll probably see something different: you're most likely to see the typical R startup message. The only reason it's truncated on my machine is that I've modified my `.Rprofile` so that R is less chatty on start up. Also I added a pretty little rainbow because why not?^[As an aside, it's worth noting that rpy2 has run R with my standard configuration. It hasn't loaded any specific environment. I was half tempted to talk about how you a Python user could use rpy2 to configure the R environment using the [renv](https://rstudio.github.io/renv/index.html) package for instance, but that felt a little beyond the scope of the post. The only thing I will mention is that in this particular use case (passing Arrow objects between R and Python) I would not recommend trying to configure the Python environment and the R environment within the same conda environment. I tried this and oh my... the number of unsolvable conflicts was truly impressive. Keep the Python environment and the R environment separate babes.] ^[As another exciting aside, during the process of writing this post I decided to start using rig to manage multiple installations of R on my machine. This is fine, in the sense that rig manages the PATH to the default R version and rpy2 finds it... but there is an issue in the fine print (it's in the rpy2 readme but naturally I did not read it until I encountered the problem). Sometimes this leads to a situation where some C libraries can't be found, and you need to run the following line of code at the terminal before starting Python: `export LD_LIBRARY_PATH="$(python -m rpy2.situation LD_LIBRARY_PATH)":${LD_LIBRARY_PATH}`] Normally you'd see a more verbose startup message from R but I prefer to keep mine quieter so all it does is print the version string and a pretty little rainbow. 
+You'll notice that this prints a little startup message. If you're following along at home you'll probably see something different: you're most likely to see the typical R startup message. The only reason it's truncated on my machine is that I've modified my `.Rprofile` so that R is less chatty on start up. Also I added a pretty little rainbow because why not?^[As an aside, it's worth noting that rpy2 has run R with my standard configuration. It hasn't loaded any specific environment. I was half tempted to talk about how you a Python user could use rpy2 to configure the R environment using the [renv](https://rstudio.github.io/renv/index.html) package for instance, but that felt a little beyond the scope of the post. The only thing I will mention is that in this particular use case (passing Arrow objects between R and Python) I would not recommend trying to configure the Python environment and the R environment within the same conda environment. I tried this and oh my... the number of unsolvable conflicts was truly impressive. Additionally, while I am mentioning painful details, during the process of writing this post I decided to start using [rig](https://github.com/r-lib/rig) to manage multiple installations of R on my machine. This is fine, in the sense that rig manages the PATH to the default R version and rpy2 finds it... but there is an issue in the fine print (it's in the rpy2 readme but naturally I did not read it until I encountered the problem). Sometimes this leads to a situation where some C libraries can't be found, and you need to run the following line of code at the terminal before starting Python: `export LD_LIBRARY_PATH="$(python -m rpy2.situation LD_LIBRARY_PATH)":${LD_LIBRARY_PATH}`] Normally you'd see a more verbose startup message from R but I prefer to keep mine quieter so all it does is print the version string and a pretty little rainbow. 
 
-Anyway, our next step is to load some packages. In native R code we'd use the `library()` function for this, but rpy2 provides a more Pythonic approach. Importing the packages submodule gives us acces to `importr()`, which is allows us to load packages. The code below illustrates how you can expose the base R package and the utils R package (both of which come bundled with any minimal R installation) to Python:
+Anyway, our next step is to load some packages. In native R code we'd use the `library()` function for this, but rpy2 provides a more Pythonic approach. Importing the packages submodule gives us access to `importr()`, which is allows us to load packages. The code below illustrates how you can expose the base R package and the utils R package (both of which come bundled with any minimal R installation) to Python:
 
 ```{python import rpackages}
-import rpy2.robjects.packages as rpackages
+import rpy2.robjects.packages as pkg
 
-base = rpackages.importr("base")
-utils = rpackages.importr("utils")
+base = pkg.importr("base")
+utils = pkg.importr("utils")
 ```
 
 Of particular note is that once we have access to utils we can call the native R function `install.packages()` to install additional packages from CRAN. However, at this point we need to talk a little about how names are translated by rpy2. As every Python user would note, the dot is special and not used within the name of a function. Though not generally recommended in R except in special circumstances,^[The dot is typically used to denote an [S3](https://adv-r.hadley.nz/s3.html) method in R, but because R embraces chaos this is not universally adhered to and in any case S3 is... look, I love S3 but as Hadley Wickham once observed it's an object oriented programming system that absolutely allows you to shoot yourself in the foot if you want to. Anyway. This is not the post for ramblings about the chaotic splendour of R.] functions containing dots (and various other characters not permitted by Python) are syntactically valid in R. To address this, rpy2 will automatically convert dots to underscores. So if I want to install the fortunes package -- a toy package that contains various quotes vaguely related to R -- using rpy, this is how I'd do it:^[Depending on how blank your R configuration is, you may need to specify which CRAN mirror you want to download the package from before attempting the installation. To do that, include a command like `utils.chooseCRANmirror(ind=1)` to select the first mirror on the list of known servers.]
@@ -81,7 +81,7 @@ utils.install_packages("fortunes")
 Once installed the fortunes package can be imported, allowing me to call the `fortune()` function from the package:
 
 ```{python use-fortunes}
-fortunes = rpackages.importr("fortunes")
+fortunes = pkg.importr("fortunes")
 fortune = fortunes.fortune(7)
 print(fortune)
 ```
