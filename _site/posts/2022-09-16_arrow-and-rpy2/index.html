@@ -280,9 +280,16 @@ quarto render index.qmd --execute-daemon-restart
 <p>In the <a href="../../posts/2022-09-09_reticulated-arrow/">last post on this blog</a> I showed how <a href="https://arrow.apache.org/">Apache Arrow</a> makes it possible to hand over data sets from R to Python (and vice versa) without making wasteful copies of the data.</p>
 <p>The solution I outlined there was to use the <a href="https://rstudio.github.io/reticulate/">reticulate</a> package to conduct the handover, and rely on Arrow tools both sides to manage the data. In one sense it’s a perfectly good solution to the problem… but it’s a solution tailor made for R users who need access to Python. When viewed from the perspective of a Python user who needs access to R, it’s a little awkward to have an R package (reticulate) governing the handover.<a href="#fn1" class="footnote-ref" id="fnref1" role="doc-noteref"><sup>1</sup></a> Perhaps we can find a more Pythonic way to approach this?</p>
 <p>A solution to our problem is provided by the <a href="https://rpy2.github.io/">rpy2 library</a> that provides an interface to R from Python, and the <a href="https://rpy2.github.io/rpy2-arrow/version/main/html/index.html">rpy2-arrow extension</a> that allows it to support Arrow objects. Let’s take a look, shall we?</p>
+<p><br><br></p>
 <div class="column-body-outset">
-<p><img src="img/cover.jpg" class="img-fluid"> “The Arrow hits the mark: Sport, politics, and the drama”. <a href="https://en.wikipedia.org/wiki/The_Arrow_(newspaper)">The Arrow</a> was a newspaper published in Sydney between 1896 and 1936, having previously been known as <em>The Dead Bird</em> and <em>Bird O’Freedom</em>.</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="img/cover.jpg" class="img-fluid figure-img"></p>
+<p></p><figcaption class="figure-caption">This was the banner image that appeared atop the first page of <a href="https://en.wikipedia.org/wiki/The_Arrow_(newspaper)">The Arrow</a>, a newspaper that was published in Sydney between 1896 and 1936. It seems an appropriate way to start this post given that I’m talking about Apache Arrow, and I’m using a data set that lists works of fiction published in Australian newspapers in the 19th and early 20th centuries.<a href="#fn2" class="footnote-ref" id="fnref2" role="doc-noteref"><sup>2</sup></a></figcaption><p></p>
+</figure>
 </div>
+</div>
+<p><br><br></p>
 <section id="setting-up-the-python-environment" class="level2">
 <h2 class="anchored" data-anchor-id="setting-up-the-python-environment">Setting up the Python environment</h2>
 <p>For the purposes of this post I’ll create a fresh conda environment that I’ll call “continuation”, both because this post is a continuation of the previous one and because the data set I’ll use later is called <a href="https://cdhrdatasys.anu.edu.au/tobecontinued/">To Be Continued</a>. I was able install most packages I need through conda-forge, but for rpy2 and rpy2-arrow I was only able to do so from pypi so I had to use pip for that. So the code for setting up my Python environment was as follows:</p>
@@ -290,6 +297,7 @@ quarto render index.qmd --execute-daemon-restart
 <span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="ex">conda</span> install <span class="at">-n</span> continuation pip pyarrow pandas jupyter</span>
 <span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="ex">conda</span> activate continuation</span>
 <span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="ex">pip</span> install rpy2 rpy2-arrow</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p><br><br></p>
 </section>
 <section id="introducing-rpy2" class="level2 page-columns page-full">
 <h2 class="anchored" data-anchor-id="introducing-rpy2">Introducing rpy2</h2>
@@ -311,7 +319,7 @@ quarto render index.qmd --execute-daemon-restart
 <pre><code>R version 4.2.1 (2022-06-23) 🌈</code></pre>
 </div>
 </div>
-<p>You’ll notice that this prints a little startup message. If you’re following along at home you’ll probably see something different: you’re most likely to see the typical R startup message. The only reason it’s truncated on my machine is that I’ve modified my <code>.Rprofile</code> so that R is less chatty on start up. Also I added a pretty little rainbow because why not?<a href="#fn2" class="footnote-ref" id="fnref2" role="doc-noteref"><sup>2</sup></a> Normally you’d see a more verbose startup message from R but I prefer to keep mine quieter so all it does is print the version string and a pretty little rainbow.</p>
+<p>You’ll notice that this prints a little startup message. If you’re following along at home you’ll probably see something different: you’re most likely to see the typical R startup message. The only reason it’s truncated on my machine is that I’ve modified my <code>.Rprofile</code> so that R is less chatty on start up. Also I added a pretty little rainbow because why not?<a href="#fn3" class="footnote-ref" id="fnref3" role="doc-noteref"><sup>3</sup></a> Normally you’d see a more verbose startup message from R but I prefer to keep mine quieter so all it does is print the version string and a pretty little rainbow.</p>
 <p>Anyway, our next step is to load some packages. In native R code we’d use the <code>library()</code> function for this, but rpy2 provides a more Pythonic approach. Importing the packages submodule gives us access to <code>importr()</code>, which is allows us to load packages. The code below illustrates how you can expose the base R package and the utils R package (both of which come bundled with any minimal R installation) to Python:</p>
 <div class="cell" data-execution_count="3">
 <div class="sourceCode cell-code" id="cb7"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> rpy2.robjects.packages <span class="im">as</span> pkg</span>
@@ -319,7 +327,7 @@ quarto render index.qmd --execute-daemon-restart
 <span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a>base <span class="op">=</span> pkg.importr(<span class="st">"base"</span>)</span>
 <span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>utils <span class="op">=</span> pkg.importr(<span class="st">"utils"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
-<p>Of particular note is that once we have access to utils we can call the native R function <code>install.packages()</code> to install additional packages from CRAN. However, at this point we need to talk a little about how names are translated by rpy2. As every Python user would immediately notice, the dot is special and is not used within the name of a function. In contrast, although not generally recommended in R except in special circumstances,<a href="#fn3" class="footnote-ref" id="fnref3" role="doc-noteref"><sup>3</sup></a> function names containing dots are syntactically valid in R.<a href="#fn4" class="footnote-ref" id="fnref4" role="doc-noteref"><sup>4</sup></a> To address this, rpy2 will automatically convert dots to underscores. So if I want to install the <a href="https://cran.r-project.org/package=fortunes">fortunes</a> package – a simple package that contains quotes vaguely related to R – using rpy2, this is how I’d do it:<a href="#fn5" class="footnote-ref" id="fnref5" role="doc-noteref"><sup>5</sup></a></p>
+<p>Of particular note is that once we have access to utils we can call the native R function <code>install.packages()</code> to install additional packages from CRAN. However, at this point we need to talk a little about how names are translated by rpy2. As every Python user would immediately notice, the dot is special and is not used within the name of a function. In contrast, although not generally recommended in R except in special circumstances,<a href="#fn4" class="footnote-ref" id="fnref4" role="doc-noteref"><sup>4</sup></a> function names containing dots are syntactically valid in R.<a href="#fn5" class="footnote-ref" id="fnref5" role="doc-noteref"><sup>5</sup></a> To address this, rpy2 will automatically convert dots to underscores. So if I want to install the <a href="https://cran.r-project.org/package=fortunes">fortunes</a> package – a simple package that contains quotes vaguely related to R – using rpy2, this is how I’d do it:<a href="#fn6" class="footnote-ref" id="fnref6" role="doc-noteref"><sup>6</sup></a></p>
 <div class="sourceCode" id="cb8"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a>utils.install_packages(<span class="st">"fortunes"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <p>Once installed the fortunes package can be imported, allowing me to call the <code>fortune()</code> function from the package:</p>
 <div class="cell" data-execution_count="4">
@@ -337,9 +345,16 @@ What we have is nice, but we need something very different.
 </div>
 <p>I’m rather fond of this quote, and it seems very appropriate to the spirit of what polyglot data science is all about. Whatever language or tools we’re working in, we’ve usually chosen them for good reason. But there is no tool that works all the time, nor any language that is ideal for every situation. Sometimes we need something very different, and when we do it is very helpful if our tools able to talk fluently to each other.</p>
 <p>Anyway, that’s enough rambling. We’re now at the point that we can tackle the problem of transferring data from Python to R, but in order to do that we’ll need some data…</p>
+<p><br><br></p>
 <div class="column-body-outset">
-<p><img src="img/serpent.jpg" class="img-fluid"> Header illustration to “The Trail of the Serpent” by M. E. Braddon. Published in <em>Molong Express and Western District Advertiser</em>, 4 August 1906. <a href="https://trove.nla.gov.au/newspaper/article/139469044">Trove article 139469044</a></p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="img/serpent.jpg" class="img-fluid figure-img"></p>
+<p></p><figcaption class="figure-caption">Header illustration to “The Trail of the Serpent” by M. E. Braddon. Published in <em>Molong Express and Western District Advertiser</em>, 4 August 1906. <a href="https://trove.nla.gov.au/newspaper/article/139469044">Trove article 139469044</a></figcaption><p></p>
+</figure>
 </div>
+</div>
+<p><br><br></p>
 </section>
 <section id="about-the-data" class="level2 page-columns page-full">
 <h2 class="anchored" data-anchor-id="about-the-data">About the data</h2>
@@ -667,9 +682,16 @@ What we have is nice, but we need something very different.
 </div>
 </div>
 <p>Now that we have a sense of the data, let’s add Arrow to the mix!</p>
+<p><br><br></p>
 <div class="column-body-outset">
-<p><img src="img/darlington.jpg" class="img-fluid"> “One of them raised himself on his elbow and fired point blank at Darlington”. Illustration from “The Lass That Loved a Miner” by J. Monk Foster. Published in <em>Australian Town and Country Journal</em>, 14 April 1894. <a href="https://trove.nla.gov.au/newspaper/article/71212612">Trove article 71212612</a></p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="img/darlington.jpg" class="img-fluid figure-img"></p>
+<p></p><figcaption class="figure-caption">“One of them raised himself on his elbow and fired point blank at Darlington”. Illustration from “The Lass That Loved a Miner” by J. Monk Foster. Published in <em>Australian Town and Country Journal</em>, 14 April 1894. <a href="https://trove.nla.gov.au/newspaper/article/71212612">Trove article 71212612</a></figcaption><p></p>
+</figure>
 </div>
+</div>
+<p><br><br></p>
 </section>
 <section id="pandas-to-arrow-tables" class="level2">
 <h2 class="anchored" data-anchor-id="pandas-to-arrow-tables">Pandas to Arrow Tables</h2>
@@ -725,6 +747,7 @@ Publication Source: [[null,null,"Sunday Times",null,null,...,null,null,null,null
 </div>
 <p>The output looks about right to me. It’s formatted slightly differently from what I expect when I’m working with Arrow Tables in R, but this is most definitely an Arrow Table, displayed according to pyarrow conventions.</p>
 <p>Now that we have our data represented as an Arrow Table, we can move onto the really fun part… seamlessly handing the reins back and forth between Python and R without ever making copies of the data object.</p>
+<p><br><br></p>
 </section>
 <section id="passing-tables-from-python-to-r" class="level2 page-columns page-full">
 <h2 class="anchored" data-anchor-id="passing-tables-from-python-to-r">Passing Tables from Python to R</h2>
@@ -741,13 +764,20 @@ Publication Source: [[null,null,"Sunday Times",null,null,...,null,null,null,null
 <div class="sourceCode cell-code" id="cb16"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a>rarrow_fiction <span class="op">=</span> pyra.pyarrow_table_to_r_table(pyarrow_fiction)</span>
 <span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a>rarrow_fiction</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-display" data-execution_count="9">
-<pre><code>&lt;rpy2.rinterface_lib.sexp.SexpEnvironment object at 0x7febbf259100&gt; [RTYPES.ENVSXP]</code></pre>
+<pre><code>&lt;rpy2.rinterface_lib.sexp.SexpEnvironment object at 0x7f8444b52ec0&gt; [RTYPES.ENVSXP]</code></pre>
 </div>
 </div>
 <p>The printed output isn’t the prettiest thing in the world, but nevertheless it does represent the object of interest. On the Python side we have <code>pyarrow_fiction</code>, a data structure that points to an Arrow Table and enables various compute operations supplied through pyarrow. On the R side we now have <code>rarrow_fiction</code>, a data structure that points to the <em>same</em> Arrow Table and enables compute operations supplied by the R arrow package.</p>
+<p><br><br></p>
 <div class="column-body-outset">
-<p><img src="img/flowers.jpg" class="img-fluid"> Header illustration to “Where flowers are Rare” by Val Jameson. Published in <em>The Sydney Mail</em>, 8 December 1909. <a href="https://trove.nla.gov.au/newspaper/article/165736425">Trove article 165736425</a></p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="img/flowers.jpg" class="img-fluid figure-img"></p>
+<p></p><figcaption class="figure-caption">Header illustration to “Where flowers are Rare” by Val Jameson. Published in <em>The Sydney Mail</em>, 8 December 1909. <a href="https://trove.nla.gov.au/newspaper/article/165736425">Trove article 165736425</a></figcaption><p></p>
+</figure>
 </div>
+</div>
+<p><br><br></p>
 </section>
 <section id="accessing-the-table-from-the-r-side" class="level2">
 <h2 class="anchored" data-anchor-id="accessing-the-table-from-the-r-side">Accessing the Table from the R side</h2>
@@ -756,7 +786,7 @@ Publication Source: [[null,null,"Sunday Times",null,null,...,null,null,null,null
 <div class="cell" data-execution_count="10">
 <div class="sourceCode cell-code" id="cb18"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="op">%</span>load_ext rpy2.ipython</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
-<p>Now that we’ve done this, all I have to do is preface each cell with <code>%%R</code> and the subsequent “Python” code will be passed to R and interpreted there.<a href="#fn6" class="footnote-ref" id="fnref6" role="doc-noteref"><sup>6</sup></a> To start with I’ll load the dplyr and arrow packages, using <code>suppressMessages()</code> to prevent them being chatty and warning me about namespace masking:</p>
+<p>Now that we’ve done this, all I have to do is preface each cell with <code>%%R</code> and the subsequent “Python” code will be passed to R and interpreted there.<a href="#fn7" class="footnote-ref" id="fnref7" role="doc-noteref"><sup>7</sup></a> To start with I’ll load the dplyr and arrow packages, using <code>suppressMessages()</code> to prevent them being chatty and warning me about namespace masking:</p>
 <div class="cell" data-execution_count="11">
 <div class="sourceCode cell-code" id="cb19"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a><span class="op">%%</span>R</span>
 <span id="cb19-2"><a href="#cb19-2" aria-hidden="true" tabindex="-1"></a>suppressMessages({</span>
@@ -792,6 +822,7 @@ See $metadata for additional Schema metadata</code></pre>
 </div>
 </div>
 <p>By using <code>%%R -i rarrow_fiction</code> to specify the cell magic, we’re able to access the <code>rarrow_fiction</code> object from R within this cell and perform the required computations.</p>
+<p><br><br></p>
 </section>
 <section id="the-journey-home" class="level2 page-columns page-full">
 <h2 class="anchored" data-anchor-id="the-journey-home">The journey home</h2>
@@ -800,7 +831,7 @@ See $metadata for additional Schema metadata</code></pre>
 <div class="sourceCode cell-code" id="cb25"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb25-1"><a href="#cb25-1" aria-hidden="true" tabindex="-1"></a>r_gender <span class="op">=</span> robjects.r(<span class="st">'gender'</span>)</span>
 <span id="cb25-2"><a href="#cb25-2" aria-hidden="true" tabindex="-1"></a>r_gender</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-display" data-execution_count="13">
-<pre><code>&lt;rpy2.robjects.environments.Environment object at 0x7febcfd7a180&gt; [RTYPES.ENVSXP]
+<pre><code>&lt;rpy2.robjects.environments.Environment object at 0x7f8444b4fbc0&gt; [RTYPES.ENVSXP]
 R classes: ('Table', 'ArrowTabular', 'ArrowObject', 'R6')
 n items: 36</code></pre>
 </div>
@@ -911,8 +942,14 @@ n: [[12832,6420,3346,2537,1687,...,1,1,1,1,1]]</code></pre>
 </div>
 </div>
 <p>And with that the journey is complete!</p>
+<p><br><br></p>
 <div class="column-body-outset">
-<p><img src="img/motorcar.jpg" class="img-fluid"> Header illustration to “The Black Motor Car” by J. B. Harris Burland. Published in – and I am absolutely not kidding you – <em>The Arrow</em>, 25 November 1905. <a href="https://trove.nla.gov.au/newspaper/article/103450814">Trove article 103450814</a></p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="img/motorcar.jpg" class="img-fluid figure-img"></p>
+<p></p><figcaption class="figure-caption">Header illustration to “The Black Motor Car” by J. B. Harris Burland. Published in – just to bring us full circle – <em>The Arrow</em>, 25 November 1905. <a href="https://trove.nla.gov.au/newspaper/article/103450814">Trove article 103450814</a></figcaption><p></p>
+</figure>
+</div>
 </div>
 </section>
 
@@ -927,11 +964,12 @@ n: [[12832,6420,3346,2537,1687,...,1,1,1,1,1]]</code></pre>
 
 <ol>
 <li id="fn1"><p>Relatedly, if you’re a Python user blogging in quarto, you are very unlikely to be using the <a href="https://quarto.org/docs/reference/cells/cells-knitr.html">knitr engine</a> to execute code like I did in the last blog post. Instead you’re almost certainly using the <a href="https://quarto.org/docs/reference/cells/cells-jupyter.html">jupyter engine</a>. With that in mind, and with the goal of making this post a little more Pythonic, I’m using Jupyter this time.<a href="#fnref1" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
-<li id="fn2"><p>As an aside, it’s worth noting that rpy2 has run R with my standard configuration. It hasn’t loaded any specific environment. I was half tempted to talk about how you a Python user could use rpy2 to configure the R environment using the <a href="https://rstudio.github.io/renv/index.html">renv</a> package for instance, but that felt a little beyond the scope of the post. The only thing I will mention is that in this particular use case (passing Arrow objects between R and Python) I would not recommend trying to configure the Python environment and the R environment within the same conda environment. I tried this and oh my… the number of unsolvable conflicts was truly impressive. Additionally, while I am mentioning painful details, during the process of writing this post I decided to start using <a href="https://github.com/r-lib/rig">rig</a> to manage multiple installations of R on my machine. This is fine, in the sense that rig manages the PATH to the default R version and rpy2 finds it… but there is an issue in the fine print (it’s in the rpy2 readme but naturally I did not read it until I encountered the problem). Sometimes this leads to a situation where some C libraries can’t be found, and you need to run the following line of code at the terminal before starting Python: <code>export LD_LIBRARY_PATH="$(python -m rpy2.situation LD_LIBRARY_PATH)":${LD_LIBRARY_PATH}</code><a href="#fnref2" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
-<li id="fn3"><p>The dot is typically used to denote an <a href="https://adv-r.hadley.nz/s3.html">S3</a> method in R, but because R embraces chaos this is not universally adhered to and in any case S3 is… look, I love S3 but as Hadley Wickham once observed it’s an object oriented programming system that absolutely allows you to shoot yourself in the foot if you want to. Anyway. This is not the post for ramblings about the chaotic splendour of R.<a href="#fnref3" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
-<li id="fn4"><p>This issue holds more generally. R permits a lot more flexibility in function names than Python. The rpy2 documentation discusses how this and related issue are handled in the section on <a href="https://rpy2.github.io/doc/v2.9.x/html/robjects_functions.html">calling functions</a>.<a href="#fnref4" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
-<li id="fn5"><p>Depending on how blank your R configuration is, you may need to specify which CRAN mirror you want to download the package from before attempting the installation. To do that, include a command like <code>utils.chooseCRANmirror(ind=1)</code> to select the first mirror on the list of known servers.<a href="#fnref5" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
-<li id="fn6"><p>Okay, so some R users might be wondering about what was going on in the last post where I was flipping back and forth between R and Python without apparently doing anything like this. The answer is that when using knitr as the engine (rather than jupyter), python code is automatically interpreted with the help of reticulate. That’s already a feature in knitr, so I didn’t need to invoke it explicitly.<a href="#fnref6" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn2"><p>A note on image copyright. As far as I can tell all images in this post are public domain. They’re all sourced from Trove and are all over a century old, meaning that they are all covered by the “plus 50 years” rule in Australian copyright law (the current “plus 70” rule does not apply retroactively). The original illustrator is difficult to determine, and given the age of the images so too is any potential copyright holder, but it seems extremely unlikely that any are still covered by any copyright. As always, I will remove any image if I discover that I am incorrect in this.<a href="#fnref2" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn3"><p>As an aside, it’s worth noting that rpy2 has run R with my standard configuration. It hasn’t loaded any specific environment. I was half tempted to talk about how you a Python user could use rpy2 to configure the R environment using the <a href="https://rstudio.github.io/renv/index.html">renv</a> package for instance, but that felt a little beyond the scope of the post. The only thing I will mention is that in this particular use case (passing Arrow objects between R and Python) I would not recommend trying to configure the Python environment and the R environment within the same conda environment. I tried this and oh my… the number of unsolvable conflicts was truly impressive. Additionally, while I am mentioning painful details, during the process of writing this post I decided to start using <a href="https://github.com/r-lib/rig">rig</a> to manage multiple installations of R on my machine. This is fine, in the sense that rig manages the PATH to the default R version and rpy2 finds it… but there is an issue in the fine print (it’s in the rpy2 readme but naturally I did not read it until I encountered the problem). Sometimes this leads to a situation where some C libraries can’t be found, and you need to run the following line of code at the terminal before starting Python: <code>export LD_LIBRARY_PATH="$(python -m rpy2.situation LD_LIBRARY_PATH)":${LD_LIBRARY_PATH}</code><a href="#fnref3" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn4"><p>The dot is typically used to denote an <a href="https://adv-r.hadley.nz/s3.html">S3</a> method in R, but because R embraces chaos this is not universally adhered to and in any case S3 is… look, I love S3 but as Hadley Wickham once observed it’s an object oriented programming system that absolutely allows you to shoot yourself in the foot if you want to. Anyway. This is not the post for ramblings about the chaotic splendour of R.<a href="#fnref4" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn5"><p>This issue holds more generally. R permits a lot more flexibility in function names than Python. The rpy2 documentation discusses how this and related issue are handled in the section on <a href="https://rpy2.github.io/doc/v2.9.x/html/robjects_functions.html">calling functions</a>.<a href="#fnref5" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn6"><p>Depending on how blank your R configuration is, you may need to specify which CRAN mirror you want to download the package from before attempting the installation. To do that, include a command like <code>utils.chooseCRANmirror(ind=1)</code> to select the first mirror on the list of known servers.<a href="#fnref6" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn7"><p>Okay, so some R users might be wondering about what was going on in the last post where I was flipping back and forth between R and Python without apparently doing anything like this. The answer is that when using knitr as the engine (rather than jupyter), python code is automatically interpreted with the help of reticulate. That’s already a feature in knitr, so I didn’t need to invoke it explicitly.<a href="#fnref7" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
 </ol>
 </section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
   author = {Danielle Navarro},
