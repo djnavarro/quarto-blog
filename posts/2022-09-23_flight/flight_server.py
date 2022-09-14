@@ -13,8 +13,9 @@ import pyarrow.flight as flight
 #
 # https://arrow.apache.org/docs/format/Flight.html#protocol-buffer-definitions
 
-
-class Server(flight.FlightServerBase):
+# Why Waitress? It's a "Table Server". Yes this is an excuse to write the whole
+# post around The Waitresses. 
+class Waitress(flight.FlightServerBase):
   
     # On initialisation, create a Server object specifying the host 
     # and the port. The list of flights for this server is empty
@@ -47,10 +48,15 @@ class Server(flight.FlightServerBase):
     # Helper function to construct a key from a descriptor.
     # The key is a tuple containing the descriptor type, command, and path
     def _get_key(self, descriptor):
-      value = descriptor.descriptor_type.value
-      command = descriptor.command
-      path = tuple(descriptor.path or tuple())
-      return (value, command, path)
+        value = descriptor.descriptor_type.value
+        command = descriptor.command
+        path = tuple(descriptor.path or tuple())
+        return (value, command, path)
+
+    def _get_descriptor(self, key):
+        if key[1] is not None:
+            return flight.FlightDescriptor.for_command(key[1])
+        return flight.FlightDescriptor.for_path(*key[2])
 
     # Helper function to get the total size of the table (in bytes). To 
     # do that we stream to a "mock" sink, using the helper class 
@@ -80,8 +86,8 @@ class Server(flight.FlightServerBase):
     def _get_flight_info(self, key, descriptor, table):
         schema = table.schema
         total_records = table.num_rows
-        total_bytes = self._get_table_size(table)
-        endpoints = self._get_flight_endpoint
+        total_bytes = Waitress._get_table_size(table)
+        endpoints = self._get_flight_endpoint(key)
         return flight.FlightInfo(schema, descriptor, endpoints, 
                                  total_records, total_bytes)
 
@@ -100,27 +106,30 @@ class Server(flight.FlightServerBase):
     # they always have context as the second argument because Arrow. Later
     # arguments vary depending on context
 
+    # if the flight exists call _get_flight_info(), otherwise raise an error
     def get_flight_info(self, context, descriptor):
         print("get_flight_info")
-        key = self._get_key(descriptor) # note: original used class attribute Server._get_key
+        key = Waitress._get_key(descriptor)
         if key in self.flights:
             table = self.flights[key]
-            return self._get_flight_info(key, descriptor, table)
+            flight_info = self._get_flight_info(key, descriptor, table)
+            return flight_info
         raise KeyError('Flight not found.')
 
+    # generator function (i.e., stateful function: thingy in python that yields 
+    # a different result each time it's called depending on where it's up to in
+    # the execution) that returns a call to _get_flight_info
     def list_flights(self, context, criteria):
         print("list_flights")
         for key, table in self.flights.items():
-            if key[1] is not None:
-                descriptor = flight.FlightDescriptor.for_command(key[1])
-            else:
-                descriptor = flight.FlightDescriptor.for_path(*key[2])
+            descriptor = Waitress._get_descriptor(key)
+            flight_info = self._get_flight_info(key, descriptor, table)
+            yield flight_info
 
-            yield self._get_flight_info(key, descriptor, table)
 
     def do_put(self, context, descriptor, reader, writer):
         print("do_put")
-        key = self._get_key(descriptor)
+        key = Waitress._get_key(descriptor)
         print(key)
         self.flights[key] = reader.read_all()
         print(self.flights[key])
