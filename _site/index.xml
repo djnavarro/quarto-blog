@@ -15,7 +15,620 @@
 <link>https://blog.djnavarro.net/index.html</link>
 </image>
 <generator>quarto-1.1.149</generator>
-<lastBuildDate>Sat, 03 Sep 2022 14:00:00 GMT</lastBuildDate>
+<lastBuildDate>Thu, 08 Sep 2022 14:00:00 GMT</lastBuildDate>
+<item>
+  <title>Passing Arrow data between R and Python with reticulate</title>
+  <dc:creator>Danielle Navarro</dc:creator>
+  <link>https://blog.djnavarro.net/posts/2022-09-09_reticulated-arrow/index.html</link>
+  <description><![CDATA[ 
+
+
+
+
+<!-- 
+cover img: https://unsplash.com/photos/yrcaXCWe0VY
+artist: David Clode
+licence: unsplash free-to-use 
+-->
+<!--------------- my typical setup ----------------->
+<p>As the 21st century gears up for its quarter-life crisis, the trend in data science is toward multi-language tools. I use <a href="https://quarto.org/">quarto</a> to write this blog, a document preparation system that supports code evaluation in R, Python, Julia, and more. My work revolves around <a href="https://arrow.apache.org/">Apache Arrow</a>, a toolbox for data analysis and interchange with implementations in multiple languages. You get the idea. In one sense this new development is fantastic – your language of choice is much more likely to be supported in the future than it ever was in the past. In another sense it is daunting – it sometimes feels like we need to learn <em>all the things</em> in order to get by in this brave new world. Meanwhile we all have our actual jobs to do and we don’t have the time. In the <a href="https://www.youtube.com/watch?v=1i739SyCu9I">immortal words of Bob Katter</a> commenting on same sex marriage legislation in Australia,</p>
+<blockquote class="blockquote">
+<p>I mean, you know, people are entitled to their sexual proclivities. Let there be a thousand blossoms bloom as far as I’m concerned, you know…</p>
+<p>&nbsp; &nbsp; &nbsp; [<em>pauses, expression turns dark</em>]</p>
+<p>…but I ain’t spending any time on it because, in the meantime, every three months a person is torn to pieces by a crocodile in North Queensland</p>
+</blockquote>
+<p>I mean, he makes a good point? Or at least, it’s a good point about data science: I’m not convinced it was a stellar contribution to the discussion of LGBT rights in the antipodes.<sup>1</sup> There’s a lot going on in the data science world, none of us can keep pace with all of it, and we’re all trying our best not to be eaten by crocodiles.</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[R code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><span class="fu" style="color: #4758AB;">library</span>(tidyverse)</span>
+<span id="cb1-2"><span class="fu" style="color: #4758AB;">library</span>(tictoc)</span></code></pre></div>
+</div>
+</div>
+<p><br><br></p>
+<div class="column-body-outset">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://blog.djnavarro.net/posts/2022-09-09_reticulated-arrow/img/cover.jpg" class="img-fluid figure-img"></p>
+<p></p><figcaption class="figure-caption">Much of this post relates to the “reticulate” R package, named for the reticulated python, whose name in turn comes from the pattern of markings on the scales shown in the image above: to “reticulate” is to arrange or mark something like a network. It is deeply important me to me to stress that this animal is not – strictly speaking or even informally speaking – a crocodile. My sincerest apologies to Bob Katter, but this post is not in fact about crocodile-related deaths in northern Queensland. I also promise that this is the only snake picture in the post, and all subsequent reptile photos will only of the adorable kind, even the crocodile one. <a href="https://unsplash.com/photos/yrcaXCWe0VY">Original image</a> freely available courtesy of David Clode via Unsplash.</figcaption><p></p>
+</figure>
+</div>
+</div>
+<p><br><br></p>
+<section id="data-interchange-in-a-polyglot-world" class="level2 page-columns page-full">
+<h2 class="anchored" data-anchor-id="data-interchange-in-a-polyglot-world">Data interchange in a polyglot world</h2>
+<p>In the spirit of saving you from at least one reptilian threat, this post is a primer on how to efficiently pass control of a large data set between R and Python <em>without</em> making any wasteful copies of the data.</p>
+<p>The idea to write this post emerged from a recent discussion on Twitter started by <a href="https://twitter.com/mxcatnap/status/1559991199494279169">Cass Wilkinson Saldaña</a> about passing control of a data set from R to Python, and a comment in that discussion by <a href="https://twitter.com/jonkeane/status/1560016227824721920">Jon Keane</a> mentioning that with the assistance of Apache Arrow this handover can be made very smooth, and incredibly efficient too. Unfortunately, to be able to do this you need to know the trick, and as they regretfully mentioned in the thread, the trick isn’t well documented yet.</p>
+<p>In time the documentation will of course improve, but in the here-and-now it seems like a good idea to explain how the magic trick works…</p>
+<p><br><br></p>
+<section id="the-reticulate-trick" class="level3">
+<h3 class="anchored" data-anchor-id="the-reticulate-trick">The reticulate trick</h3>
+<p>The “trick” is simple: if your data are stored as an Arrow Table, and you use the <a href="https://rstudio.github.io/reticulate/">reticulate</a> package to pass it from R to Python (or vice versa), only the metadata changes hands. Because an Arrow Table has the <em>same</em> structure in-memory when accessed from Python as it does in R, the data set itself does not need to be touched at all. The only thing that needs to happen is the language on the receiving end needs to be told <em>where</em> the data are stored. Or, to put it another way, we just pass a pointer across. This all happens invisibly, so if you know how to use reticulate,<sup>2</sup> you already know almost everything you need to know and can skip straight to the section on passing Arrow objects. If you’re like Danielle-From-Last-Month and have absolutely no idea how reticulate works, read on…</p>
+<p><br><br></p>
+</section>
+<section id="managing-the-python-environment-from-r" class="level3 page-columns page-full">
+<h3 class="anchored" data-anchor-id="managing-the-python-environment-from-r">Managing the Python environment from R</h3>
+<p>If reticulate is not already on your system, you can install it from CRAN with <code>install.packages("reticulate")</code>. Once installed, you can load it in the usual fashion:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[R code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb2" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1"><span class="fu" style="color: #4758AB;">library</span>(reticulate)</span></code></pre></div>
+</div>
+</div>
+<p>What happens next depends a little on whether you already have a Python set up. If you don’t have a preferred Python configuration on your machine and would like to let reticulate manage everything for you, then you can do something like this:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[R code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb3" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1"><span class="fu" style="color: #4758AB;">install_python</span>()</span>
+<span id="cb3-2"><span class="fu" style="color: #4758AB;">install_miniconda</span>()</span></code></pre></div>
+</div>
+</div>
+<p>This will set you up with a default Python build, managed by a copy of <a href="https://docs.conda.io/en/latest/miniconda.html">Miniconda</a> that it installs in an OS-specific location that you can discover by calling <code>miniconda_path()</code>.</p>
+<p>The previous approach is a perfectly sensible way to use reticulate, but in the end I took a slightly different path. If you’re like me and already have Python and Miniconda configured on your local machine, you probably <em>don’t</em> want reticulate potentially installing new versions and possibly making a mess of things.<sup>3</sup> You probably want to use your existing set up and ensure that reticulate knows where to find everything. If that’s the case, what you want to do is edit your <code>.Renviron</code> file<sup>4</sup> and set the RETICULATE_MINICONDA_PATH variable. Add a line like this one,</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[within .Renviron]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb4" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb4-1"><span class="va" style="color: #111111;">RETICULATE_MINICONDA_PATH</span><span class="op" style="color: #5E5E5E;">=</span>/home/danielle/miniconda3/</span></code></pre></div>
+</div>
+</div>
+<p>where you should specify the path to your Miniconda installation, not mine 😁</p>
+<p>Regardless of which method you’ve followed, you can use <code>conda_list()</code> to display a summary of all your Python environments.<sup>5</sup> Somehow, despite the fact that I went to the effort of setting everything up, I haven’t used Python much on this machine, so my list of environments is short:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[R code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb5" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1"><span class="fu" style="color: #4758AB;">conda_list</span>()</span></code></pre></div>
+</div>
+</div>
+<div class="cell">
+<div class="cell-output cell-output-stdout">
+<pre><code>          name                                                 python
+1         base                   /home/danielle/miniconda3/bin/python
+2 continuation /home/danielle/miniconda3/envs/continuation/bin/python
+3 r-reticulate /home/danielle/miniconda3/envs/r-reticulate/bin/python</code></pre>
+</div>
+</div>
+<p>For the purposes of this post I’ll create a new environment that – in honour of Bob Katter and the reptilian terror in the north – I will call “reptilia”. To keep things neat I’ll install<sup>6</sup> the pandas and pyarrow packages that this post will be using at the same time:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[R code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb7" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1"><span class="fu" style="color: #4758AB;">conda_create</span>(</span>
+<span id="cb7-2">  <span class="at" style="color: #657422;">envname =</span> <span class="st" style="color: #20794D;">"reptilia"</span>,</span>
+<span id="cb7-3">  <span class="at" style="color: #657422;">packages =</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="st" style="color: #20794D;">"pandas"</span>, <span class="st" style="color: #20794D;">"pyarrow"</span>)</span>
+<span id="cb7-4">)</span></code></pre></div>
+</div>
+</div>
+<p>When I list my conda environments I see that the reptilia environment exists:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[R code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb8" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1"><span class="fu" style="color: #4758AB;">conda_list</span>()</span></code></pre></div>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>          name                                                 python
+1         base                   /home/danielle/miniconda3/bin/python
+2 continuation /home/danielle/miniconda3/envs/continuation/bin/python
+3 r-reticulate /home/danielle/miniconda3/envs/r-reticulate/bin/python
+4     reptilia     /home/danielle/miniconda3/envs/reptilia/bin/python</code></pre>
+</div>
+</div>
+<p>To ensure that reticulate uses the reptilia environment throughout this post,<sup>7</sup> I call the <code>use_miniconda()</code> function and specify the environment name:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[R code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb10" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1"><span class="fu" style="color: #4758AB;">use_miniconda</span>(<span class="st" style="color: #20794D;">"reptilia"</span>)</span></code></pre></div>
+</div>
+</div>
+<p>Our set up is now complete!</p>
+<p><br><br></p>
+<div class="column-body-outset">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://blog.djnavarro.net/posts/2022-09-09_reticulated-arrow/img/david-clode-UBN5a4IA3bk-unsplash.jpg" class="img-fluid figure-img"></p>
+<p></p><figcaption class="figure-caption">A tree frog photographed near Cairns, because some reptiles are cute and adorable – even in Queensland. <a href="https://unsplash.com/photos/UBN5a4IA3bk">Original image</a> freely available courtesy of David Clode via Unsplash.</figcaption><p></p>
+</figure>
+</div>
+</div>
+<p><br><br></p>
+</section>
+<section id="using-reticulate-to-call-python-from-r" class="level3">
+<h3 class="anchored" data-anchor-id="using-reticulate-to-call-python-from-r">Using reticulate to call Python from R</h3>
+<p>Now that my environment is set up I’m ready to use Python. When calling Python code from within R, some code translation is necessary due to the differences in syntax across languages. As a simple example, let’s say I have my regular Python session open and I want to check my Python version and executable. To do this I’d import the sys library:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[python code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb11" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb11-1"><span class="im" style="color: #00769E;">import</span> sys</span>
+<span id="cb11-2"><span class="bu" style="color: null;">print</span>(sys.version)</span>
+<span id="cb11-3"><span class="bu" style="color: null;">print</span>(sys.executable)</span></code></pre></div>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>3.8.13 | packaged by conda-forge | (default, Mar 25 2022, 06:15:10) 
+[GCC 10.3.0]
+/home/danielle/miniconda3/envs/reptilia/bin/python</code></pre>
+</div>
+</div>
+<p>To execute these commands from R, the code needs some minor changes. The <code>import()</code> function replaces the <code>import</code> keyword, and <code>$</code> replaces <code>.</code> as the accessor:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[R code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb13" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1">sys <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">import</span>(<span class="st" style="color: #20794D;">"sys"</span>)</span>
+<span id="cb13-2">sys<span class="sc" style="color: #5E5E5E;">$</span>version</span>
+<span id="cb13-3">sys<span class="sc" style="color: #5E5E5E;">$</span>executable</span></code></pre></div>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] "3.8.13 | packaged by conda-forge | (default, Mar 25 2022, 06:15:10) \n[GCC 10.3.0]"
+[1] "/home/danielle/miniconda3/envs/reptilia/bin/python"</code></pre>
+</div>
+</div>
+<p>The code looks more R-like, but Python is doing the work.<sup>8</sup></p>
+<p><br><br></p>
+</section>
+<section id="copying-data-frames-between-languages" class="level3 page-columns page-full">
+<h3 class="anchored" data-anchor-id="copying-data-frames-between-languages">Copying data frames between languages</h3>
+<p>Okay, now that we understand the basics of reticulate, it’s time to tackle the problem of transferring data sets between R and Python. For now, let’s leave Arrow out of this. All we’re going to do is take an ordinary R data frame and transfer it to Python.</p>
+<p>First, let’s load some data into R. Sticking to the reptilian theme we’ve got going here, the data are taken from <a href="http://www.reptile-database.org/">The Reptile Database</a> (accessed August 31 2022), an open and freely available catalog of reptile species and their scientific classifications.<sup>9</sup></p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[R code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb15" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb15-1">taxa <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">read_csv2</span>(<span class="st" style="color: #20794D;">"taxa.csv"</span>)</span>
+<span id="cb15-2">taxa</span></code></pre></div>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 14,930 × 10
+   taxon_id family subfa…¹ genus subge…² speci…³ autho…⁴ infra…⁵ infra…⁶ infra…⁷
+   &lt;chr&gt;    &lt;chr&gt;  &lt;chr&gt;   &lt;chr&gt; &lt;lgl&gt;   &lt;chr&gt;   &lt;chr&gt;   &lt;chr&gt;   &lt;chr&gt;   &lt;chr&gt;  
+ 1 Ablepha… Scinc… Eugong… Able… NA      alaicus ELPATJ… &lt;NA&gt;    &lt;NA&gt;    &lt;NA&gt;   
+ 2 Ablepha… Scinc… Eugong… Able… NA      alaicus ELPATJ… subsp.  alaicus ELPATJ…
+ 3 Ablepha… Scinc… Eugong… Able… NA      alaicus ELPATJ… subsp.  kucenk… NIKOLS…
+ 4 Ablepha… Scinc… Eugong… Able… NA      alaicus ELPATJ… subsp.  yakovl… (EREMC…
+ 5 Ablepha… Scinc… Eugong… Able… NA      anatol… SCHMID… &lt;NA&gt;    &lt;NA&gt;    &lt;NA&gt;   
+ 6 Ablepha… Scinc… Eugong… Able… NA      bivitt… (MENET… &lt;NA&gt;    &lt;NA&gt;    &lt;NA&gt;   
+ 7 Ablepha… Scinc… Eugong… Able… NA      budaki  GÖCMEN… &lt;NA&gt;    &lt;NA&gt;    &lt;NA&gt;   
+ 8 Ablepha… Scinc… Eugong… Able… NA      cherno… DAREVS… &lt;NA&gt;    &lt;NA&gt;    &lt;NA&gt;   
+ 9 Ablepha… Scinc… Eugong… Able… NA      cherno… DAREVS… subsp.  cherno… DAREVS…
+10 Ablepha… Scinc… Eugong… Able… NA      cherno… DAREVS… subsp.  eiselti SCHMID…
+# … with 14,920 more rows, and abbreviated variable names ¹​subfamily,
+#   ²​subgenus, ³​specific_epithet, ⁴​authority, ⁵​infraspecific_marker,
+#   ⁶​infraspecific_epithet, ⁷​infraspecific_authority</code></pre>
+</div>
+</div>
+<p>Currently this object is stored in-memory as an R data frame and we want to move it to Python. However, because Python data structures are different from R data structures, what this actually requires us to do is make a copy of the whole data set inside Python, using a Python-native data structure (in this case a Pandas DataFrame). Thankfully, reticulate does this seamlessly with the <code>r_to_py()</code> function:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[R code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb17" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb17-1">py_taxa <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">r_to_py</span>(taxa)</span>
+<span id="cb17-2">py_taxa</span></code></pre></div>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>                            taxon_id  ...    infraspecific_authority
+0                 Ablepharus_alaicus  ...                         NA
+1         Ablepharus_alaicus_alaicus  ...          ELPATJEVSKY, 1901
+2        Ablepharus_alaicus_kucenkoi  ...             NIKOLSKY, 1902
+3      Ablepharus_alaicus_yakovlevae  ...         (EREMCHENKO, 1983)
+4              Ablepharus_anatolicus  ...                         NA
+...                              ...  ...                        ...
+14925           Zygaspis_quadrifrons  ...                         NA
+14926               Zygaspis_vandami  ...                         NA
+14927     Zygaspis_vandami_arenicola  ...  BROADLEY &amp; BROADLEY, 1997
+14928       Zygaspis_vandami_vandami  ...         (FITZSIMONS, 1930)
+14929              Zygaspis_violacea  ...                         NA
+
+[14930 rows x 10 columns]</code></pre>
+</div>
+</div>
+<p>Within the Python session, an object called <code>r</code> has been created: the Pandas DataFrame object is stored as <code>r.py_taxa</code>, and we can manipulate it using Python code in whatever fashion we normally might.</p>
+<p>It helps to see a concrete example. To keep things simple, let’s pop over to our Python session and give ourselves a simple data wrangling task. Our goal is to count the number of entries in the data set for each reptilian family using Pandas syntax:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[python code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb19" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb19-1">counts <span class="op" style="color: #5E5E5E;">=</span> r. <span class="op" style="color: #5E5E5E;">\</span></span>
+<span id="cb19-2">  py_taxa[[<span class="st" style="color: #20794D;">"family"</span>, <span class="st" style="color: #20794D;">"taxon_id"</span>]]. <span class="op" style="color: #5E5E5E;">\</span></span>
+<span id="cb19-3">  groupby(<span class="st" style="color: #20794D;">"family"</span>). <span class="op" style="color: #5E5E5E;">\</span></span>
+<span id="cb19-4">  agg(<span class="bu" style="color: null;">len</span>)</span>
+<span id="cb19-5">  </span>
+<span id="cb19-6">counts</span></code></pre></div>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>                 taxon_id
+family                   
+Acrochordidae           3
+Agamidae              677
+Alligatoridae          16
+Alopoglossidae         32
+Amphisbaenidae        206
+...                   ...
+Xenodermidae           30
+Xenopeltidae            2
+Xenophidiidae           2
+Xenosauridae           15
+Xenotyphlopidae         1
+
+[93 rows x 1 columns]</code></pre>
+</div>
+</div>
+<p>Naturally I could have done this in R using dplyr functions, but that’s not the point of the post. What matters for our purposes is that <code>counts</code> is a Pandas DataFrame that now exists in the Python session, which we would like to pull back into our R session.</p>
+<p>This turns out to be easier than I was expecting. The reticulate package exposes an object named <code>py</code> to the user, and any objects I created in my Python session can be accessed that way:</p>
+<div class="cell" data-out.lines="10">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[R code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb21" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb21-1">py<span class="sc" style="color: #5E5E5E;">$</span>counts</span></code></pre></div>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>                   taxon_id
+Acrochordidae             3
+Agamidae                677
+Alligatoridae            16
+Alopoglossidae           32
+Amphisbaenidae          206
+Anguidae                113
+Aniliidae                 3
+Anomalepididae           23
+Anomochilidae             3
+...</code></pre>
+</div>
+</div>
+<p>What’s especially neat is that the data structure has been automatically translated for us: the <code>counts</code> object in Python is a Pandas DataFrame, but when accessed from R it is automatically translated into a native R data structure: <code>py$counts</code> is a regular data frame:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[R code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb23" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb23-1"><span class="fu" style="color: #4758AB;">class</span>(py<span class="sc" style="color: #5E5E5E;">$</span>counts)</span></code></pre></div>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] "data.frame"</code></pre>
+</div>
+</div>
+<p><br><br></p>
+<div class="column-body-outset">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://blog.djnavarro.net/posts/2022-09-09_reticulated-arrow/img/david-clode-GU2DpW-H89M-unsplash.jpg" class="img-fluid figure-img"></p>
+<p></p><figcaption class="figure-caption">A chameleon. I suppose there is some logic for this image, at least insofar as reticulate allows R to mimic Python and as for arrow Arrow – while it does a lot of the work in the next section — it blends seamlessly into the background. Like a chameleon. Get it? I’m so clever. <a href="https://unsplash.com/photos/GU2DpW-H89M">Original image</a> freely available courtesy of David Clode via Unsplash.</figcaption><p></p>
+</figure>
+</div>
+</div>
+<p><br><br></p>
+</section>
+</section>
+<section id="data-interchange-with-arrow-in-the-polyglot-world" class="level2 page-columns page-full">
+<h2 class="anchored" data-anchor-id="data-interchange-with-arrow-in-the-polyglot-world">Data interchange with Arrow in the polyglot world</h2>
+<p>So far we have not touched Arrow, and you might be wondering if it’s even necessary to do so given that reticulate seems so smooth and seamless. Appearances can be a little deceiving however. The example from the last section only looks smooth and seamless because the data set is small. As I’ll show later in the post, cracks in the facade start to appear when you have to pass large data sets across languages. This happens for the very simple reason that a Pandas DataFrame is a different <em>thing</em> to an R data frame. It’s not possible for the two languages to share a single copy of the same data object because they don’t agree on what constitutes “a data object”. The only way we can do the handover is to make a copy of the data set and convert it to a format more suitable to the destination language. When the data set is small, this is not a problem. But as your data set grows, this becomes ever more burdensome. These copy-and-convert operations are not cheap.</p>
+<p>Wouldn’t it be nice if R and Python could both agree to represent the data as, oh let’s say…. an Arrow Table? On the R side we could interact with it using the arrow R package, and on the Python side we could interact with it using the pyarrow module. But regardless of which language we’re using, the thing in memory would be <em>exactly</em> the same… handing over the data set from one language to the other would no longer require any copying. A little metadata would change hands, and that’s all.</p>
+<p>That sounds much nicer.</p>
+<p><br><br></p>
+<section id="setting-up-arrow" class="level3">
+<h3 class="anchored" data-anchor-id="setting-up-arrow">Setting up arrow</h3>
+<p>I’m not going to talk much about setting up arrow for R in this post, because I’ve written about it before! In addition to the <a href="https://arrow.apache.org/docs/r/">installation instructions on the arrow documentation</a> there’s a <a href="https://blog.djnavarro.net/posts/2021-11-19_starting-apache-arrow-in-r/">getting started with arrow</a> post on this blog. But in any case, it’s usually pretty straightfoward: you can install the arrow R package from CRAN in the usual way using <code>install.packages("arrow")</code> and then load it in the usual fashion:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[R code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb25" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb25-1"><span class="fu" style="color: #4758AB;">library</span>(arrow)</span></code></pre></div>
+</div>
+</div>
+<p>On the Python side, I’ve already installed pyarrow earlier when setting up the “reptilia” environment. But had I not done so, I could redress this now using <code>conda_install()</code> with a command such as this:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[R code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb26" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb26-1"><span class="fu" style="color: #4758AB;">conda_install</span>(</span>
+<span id="cb26-2">  <span class="at" style="color: #657422;">packages =</span> <span class="st" style="color: #20794D;">"pyarrow"</span>, </span>
+<span id="cb26-3">  <span class="at" style="color: #657422;">envname =</span> <span class="st" style="color: #20794D;">"reptilia"</span></span>
+<span id="cb26-4">)</span></code></pre></div>
+</div>
+</div>
+<p>From there we’re good to go. On the R side, let’s start by reading the reptiles data directly from file into an Arrow Table:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[R code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb27" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb27-1">taxa_arrow <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">read_delim_arrow</span>(</span>
+<span id="cb27-2">  <span class="at" style="color: #657422;">file =</span> <span class="st" style="color: #20794D;">"taxa.csv"</span>, </span>
+<span id="cb27-3">  <span class="at" style="color: #657422;">delim =</span> <span class="st" style="color: #20794D;">";"</span>, </span>
+<span id="cb27-4">  <span class="at" style="color: #657422;">as_data_frame =</span> <span class="cn" style="color: #8f5902;">FALSE</span></span>
+<span id="cb27-5">)</span>
+<span id="cb27-6">taxa_arrow</span></code></pre></div>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Table
+14930 rows x 10 columns
+$taxon_id &lt;string&gt;
+$family &lt;string&gt;
+$subfamily &lt;string&gt;
+$genus &lt;string&gt;
+$subgenus &lt;null&gt;
+$specific_epithet &lt;string&gt;
+$authority &lt;string&gt;
+$infraspecific_marker &lt;string&gt;
+$infraspecific_epithet &lt;string&gt;
+$infraspecific_authority &lt;string&gt;</code></pre>
+</div>
+</div>
+<p>Next let’s import pyarrow on the Python side and check the version:<sup>10</sup></p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[python code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb29" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb29-1"><span class="im" style="color: #00769E;">import</span> pyarrow <span class="im" style="color: #00769E;">as</span> pa</span>
+<span id="cb29-2">pa.__version__</span></code></pre></div>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>'8.0.0'</code></pre>
+</div>
+</div>
+<p>Everything looks good here too!</p>
+<p><br><br></p>
+</section>
+<section id="handover-to-python" class="level3">
+<h3 class="anchored" data-anchor-id="handover-to-python">Handover to Python</h3>
+<p>After all that set up, it’s almost comically easy to do the transfer itself. It’s literally the same as last time: we call <code>r_to_py()</code>. The <code>taxa_arrow</code> variable refers to an Arrow Table on the R side, so now all I have to do is use <code>r_to_py()</code> to create <code>py_taxa_arrow</code>, a variable that refers to the same Arrow Table from the Python side:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[R code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb31" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb31-1">py_taxa_arrow <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">r_to_py</span>(taxa_arrow)</span></code></pre></div>
+</div>
+</div>
+<p>Since we’re in Python now, let’s just switch languages and take a peek, shall we? Just like last time, objects created by reticulate are accessible on the Python side via the <code>r</code> object, so we access this object in Python with <code>r.py_taxa_arrow</code>:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[python code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb32" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb32-1">r.py_taxa_arrow</span></code></pre></div>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>pyarrow.Table
+taxon_id: string
+family: string
+subfamily: string
+genus: string
+subgenus: null
+specific_epithet: string
+authority: string
+infraspecific_marker: string
+infraspecific_epithet: string
+infraspecific_authority: string
+----
+taxon_id: [["Ablepharus_alaicus","Ablepharus_alaicus_alaicus","Ablepharus_alaicus_kucenkoi","Ablepharus_alaicus_yakovlevae","Ablepharus_anatolicus",...,"Plestiodon_egregius_onocrepis","Plestiodon_egregius_similis","Plestiodon_elegans","Plestiodon_fasciatus","Plestiodon_finitimus"],["Plestiodon_gilberti","Plestiodon_gilberti_cancellosus","Plestiodon_gilberti_gilberti","Plestiodon_gilberti_placerensis","Plestiodon_gilberti_rubricaudatus",...,"Zygaspis_quadrifrons","Zygaspis_vandami","Zygaspis_vandami_arenicola","Zygaspis_vandami_vandami","Zygaspis_violacea"]]
+family: [["Scincidae","Scincidae","Scincidae","Scincidae","Scincidae",...,"Scincidae","Scincidae","Scincidae","Scincidae","Scincidae"],["Scincidae","Scincidae","Scincidae","Scincidae","Scincidae",...,"Amphisbaenidae","Amphisbaenidae","Amphisbaenidae","Amphisbaenidae","Amphisbaenidae"]]
+subfamily: [["Eugongylinae","Eugongylinae","Eugongylinae","Eugongylinae","Eugongylinae",...,"Scincinae","Scincinae","Scincinae","Scincinae","Scincinae"],["Scincinae","Scincinae","Scincinae","Scincinae","Scincinae",...,null,null,null,null,null]]
+genus: [["Ablepharus","Ablepharus","Ablepharus","Ablepharus","Ablepharus",...,"Plestiodon","Plestiodon","Plestiodon","Plestiodon","Plestiodon"],["Plestiodon","Plestiodon","Plestiodon","Plestiodon","Plestiodon",...,"Zygaspis","Zygaspis","Zygaspis","Zygaspis","Zygaspis"]]
+subgenus: [11142 nulls,3788 nulls]
+specific_epithet: [["alaicus","alaicus","alaicus","alaicus","anatolicus",...,"egregius","egregius","elegans","fasciatus","finitimus"],["gilberti","gilberti","gilberti","gilberti","gilberti",...,"quadrifrons","vandami","vandami","vandami","violacea"]]
+authority: [["ELPATJEVSKY, 1901","ELPATJEVSKY, 1901","ELPATJEVSKY, 1901","ELPATJEVSKY, 1901","SCHMIDTLER, 1997",...,"BAIRD, 1858","BAIRD, 1858","(BOULENGER, 1887)","(LINNAEUS, 1758)","OKAMOTO &amp; HIKIDA, 2012"],["(VAN DENBURGH, 1896)","(VAN DENBURGH, 1896)","(VAN DENBURGH, 1896)","(VAN DENBURGH, 1896)","(VAN DENBURGH, 1896)",...,"(PETERS, 1862)","(FITZSIMONS, 1930)","(FITZSIMONS, 1930)","(FITZSIMONS, 1930)","(PETERS, 1854)"]]
+infraspecific_marker: [[null,"subsp.","subsp.","subsp.",null,...,"subsp.","subsp.",null,null,null],[null,"subsp.","subsp.","subsp.","subsp.",...,null,null,"subsp.","subsp.",null]]
+infraspecific_epithet: [[null,"alaicus","kucenkoi","yakovlevae",null,...,"onocrepis","similis",null,null,null],[null,"cancellosus","gilberti","placerensis","rubricaudatus",...,null,null,"arenicola","vandami",null]]
+infraspecific_authority: [[null,"ELPATJEVSKY, 1901","NIKOLSKY, 1902","(EREMCHENKO, 1983)",null,...,"(COPE, 1871)","(MCCONKEY, 1957)",null,null,null],[null,"(RODGERS &amp; FITCH, 1947)","(VAN DENBURGH, 1896)","(RODGERS, 1944)","(TAYLOR, 1936)",...,null,null,"BROADLEY &amp; BROADLEY, 1997","(FITZSIMONS, 1930)",null]]</code></pre>
+</div>
+</div>
+<p>The output is formatted slightly differently because the Python pyarrow library is now doing the work. You can see from the first line that this is a <em>pyarrow</em> Table, but nevertheless when you look at the rest of the output it’s pretty clear that this is the same table.</p>
+<p>Easy!</p>
+<p><br><br></p>
+</section>
+<section id="handover-to-r" class="level3 page-columns page-full">
+<h3 class="anchored" data-anchor-id="handover-to-r">Handover to R</h3>
+<p>Right then, what’s next? Just like last time, let’s do a little bit of data wrangling on the Python side. In the code below I’m using pyarrow to do the same thing I did with Pandas earlier: counting the number of entries for each reptile family.</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[python code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb34" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb34-1">counts_arrow <span class="op" style="color: #5E5E5E;">=</span> r.py_taxa_arrow. <span class="op" style="color: #5E5E5E;">\</span></span>
+<span id="cb34-2">  group_by(<span class="st" style="color: #20794D;">"family"</span>). <span class="op" style="color: #5E5E5E;">\</span></span>
+<span id="cb34-3">  aggregate([(<span class="st" style="color: #20794D;">"taxon_id"</span>, <span class="st" style="color: #20794D;">"count"</span>)]). <span class="op" style="color: #5E5E5E;">\</span></span>
+<span id="cb34-4">  sort_by([(<span class="st" style="color: #20794D;">"family"</span>, <span class="st" style="color: #20794D;">"ascending"</span>)])</span>
+<span id="cb34-5">  </span>
+<span id="cb34-6">counts_arrow</span></code></pre></div>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>pyarrow.Table
+taxon_id_count: int64
+family: string
+----
+taxon_id_count: [[3,677,16,32,206,...,2,2,15,1,5]]
+family: [["Acrochordidae","Agamidae","Alligatoridae","Alopoglossidae","Amphisbaenidae",...,"Xenopeltidae","Xenophidiidae","Xenosauridae","Xenotyphlopidae",null]]</code></pre>
+</div>
+</div>
+<p>Flipping back to R, the <code>counts_arrow</code> object is accessible via the <code>py</code> object. Let’s take a look:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[R code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb36" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb36-1">py<span class="sc" style="color: #5E5E5E;">$</span>counts_arrow</span></code></pre></div>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Table
+93 rows x 2 columns
+$taxon_id_count &lt;int64&gt;
+$family &lt;string&gt;</code></pre>
+</div>
+</div>
+<p>The output is formatted a little differently because now it’s the R arrow package tasked with printing the output, but it is the same Table.</p>
+<p>Mission accomplished!</p>
+<p>But… was it all worthwhile?</p>
+<p><br><br></p>
+<div class="column-body-outset">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://blog.djnavarro.net/posts/2022-09-09_reticulated-arrow/img/david-clode-0W8PfUdXqhk-unsplash.jpg" class="img-fluid figure-img"></p>
+<p></p><figcaption class="figure-caption">A baby crocodile, just so that Bob Katter doesn’t feel like I completely forgot about his worries. It doesn’t look like it’s about to tear anyone to pieces but what would I know? I’m not an expert on such matters. <a href="https://unsplash.com/photos/0W8PfUdXqhk">Original image</a> freely available courtesy of David Clode via Unsplash.</figcaption><p></p>
+</figure>
+</div>
+</div>
+<p><br><br></p>
+</section>
+</section>
+<section id="does-arrow-really-make-a-big-difference" class="level2">
+<h2 class="anchored" data-anchor-id="does-arrow-really-make-a-big-difference">Does Arrow really make a big difference?</h2>
+<p>At the end of all this, you might want to know if using Arrow makes much of a difference. As much as I love learning new things for the sheer joy of learning new things, I prefer to learn useful things when I can! So let’s do a little comparison. First, I’ll define a <code>handover_time()</code> function that takes two arguments. The first argument <code>n</code> specifies the number of rows in the to-be-transferred data set. The second argument <code>arrow</code> is a logical value: setting <code>arrow = FALSE</code> means that an R data frame will be passed to Python as a Panda DataFrame, wheras <code>arrow = TRUE</code> means that an Arrow Table in R will be passed to Python and remain an Arrow Table. The actual data set is constructed by randomly sampling <code>n</code> rows from the <code>taxa</code> data set (with replacement):</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[R code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb38" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb38-1">handover_time <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>(n, <span class="at" style="color: #657422;">arrow =</span> <span class="cn" style="color: #8f5902;">FALSE</span>) {</span>
+<span id="cb38-2">  data_in_r <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">slice_sample</span>(taxa, <span class="at" style="color: #657422;">n =</span> n, <span class="at" style="color: #657422;">replace =</span> <span class="cn" style="color: #8f5902;">TRUE</span>)</span>
+<span id="cb38-3">  <span class="cf" style="color: #003B4F;">if</span>(arrow) {</span>
+<span id="cb38-4">    data_in_r <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">arrow_table</span>(data_in_r)</span>
+<span id="cb38-5">  }</span>
+<span id="cb38-6">  <span class="fu" style="color: #4758AB;">tic</span>()</span>
+<span id="cb38-7">  data_in_python <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">r_to_py</span>(data_in_r)</span>
+<span id="cb38-8">  t <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">toc</span>(<span class="at" style="color: #657422;">quiet =</span> <span class="cn" style="color: #8f5902;">TRUE</span>)</span>
+<span id="cb38-9">  <span class="fu" style="color: #4758AB;">return</span>(t<span class="sc" style="color: #5E5E5E;">$</span>toc <span class="sc" style="color: #5E5E5E;">-</span> t<span class="sc" style="color: #5E5E5E;">$</span>tic)</span>
+<span id="cb38-10">}</span></code></pre></div>
+</div>
+</div>
+<p>Now that I’ve defined the test function, let’s see what happens. I’ll vary the number of rows from 10000 to 1000000 for both the native data frame version and the Arrow Table version, and store the result as <code>times</code>:</p>
+<div class="cell" data-hash="index_cache/html/speed-test-2_5b7dfe08b589ec827e86b19cd57ec596">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[R code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb39" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb39-1">times <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">tibble</span>(</span>
+<span id="cb39-2">  <span class="at" style="color: #657422;">n =</span> <span class="fu" style="color: #4758AB;">seq</span>(<span class="dv" style="color: #AD0000;">10000</span>, <span class="dv" style="color: #AD0000;">1000000</span>, <span class="at" style="color: #657422;">length.out =</span> <span class="dv" style="color: #AD0000;">100</span>),</span>
+<span id="cb39-3">  <span class="at" style="color: #657422;">data_frame =</span> <span class="fu" style="color: #4758AB;">map_dbl</span>(n, handover_time),</span>
+<span id="cb39-4">  <span class="at" style="color: #657422;">arrow_table =</span> <span class="fu" style="color: #4758AB;">map_dbl</span>(n, handover_time, <span class="at" style="color: #657422;">arrow =</span> <span class="cn" style="color: #8f5902;">TRUE</span>),</span>
+<span id="cb39-5">)</span></code></pre></div>
+</div>
+</div>
+<p>Now let’s plot the data:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[R code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb40" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb40-1">times <span class="sc" style="color: #5E5E5E;">|&gt;</span> </span>
+<span id="cb40-2">  <span class="fu" style="color: #4758AB;">pivot_longer</span>(</span>
+<span id="cb40-3">    <span class="at" style="color: #657422;">cols =</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="st" style="color: #20794D;">"data_frame"</span>, <span class="st" style="color: #20794D;">"arrow_table"</span>), </span>
+<span id="cb40-4">    <span class="at" style="color: #657422;">names_to =</span> <span class="st" style="color: #20794D;">"type"</span>, </span>
+<span id="cb40-5">    <span class="at" style="color: #657422;">values_to =</span> <span class="st" style="color: #20794D;">"time"</span></span>
+<span id="cb40-6">  ) <span class="sc" style="color: #5E5E5E;">|&gt;</span> </span>
+<span id="cb40-7">  <span class="fu" style="color: #4758AB;">mutate</span>(</span>
+<span id="cb40-8">    <span class="at" style="color: #657422;">type =</span> type <span class="sc" style="color: #5E5E5E;">|&gt;</span> </span>
+<span id="cb40-9">      <span class="fu" style="color: #4758AB;">factor</span>(</span>
+<span id="cb40-10">        <span class="at" style="color: #657422;">levels =</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="st" style="color: #20794D;">"data_frame"</span>, <span class="st" style="color: #20794D;">"arrow_table"</span>),</span>
+<span id="cb40-11">        <span class="at" style="color: #657422;">labels =</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="st" style="color: #20794D;">"Data Frames"</span>, <span class="st" style="color: #20794D;">"Arrow Tables"</span>)</span>
+<span id="cb40-12">      )</span>
+<span id="cb40-13">  ) <span class="sc" style="color: #5E5E5E;">|&gt;</span></span>
+<span id="cb40-14">  <span class="fu" style="color: #4758AB;">ggplot</span>(<span class="fu" style="color: #4758AB;">aes</span>(n, time)) <span class="sc" style="color: #5E5E5E;">+</span> </span>
+<span id="cb40-15">  <span class="fu" style="color: #4758AB;">geom_point</span>() <span class="sc" style="color: #5E5E5E;">+</span> </span>
+<span id="cb40-16">  <span class="fu" style="color: #4758AB;">facet_wrap</span>(<span class="sc" style="color: #5E5E5E;">~</span>type) <span class="sc" style="color: #5E5E5E;">+</span> </span>
+<span id="cb40-17">  <span class="fu" style="color: #4758AB;">theme_bw</span>() <span class="sc" style="color: #5E5E5E;">+</span> </span>
+<span id="cb40-18">  <span class="fu" style="color: #4758AB;">labs</span>(</span>
+<span id="cb40-19">    <span class="at" style="color: #657422;">x =</span> <span class="st" style="color: #20794D;">"Number of Rows"</span>,</span>
+<span id="cb40-20">    <span class="at" style="color: #657422;">y =</span> <span class="st" style="color: #20794D;">"Handover Time (Seconds)"</span>, </span>
+<span id="cb40-21">    <span class="at" style="color: #657422;">title =</span> <span class="st" style="color: #20794D;">"How long does it take to pass data from R to Python?"</span></span>
+<span id="cb40-22">  )</span></code></pre></div>
+</div>
+<div class="cell-output-display">
+<p><img src="https://blog.djnavarro.net/posts/2022-09-09_reticulated-arrow/index_files/figure-html/plot-speed-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>Okay yeah. I’ll be the first to admit that this isn’t a very sophisticated way to do benchmarking, but when the difference is this stark you really don’t have to be sophisticated. Without Arrow, the only way to hand data from R to Python is to copy and convert the data, and that’s time consuming. The time cost gets worse the larger your data set becomes. With Arrow, the problem goes away because you’re not copying the data at all. The time cost is tiny and it stays tiny even as the data set gets bigger.</p>
+<p>Seems handy to me?</p>
+<p><br><br></p>
+<!--------------- appendices go here ----------------->
+</section>
+
+
+
+<div id="quarto-appendix" class="default"><section id="acknowledgments" class="level2 appendix"><h2 class="quarto-appendix-heading">Acknowledgments</h2><div class="quarto-appendix-contents">
+
+<p>Thank you to <a href="https://twitter.com/marlene_zw">Marlene Mhangami</a> and <a href="https://twitter.com/hpcprogrammer">Fernanda Foertter</a> for reviewing this post.</p>
+<div class="cell">
+
+</div>
+
+
+</div></section><section id="footnotes" class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
+
+<ol>
+<li id="fn1"><p>That being said, it wasn’t the worst comment on same sex marriage I saw an Australian politician make at the time, not by a long margin.↩︎</p></li>
+<li id="fn2"><p>Something to note here is that the reticulate solution implicitly assumes R is your “primary” language and Python is the “secondary” language. That is, reticulate is an R package that calls Python, not a Python module that calls R. Simularly, this quarto document uses the <a href="https://quarto.org/docs/computations/r.html">knitr engine</a> (also an R package) to integrate code from the two languages. Yes the tools are multi-language, but the setup is pretty R-centric. Arguably this is typical for how an R user would set up a multi-language project, and since R is my primary language it’s my preferred solution. However, it’s not a particularly Pythonic way of approaching the problem. But fear not, Python fans. In the next post I’m going to describe an approach that solves the same problem in a Python-centric way.↩︎</p></li>
+<li id="fn3"><p>Okay, in the spirit of total honesty… when I first started using reticulate I actually did let reticulate install its own version of Miniconda and everything was a total mess there for a while. My bash profile was set to find my original version of Miniconda, but reticulate was configured to look for the version it had installed. Hijinx ensued. As amusing as that little episode was, I’m much happier now that reticulate and bash are in agreement as to where Miniconda lives.↩︎</p></li>
+<li id="fn4"><p>The easiest way to edit this file, if you don’t already know how, is to call <code>usethis::edit_r_environ()</code> at the R console.↩︎</p></li>
+<li id="fn5"><p>Well, all the Conda environments anyway↩︎</p></li>
+<li id="fn6"><p>You can also use <code>conda_install()</code> to install into an existing conda environment.↩︎</p></li>
+<li id="fn7"><p>Okay, I should unpack a little. This blog is written using quarto, and in this post I’m using knitr as the engine to power the evaluation of code chunks. The knitr R package relies on reticulate when it needs to execute Python code. What that means is that code chunks labelled “Python code” in this post are <em>implicitly</em> executed using the same interface (reticulate) as the examples that I am <em>explicitly</em> calling when some of my “R code” chunks use reticulate in a more obvious way. When I call <code>use_miniconda()</code> here it specifies the Python environment used by reticulate in this R session, irrespective of which “path” I use. In other words, the “Python code” chunks and the explicit calls to reticulate functions are all executed with the same Python environment (reptilia) because they occur within the same R session.↩︎</p></li>
+<li id="fn8"><p>As an aside it’s worth noting that reticulate exports an object called <code>py</code>, from which Python objects can be accessed: the <code>sys</code> object can also be referred to as <code>py$sys</code>.↩︎</p></li>
+<li id="fn9"><p>Note that the website does not explicitly specify a particular licence, but <a href="https://www.researchgate.net/publication/352462027_A_Quarter_Century_of_Reptile_and_Amphibian_Databases">journal articles documenting the database</a> written by the maintainers do refer to it as “open and freely available”. With that in mind I take it that the use of the data in this post is permitted. Naturally, should I discover that it is not I’ll immediately remove it!↩︎</p></li>
+<li id="fn10"><p>As an aside – because I’m on on linux and life on linux is dark and full of terrors – this didn’t actually work for me the first time I tried it, and naturally I was filled with despair. Instead, I received this: <code>libstdc++.so.6: version 'GLIBCXX_3.4.22' not found</code>. As usual, googling the error message solved the problem. I updated with <code>sudo apt-get install libstdc++6</code>, and another catastrophe was thereby averted by copy/pasting into a search engine 🙃↩︎</p></li>
+</ol>
+</section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
+  author = {Danielle Navarro},
+  editor = {},
+  title = {Passing {Arrow} Data Between {R} and {Python} with
+    Reticulate},
+  date = {2022-09-09},
+  url = {https://blog.djnavarro.net/posts/2022-09-09_reticulated-arrow},
+  langid = {en}
+}
+</code></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2022" class="csl-entry quarto-appendix-citeas">
+Danielle Navarro. 2022. <span>“Passing Arrow Data Between R and Python
+with Reticulate.”</span> September 9, 2022. <a href="https://blog.djnavarro.net/posts/2022-09-09_reticulated-arrow">https://blog.djnavarro.net/posts/2022-09-09_reticulated-arrow</a>.
+</div></div></section></div> ]]></description>
+  <category>Apache Arrow</category>
+  <category>R</category>
+  <category>Python</category>
+  <guid>https://blog.djnavarro.net/posts/2022-09-09_reticulated-arrow/index.html</guid>
+  <pubDate>Thu, 08 Sep 2022 14:00:00 GMT</pubDate>
+  <media:content url="https://blog.djnavarro.net/posts/2022-09-09_reticulated-arrow/img/cover.jpg" medium="image" type="image/jpeg"/>
+</item>
 <item>
   <title>Sudo ask me a password</title>
   <dc:creator>Danielle Navarro</dc:creator>
@@ -602,6 +1215,7 @@ in R with Apache Arrow.”</span> August 23, 2022. <a href="https://blog.djnavar
 </div></div></section></div> ]]></description>
   <category>Apache Arrow</category>
   <category>Data Visualisation</category>
+  <category>R</category>
   <guid>https://blog.djnavarro.net/posts/2022-08-23_visualising-a-billion-rows/index.html</guid>
   <pubDate>Mon, 22 Aug 2022 14:00:00 GMT</pubDate>
   <media:content url="https://blog.djnavarro.net/posts/2022-08-23_visualising-a-billion-rows/img/cover.jpg" medium="image" type="image/jpeg"/>
@@ -1861,6 +2475,7 @@ Danielle Navarro. 2022. <span>“Arrays and Tables in Arrow.”</span> May
 25, 2022. <a href="https://blog.djnavarro.net/posts/2022-05-25_arrays-and-tables-in-arrow">https://blog.djnavarro.net/posts/2022-05-25_arrays-and-tables-in-arrow</a>.
 </div></div></section></div> ]]></description>
   <category>Apache Arrow</category>
+  <category>R</category>
   <guid>https://blog.djnavarro.net/posts/2022-05-25_arrays-and-tables-in-arrow/index.html</guid>
   <pubDate>Tue, 24 May 2022 14:00:00 GMT</pubDate>
   <media:content url="https://blog.djnavarro.net/posts/2022-05-25_arrays-and-tables-in-arrow/img/cover.jpg" medium="image" type="image/jpeg"/>
@@ -3207,6 +3822,7 @@ Danielle Navarro. 2022. <span>“Using Amazon S3 with R.”</span> March 17,
 2022. <a href="https://blog.djnavarro.net/using-aws-s3-in-r">https://blog.djnavarro.net/using-aws-s3-in-r</a>.
 </div></div></section></div> ]]></description>
   <category>Amazon S3</category>
+  <category>R</category>
   <guid>https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/index.html</guid>
   <pubDate>Wed, 16 Mar 2022 13:00:00 GMT</pubDate>
   <media:content url="https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/preview-image.jpg" medium="image" type="image/jpeg"/>
@@ -4926,6 +5542,7 @@ Danielle Navarro. 2022. <span>“Data Types in Arrow and R.”</span> March
 4, 2022. <a href="https://blog.djnavarro.net/data-types-in-arrow-and-r">https://blog.djnavarro.net/data-types-in-arrow-and-r</a>.
 </div></div></section></div> ]]></description>
   <category>Apache Arrow</category>
+  <category>R</category>
   <guid>https://blog.djnavarro.net/posts/2022-03-04_data-types-in-arrow-and-r/index.html</guid>
   <pubDate>Thu, 03 Mar 2022 13:00:00 GMT</pubDate>
   <media:content url="https://blog.djnavarro.net/posts/2022-03-04_data-types-in-arrow-and-r/img/cover.jpg" medium="image" type="image/jpeg"/>
@@ -5136,6 +5753,7 @@ Danielle Navarro. 2022. <span>“R Scripts for Twitter Mutes and
 Blocks.”</span> February 11, 2022. <a href="https://blog.djnavarro.net/r-scripts-for-twitter-blocks">https://blog.djnavarro.net/r-scripts-for-twitter-blocks</a>.
 </div></div></section></div> ]]></description>
   <category>Twitter</category>
+  <category>R</category>
   <guid>https://blog.djnavarro.net/posts/2022-02-11_r-scripts-for-twitter-blocks/index.html</guid>
   <pubDate>Thu, 10 Feb 2022 13:00:00 GMT</pubDate>
   <media:content url="https://blog.djnavarro.net/posts/2022-02-11_r-scripts-for-twitter-blocks/img/jeremy-bezanger-Nh1tBGgEcG4-unsplash.jpg" medium="image" type="image/jpeg"/>
@@ -5842,6 +6460,7 @@ Danielle Navarro. 2022. <span>“Binding Apache Arrow to R.”</span>
 January 18, 2022. <a href="https://blog.djnavarro.net/binding-arrow-to-r">https://blog.djnavarro.net/binding-arrow-to-r</a>.
 </div></div></section></div> ]]></description>
   <category>Apache Arrow</category>
+  <category>R</category>
   <guid>https://blog.djnavarro.net/posts/2022-01-18_binding-arrow-to-r/index.html</guid>
   <pubDate>Mon, 17 Jan 2022 13:00:00 GMT</pubDate>
   <media:content url="https://blog.djnavarro.net/posts/2022-01-18_binding-arrow-to-r/img/magicians_hard_glossy_armour.jpg" medium="image" type="image/jpeg"/>
@@ -5955,6 +6574,7 @@ January 18, 2022. <a href="https://blog.djnavarro.net/binding-arrow-to-r">https:
 Danielle Navarro. 2022. <span>“Setting CRAN Repository Options.”</span>
 January 10, 2022. <a href="https://blog.djnavarro.net/setting-cran-repositories">https://blog.djnavarro.net/setting-cran-repositories</a>.
 </div></div></section></div> ]]></description>
+  <category>R</category>
   <guid>https://blog.djnavarro.net/posts/2022-01-10_setting-cran-repositories/index.html</guid>
   <pubDate>Sun, 09 Jan 2022 13:00:00 GMT</pubDate>
   <media:content url="https://blog.djnavarro.net/posts/2022-01-10_setting-cran-repositories/img/rasa-kasparaviciene-0TFxOkhFt14-unsplash.jpg" medium="image" type="image/jpeg"/>
@@ -6316,6 +6936,7 @@ Danielle Navarro. 2021. <span>“Getting Started with Apache
 Arrow.”</span> November 19, 2021. <a href="https://blog.djnavarro.net/starting-apache-arrow-in-r">https://blog.djnavarro.net/starting-apache-arrow-in-r</a>.
 </div></div></section></div> ]]></description>
   <category>Apache Arrow</category>
+  <category>R</category>
   <guid>https://blog.djnavarro.net/posts/2021-11-19_starting-apache-arrow-in-r/index.html</guid>
   <pubDate>Thu, 18 Nov 2021 13:00:00 GMT</pubDate>
   <media:content url="https://blog.djnavarro.net/posts/2021-11-19_starting-apache-arrow-in-r/img/frank-busch-LpYcecGTifI-unsplash.jpg" medium="image" type="image/jpeg"/>
@@ -7293,6 +7914,7 @@ Danielle Navarro. 2021. <span>“Data Serialisation in R.”</span> November
 15, 2021. <a href="https://blog.djnavarro.net/serialisation-with-rds">https://blog.djnavarro.net/serialisation-with-rds</a>.
 </div></div></section></div> ]]></description>
   <category>Serialisation</category>
+  <category>R</category>
   <guid>https://blog.djnavarro.net/posts/2021-11-15_serialisation-with-rds/index.html</guid>
   <pubDate>Sun, 14 Nov 2021 13:00:00 GMT</pubDate>
   <media:content url="https://blog.djnavarro.net/posts/2021-11-15_serialisation-with-rds/preview-image.jpg" medium="image" type="image/jpeg"/>
@@ -7715,6 +8337,7 @@ Danielle Navarro. 2021. <span>“Unpredictable Paintings.”</span> November
 1, 2021. <a href="https://blog.djnavarro.net/unpredictable-paintings">https://blog.djnavarro.net/unpredictable-paintings</a>.
 </div></div></section></div> ]]></description>
   <category>Art</category>
+  <category>R</category>
   <guid>https://blog.djnavarro.net/posts/2021-11-01_unpredictable-paintings/index.html</guid>
   <pubDate>Sun, 31 Oct 2021 13:00:00 GMT</pubDate>
   <media:content url="https://blog.djnavarro.net/posts/2021-11-01_unpredictable-paintings/featured.png" medium="image" type="image/png" height="89" width="144"/>
@@ -7819,6 +8442,7 @@ Danielle Navarro. 2021. <span>“Generative Art Resources in R.”</span>
 October 19, 2021. <a href="https://blog.djnavarro.net/rtistry-posts">https://blog.djnavarro.net/rtistry-posts</a>.
 </div></div></section></div> ]]></description>
   <category>Art</category>
+  <category>R</category>
   <guid>https://blog.djnavarro.net/posts/2021-10-19_rtistry-posts/index.html</guid>
   <pubDate>Mon, 18 Oct 2021 13:00:00 GMT</pubDate>
   <media:content url="https://blog.djnavarro.net/posts/2021-10-19_rtistry-posts/preview-image.png" medium="image" type="image/png" height="89" width="144"/>
@@ -8834,6 +9458,8 @@ Danielle Navarro. 2021. <span>“Visualising the Hits of Queen
 Britney.”</span> September 14, 2021. <a href="https://blog.djnavarro.net/tidy-tuesday-billboard">https://blog.djnavarro.net/tidy-tuesday-billboard</a>.
 </div></div></section></div> ]]></description>
   <category>Tidy Tuesday</category>
+  <category>Data Visualisation</category>
+  <category>R</category>
   <guid>https://blog.djnavarro.net/posts/2021-09-14_tidy-tuesday-billboard/index.html</guid>
   <pubDate>Mon, 13 Sep 2021 14:00:00 GMT</pubDate>
   <media:content url="https://blog.djnavarro.net/posts/2021-09-14_tidy-tuesday-billboard/britney.jpg" medium="image" type="image/jpeg"/>
@@ -9759,6 +10385,7 @@ Danielle Navarro. 2021. <span>“Art, Jasmines, and the Water
 Colours.”</span> September 7, 2021. <a href="https://blog.djnavarro.net/water-colours">https://blog.djnavarro.net/water-colours</a>.
 </div></div></section></div> ]]></description>
   <category>Art</category>
+  <category>R</category>
   <guid>https://blog.djnavarro.net/posts/2021-09-07_water-colours/index.html</guid>
   <pubDate>Mon, 06 Sep 2021 14:00:00 GMT</pubDate>
   <media:content url="https://blog.djnavarro.net/posts/2021-09-07_water-colours/jasmine-recollected.png" medium="image" type="image/png" height="89" width="144"/>
@@ -9994,6 +10621,7 @@ Difficulty Level Linux.”</span> August 8, 2021. <a href="https://blog.djnavarr
   <category>Git</category>
   <category>Credentials</category>
   <category>Linux</category>
+  <category>R</category>
   <guid>https://blog.djnavarro.net/posts/2021-08-08_git-credential-helpers/index.html</guid>
   <pubDate>Sat, 07 Aug 2021 14:00:00 GMT</pubDate>
   <media:content url="https://blog.djnavarro.net/posts/2021-08-08_git-credential-helpers/credentials.jpg" medium="image" type="image/jpeg"/>
@@ -10139,196 +10767,10 @@ Danielle Navarro. 2021. <span>“Generative Art in R.”</span> July 8,
 2021. <a href="https://blog.djnavarro.net/generative-art-in-r">https://blog.djnavarro.net/generative-art-in-r</a>.
 </div></div></section></div> ]]></description>
   <category>Art</category>
+  <category>R</category>
   <guid>https://blog.djnavarro.net/posts/2021-07-08_generative-art-in-r/index.html</guid>
   <pubDate>Wed, 07 Jul 2021 14:00:00 GMT</pubDate>
   <media:content url="https://blog.djnavarro.net/posts/2021-07-08_generative-art-in-r/turmite59-in-red.jpg" medium="image" type="image/jpeg"/>
-</item>
-<item>
-  <title>Bootstrap cards in distill</title>
-  <dc:creator>Danielle Navarro</dc:creator>
-  <link>https://blog.djnavarro.net/posts/2021-04-19_bs4cards-in-distill/index.html</link>
-  <description><![CDATA[ 
-
-
-
-
-<!--------------- my typical setup ----------------->
-<!--------------- post begins here ----------------->
-<p>When creating R markdown websites, I often find myself wanting to organise content into a nice-looking grid of links. For example, in a <a href="https://slides.djnavarro.net/">recent project</a> I wanted to be able to create something like this:</p>
-<div class="cell">
-<div class="cell-output-display">
-<div>
-<div class="row p-0 row-cols-1 row-cols-md-2 row-cols-lg-3" style="margin-left: -.2rem; margin-right: -.2rem; margin-top: 1rem; margin-bottom: 1rem; ">
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .2rem ; border-width: 0; border-radius: .6rem .6rem .6rem .6rem ;">
-<a href="https://slides.djnavarro.net/starting-rmarkdown" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2021-04-19_bs4cards-in-distill/https:/slides.djnavarro.net/index_img/starting-rmarkdown.png" class="card-img-top" style="border-style:solid; border-color:inherits; border-width:1px 1px 0 1px; border-radius: .6rem .6rem 0 0 ;">
-</a>
-<div class="card-body justify-content-end m-0 p-0" style="visibility: visible; background-color: inherits; border-style:solid; border-color:inherits; border-width:1px; border-radius: 0 0 .6rem .6rem ;">
-<a href="https://slides.djnavarro.net/starting-rmarkdown">
-<h5 class="card-title my-auto px-3 pt-3 pb-1 anchored">Starting R markdown</h5>
-</a>
-<p class="card-text my-auto px-3 pb-3 pt-1">An introduction to R markdown. The target audience is a novice R user with no previous experience with markdown.</p>
-</div>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .2rem ; border-width: 0; border-radius: .6rem .6rem .6rem .6rem ;">
-<a href="https://slides.djnavarro.net/starting-ggplot2" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2021-04-19_bs4cards-in-distill/https:/slides.djnavarro.net/index_img/starting-ggplot2.png" class="card-img-top" style="border-style:solid; border-color:inherits; border-width:1px 1px 0 1px; border-radius: .6rem .6rem 0 0 ;">
-</a>
-<div class="card-body justify-content-end m-0 p-0" style="visibility: visible; background-color: inherits; border-style:solid; border-color:inherits; border-width:1px; border-radius: 0 0 .6rem .6rem ;">
-<a href="https://slides.djnavarro.net/starting-ggplot2">
-<h5 class="card-title my-auto px-3 pt-3 pb-1 anchored">Starting ggplot2</h5>
-</a>
-<p class="card-text my-auto px-3 pb-3 pt-1">An introduction to ggplot2. The target audience is a novice user with no previous experience with R or ggplot2.</p>
-</div>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .2rem ; border-width: 0; border-radius: .6rem .6rem .6rem .6rem ;">
-<a href="https://slides.djnavarro.net/starting-programming" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2021-04-19_bs4cards-in-distill/https:/slides.djnavarro.net/index_img/starting-programming.png" class="card-img-top" style="border-style:solid; border-color:inherits; border-width:1px 1px 0 1px; border-radius: .6rem .6rem 0 0 ;">
-</a>
-<div class="card-body justify-content-end m-0 p-0" style="visibility: visible; background-color: inherits; border-style:solid; border-color:inherits; border-width:1px; border-radius: 0 0 .6rem .6rem ;">
-<a href="https://slides.djnavarro.net/starting-programming">
-<h5 class="card-title my-auto px-3 pt-3 pb-1 anchored">Starting programming</h5>
-</a>
-<p class="card-text my-auto px-3 pb-3 pt-1">This is primarily a tutorial on making generative art in R, but in doing so introduces core programming constructs and data structures. It is assumed the user has some previous experience with ggplot2.</p>
-</div>
-</div>
-</div>
-</div>
-</div>
-</div>
-<p>It bothered me that this wasn’t as straightforward as I was expecting, so for one of my side projects I’ve been putting together a small package called <a href="https://bs4cards.djnavarro.net">bs4cards</a> to make this a little easier inside an R markdown document or website. There are some introductory articles posted on the bs4cards package website showing how the package works, and there’s no need to duplicate that content here. However, because this website uses the <a href="https://rstudio.github.io/distill/">distill</a> package <span class="citation" data-cites="distill">(Allaire et al. 2021)</span> and the package website is built using <a href="https://pkgdown.r-lib.org/">pkgdown</a> <span class="citation" data-cites="pkgdown">(Wickham, Hesselberth, and Salmon 2021)</span>, it seems like a good idea to have at least one post on both sites that uses bs4cards.</p>
-<section id="enabling-bootstrap-4" class="level2">
-<h2 class="anchored" data-anchor-id="enabling-bootstrap-4">Enabling bootstrap 4</h2>
-<p>The reason for doing this is that the first step in using the package is to make sure that your R markdown document uses version 4 of bootstrap: the <code>bs4cards</code> package takes its name from the <a href="https://getbootstrap.com/docs/4.5/components/card/">cards</a> system introduced in bootstrap version 4, and will not work properly if used in R markdown documents that rely on bootstrap version 3, or don’t use bootstrap at all. To ensure that you are using bootstrap 4, you need to edit the YAML header for your document to specify which version of bootstrap you want to use. The instructions are slightly different depending on what kind of document you’re creating:</p>
-<section id="vanilla-r-markdown" class="level3">
-<h3 class="anchored" data-anchor-id="vanilla-r-markdown">Vanilla R markdown</h3>
-<p>For a plain R markdown document or website (i.e., one where the output format is <code>html_document</code>) here is the relevant section of YAML you might use:</p>
-<pre><code>output:
-  html_document:
-    theme:
-      version: 4</code></pre>
-<p>This overrides the R markdown defaults <span class="citation" data-cites="rmarkdown">(Xie, Dervieux, and Riederer 2020)</span> to ensure that the output is built using <a href="https://getbootstrap.com/docs/4.5/getting-started/introduction/">bootstrap 4.5</a>.</p>
-</section>
-<section id="pkgdown" class="level3">
-<h3 class="anchored" data-anchor-id="pkgdown">Pkgdown</h3>
-<p>To enable bootstrap 4 in a pkgdown site, the process is similar but not identical. Edit the <code>_pkgdown.yml</code> file to include the following</p>
-<pre><code>template:
-  bootstrap: 4</code></pre>
-<p>Note that this relies on a currently-in-development feature, so you may need to update to the development version of pkgdown to make this work.</p>
-</section>
-<section id="distill" class="level3">
-<h3 class="anchored" data-anchor-id="distill">Distill</h3>
-<p>Distill R markdown does not use bootstrap, which is a little inconvenient if you want to use bs4cards with distill. With a little effort it is possible to enable the entire bootstrap library in a distill site, but this can lead to undesirable side-effects because bootstrap has a lot of styling that doesn’t look visually appealing when mixed with the istill styling. The solution I’ve adopted for this is to use a custom bootstrap build that includes a minimal number of bootstrap components. If you want to try the same approach, you can download the <a href="https://github.com/djnavarro/strapless/releases/download/0.0.0.9000/strapless.css">strapless.css</a> file to the same folder as the distill post you want to enable it for, and include the following YAML in the post header:</p>
-<pre><code>output:
-  distill::distill_article:
-    css: "strapless.css"</code></pre>
-<p>If you want to enable strapless for the entire site, this markup goes in the <code>_site.yml</code> file and the css file should go in the home folder for the project. Once that’s done you should be ready to go. That being said, you’d be wise to be careful when adopting this approach: the strapless build is a crude hack, and I haven’t tested it very thoroughly.</p>
-</section>
-</section>
-<section id="testing-with-pretty-pictures" class="level2">
-<h2 class="anchored" data-anchor-id="testing-with-pretty-pictures">Testing with pretty pictures</h2>
-<p>Just to make certain, let’s check that it does what we want by generating cards using the <code>galleries</code> data that comes bundled with the bs4cards package:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb4" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><span class="fu" style="color: #4758AB;">library</span>(bs4cards)</span>
-<span id="cb4-2">galleries <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb4-3">  <span class="fu" style="color: #4758AB;">cards</span>(<span class="at" style="color: #657422;">title =</span> long_name, <span class="at" style="color: #657422;">image =</span> image_url)</span></code></pre></div>
-<div class="cell-output-display">
-<div>
-<div class="row p-0 row-cols-1 row-cols-md-2 row-cols-lg-3" style="margin-left: -.2rem; margin-right: -.2rem; margin-top: 1rem; margin-bottom: 1rem; ">
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .2rem ; border-width: 0; border-radius: .6rem .6rem .6rem .6rem ;">
-<img src="https://blog.djnavarro.net/posts/2021-04-19_bs4cards-in-distill/https:/bs4cards.djnavarro.net/image/ash.jpg" class="card-img-top" style="border-style:solid; border-color:inherits; border-width:1px 1px 0 1px; border-radius: .6rem .6rem 0 0 ;">
-<div class="card-body justify-content-end m-0 p-0" style="visibility: visible; background-color: inherits; border-style:solid; border-color:inherits; border-width:1px; border-radius: 0 0 .6rem .6rem ;">
-<h5 class="card-title my-auto px-3 pt-3 pb-3 anchored">Ash Cloud and Blood</h5>
-</div>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .2rem ; border-width: 0; border-radius: .6rem .6rem .6rem .6rem ;">
-<img src="https://blog.djnavarro.net/posts/2021-04-19_bs4cards-in-distill/https:/bs4cards.djnavarro.net/image/ghosts.jpg" class="card-img-top" style="border-style:solid; border-color:inherits; border-width:1px 1px 0 1px; border-radius: .6rem .6rem 0 0 ;">
-<div class="card-body justify-content-end m-0 p-0" style="visibility: visible; background-color: inherits; border-style:solid; border-color:inherits; border-width:1px; border-radius: 0 0 .6rem .6rem ;">
-<h5 class="card-title my-auto px-3 pt-3 pb-3 anchored">Ghosts on Marble Paper</h5>
-</div>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .2rem ; border-width: 0; border-radius: .6rem .6rem .6rem .6rem ;">
-<img src="https://blog.djnavarro.net/posts/2021-04-19_bs4cards-in-distill/https:/bs4cards.djnavarro.net/image/ice-floes.jpg" class="card-img-top" style="border-style:solid; border-color:inherits; border-width:1px 1px 0 1px; border-radius: .6rem .6rem 0 0 ;">
-<div class="card-body justify-content-end m-0 p-0" style="visibility: visible; background-color: inherits; border-style:solid; border-color:inherits; border-width:1px; border-radius: 0 0 .6rem .6rem ;">
-<h5 class="card-title my-auto px-3 pt-3 pb-3 anchored">Ice Floes</h5>
-</div>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .2rem ; border-width: 0; border-radius: .6rem .6rem .6rem .6rem ;">
-<img src="https://blog.djnavarro.net/posts/2021-04-19_bs4cards-in-distill/https:/bs4cards.djnavarro.net/image/native-flora.jpg" class="card-img-top" style="border-style:solid; border-color:inherits; border-width:1px 1px 0 1px; border-radius: .6rem .6rem 0 0 ;">
-<div class="card-body justify-content-end m-0 p-0" style="visibility: visible; background-color: inherits; border-style:solid; border-color:inherits; border-width:1px; border-radius: 0 0 .6rem .6rem ;">
-<h5 class="card-title my-auto px-3 pt-3 pb-3 anchored">Native Flora</h5>
-</div>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .2rem ; border-width: 0; border-radius: .6rem .6rem .6rem .6rem ;">
-<img src="https://blog.djnavarro.net/posts/2021-04-19_bs4cards-in-distill/https:/bs4cards.djnavarro.net/image/silhouettes.jpg" class="card-img-top" style="border-style:solid; border-color:inherits; border-width:1px 1px 0 1px; border-radius: .6rem .6rem 0 0 ;">
-<div class="card-body justify-content-end m-0 p-0" style="visibility: visible; background-color: inherits; border-style:solid; border-color:inherits; border-width:1px; border-radius: 0 0 .6rem .6rem ;">
-<h5 class="card-title my-auto px-3 pt-3 pb-3 anchored">Silhouettes</h5>
-</div>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .2rem ; border-width: 0; border-radius: .6rem .6rem .6rem .6rem ;">
-<img src="https://blog.djnavarro.net/posts/2021-04-19_bs4cards-in-distill/https:/bs4cards.djnavarro.net/image/track-marks.jpg" class="card-img-top" style="border-style:solid; border-color:inherits; border-width:1px 1px 0 1px; border-radius: .6rem .6rem 0 0 ;">
-<div class="card-body justify-content-end m-0 p-0" style="visibility: visible; background-color: inherits; border-style:solid; border-color:inherits; border-width:1px; border-radius: 0 0 .6rem .6rem ;">
-<h5 class="card-title my-auto px-3 pt-3 pb-3 anchored">Track Marks</h5>
-</div>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .2rem ; border-width: 0; border-radius: .6rem .6rem .6rem .6rem ;">
-<img src="https://blog.djnavarro.net/posts/2021-04-19_bs4cards-in-distill/https:/bs4cards.djnavarro.net/image/viewports.jpg" class="card-img-top" style="border-style:solid; border-color:inherits; border-width:1px 1px 0 1px; border-radius: .6rem .6rem 0 0 ;">
-<div class="card-body justify-content-end m-0 p-0" style="visibility: visible; background-color: inherits; border-style:solid; border-color:inherits; border-width:1px; border-radius: 0 0 .6rem .6rem ;">
-<h5 class="card-title my-auto px-3 pt-3 pb-3 anchored">Viewports</h5>
-</div>
-</div>
-</div>
-</div>
-</div>
-</div>
-<p><br></p>
-<p>Looks about right to me?</p>
-<!--------------- appendices go here ----------------->
-</section>
-<div class="cell">
-<div class="cell-output-display">
-
-
-</div>
-</div>
-
-
-
-
-<div id="quarto-appendix" class="default"><section id="last-updated" class="level2 appendix"><h2 class="quarto-appendix-heading">Last updated</h2><div class="quarto-appendix-contents">
-
-<p>2022-08-23 13:12:17 AEST</p>
-</div></section><section id="details" class="level2 appendix"><h2 class="quarto-appendix-heading">Details</h2><div class="quarto-appendix-contents">
-
-<p><a href="https://github.com/djnavarro/quarto-blog/tree/main/posts/2021-04-19_bs4cards-in-distill/index.qmd">source code</a>, <a href="https://github.com/djnavarro/quarto-blog/tree/main/posts/2021-04-19_bs4cards-in-distill/renv.lock">R environment</a></p>
-</div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">References</h2><div id="refs" class="references csl-bib-body hanging-indent">
-<div id="ref-distill" class="csl-entry">
-Allaire, JJ, Rich Iannone, Alison Presmanes Hill, and Yihui Xie. 2021. <em>Distill: ’R Markdown’ Format for Scientific and Technical Writing</em>. <a href="https://CRAN.R-project.org/package=distill">https://CRAN.R-project.org/package=distill</a>.
-</div>
-<div id="ref-pkgdown" class="csl-entry">
-Wickham, Hadley, Jay Hesselberth, and Maëlle Salmon. 2021. <em>Pkgdown: Make Static HTML Documentation for a Package</em>.
-</div>
-<div id="ref-rmarkdown" class="csl-entry">
-Xie, Yihui, Christophe Dervieux, and Emily Riederer. 2020. <em>R Markdown Cookbook</em>. Boca Raton, Florida: Chapman; Hall/CRC. <a href="https://bookdown.org/yihui/rmarkdown-cookbook">https://bookdown.org/yihui/rmarkdown-cookbook</a>.
-</div>
-</div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2021,
-  author = {Danielle Navarro},
-  editor = {},
-  title = {Bootstrap Cards in Distill},
-  date = {2021-04-19},
-  url = {https://blog.djnavarro.net/bs4cards-in-distill},
-  langid = {en}
-}
-</code></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2021" class="csl-entry quarto-appendix-citeas">
-Danielle Navarro. 2021. <span>“Bootstrap Cards in Distill.”</span> April
-19, 2021. <a href="https://blog.djnavarro.net/bs4cards-in-distill">https://blog.djnavarro.net/bs4cards-in-distill</a>.
-</div></div></section></div> ]]></description>
-  <category>Blogging</category>
-  <category>Bootstrap</category>
-  <category>Distill</category>
-  <guid>https://blog.djnavarro.net/posts/2021-04-19_bs4cards-in-distill/index.html</guid>
-  <pubDate>Sun, 18 Apr 2021 14:00:00 GMT</pubDate>
-  <media:content url="https://blog.djnavarro.net/posts/2021-04-19_bs4cards-in-distill/bs4cards-logo.png" medium="image" type="image/png" height="83" width="144"/>
 </item>
 </channel>
 </rss>
