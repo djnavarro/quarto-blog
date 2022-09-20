@@ -7,6 +7,12 @@ image: "img/hennie-stander-aWwFbn0ZW6A-unsplash.jpg"
 ---
 
 <!-- 
+rendering from terminal:
+  cd ~/GitHub/sites/quarto-blog/posts/2022-09-23_flight
+  
+-->
+
+<!-- 
 cover image: https://unsplash.com/photos/aWwFbn0ZW6A
 credit: Hennie Stander
 licence: open via unsplash licence
@@ -54,9 +60,91 @@ It exists for one purpose: it makes it super easy to transfer Arrow-formatted da
 
 So let's take flight for a spin, yeah? Later on in the post I will talk a little about what's actually happening under the hood, but let's set that aside for the moment...
 
+### Prerequisites
+
+There are a couple of prerequisites for this post. Specifically I'll assume you have the arrow and reticulate packages installed in your R environment, and similarly that your Python environment has pyarrow installed. If you're only interested in the Python side, you probably don't need either of the R packages, but R users do need the pyarrow installation because the R flight implementation builds on pyarrow.
+
+
 ## A minimal example with R
 
-We'll start with R because the implementation in R operates at a higher level of abstraction than other languages. Makes it easier to understand the basic ideas, but be warned: we'll need to switch languages later. 
+The implementation status of Arrow Flight varies a little across languages. For example, in his excellent book [In-Memory Analytics with Apache Arrow](https://www.packtpub.com/product/in-memory-analytics-with-apache-arrow/9781801071031), my Voltron Data colleague [Matt Topol](https://twitter.com/zeroshade) shows the reader how to build an Arrow Flight server in Python, C++, and Go. Later in this post I'll talk about Python too, but I'm going to start with R for two reasons. The first is personal: I use R as my primary language, and it's just where my mind goes first. The second is practical: at the moment, the flight implementation in R is a more high-level than the Python implementation -- in fact, the R implementation is built on top of the Python library -- and this makes it a little easier to to show you the big picture. So we'll start in R for simplicity, then pivot to Python when a little more complexity is needed. 
+
+### Starting the demo server
+
+Let's get started. If all you want is a simple flight server to handle uploads and downloads of Arrow tables, there is almost nothing you need to do on the server side. The arrow R package comes with a bundled "demo_flight_server" Python module that provides this for you, so all you need to do is start it running. The [start_demo_server.R](./start_demo_server.R) script shown below shows how to do this:
+
+```{r, filename="start_demo_server.R", eval=FALSE}
+# load R packages
+library(arrow)
+library(reticulate)
+
+# use a Python environment with pyarrow
+use_miniconda("base")
+
+# load the definition of the "demo flight server" Python class
+# that comes bundled with the R arrow package
+server_class_object <- load_flight_server("demo_flight_server")
+
+# create an instance of the server and start it running
+server_instance <- server_class_object$DemoFlightServer(port = 8089)
+server_instance$serve()
+```
+
+For the purposes of this post I think it's handy to imagine that I'm executing these R scripts from the terminal. After all, I don't really want to be running the server from my RStudio console! At the terminal I'd type this to start the server as a background job:
+
+```{bash, filename="[terminal]", eval=FALSE}
+Rscript start_demo_server.R &
+```
+
+### Connecting with a client
+
+Now that I have this server running quietly in the background on port 8089, I can define a flight client at my regular R console that can interact with it. However, because this is a completely different R session, I'll need to make sure that I have the environment set up correctly: 
+
+```{r, filename="[R console]", message=FALSE}
+library(arrow)
+library(reticulate)
+use_miniconda("base")
+```
+
+Great, now I can call `flight_connect()`:
+
+```{r, filename="[R console]"}
+client <- flight_connect(port = 8089)
+```
+
+So what are the "flights" on this server?
+
+```{r, filename="[R console]"}
+list_flights(client)
+```
+
+Hm, nothing. Yeah that makes sense because I didn't upload anything to the server! Okay, well, let's suppose I want to store a copy of the `airquality` data as an Arrow Table on my server. The `flight_put()` function will do that for me:
+
+```{r, filename="[R console]"}
+flight_put(client, data = airquality, path = "pollution_data")
+```
+
+This command creates an Arrow Table from the `airquality` data and uploads it to the server. The `path` argument is, in effect, used as the name of the data set on the server side. So if we *now* try to list the "flights" on our server we get this:
+
+```{r, filename="[R console]"}
+list_flights(client)
+```
+
+Excellent. Now, just to prove to you that I'm not cheating, let's check to make sure that there is no object called `pollution_data` stored locally within my R session:^[One of my favourite things about having a quarto blog is that every post is a notebook. It's technically possible to "cheat" by including hidden code chunks that execute different code than that shown in the post, but it's something I do very sparingly and only when there's some weirdness involved. I'm not doing that here. When this post is rendered, it does start a new instance of the demo server in a different R session: every flight server demonstrated here is in fact running in the background so that the post renders, and server side data are all stored by those other processes. There really is no copy of the `pollution_data` object in the R session used to render this post. It's somewhere else, as it bloody well should be.]
+
+```{r, filename="[R console]", error=TRUE}
+pollution_data
+```
+
+Okay, so there's no `pollution_data` object in my R session, but presumably there is some corresponding object on the server, right? I can access that object straightforwardly courtest of the `flight_get()` function:
+
+```{r, filename="[R console]", message=FALSE}
+flight_get(client, "pollution_data")
+```
+
+Yay! It works! 
+
+At the very least we have proof-of-concept that we can start a flight server and use it to upload and download data. But there's a lot that hasn't really been explained properly here. The time has come to start digging a little deeper, so we can really get a sense of what's going on under the hood and how this very simple example can be extended.
 
 ## Unpacking the operations
 
@@ -79,8 +167,9 @@ A little bit of detail about RPC vs REST, about gRPC and protobuf. Not a lot is 
 Not sure if I want to write this section but it is tempting
 
 
-
-
+```{r, echo=FALSE}
+client$do_action("shutdown")
+```
 
 <!--------------- appendices go here ----------------->
 
