@@ -65,7 +65,7 @@ So let's take flight for a spin, yeah? Later on in the post I will talk a little
 There are a couple of prerequisites for this post. Specifically I'll assume you have the arrow and reticulate packages installed in your R environment, and similarly that your Python environment has pyarrow installed. If you're only interested in the Python side, you probably don't need either of the R packages, but R users do need the pyarrow installation because the R flight implementation builds on pyarrow.
 
 
-## A minimal example with R
+## A demonstration with R
 
 The implementation status of Arrow Flight varies a little across languages. For example, in his excellent book [In-Memory Analytics with Apache Arrow](https://www.packtpub.com/product/in-memory-analytics-with-apache-arrow/9781801071031), my Voltron Data colleague [Matt Topol](https://twitter.com/zeroshade) shows the reader how to build an Arrow Flight server in Python, C++, and Go. Later in this post I'll talk about Python too, but I'm going to start with R for two reasons. The first is personal: I use R as my primary language, and it's just where my mind goes first. The second is practical: at the moment, the flight implementation in R is a more high-level than the Python implementation -- in fact, the R implementation is built on top of the Python library -- and this makes it a little easier to to show you the big picture. So we'll start in R for simplicity, then pivot to Python when a little more complexity is needed. 
 
@@ -136,7 +136,7 @@ Excellent. Now, just to prove to you that I'm not cheating, let's check to make 
 pollution_data
 ```
 
-Okay, so there's no `pollution_data` object in my R session, but presumably there is some corresponding object on the server, right? I can access that object straightforwardly courtest of the `flight_get()` function:
+Okay, so there's no `pollution_data` object in my R session, but presumably there is some corresponding object on the server, right? I can access that object straightforwardly courtesy of the `flight_get()` function:
 
 ```{r, filename="[R console]", message=FALSE}
 flight_get(client, "pollution_data")
@@ -144,11 +144,24 @@ flight_get(client, "pollution_data")
 
 Yay! It works! 
 
-At the very least we have proof-of-concept that we can start a flight server and use it to upload and download data. But there's a lot that hasn't really been explained properly here. The time has come to start digging a little deeper, so we can really get a sense of what's going on under the hood and how this very simple example can be extended.
+At the very least we have proof-of-concept that we can start a flight server and use it to upload and download data. But there's a lot that hasn't really been explained properly here. The time has come to start digging a little deeper, so we can really get a sense of what's going on under the hood and how this simple example can be extended.
 
 ## Unpacking the operations
 
-Like I said, the R functions operate at a high level of abstractions. The `flight_put()` function, for example, is called by the client and executes a whole exchange with the server. If we really want to understand flight, we really want to unpack that and look at what's happening at a lower level. 
+One thing that I like about the flight functionality exposed through `flight_connect()`, `flight_put()`, `flight_get()`, etc is that it operates at a high level of abstraction. In my day-to-day data analysis work I really don't want to spend my time thinking about low-level operations. When I tell R to "put" a data set onto the server I *want* it to happen with one line of code. This high level API is super useful to me on an everyday basis, but it also masks some of the details about how flight works. To give you a sense of what's being hidden, we can take a closer look at the `client` object. Here's a list of some of the methods that are available through the object itself:
+
+``` r
+client$do_put()
+client$do_get()
+client$do_action()
+client$list_action()
+client$list_flights()
+client$get_flight_info()
+```
+
+Each of these methods describes a low level operation available to the flight client. As you might expect, the `do_put()` method for the client is very closely related to the `flight_put()` function that I called earlier! However, they aren't the same. The `do_put()` method doesn't actually upload any data, it merely opens a connection to the server, which we can then use to stream data set from the client to the server. If you were calling the `do_put()` method directly, you would need to take care of that yourself. But it's tiresome to write that code over and over, so the  `flight_put()` function provides a convenient high-level wrapper that abstracts over all that. 
+
+If you're the analyst working with the data, this is fabulous. But if you're looking to implement your very own flight server, you probably need to understand what these low level operations are. So that's where we're headed next...
 
 ## Building a flight server in Python
 

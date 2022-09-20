@@ -247,7 +247,7 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
   <ul class="collapse">
   <li><a href="#prerequisites" id="toc-prerequisites" class="nav-link" data-scroll-target="#prerequisites">Prerequisites</a></li>
   </ul></li>
-  <li><a href="#a-minimal-example-with-r" id="toc-a-minimal-example-with-r" class="nav-link" data-scroll-target="#a-minimal-example-with-r">A minimal example with R</a>
+  <li><a href="#a-demonstration-with-r" id="toc-a-demonstration-with-r" class="nav-link" data-scroll-target="#a-demonstration-with-r">A demonstration with R</a>
   <ul class="collapse">
   <li><a href="#starting-the-demo-server" id="toc-starting-the-demo-server" class="nav-link" data-scroll-target="#starting-the-demo-server">Starting the demo server</a></li>
   <li><a href="#connecting-with-a-client" id="toc-connecting-with-a-client" class="nav-link" data-scroll-target="#connecting-with-a-client">Connecting with a client</a></li>
@@ -310,8 +310,8 @@ licence: open via unsplash licence
 <p>There are a couple of prerequisites for this post. Specifically I’ll assume you have the arrow and reticulate packages installed in your R environment, and similarly that your Python environment has pyarrow installed. If you’re only interested in the Python side, you probably don’t need either of the R packages, but R users do need the pyarrow installation because the R flight implementation builds on pyarrow.</p>
 </section>
 </section>
-<section id="a-minimal-example-with-r" class="level2">
-<h2 class="anchored" data-anchor-id="a-minimal-example-with-r">A minimal example with R</h2>
+<section id="a-demonstration-with-r" class="level2">
+<h2 class="anchored" data-anchor-id="a-demonstration-with-r">A demonstration with R</h2>
 <p>The implementation status of Arrow Flight varies a little across languages. For example, in his excellent book <a href="https://www.packtpub.com/product/in-memory-analytics-with-apache-arrow/9781801071031">In-Memory Analytics with Apache Arrow</a>, my Voltron Data colleague <a href="https://twitter.com/zeroshade">Matt Topol</a> shows the reader how to build an Arrow Flight server in Python, C++, and Go. Later in this post I’ll talk about Python too, but I’m going to start with R for two reasons. The first is personal: I use R as my primary language, and it’s just where my mind goes first. The second is practical: at the moment, the flight implementation in R is a more high-level than the Python implementation – in fact, the R implementation is built on top of the Python library – and this makes it a little easier to to show you the big picture. So we’ll start in R for simplicity, then pivot to Python when a little more complexity is needed.</p>
 <section id="starting-the-demo-server" class="level3">
 <h3 class="anchored" data-anchor-id="starting-the-demo-server">Starting the demo server</h3>
@@ -414,7 +414,7 @@ licence: open via unsplash licence
 <pre><code>Error in eval(expr, envir, enclos): object 'pollution_data' not found</code></pre>
 </div>
 </div>
-<p>Okay, so there’s no <code>pollution_data</code> object in my R session, but presumably there is some corresponding object on the server, right? I can access that object straightforwardly courtest of the <code>flight_get()</code> function:</p>
+<p>Okay, so there’s no <code>pollution_data</code> object in my R session, but presumably there is some corresponding object on the server, right? I can access that object straightforwardly courtesy of the <code>flight_get()</code> function:</p>
 <div class="cell">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
@@ -436,12 +436,20 @@ See $metadata for additional Schema metadata</code></pre>
 </div>
 </div>
 <p>Yay! It works!</p>
-<p>At the very least we have proof-of-concept that we can start a flight server and use it to upload and download data. But there’s a lot that hasn’t really been explained properly here. The time has come to start digging a little deeper, so we can really get a sense of what’s going on under the hood and how this very simple example can be extended.</p>
+<p>At the very least we have proof-of-concept that we can start a flight server and use it to upload and download data. But there’s a lot that hasn’t really been explained properly here. The time has come to start digging a little deeper, so we can really get a sense of what’s going on under the hood and how this simple example can be extended.</p>
 </section>
 </section>
 <section id="unpacking-the-operations" class="level2">
 <h2 class="anchored" data-anchor-id="unpacking-the-operations">Unpacking the operations</h2>
-<p>Like I said, the R functions operate at a high level of abstractions. The <code>flight_put()</code> function, for example, is called by the client and executes a whole exchange with the server. If we really want to understand flight, we really want to unpack that and look at what’s happening at a lower level.</p>
+<p>One thing that I like about the flight functionality exposed through <code>flight_connect()</code>, <code>flight_put()</code>, <code>flight_get()</code>, etc is that it operates at a high level of abstraction. In my day-to-day data analysis work I really don’t want to spend my time thinking about low-level operations. When I tell R to “put” a data set onto the server I <em>want</em> it to happen with one line of code. This high level API is super useful to me on an everyday basis, but it also masks some of the details about how flight works. To give you a sense of what’s being hidden, we can take a closer look at the <code>client</code> object. Here’s a list of some of the methods that are available through the object itself:</p>
+<div class="sourceCode" id="cb14"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a>client<span class="sc">$</span><span class="fu">do_put</span>()</span>
+<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a>client<span class="sc">$</span><span class="fu">do_get</span>()</span>
+<span id="cb14-3"><a href="#cb14-3" aria-hidden="true" tabindex="-1"></a>client<span class="sc">$</span><span class="fu">do_action</span>()</span>
+<span id="cb14-4"><a href="#cb14-4" aria-hidden="true" tabindex="-1"></a>client<span class="sc">$</span><span class="fu">list_action</span>()</span>
+<span id="cb14-5"><a href="#cb14-5" aria-hidden="true" tabindex="-1"></a>client<span class="sc">$</span><span class="fu">list_flights</span>()</span>
+<span id="cb14-6"><a href="#cb14-6" aria-hidden="true" tabindex="-1"></a>client<span class="sc">$</span><span class="fu">get_flight_info</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>Each of these methods describes a low level operation available to the flight client. As you might expect, the <code>do_put()</code> method for the client is very closely related to the <code>flight_put()</code> function that I called earlier! However, they aren’t the same. The <code>do_put()</code> method doesn’t actually upload any data, it merely opens a connection to the server, which we can then use to stream data set from the client to the server. If you were calling the <code>do_put()</code> method directly, you would need to take care of that yourself. But it’s tiresome to write that code over and over, so the <code>flight_put()</code> function provides a convenient high-level wrapper that abstracts over all that.</p>
+<p>If you’re the analyst working with the data, this is fabulous. But if you’re looking to implement your very own flight server, you probably need to understand what these low level operations are. So that’s where we’re headed next…</p>
 </section>
 <section id="building-a-flight-server-in-python" class="level2">
 <h2 class="anchored" data-anchor-id="building-a-flight-server-in-python">Building a flight server in Python</h2>
@@ -460,7 +468,7 @@ See $metadata for additional Schema metadata</code></pre>
 <p>Not sure if I want to write this section but it is tempting</p>
 <div class="cell">
 <div class="cell-output cell-output-stdout">
-<pre><code>&lt;generator object at 0x7f0c9f071860&gt;</code></pre>
+<pre><code>&lt;generator object at 0x7faca56f1860&gt;</code></pre>
 </div>
 </div>
 <!--------------- appendices go here ----------------->
