@@ -7,11 +7,11 @@ reticulate::use_miniconda("base")
 this_folder <- here::here("posts", "2022-09-23_flight")
 
 # load the server defined in the flight_server.py module
-server_generator <- load_flight_server("flight_server", this_folder)
+server_generator <- load_flight_server("tiny_flight_server", this_folder)
 
 # specify a specific instance of this kind of server by calling the
-# Server() method, which I now realise is poorly named /facepalm
-server <- server_generator$Server(port = 8089)
+# TinyFlightServer() method
+server <- server_generator$TinyFlightServer(port = 6789)
 
 # start the server running
 server$serve()

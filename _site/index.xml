@@ -218,6 +218,35 @@ See $metadata for additional Schema metadata</code></pre>
 <span id="cb14-6">client<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">get_flight_info</span>()</span></code></pre></div>
 <p>Each of these methods describes a low level operation available to the flight client. As you might expect, the <code>do_put()</code> method for the client is very closely related to the <code>flight_put()</code> function that I called earlier! However, they aren’t the same. The <code>do_put()</code> method doesn’t actually upload any data, it merely opens a connection to the server, which we can then use to stream data set from the client to the server. If you were calling the <code>do_put()</code> method directly, you would need to take care of that yourself. But it’s tiresome to write that code over and over, so the <code>flight_put()</code> function provides a convenient high-level wrapper that abstracts over all that.</p>
 <p>If you’re the analyst working with the data, this is fabulous. But if you’re looking to implement your very own flight server, you probably need to understand what these low level operations are. So that’s where we’re headed next…</p>
+<section id="unpacking-flight_put" class="level3">
+<h3 class="anchored" data-anchor-id="unpacking-flight_put">Unpacking flight_put()</h3>
+<p>Let’s start by taking a look at what happens when we call the R function <code>flight_put()</code>. Our goal is to transmit the data to the server, and there’s an Arrow Flight method called <code>do_put()</code> that can do this for us. Here’s how the transaction unfolds:</p>
+<p><img src="https://blog.djnavarro.net/posts/2022-09-23_flight/img/do_put.png" class="img-fluid"></p>
+<p>When the client calls <code>do_put()</code> it passes two arguments: a “flight descriptor” used to identify the data (more on that later), and the schema for the flight data.<sup>5</sup> Somewhat simplified, here’s the signature on the client side:</p>
+<div class="sourceCode" id="cb15" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb15-1">do_put(descriptor, schema)</span></code></pre></div>
+<p>Passing the schema allows the client to create “stream writer” and “stream reader” objects that are returned to the client-side user, <em>and</em> passed to the server. On the server-side, the <code>do_put()</code> method expects three inputs: the flight descriptor, the writer, and the reader. Here’s the signature on the server side:</p>
+<div class="sourceCode" id="cb16" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb16-1">do_put(descriptor, reader, writer)</span></code></pre></div>
+<p>Now that the client and server agree on the description of the data, as well as the streaming reader and writer we can move to step two, in which the client streams the data to the server. The server stores the data along with the appropriate descriptor so that it can be found later, and sends a response to the client.</p>
+</section>
+<section id="unpacking-flight_get" class="level3">
+<h3 class="anchored" data-anchor-id="unpacking-flight_get">Unpacking flight_get()</h3>
+<p>Next let’s look at <code>flight_get()</code>. When I called this function earlier, it triggered two separate interactions between the client and server. First, the client calls the <code>get_flight_info()</code> method, and the server responds with some information about the data source that includes – among other things – a “ticket”. Now in possession of this ticket, the client can call <code>do_get()</code> to request that the server send the data that matches the ticket, which the server then streams. So the whole exchange looks like this:</p>
+<p><img src="https://blog.djnavarro.net/posts/2022-09-23_flight/img/do_get.png" class="img-fluid"></p>
+<p>So, in the previous example when I called <code>flight_get()</code>, the process looked like this. On the client side, we used the <code>"pollution_data"</code> path to construct a descriptor object and the client used <code>get_flight_info()</code> to request that information about this “flight” from the server:</p>
+<div class="sourceCode" id="cb17" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb17-1">get_flight_info(descriptor)</span></code></pre></div>
+<p>On the server side, once the descriptor is received, a flight info object is constructed. The flight info object consists of five parts:</p>
+<ul>
+<li>The schema for the data stored by the flight,</li>
+<li>The descriptor</li>
+<li>A list of one or more endpoints that specify where the data are available for streaming. Each end point includes a location from which to stream, and the associated ticket for that location</li>
+<li>The total number of records (i.e.&nbsp;rows) stored</li>
+<li>The total number of bytes to be streamed (i.e., the size of the data)</li>
+</ul>
+<p>This object is then returned to the client. It may seem like this is overly elaborate: why does the client need this much information if only the ticket is needed? In the example I’ve used here, it’s not really needed, but in a more sophisticated setup this would make it possible to stream in parallel, with different endpoints streaming different subsets of the data.</p>
+<p>In any case, once this flight information has been received by the client, we can extract the ticket that we need from the relevant endpoint (there’s only one in our case). The client now calls:</p>
+<div class="sourceCode" id="cb18" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1"><span class="fu" style="color: #4758AB;">do_get</span>(ticket)</span></code></pre></div>
+<p>This returns a stream reader object that the client can use to receive the stream of data from the server.</p>
+</section>
 </section>
 <section id="building-a-flight-server-in-python" class="level2">
 <h2 class="anchored" data-anchor-id="building-a-flight-server-in-python">Building a flight server in Python</h2>
@@ -239,7 +268,7 @@ See $metadata for additional Schema metadata</code></pre>
 <p>Not sure if I want to write this section but it is tempting</p>
 <div class="cell">
 <div class="cell-output cell-output-stdout">
-<pre><code>&lt;generator object at 0x7feae3de3860&gt;</code></pre>
+<pre><code>&lt;generator object at 0x7f2206c7f860&gt;</code></pre>
 </div>
 </div>
 <!--------------- appendices go here ----------------->
@@ -255,6 +284,7 @@ See $metadata for additional Schema metadata</code></pre>
 <li id="fn2"><p>Shocking, right? Wes McKinney has a really deep understanding of Arrow. What next? Hadley Wickham understands ggplot2?????↩︎</p></li>
 <li id="fn3"><p>Sorry. I’m just cackling at the thought of trying to email 100Gb of data…↩︎</p></li>
 <li id="fn4"><p>One of my favourite things about having a quarto blog is that every post is a notebook. It’s technically possible to “cheat” by including hidden code chunks that execute different code than that shown in the post, but it’s something I do very sparingly and only when there’s some weirdness involved. I’m not doing that here. When this post is rendered, it does start a new instance of the demo server in a different R session: every flight server demonstrated here is in fact running in the background so that the post renders, and server side data are all stored by those other processes. There really is no copy of the <code>pollution_data</code> object in the R session used to render this post. It’s somewhere else, as it bloody well should be.↩︎</p></li>
+<li id="fn5"><p>Optionally, you can also pass a third “options” argument.↩︎</p></li>
 </ol>
 </section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
   author = {Danielle Navarro},

@@ -182,13 +182,67 @@ Each of these methods describes a low level operation available to the flight cl
 
 If you're the analyst working with the data, this is fabulous. But if you're looking to implement your very own flight server, you probably need to understand what these low level operations are. So that's where we're headed next...
 
+### Unpacking flight_put()
+
+Let's start by taking a look at what happens when we call the R function `flight_put()`. Our goal is to transmit the data to the server, and there's an Arrow Flight method called `do_put()` that can do this for us. Here's how the transaction unfolds:
+
+![](img/do_put.png)
+
+When the client calls `do_put()` it passes two arguments: a "flight descriptor" used to identify the data (more on that later), and the schema for the flight data.^[Optionally, you can also pass a third "options" argument.]  Somewhat simplified, here's the signature on the client side:
+
+``` python
+do_put(descriptor, schema)
+```
+
+Passing the schema allows the client to create "stream writer" and "stream reader" objects that are returned to the client-side user, *and* passed to the server. On the server-side, the `do_put()` method expects three inputs: the flight descriptor, the writer, and the reader. Here's the signature on the server side: 
+
+``` python
+do_put(descriptor, reader, writer)
+```
+
+Now that the client and server agree on the description of the data, as well as the streaming reader and writer we can move to step two, in which the client streams the data to the server. The server stores the data along with the appropriate descriptor so that it can be found later, and sends a response to the client. 
+
+### Unpacking flight_get()
+
+Next let's look at `flight_get()`. When I called this function earlier, it triggered two separate interactions between the client and server. First, the client calls the `get_flight_info()` method, and the server responds with some information about the data source that includes -- among other things -- a "ticket". Now in possession of this ticket, the client can call `do_get()` to request that the server send the data that matches the ticket, which the server then streams. So the whole exchange looks like this:
+
+![](img/do_get.png)
+
+So, in the previous example when I called `flight_get()`, the process looked like this. On the client side, we used the `"pollution_data"` path to construct a descriptor object and the client used `get_flight_info()` to request that information about this "flight" from the server:
+
+``` python
+get_flight_info(descriptor)
+```
+
+On the server side, once the descriptor is received, a flight info object is constructed. The flight info object consists of five parts: 
+
+- The schema for the data stored by the flight, 
+- The descriptor
+- A list of one or more endpoints that specify where the data are available for streaming. Each end point includes a location from which to stream, and the associated ticket for that location
+- The total number of records (i.e. rows) stored 
+- The total number of bytes to be streamed (i.e., the size of the data)
+
+This object is then returned to the client. It may seem like this is overly elaborate: why does the client need this much information if only the ticket is needed? In the example I've used here, it's not really needed, but in a more sophisticated setup this would make it possible to stream in parallel, with different endpoints streaming different subsets of the data.
+
+In any case, once this flight information has been received by the client, we can extract the ticket that we need from the relevant endpoint (there's only one in our case). The client now calls:
+
+``` r
+do_get(ticket)
+```
+
+This returns a stream reader object that the client can use to receive the stream of data from the server.
+
+
 ## Building a flight server in Python
 
 > Little bit classy, bit of a rat <br>
 I got my hair tied back <br>
 in a plait at the back
 
-Now that we understand what is happening at a lower level, we can build a server. Here it's handy to switch to Python, because R doesn't currently have an independent method to build the server in R: it's actually a Python flight server under the hood. Our lives will be easier if we just switch to Python here:
+Now that we have a basic understanding of what is happening at a lower level, we can build a server. At this point it's handy to switch to Python. R doesn't currently have an independent method to build the server: it's actually a Python flight server under the hood, so we might as well write our server using Python.
+
+
+
 
 ## Using our server
 
