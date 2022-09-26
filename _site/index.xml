@@ -276,10 +276,11 @@ See $metadata for additional Schema metadata</code></pre>
 </section>
 <section id="a-python-example" class="level2">
 <h2 class="anchored" data-anchor-id="a-python-example">A Python example</h2>
+<p>Now that we have a basic understanding of what is happening at a lower level, we can build a flight server of our very own. To do this I’ll switch over to Python. R doesn’t currently have a direct implementation of flight, and relies on Python. Given this, it’s easiest to switch completely to Python for the rest of this post.</p>
 <p><br></p>
-<section id="building-a-tiny-flight-server" class="level3">
-<h3 class="anchored" data-anchor-id="building-a-tiny-flight-server">Building a tiny flight server</h3>
-<p>Now that we have a basic understanding of what is happening at a lower level, we can build a server. At this point it’s handy to switch to Python. R doesn’t currently have an independent method to build the server: it’s actually a Python flight server under the hood, so we might as well write our server using Python.</p>
+<section id="a-tiny-flight-server" class="level3">
+<h3 class="anchored" data-anchor-id="a-tiny-flight-server">A tiny flight server</h3>
+<p>Our goal in this section is to write our own flight server in Python that does the same job as the one we saw earlier in the R example: it’s a server that allows you to cache copies of Arrow tables. To do so, we’ll start our Python script the way one usually does, with some imports:</p>
 <div class="cell">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
@@ -289,7 +290,8 @@ See $metadata for additional Schema metadata</code></pre>
 <span id="cb24-2"><span class="im" style="color: #00769E;">import</span> pyarrow.flight <span class="im" style="color: #00769E;">as</span> flight</span></code></pre></div>
 </div>
 </div>
-<p>Define the server class…</p>
+<p>What I’ll do now is define a Python class called <code>TinyServer</code>. The job of this class is to provide server side flight methods for <code>do_get()</code>, <code>do_put()</code>, and others. We’ll be able to use this class to create specific server instances and set them running, in more or less the exact same fashion that we did previously in the R example.</p>
+<p>I’ll explain the code in more detail in a moment after I’ve shown you both the server and the client, but let’s start just by looking at the code. You can find all the code in the <a href="tiny_flight.py">tiny_flight.py</a> script that accompanies this post. Here’s the complete code used to define the <code>TinyServer</code> class:</p>
 <div class="cell">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
@@ -366,57 +368,67 @@ See $metadata for additional Schema metadata</code></pre>
 <span id="cb25-69">        ]</span></code></pre></div>
 </div>
 </div>
+<p>Hopefully some of this makes sense already, but it will become a little clearer in a moment. In order to do that, it’s helpful to see what the code for the client looks like:</p>
+<p><br></p>
+</section>
+<section id="a-tiny-flight-client" class="level3">
+<h3 class="anchored" data-anchor-id="a-tiny-flight-client">A tiny flight client</h3>
+<p>To accompany a <code>TinyServer</code>, we’ll need a <code>TinyClient</code> that knows how to talk to it. With that in mind, here’s the entire source code used to define the <code>TinyClient</code> class:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>tiny_flight.py</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb26" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb26-1"><span class="kw" style="color: #003B4F;">class</span> TinyClient:</span>
+<span id="cb26-2"></span>
+<span id="cb26-3">    <span class="kw" style="color: #003B4F;">def</span> <span class="fu" style="color: #4758AB;">__init__</span>(<span class="va" style="color: #111111;">self</span>, host <span class="op" style="color: #5E5E5E;">=</span> <span class="st" style="color: #20794D;">"localhost"</span>, port <span class="op" style="color: #5E5E5E;">=</span> <span class="dv" style="color: #AD0000;">5678</span>):</span>
+<span id="cb26-4">        <span class="va" style="color: #111111;">self</span>.location <span class="op" style="color: #5E5E5E;">=</span> flight.Location.for_grpc_tcp(host, port)</span>
+<span id="cb26-5">        <span class="va" style="color: #111111;">self</span>.con <span class="op" style="color: #5E5E5E;">=</span> flight.<span class="ex" style="color: null;">connect</span>(<span class="va" style="color: #111111;">self</span>.location)</span>
+<span id="cb26-6">        <span class="va" style="color: #111111;">self</span>.con.wait_for_available()</span>
+<span id="cb26-7"></span>
+<span id="cb26-8">    <span class="kw" style="color: #003B4F;">def</span> put_table(<span class="va" style="color: #111111;">self</span>, name, table):</span>
+<span id="cb26-9">        desc <span class="op" style="color: #5E5E5E;">=</span> flight.FlightDescriptor.for_command(name.encode(<span class="st" style="color: #20794D;">"utf8"</span>))</span>
+<span id="cb26-10">        writer, reader <span class="op" style="color: #5E5E5E;">=</span> <span class="va" style="color: #111111;">self</span>.con.do_put(desc, table.schema)</span>
+<span id="cb26-11">        writer.write(table)</span>
+<span id="cb26-12">        writer.close()</span>
+<span id="cb26-13">      </span>
+<span id="cb26-14">    <span class="kw" style="color: #003B4F;">def</span> get_table(<span class="va" style="color: #111111;">self</span>, name):</span>
+<span id="cb26-15">        reader <span class="op" style="color: #5E5E5E;">=</span> <span class="va" style="color: #111111;">self</span>.con.do_get(flight.Ticket(name.encode(<span class="st" style="color: #20794D;">"utf8"</span>)))</span>
+<span id="cb26-16">        <span class="cf" style="color: #003B4F;">return</span> reader.read_all()</span>
+<span id="cb26-17">    </span>
+<span id="cb26-18">    <span class="kw" style="color: #003B4F;">def</span> list_tables(<span class="va" style="color: #111111;">self</span>):</span>
+<span id="cb26-19">        names <span class="op" style="color: #5E5E5E;">=</span> []</span>
+<span id="cb26-20">        <span class="cf" style="color: #003B4F;">for</span> flight <span class="kw" style="color: #003B4F;">in</span> <span class="va" style="color: #111111;">self</span>.con.list_flights():</span>
+<span id="cb26-21">            names.append(flight.descriptor.command.decode(<span class="st" style="color: #20794D;">'utf-8'</span>))</span>
+<span id="cb26-22">        <span class="cf" style="color: #003B4F;">return</span> names</span>
+<span id="cb26-23">    </span>
+<span id="cb26-24">    <span class="kw" style="color: #003B4F;">def</span> drop_table(<span class="va" style="color: #111111;">self</span>, name):</span>
+<span id="cb26-25">        drop <span class="op" style="color: #5E5E5E;">=</span> flight.Action(<span class="st" style="color: #20794D;">"drop_table"</span>, name.encode(<span class="st" style="color: #20794D;">'utf-8'</span>)) </span>
+<span id="cb26-26">        <span class="va" style="color: #111111;">self</span>.con.do_action(drop)</span></code></pre></div>
+</div>
+</div>
+<p>These two classes are designed to work in concert: the <code>do_put()</code> method for <code>TinyServer</code> is aligned with the <code>do_put()</code> method for <code>TinyClient</code>, and so on. That’s the reason I started by showing you all the source code for both parts before explaining any of the specific methods – now that we’ve seen the code, we can examine <code>TinyServer.do_put()</code> and <code>TinyClient.do_put()</code> together</p>
+<p><br></p>
+</section>
+<section id="our-flight-methods" class="level3">
+<h3 class="anchored" data-anchor-id="our-flight-methods">Our flight methods</h3>
 <p>Blah blah</p>
+<p><br></p>
+</section>
+<section id="using-our-server" class="level3">
+<h3 class="anchored" data-anchor-id="using-our-server">Using our server</h3>
 <p>Conveniently, the <a href="tiny_flight.py">tiny_flight.py</a> script is bundled with this post, so I can import it as a module:</p>
 <div class="cell">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
 <pre><strong>[Python commands]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb26" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb26-1"><span class="im" style="color: #00769E;">import</span> threading</span>
-<span id="cb26-2"><span class="im" style="color: #00769E;">import</span> tiny_flight <span class="im" style="color: #00769E;">as</span> tiny</span>
-<span id="cb26-3"></span>
-<span id="cb26-4">server <span class="op" style="color: #5E5E5E;">=</span> tiny.TinyServer(port <span class="op" style="color: #5E5E5E;">=</span> <span class="dv" style="color: #AD0000;">9001</span>)</span>
-<span id="cb26-5">thread <span class="op" style="color: #5E5E5E;">=</span> threading.Thread(target<span class="op" style="color: #5E5E5E;">=</span><span class="kw" style="color: #003B4F;">lambda</span>: server.serve(), daemon<span class="op" style="color: #5E5E5E;">=</span><span class="va" style="color: #111111;">True</span>)</span>
-<span id="cb26-6">thread.start()</span></code></pre></div>
-</div>
-</div>
-<p><br></p>
-</section>
-<section id="a-tiny-server-needs-a-tiny-client" class="level3">
-<h3 class="anchored" data-anchor-id="a-tiny-server-needs-a-tiny-client">A tiny server needs a tiny client</h3>
-<p>Okay, now we need to define the client:</p>
-<div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>tiny_flight.py</strong></pre>
-</div>
-<div class="sourceCode cell-code" id="cb27" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb27-1"><span class="kw" style="color: #003B4F;">class</span> TinyClient:</span>
-<span id="cb27-2"></span>
-<span id="cb27-3">    <span class="kw" style="color: #003B4F;">def</span> <span class="fu" style="color: #4758AB;">__init__</span>(<span class="va" style="color: #111111;">self</span>, host <span class="op" style="color: #5E5E5E;">=</span> <span class="st" style="color: #20794D;">"localhost"</span>, port <span class="op" style="color: #5E5E5E;">=</span> <span class="dv" style="color: #AD0000;">5678</span>):</span>
-<span id="cb27-4">        <span class="va" style="color: #111111;">self</span>.location <span class="op" style="color: #5E5E5E;">=</span> flight.Location.for_grpc_tcp(host, port)</span>
-<span id="cb27-5">        <span class="va" style="color: #111111;">self</span>.con <span class="op" style="color: #5E5E5E;">=</span> flight.<span class="ex" style="color: null;">connect</span>(<span class="va" style="color: #111111;">self</span>.location)</span>
-<span id="cb27-6">        <span class="va" style="color: #111111;">self</span>.con.wait_for_available()</span>
-<span id="cb27-7"></span>
-<span id="cb27-8">    <span class="kw" style="color: #003B4F;">def</span> put_table(<span class="va" style="color: #111111;">self</span>, name, table):</span>
-<span id="cb27-9">        desc <span class="op" style="color: #5E5E5E;">=</span> flight.FlightDescriptor.for_command(name.encode(<span class="st" style="color: #20794D;">"utf8"</span>))</span>
-<span id="cb27-10">        writer, reader <span class="op" style="color: #5E5E5E;">=</span> <span class="va" style="color: #111111;">self</span>.con.do_put(desc, table.schema)</span>
-<span id="cb27-11">        writer.write(table)</span>
-<span id="cb27-12">        writer.close()</span>
-<span id="cb27-13">      </span>
-<span id="cb27-14">    <span class="kw" style="color: #003B4F;">def</span> get_table(<span class="va" style="color: #111111;">self</span>, name):</span>
-<span id="cb27-15">        reader <span class="op" style="color: #5E5E5E;">=</span> <span class="va" style="color: #111111;">self</span>.con.do_get(flight.Ticket(name.encode(<span class="st" style="color: #20794D;">"utf8"</span>)))</span>
-<span id="cb27-16">        <span class="cf" style="color: #003B4F;">return</span> reader.read_all()</span>
-<span id="cb27-17">    </span>
-<span id="cb27-18">    <span class="kw" style="color: #003B4F;">def</span> list_tables(<span class="va" style="color: #111111;">self</span>):</span>
-<span id="cb27-19">        names <span class="op" style="color: #5E5E5E;">=</span> []</span>
-<span id="cb27-20">        <span class="cf" style="color: #003B4F;">for</span> flight <span class="kw" style="color: #003B4F;">in</span> <span class="va" style="color: #111111;">self</span>.con.list_flights():</span>
-<span id="cb27-21">            names.append(flight.descriptor.command.decode(<span class="st" style="color: #20794D;">'utf-8'</span>))</span>
-<span id="cb27-22">        <span class="cf" style="color: #003B4F;">return</span> names</span>
-<span id="cb27-23">    </span>
-<span id="cb27-24">    <span class="kw" style="color: #003B4F;">def</span> drop_table(<span class="va" style="color: #111111;">self</span>, name):</span>
-<span id="cb27-25">        drop <span class="op" style="color: #5E5E5E;">=</span> flight.Action(<span class="st" style="color: #20794D;">"drop_table"</span>, name.encode(<span class="st" style="color: #20794D;">'utf-8'</span>)) </span>
-<span id="cb27-26">        <span class="va" style="color: #111111;">self</span>.con.do_action(drop)</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb27" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb27-1"><span class="im" style="color: #00769E;">import</span> threading</span>
+<span id="cb27-2"><span class="im" style="color: #00769E;">import</span> tiny_flight <span class="im" style="color: #00769E;">as</span> tiny</span>
+<span id="cb27-3"></span>
+<span id="cb27-4">server <span class="op" style="color: #5E5E5E;">=</span> tiny.TinyServer(port <span class="op" style="color: #5E5E5E;">=</span> <span class="dv" style="color: #AD0000;">9001</span>)</span>
+<span id="cb27-5">thread <span class="op" style="color: #5E5E5E;">=</span> threading.Thread(target<span class="op" style="color: #5E5E5E;">=</span><span class="kw" style="color: #003B4F;">lambda</span>: server.serve(), daemon<span class="op" style="color: #5E5E5E;">=</span><span class="va" style="color: #111111;">True</span>)</span>
+<span id="cb27-6">thread.start()</span></code></pre></div>
 </div>
 </div>
 <p>Now let’s start our client…</p>
@@ -486,10 +498,8 @@ See $metadata for additional Schema metadata</code></pre>
 </section>
 <section id="further-down-the-rabbit-hole" class="level2">
 <h2 class="anchored" data-anchor-id="further-down-the-rabbit-hole">Further down the rabbit hole</h2>
-<p>A little bit of detail about RPC vs REST, about gRPC and protobuf. Not a lot is needed here, just enough to understand what flight is built on top of</p>
-<div class="cell">
-
-</div>
+<p>A little bit of detail about RPC vs REST, about gRPC and protobuf. Not a lot is needed here, just enough to understand what flight is built on top of…</p>
+<p><br></p>
 </section>
 <section id="where-to-next" class="level2">
 <h2 class="anchored" data-anchor-id="where-to-next">Where to next?</h2>
@@ -512,6 +522,9 @@ See $metadata for additional Schema metadata</code></pre>
 </ul>
 <p>Finally, while neither one is ideal as a place to start, once I started getting the hang of what I was doing, I have found it handy to browse through the <a href="https://arrow.apache.org/docs/python/api/flight.html">Python flight API reference pages</a>, and to occasionally dip into the official <a href="https://arrow.apache.org/docs/format/Flight.html">Arrow flight RPC specification</a>. Regarding the latter, my experience was that the images showing how each of the flight methods operates were handy, and the <a href="https://arrow.apache.org/docs/format/Flight.html#protocol-buffer-definitions">comments</a> shown in the in the “protocol buffer definitions” are nice because they’re maybe the clearest verbal description of what each of the flight methods expects as input and what objects they will return.</p>
 <p>Happy hunting!</p>
+<div class="cell">
+
+</div>
 <!--------------- appendices go here ----------------->
 
 
