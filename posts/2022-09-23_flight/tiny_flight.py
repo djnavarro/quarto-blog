@@ -89,7 +89,8 @@ class TinyClient:
         writer.close()
       
     def get_table(self, name):
-        reader = self.con.do_get(flight.Ticket(name.encode("utf8")))
+        ticket = flight.Ticket(name.encode("utf8"))
+        reader = self.con.do_get(ticket)
         return reader.read_all()
     
     def list_tables(self):

@@ -266,7 +266,7 @@ knitr::read_chunk("tiny_flight.py")
 
 Our goal in this section is to write our own flight server in Python that does the same job as the one we saw earlier in the R example: it's a server that allows you to cache copies of Arrow tables. To do so, we'll start our Python script the way one usually does, with some imports:
 
-```{python imports, filename="tiny_flight.py", eval = FALSE}
+```{python imports, filename="tiny_flight.py", eval = TRUE}
 ```
 
 What I'll do now is define a Python class called `TinyServer`. The job of this class is to provide server side flight methods for `do_get()`, `do_put()`, and others. We'll be able to use this class to create specific server instances and set them running, in more or less the exact same fashion that we did previously in the R example. 
@@ -291,12 +291,215 @@ These two classes are designed to work in concert: the `do_put()` method for `Ti
 
 <br>
 
-### Our flight methods
+### Initialisation
 
-Blah blah
+Let's start by looking at what happens when the server and client are initialised. When a new `TinyServer` or `TinyClient` object is created, the `__init__` function is called:
 
+```{python, filename="[server]", eval=FALSE}
+class TinyServer(flight.FlightServerBase):
+  
+    def __init__(self, host = "localhost", port = 5678):
+        self.tables = {}
+        self.location = flight.Location.for_grpc_tcp(host, port)
+        super().__init__(self.location)
+```
+
+```{python, filename="[client]", eval=FALSE}
+class TinyClient:
+
+    def __init__(self, host = "localhost", port = 5678):
+        self.location = flight.Location.for_grpc_tcp(host, port)
+        self.con = flight.connect(self.location)
+        self.con.wait_for_available()
+```
+
+Some things to notice here. At start up, the server and client both call the `flight.Location.for_grpc_tcp()` function to generate a  [Location](https://arrow.apache.org/docs/python/generated/pyarrow.flight.Location.html) object used to specify the address of the server:
+
+```{python, filename="[Python code]"}
+loc = flight.Location.for_grpc_tcp("localhost", 5678)
+print(loc)
+```
+
+The important thing in this output the server address. The `localhost:5678` part indicates that the server is running locally on port 5678, and the `grpc+tcp://` part tells us what communication protocols are being used. For this server, those protocols are [gRPC](https://grpc.io/) and [TCP](https://en.wikipedia.org/wiki/Transmission_Control_Protocol). I'll talk about this more later. For now, it's sufficient to recognise that this location object does store the server address. If I'd really wanted to, I could have written code that constructs this string manually^[People with more experience in Python than I would notice the importance of the `b''` notation. One thing I didn't know about Python until recently is that it is quite explicit in specifying how strings are encoded. The `b''` notation is used to indicate that this is a "byte literal" string. To convert it to utf-8 text, it heeds to be explicitly decoded. I mention this here because later on in the post I'm going to call `.encode()` and `.decode()` string methods to switch back and forth between byte literals and utf-8 strings. I'm assuming this is common knowledge among Python users, but coming from R this was a little surprising!] but there's no need to do that when the pyarrow flight module supplies built-in location classes to do this for us!
+
+The rest of the code is used for initialisation. On the server side, we initialise the server object as an instance of the parent class (i.e., `FlightServerBase`). On the client side, the first action is to call `flight.connect()`: this is also an initialisation action that returns an instance of the `FlightClient` class. In other words there's a symmetry here: the `TinyServer` is built on top of the `FlightServerBase` class, and the `TinyClient` is built on top of the `FlightClient` class. 
+
+The other thing to notice here is the data structures set up in these initialisations. On the server side we create an empty dictionary called `tables` (referred to as `self.tables` since it belongs to the instance not the class) that the server uses to store any data sets that it is sent. On the client side, the `self.con` object is used to represent our connection to the server: it is this object that is an intance of the `FlightClient` class, and it comes equipped with client side methods for `do_put()`, `do_get()` etc. Finally, notice that the last action that the client takes when it is initialised is to wait for the connection to the server to be established. 
+
+<br>
+
+### Putting a table
+
+Next, let's take a look at the code used to place data on the server. On the server side, we have to specify the `do_put()` method. In this case, all my code does is store a copy of the data in `self.tables` and prints a little message to the server console using the `server_message()` function:
+
+```{python, filename="[server]", eval=FALSE}
+@staticmethod    
+def server_message(method, content):
+    print("(server) " + method + " " + content.decode("utf-8"))
+      
+def do_put(self, context, descriptor, reader, writer):
+    self.server_message("do_put", descriptor.command)
+    self.tables[descriptor.command] = reader.read_all()
+```
+
+There's a few things to comment on here. The `server_message()` function isn't very interesting for our purposes: it doesn't do anything other than print a message. The really important part of this code is the one line that does all the server-side work:
+
+```{python, eval=FALSE}
+self.tables[descriptor.command] = reader.read_all()
+```
+
+The `reader` object here that is passed as one of the arguments to `do_put()` is a [RecordBatchStreamReader](https://arrow.apache.org/docs/python/generated/pyarrow.ipc.RecordBatchStreamReader.html): it's an object capable of receiving a stream of Arrow data. When the `read_all()` method is called, it reads all record batches sent by the client and returns the final result as an Arrow table. This table is then stored in the `self.tables` dictionary. 
+
+Notice that the key against which the table is stored as the value is specified by `descriptor.command`. This also needs to be unpacked! What is a "descriptor"? What is the "command" attribute of a descriptor? That's not obvious from inspection. To make sense of this, it helps to realise that this `descriptor` object is being transmitted to the `TinyServer` from the `TinyClient`. So let's look at the code I wrote for the client side:
+
+```{python, filename="[client]", eval=FALSE}
+def put_table(self, name, table):
+    desc = flight.FlightDescriptor.for_command(name.encode("utf8"))
+    writer, reader = self.con.do_put(desc, table.schema)
+    writer.write(table)
+    writer.close()
+```
+
+This `put_table()` Python function does the same job that the `flight_put()` function is doing in R. It's a high-level wrapper that sends a `do_put()` call to the server, streams the data across, then stops. The line of code that makes the `do_put()` call is this one:
+
+```{python, eval=FALSE}
+writer, reader = self.con.do_put(desc, table.schema)
+```
+
+The `desc` object is the flight descriptor. This is the thing that is used on the server side to create the key against which the table is stored. The `desc` object is an instance of the `FlightDescriptor` class, created on the previous line. Let's have a look at what happens:
+
+```{python}
+name = "name-of-data"
+desc = flight.FlightDescriptor.for_command(name.encode("utf8"))
+print(desc)
+```
+
+Perhaps unsurprisingly, the `command` attribute is in fact the (byte encoded) string that we used to specify the `name` of the data set. In other words, once we strip back all the layers here it turns out that the server stores the data set using the name that the client gave it!
+
+```{python}
+desc.command
+```
+
+<br>
+
+### Getting a table
+
+Next, let's have a look at the code used to get data from the server. Just like last time, I'll put the relevant sections from the server code and the client side code side by side:
+
+```{python, filename="[server]", eval=FALSE}
+def do_get(self, context, ticket):
+    self.server_message("do_get", ticket.ticket)
+    table = self.tables[ticket.ticket]
+    return flight.RecordBatchStream(table)
+```
+
+```{python, filename="[client]", eval=FALSE}
+def get_table(self, name):
+    ticket = flight.Ticket(name.encode("utf8"))
+    reader = self.con.do_get(ticket)
+    return reader.read_all()
+```
+
+On the client side, the `get_table()` helper function that I've written does two things. First it creates a `ticket` object from the `name` of the data table to be retrieved. It then calls the `do_get()` flight method to communicate with the server. Then, using the `reader` object returned by `do_get()`, it streams the data from the server. The server side code is the mirror image: when the ticket is received, it uses this ticket to retrieve the specific `table` from `self.tables`, and returns a stream. 
+
+Looking at these two code extracts side by side we can see that the ticket object created by the client when `flight.Ticket()` is called ends up being used by the server to retrieve the requested table. So we should take a look at what happens here. Since I already have a `name` object lying around from earlier, let's run that line of code shall we?
+
+```{python}
+ticket = flight.Ticket(name.encode("utf8"))
+print(ticket)
+```
+
+If we take a peek at the `ticket.ticket` object that gets used on the server side, we see that -- yet again -- under the hood the ticket is really just an alias for the name of the data set:
+
+```{python}
+ticket.ticket
+```
 
 <br> 
+
+### Getting information
+
+Client side code
+
+```{python, filename="[client]", eval=FALSE}
+def list_tables(self):
+    names = []
+    for flight in self.con.list_flights():
+        names.append(flight.descriptor.command.decode('utf-8'))
+    return names
+```
+
+Server code instantiating the `get_flight_info()` and `list_flights()` method:
+
+```{python, filename="[server]", eval=FALSE}
+def get_flight_info(self, context, descriptor):
+    self.server_message("get_flight_info", descriptor.command)
+    return self.collect_flight_info(descriptor)        
+        
+def list_flights(self, context, criteria):
+    self.server_message("list_flights", b' ')
+    for key in self.tables.keys():
+        descriptor = flight.FlightDescriptor.for_command(key)
+        yield self.collect_flight_info(descriptor)
+```
+
+Notice that the server-side work is being done by the `collect_flight_info()` method. Here's the code for that one: 
+
+```{python, filename="[server]", eval=FALSE}
+def collect_flight_info(self, descriptor):
+      
+    key = descriptor.command
+    table = self.tables[key]
+        
+    schema = table.schema
+    ncases = table.num_rows
+        
+    output = pyarrow.MockOutputStream()
+    writer = pyarrow.RecordBatchStreamWriter(output, schema)
+    writer.write_table(table)
+    writer.close()
+    nbytes = output.size()
+        
+    ticket = flight.Ticket(key)
+    locations = [self.location.uri.decode("utf-8")]
+    endpoints = [flight.FlightEndpoint(ticket, locations)]
+        
+    return flight.FlightInfo(schema, descriptor, endpoints, 
+                              ncases, nbytes)
+```
+
+<br> 
+
+### Custom actions
+
+```{python, filename="[server]", eval=FALSE}
+def do_action(self, context, action):
+    if action.type == "drop_table":
+        key = action.body.to_pybytes()
+        del self.tables[key]
+        self.server_message("drop_table", key)
+            
+    elif action.type == "shutdown":
+        self.server_message("shutdown", b' ')
+        self.shutdown()
+            
+    else:
+        raise KeyError("Unknown action {!r}".format(action.type))
+
+def list_actions(self, context):
+    return [
+        ("drop_table", "Drop the specified data set."),
+        ("shutdown", "Shut down this server."),
+    ]
+```
+
+```{python, filename="[client]", eval=FALSE}
+def drop_table(self, name):
+    drop = flight.Action("drop_table", name.encode('utf-8')) 
+    self.con.do_action(drop)
+```
+
+<br>
 
 ### Using our server
 
