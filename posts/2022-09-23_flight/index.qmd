@@ -59,8 +59,6 @@ Flight is designed to solve this problem. It's not a fancypants protocol with lo
 
 It exists for one purpose: it makes it super easy to transfer Arrow-formatted data. That's it. It's flexible, and you can build other stuff on top of flight (more on that later), but the design of flight is deliberately simple. It's *meant* to be pretty minimal, so you can "just use it" without having to think too hard or do any of the obnoxious implementation work yourself. 
 
-The implementation status of Arrow Flight varies a little across languages. For example, in his excellent book [In-Memory Analytics with Apache Arrow](https://www.packtpub.com/product/in-memory-analytics-with-apache-arrow/9781801071031), my Voltron Data colleague [Matt Topol](https://twitter.com/zeroshade) shows the reader how to build an Arrow Flight server in Python, C++, and Go; in this post I'm going to talk about R and Python. I'll start with R because it supplies a high-level interface that is easier on newcomers but is less flexible than the Python version. Later, when a little more complexity is needed I'll pivot to Python.
-
 
 ### Prerequisites
 
@@ -70,44 +68,49 @@ There are a couple of prerequisites for this post. Specifically I'll assume you 
 
 ## An R example
 
-> | 
-Boys will be girls, girls will be boys effortlessly<br>
-Come as you are, come as you want completely<br>
-&nbsp; &nbsp; --[Bones UK](https://music.youtube.com/watch?v=SshwJdVy5-g)
+The implementation of Arrow Flight varies a little across languages. In this post I'm going to focus on the two languages I use most -- R and Python -- but there's nothing stopping you from using other languages. For example, the book [In-Memory Analytics with Apache Arrow](https://www.packtpub.com/product/in-memory-analytics-with-apache-arrow/9781801071031) by [Matt Topol](https://twitter.com/zeroshade) has worked examples using C++ and Go, in addition to Python. 
 
-The R flight implementation is an act of transformation: internally it's a Python server, but we won't let that stop us. 
+For the purposes of this post I'm going to start with R because the arrow package in R exposes a "high-level" interface that will allow us to start using a flight server without having to dive deeply into how it all works. However, as we'll see, there are some limitations to this approach -- not least of which is the fact that the R implementation turns out to secretly be a Python implementation under the hood -- and as the post progresses I'll pivot to Python in order to unpack some of the lower-level functionality. 
 
+To do this I'll need access to the arrow and reticulate packages, and I'll need to make certain that the Python environment is one that has pyarrow installed:
+
+```{r}
+library(arrow)
+library(reticulate)
+use_miniconda("base")
+```
 
 ### Starting the demo server
 
-Let's get started. If all you want is a simple flight server to handle uploads and downloads of Arrow tables, there is almost nothing you need to do on the server side. The arrow R package comes with a bundled "demo_flight_server" Python module that provides this for you, so all you need to do is start it running. The [start_demo_server.R](./start_demo_server.R) script shown below shows how to do this:
+Okay, so let's get started by thinking about the simplest possible scenario for using a flight server. In this set up all we want the server to do is to act as a "cache" for Arrow tables. Clients can upload tables to the server, download tables from the server, and so on. That's all we're really trying to accomplish, and happily for us this use case is supported out of the box in R. 
 
-```{r, filename="start_demo_server.R", eval=FALSE}
-# load R packages
-library(arrow)
-library(reticulate)
+Here's how it works. As I mentioned earlier, R doesn't actually implement the flight protocol itself: it's just a wrapper around the Python tools. What that means is the underlying flight server is actually written in Python, and if we want to start that server running from R we have to call the `load_flight_server()` function that will allow us access to this server from R. Conveniently, the arrow R package comes bundled with a "demo" server that already provides the server side functionality that we want, and I can import it like this:
 
-# use a Python environment with pyarrow
-use_miniconda("base")
-
-# load the definition of the "demo flight server" Python class
-# that comes bundled with the R arrow package
-server_class_object <- load_flight_server("demo_flight_server")
-
-# create an instance of the server and start it running
-server_instance <- server_class_object$DemoFlightServer(port = 8089)
-server_instance$serve()
+```{r, filename = "[R code]", eval=FALSE}
+server_class <- load_flight_server("demo_flight_server")
 ```
 
-For the purposes of this post I think it's handy to imagine that I'm executing these R scripts from the terminal. After all, I don't really want to be running the server from my RStudio console! At the terminal I'd type this to start the server as a background job:
+When I do this, all I've done is obtain access to the relevant Python code. I haven't created a server yet and I haven't started it running either. Create an instance of the "demo server", I call the `DemoFlightServer()` method attached to the `server_class()` object:
+
+```{r, filename = "[R code]", eval=FALSE}
+server <- server_class_object$DemoFlightServer(port = 8089)
+```
+
+We have now defined a server that, once started, will run on port 8089. The `server` object has a `serve()` method that I can call to start it running:
+
+```{r, filename = "[R code]", eval=FALSE}
+server$serve()
+```
+
+I've written a short script called [start_demo_server.R](./start_demo_server.R) that bundles all these operations together, and the easiest way to start a server running in its very own R process (i.e., an R session that isn't the one you're currently working in) would be to type this at the terminal:
 
 ```{bash, filename="[terminal]", eval=FALSE}
 Rscript start_demo_server.R &
 ```
 
-An alternative approach -- if I wanted to do everything from R -- would be to use the callr package here. You can use `callr::r_bg()` to create a child R process that will run in the background, and start the server within that server without blocking the current R session:
+This will start an R process as a background job that will create a server and start it running. As an alternative, if you're comfortable with using the [callr](https://callr.r-lib.org/) package, you can use `callr::r_bg()` to create a child R process from your current one. The child process will run in the background, and  we can start start the server within that R session without blocking the current one. Here's some code that will do exactly that:
 
-```{r, filename="[R console]", eval=FALSE}
+```{r, filename="[R code]", eval=FALSE}
 r_process <- callr::r_bg(function() {
   reticulate::use_miniconda("base")  
   demo <- arrow::load_flight_server("demo_flight_server")
@@ -122,56 +125,55 @@ Regardless of what method you've chosen, I'll now assume that the demo server is
 
 ### Connecting with a client
 
->| 
-I see you out, I see you out and about <br>
-You say you like me but I'm starting to have my doubts <br>
-&nbsp;&nbsp; -- [Amyl and the Sniffers](https://music.youtube.com/watch?v=jgqnpr79-Bk)
-
-Now that I have this server running quietly in the background on port 8089, I can define a flight client at my regular R console that can interact with it. However, because this is a completely different R session, I'll need to make sure that I have the environment set up correctly: 
-
-```{r, filename="[R console]", message=FALSE}
-library(arrow)
-library(reticulate)
-use_miniconda("base")
-```
-
-Great, now I can call `flight_connect()`:
+Now that I have this server running quietly in the background on port 8089, I can define a flight client in my current R session that can interact with it. To do that, I call  `flight_connect()`:
 
 ```{r, filename="[R console]"}
 client <- flight_connect(port = 8089)
 ```
 
-So what are the "flights" on this server?
+Perhaps unsurprisingly, the R object `client` is a wrapper around a Python flight client. It comes with various methods that implement low-level flight operations, but I'm going to hold off talking about those for a moment because we won't need to use the low-level interface in this initial example.
+
+Let's start by using the client to as ask a simple question: what is stored on the server? The way that data source are conceptualised in Arrow flight is as a set of "flights". Each individual "flight" corresponds to a data stream from which the client can download data. The precise implementation of this idea (e.g., what data structures are stored in a single flight) varies from server to server, but in both examples in this post each flight stores a single Arrow table. 
+
+In any case, to find out what flights are currently available on our server, we can call the `list_flights()` function:
 
 ```{r, filename="[R console]"}
 list_flights(client)
 ```
 
-Hm, nothing. Yeah that makes sense because I didn't upload anything to the server! Okay, well, let's suppose I want to store a copy of the `airquality` data as an Arrow Table on my server. The `flight_put()` function will do that for me:
+Hm, okay, there's nothing there. That makes sense because I haven't actually uploaded anything to the server yet! Okay, well, let's suppose I want to store a copy of the `airquality` data as an Arrow table on my server. As R users are probably aware, this is a data set that comes bundled with R, but just so we're all on the same page here's the first few rows of the data set:
+
+```{r, filename="[R code]"}
+head(airquality)
+```
+
+This object is a regular data frame in R, not an Arrow table, and strictly speaking what we want our client to do is send an Arrow table version of this data set to the server. Happily for us, the `flight_put()` function supplied by the arrow package will take care of the conversion for us, and we can cache a copy of the data as an Arrow table on the server in one line of code: 
 
 ```{r, filename="[R console]"}
 flight_put(client, data = airquality, path = "pollution_data")
 ```
 
-This command creates an Arrow Table from the `airquality` data and uploads it to the server. The `path` argument is, in effect, used as the name of the data set on the server side. So if we *now* try to list the "flights" on our server we get this:
+In this code, the `flight_put()` function uses the `client` object to communicate with the server, it uses the `data` argument to find the local copy of the data set, and the `path` argument is used to provide a name for the data set on the server (i.e., on the server this data set will be called `pollution_data`). Now that we've done the upload, if we try calling `list_flights()` again we get this as the result:
 
 ```{r, filename="[R console]"}
 list_flights(client)
 ```
 
-Excellent. Now, just to prove to you that I'm not cheating, let's check to make sure that there is no object called `pollution_data` stored locally within my R session:^[One of my favourite things about having a quarto blog is that every post is a notebook. It's technically possible to "cheat" by including hidden code chunks that execute different code than that shown in the post, but it's something I do very sparingly and only when there's some weirdness involved. I'm not doing that here. When this post is rendered, it does start a new instance of the demo server in a different R session: every flight server demonstrated here is in fact running in the background so that the post renders, and server side data are all stored by those other processes. There really is no copy of the `pollution_data` object in the R session used to render this post. It's somewhere else, as it bloody well should be.]
+Yay! 
+
+Now, just to prove to you that I'm not cheating, let's check to make sure that there is no object called `pollution_data` stored locally within my R session:^[One of my favourite things about having a quarto blog is that every post is a notebook. It's technically possible to "cheat" by including hidden code chunks that execute different code than that shown in the post, but it's something I do very sparingly and only when there's some weirdness involved. I'm not doing that here. When this post is rendered, it does start a new instance of the demo server in a different R session: every flight server demonstrated here is in fact running in the background so that the post renders, and server side data are all stored by those other processes. There really is no copy of the `pollution_data` object in the R session used to render this post. It's somewhere else, as it bloody well should be.]
 
 ```{r, filename="[R console]", error=TRUE}
 pollution_data
 ```
 
-Okay, so there's no `pollution_data` object in my R session, but presumably there is some corresponding object on the server, right? I can access that object straightforwardly courtesy of the `flight_get()` function:
+Clearly there is no object called `pollution_data` available in my current R session. That data set is stored only on the server. To get access to the data cached on the server, I use the `flight_get()` function:
 
 ```{r, filename="[R console]", message=FALSE}
 flight_get(client, "pollution_data")
 ```
 
-Yay! It works! 
+What has just happened is our client contacted the server and downloaded a copy of the Arrow table stored remotely. It works! 
 
 At the very least we have proof-of-concept that we can start a flight server and use it to upload and download data. But there's a lot that hasn't really been explained properly here. The time has come to start digging a little deeper, so we can really get a sense of what's going on under the hood and how this simple example can be extended.
 
@@ -190,7 +192,9 @@ client$list_flights()
 client$get_flight_info()
 ```
 
-Each of these methods describes a low level operation available to the flight client. As you might expect, the `do_put()` method for the client is very closely related to the `flight_put()` function that I called earlier! However, they aren't the same. The `do_put()` method doesn't actually upload any data, it merely opens a connection to the server, which we can then use to stream data set from the client to the server. If you were calling the `do_put()` method directly, you would need to take care of that yourself. But it's tiresome to write that code over and over, so the  `flight_put()` function provides a convenient high-level wrapper that abstracts over all that. 
+Each of these methods describes a low level operation available to the flight client, and because the R implementation is built on top of the Python version, these are all Python methods that are available in R thanks to the magic of [reticulate](https://rstudio.github.io/reticulate/). What we're seeing exposed here are the actual Arrow flight methods, and it's helpful to unpack things a little so we can see how these methods are related to the functions I've been calling in R. 
+
+As you might expect, the `do_put()` method for the client is very closely related to the `flight_put()` function that I called earlier! However, they aren't the same. The `do_put()` method doesn't actually upload any data, it merely opens a connection to the server, which we can then use to stream data from the client to the server. If you were calling the `do_put()` method directly, you would need to take care of that yourself. But it's tiresome to write that code over and over, so the  `flight_put()` function provides a convenient high-level wrapper that abstracts over all that. 
 
 If you're the analyst working with the data, this is fabulous. But if you're looking to implement your very own flight server, you probably need to understand what these low level operations are. So that's where we're headed next...
 
