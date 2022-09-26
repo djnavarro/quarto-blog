@@ -1,15 +1,10 @@
 
-# load R packages
+# load R packages and specify the Python environment
 library(arrow)
 library(reticulate)
-
-# use a Python environment with pyarrow
 use_miniconda("base")
 
-# load the definition of the "demo flight server" Python class
-# that comes bundled with the R arrow package
-server_class_object <- load_flight_server("demo_flight_server")
-
-# create an instance of the server and start it running
-server_instance <- server_class_object$DemoFlightServer(port = 8089)
-server_instance$serve()
+# load the server class, create an instance, and start serving
+server_class <- load_flight_server("demo_flight_server")
+server <- server_class$DemoFlightServer(port = 8089)
+server$serve()
