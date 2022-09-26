@@ -31,40 +31,26 @@ long_slug <- "2022-08-23_visualising-a-billion-rows"
 ## The what and why of Arrow Flight
 
 
-Let's start with a little background. If I want you to read through a whole ass post on Arrow Flight, I'd better explain why this is worth your while. What exactly *is* Arrow Flight (henceforth just "flight"), and what is it *for*? Why might you as a data scientist or data engineer care about flight?
+Let's start with a little background. If I want you to read through a whole post on Arrow Flight, I'd better explain why it's is worth your while. What exactly *is* Arrow Flight -- henceforth just "flight" -- and what is it *for*? Why might you as a data scientist or data engineer care about flight?
 
-The central idea behind flight is deceptively simple: it provides a standard protocol for transferring Arrow data over a network. But to understand why this is a Big Forking Deal, you need to have a good sense of what the Arrow ecosystem is all about. For that, I found it suuuuper helpful to go all the way back^[All the way back to October 2019, which is like ancient history by Arrow standards. Sigh. This project moves too damned fast to keep pace with it all.] to the [original announcement of flight by Wes McKinney](https://arrow.apache.org/blog/2019/10/13/introducing-arrow-flight/). I'm going to straight up quote Wes here, because his description is really good:^[Shocking, right? Wes McKinney has a really deep understanding of Arrow. What next? Hadley Wickham understands ggplot2?????] 
+The central idea behind flight is deceptively simple: it provides a standard protocol for transferring Arrow data over a network. But to understand why this is a Big Deal, you need to have a good sense of what the Arrow ecosystem is all about. For that, I found it helpful to go all the way back^[All the way back to October 2019, which is like ancient history by Arrow standards. Sigh. This project moves too damned fast to keep pace with it all.] to the [original announcement of flight by Wes McKinney](https://arrow.apache.org/blog/2019/10/13/introducing-arrow-flight/). Here's how he explained the motivation: 
 
-> **Many people have experienced the pain associated with accessing large datasets over a network.** There are many different transfer protocols and tools for reading datasets from remote data services, such as ODBC and JDBC. Over the last 10 years, file-based data warehousing in formats like CSV, Avro, and Parquet has become popular, but this also presents challenges as raw data must be transferred to local hosts before being deserialized.
->
->The work we have done since the beginning of Apache Arrow holds exciting promise for accelerating data transport in a number of ways. The Arrow columnar format has key features that can help us:
->
-- It is an “on-the-wire” representation of tabular data that does not require deserialization on receipt
-- Its natural mode is that of “streaming batches”, larger datasets are transported a batch of rows at a time (called “record batches” in Arrow parlance). In this post we will talk about “data streams”, these are sequences of Arrow record batches using the project’s binary protocol
-- The format is language-independent and now has library support in 11 languages and counting.
->
-> Implementations of standard protocols like ODBC generally implement their own custom on-wire binary protocols that must be marshalled to and from each library’s public interface. The performance of ODBC or JDBC libraries varies greatly from case to case.
->
-> **Our design goal for Flight is to create a new protocol for data services that uses the Arrow columnar format as both the over-the-wire data representation as well as the public API presented to developers. In doing so, we reduce or remove the serialization costs associated with data transport and increase the overall efficiency of distributed data systems.** Additionally, two systems that are already using Apache Arrow for other purposes can communicate data to each other with extreme efficiency. [Emphasis added]
+> Our design goal for Flight is to create a new protocol for data services that uses the Arrow columnar format as both the over-the-wire data representation as well as the public API presented to developers. In doing so, we reduce or remove the serialization costs associated with data transport and increase the overall efficiency of distributed data systems. Additionally, two systems that are already using Apache Arrow for other purposes can communicate data to each other with extreme efficiency.
 
-The bolded sections here are key. Arrow was originally introduced to provide an efficient and language-agnostic standard for representing tabular data in-memory, but as the project has grown it has necessarily expanded in scope. Storing data in-memory is not super useful if you can't manipulate it, so Arrow now supplies a powerful compute engine (now referred to as Acero) that underpins the arrow package in R and the pyarrow library in Python (and others!). In other words, the compute engine solves a practical data science problem, and solves it in a way that makes the data engineers on the team breath a sigh of relief. 
+To put this in context, it helps to have a little recap of how the project has grown: Arrow was originally introduced to provide an efficient and language-agnostic [standard for representing tabular data in-memory](https://arrow.apache.org/docs/format/Columnar.html), but as the project has grown it has necessarily expanded in scope. For example, storing data in-memory is not entirely useful if you can't manipulate it, so Arrow now supplies a powerful [compute engine](https://arrow.apache.org/docs/cpp/compute.html) that underpins both the [arrow package in R](https://arrow.apache.org/docs/r/index.html) and the [pyarrow library in Python](https://arrow.apache.org/docs/python/index.html), and several others besides. In other words, the compute engine has been developed to solve a practical data science problem. 
 
-Flight is analogous to Acero in that way. We live in a networked world (duh) and it is hard to avoid situations where the data to be analysed are stored on a different machine than the one that does the analysis. In earlier posts [LINK] I talked about how to efficiently share access to a data set between *languages* (R and Python were my examples), but it was implicitly assumed throughout that the R process and the Python process were running on the same *machine*. The moment we have processes running on different machines, those tricks don't work anymore... 
+Arrow Flight evolved from a similar practical concern. It's pretty trivial to point out that we live in a networked world now, and as consequence it is hard to avoid situations where the data to be analysed are stored on a different machine than the one that does the analysis. In my earlier posts on [reticulate](https://blog.djnavarro.net/posts/2022-09-09_reticulated-arrow/) and [rpy2](https://blog.djnavarro.net/posts/2022-09-16_arrow-and-rpy2/) I talked about how to efficiently share an Arrow data set between *languages*, but I implicitly assumed in those posts that the R process and the Python process were running on the same *machine*. The moment we have processes running on different machines, those tricks don't work anymore! 
 
-... and at this point every data scientist's heart sinks in his, her, or their chest. Am I going to have to roll my own transport protocol? Like, should I just try to email the bloody files over or something???^[Sorry. I'm just cackling at the thought of trying to email 100Gb of data...] The terror sets in. 
+Flight is designed to solve this problem. It's not a fancypants protocol with lots of different parts. It exists for one purpose: it makes it super easy to transfer Arrow-formatted data. That's it. It's pretty flexible though, and you can build other stuff on top of flight (more on that later), but the design of flight is deliberately simple. It's *meant* to be pretty minimal, so you can "just use it" without having to think too hard or do any of the obnoxious implementation work yourself. 
 
-Flight is designed to solve this problem. It's not a fancypants protocol with lots of different parts. To paraphrase David Li, one of the developers, 
-
-> it's just a dumb pipe
-
-It exists for one purpose: it makes it super easy to transfer Arrow-formatted data. That's it. It's flexible, and you can build other stuff on top of flight (more on that later), but the design of flight is deliberately simple. It's *meant* to be pretty minimal, so you can "just use it" without having to think too hard or do any of the obnoxious implementation work yourself. 
-
+<br>
 
 ### Prerequisites
 
 There are a couple of prerequisites for this post. Specifically I'll assume you have the arrow and reticulate packages installed in your R environment, and similarly that your Python environment has pyarrow installed. If you're only interested in the Python side, you probably don't need either of the R packages, but R users do need the pyarrow installation because the R flight implementation builds on pyarrow.
 
 
+<br>
 
 ## An R example
 
@@ -72,13 +58,17 @@ The implementation of Arrow Flight varies a little across languages. In this pos
 
 For the purposes of this post I'm going to start with R because the arrow package in R exposes a "high-level" interface that will allow us to start using a flight server without having to dive deeply into how it all works. However, as we'll see, there are some limitations to this approach -- not least of which is the fact that the R implementation turns out to secretly be a Python implementation under the hood -- and as the post progresses I'll pivot to Python in order to unpack some of the lower-level functionality. 
 
-To do this I'll need access to the arrow and reticulate packages, and I'll need to make certain that the Python environment is one that has pyarrow installed:
+To do this I'll need access to the arrow and reticulate packages, and I'll need to make certain that the Python environment is one that has pyarrow installed. For my machine, the commands to do this look like this:
 
-```{r}
+```{r, message=FALSE}
 library(arrow)
 library(reticulate)
 use_miniconda("base")
 ```
+
+It may be a little different for you depending on your configuration. For more information on this, take a look at the [reticulate post](https://blog.djnavarro.net/posts/2022-09-09_reticulated-arrow/) I wrote recently.
+
+<br>
 
 ### Starting the demo server
 
