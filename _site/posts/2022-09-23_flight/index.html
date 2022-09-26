@@ -252,7 +252,7 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
   <li><a href="#starting-the-demo-server" id="toc-starting-the-demo-server" class="nav-link" data-scroll-target="#starting-the-demo-server">Starting the demo server</a></li>
   <li><a href="#connecting-with-a-client" id="toc-connecting-with-a-client" class="nav-link" data-scroll-target="#connecting-with-a-client">Connecting with a client</a></li>
   </ul></li>
-  <li><a href="#the-flight-protocol" id="toc-the-flight-protocol" class="nav-link" data-scroll-target="#the-flight-protocol">The flight protocol</a>
+  <li><a href="#unpacking-the-data-exchange-process" id="toc-unpacking-the-data-exchange-process" class="nav-link" data-scroll-target="#unpacking-the-data-exchange-process">Unpacking the data exchange process</a>
   <ul class="collapse">
   <li><a href="#unpacking-flight_put" id="toc-unpacking-flight_put" class="nav-link" data-scroll-target="#unpacking-flight_put">Unpacking flight_put()</a></li>
   <li><a href="#unpacking-flight_get" id="toc-unpacking-flight_get" class="nav-link" data-scroll-target="#unpacking-flight_get">Unpacking flight_get()</a></li>
@@ -476,8 +476,8 @@ See $metadata for additional Schema metadata</code></pre>
 <p><br></p>
 </section>
 </section>
-<section id="the-flight-protocol" class="level2">
-<h2 class="anchored" data-anchor-id="the-flight-protocol">The flight protocol</h2>
+<section id="unpacking-the-data-exchange-process" class="level2">
+<h2 class="anchored" data-anchor-id="unpacking-the-data-exchange-process">Unpacking the data exchange process</h2>
 <p>One thing that I like about the flight functionality exposed through <code>flight_connect()</code>, <code>flight_put()</code>, <code>flight_get()</code>, etc is that it operates at a high level of abstraction. In my day-to-day data analysis work I really don’t want to spend my time thinking about low-level operations. When I tell R to “put” a data set onto the server I <em>want</em> it to happen with one line of code. This high level API is super useful to me on an everyday basis, but it also masks some of the details about how flight works. To give you a sense of what’s being hidden, we can take a closer look at the <code>client</code> object. Here’s a list of some of the methods that are available through the object itself:</p>
 <div class="sourceCode" id="cb19"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a>client<span class="sc">$</span><span class="fu">do_put</span>()</span>
 <span id="cb19-2"><a href="#cb19-2" aria-hidden="true" tabindex="-1"></a>client<span class="sc">$</span><span class="fu">do_get</span>()</span>
@@ -491,33 +491,37 @@ See $metadata for additional Schema metadata</code></pre>
 <p><br></p>
 <section id="unpacking-flight_put" class="level3">
 <h3 class="anchored" data-anchor-id="unpacking-flight_put">Unpacking flight_put()</h3>
-<p>Let’s start by taking a look at what happens when we call the R function <code>flight_put()</code>. Our goal is to transmit the data to the server, and there’s an Arrow Flight method called <code>do_put()</code> that can do this for us. Here’s how the transaction unfolds:</p>
+<p>Let’s start by taking a look at what happens when we call the R function <code>flight_put()</code>. Our goal is to transmit the data to the server, and there’s an Arrow Flight method called <code>do_put()</code> that can do this for us. However, the structure of the interaction is a little more complicated than simply calling <code>do_put()</code>. It’s a multi-step operation that unfolds as shown below:</p>
 <p><img src="img/do_put.png" class="img-fluid"></p>
-<p>When the client calls <code>do_put()</code> it passes two arguments: a “flight descriptor” used to identify the data (more on that later), and the schema for the flight data.<a href="#fn3" class="footnote-ref" id="fnref3" role="doc-noteref"><sup>3</sup></a> Somewhat simplified, here’s the signature on the client side:</p>
+<p>The first step in the process occurs when the client calls <code>do_put()</code>, a flight method that takes two arguments: a <strong>flight descriptor</strong> object that is used to identify the specific data stream that the client wants to be sent – and later on I’ll talk what the descriptor actually looks like – and the <a href="https://arrow.apache.org/docs/r/reference/Schema.html">schema</a> for the flight data.<a href="#fn3" class="footnote-ref" id="fnref3" role="doc-noteref"><sup>3</sup></a> Setting aside the particulars of the syntax – which might be different in every language – here’s what the <code>do_put()</code> fuction call looks like on the client side:</p>
 <div class="sourceCode" id="cb20"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a>do_put(descriptor, schema)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-<p>Passing the schema allows the client to create “stream writer” and “stream reader” objects that are returned to the client-side user, <em>and</em> passed to the server. On the server-side, the <code>do_put()</code> method expects three inputs: the flight descriptor, the writer, and the reader. Here’s the signature on the server side:</p>
+<p>Passing the schema on the client side serves a particular purpose: it allows the client to create <strong>stream writer</strong> and <strong>stream reader</strong> objects that are returned to the client-side user, and are also passed along to the server. The writer object is the thing that will take care of streaming data to the server, and the reader object is responsible for reading any metadata response that the server happens to send.<a href="#fn4" class="footnote-ref" id="fnref4" role="doc-noteref"><sup>4</sup></a></p>
+<p>Now let’s have a look at the server side, where the <code>do_put()</code> method expects three inputs: the flight descriptor, the writer, and the reader. So here’s the signature on the server side:</p>
 <div class="sourceCode" id="cb21"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb21-1"><a href="#cb21-1" aria-hidden="true" tabindex="-1"></a>do_put(descriptor, reader, writer)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-<p>Now that the client and server agree on the description of the data, as well as the streaming reader and writer we can move to step two, in which the client streams the data to the server. The server stores the data along with the appropriate descriptor so that it can be found later, and sends a response to the client.</p>
+<p>As long as these methods are written appropriately for both the client and the server, we now have a situation where both machines agree on the description of the data and have objects that can take care of the streaming process.</p>
+<p>We now move to step two in the communication, in which the client streams the data to the server. Once the data arrive on the server side, the <code>do_put()</code> method for the server stores the data along with an appropriate descriptor, so that it can be found later. Optionally, this is followed by a third stage in which the server sends a response containing metadata to the client. In the example server I’ll build in the next section, I won’t bother with that step!</p>
 <p><br></p>
 </section>
 <section id="unpacking-flight_get" class="level3">
 <h3 class="anchored" data-anchor-id="unpacking-flight_get">Unpacking flight_get()</h3>
-<p>Next let’s look at <code>flight_get()</code>. When I called this function earlier, it triggered two separate interactions between the client and server. First, the client calls the <code>get_flight_info()</code> method, and the server responds with some information about the data source that includes – among other things – a “ticket”. Now in possession of this ticket, the client can call <code>do_get()</code> to request that the server send the data that matches the ticket, which the server then streams. So the whole exchange looks like this:</p>
+<p>Next let’s look at <code>flight_get()</code>. When I called this function earlier, it triggered two separate interactions between the client and server. First, the client calls the <code>get_flight_info()</code> method, and the server responds with some information about the data source that includes – among other things – a <strong>ticket</strong>. Again, the ticket is a particular data structure that I’ll talk more about later, but for now it’s enough to note that it’s a token that uniquely specifies which flight is requested.</p>
+<p>Once in possession of this ticket, the client can call <code>do_get()</code> to request that the server send the data that matches the ticket, which the server then streams. So the whole exchange looks like this:</p>
 <p><img src="img/do_get.png" class="img-fluid"></p>
 <p>So, in the previous example when I called <code>flight_get()</code>, the process looked like this. On the client side, we used the <code>"pollution_data"</code> path to construct a descriptor object and the client used <code>get_flight_info()</code> to request that information about this “flight” from the server:</p>
 <div class="sourceCode" id="cb22"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a>get_flight_info(descriptor)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-<p>On the server side, once the descriptor is received, a flight info object is constructed. The flight info object consists of five parts:</p>
+<p>On the server side, once the descriptor is received, a <strong>flight info</strong> object is constructed. The flight info object is comprised of five parts:</p>
 <ul>
 <li>The schema for the data stored by the flight,</li>
-<li>The descriptor</li>
+<li>The flight descriptor object</li>
 <li>A list of one or more endpoints that specify where the data are available for streaming. Each end point includes a location from which to stream, and the associated ticket for that location</li>
 <li>The total number of records (i.e.&nbsp;rows) stored</li>
 <li>The total number of bytes to be streamed (i.e., the size of the data)</li>
 </ul>
-<p>This object is then returned to the client. It may seem like this is overly elaborate: why does the client need this much information if only the ticket is needed? In the example I’ve used here, it’s not really needed, but in a more sophisticated setup this would make it possible to stream in parallel, with different endpoints streaming different subsets of the data.</p>
-<p>In any case, once this flight information has been received by the client, we can extract the ticket that we need from the relevant endpoint (there’s only one in our case). The client now calls:</p>
+<p>This flight info is then returned to the client.</p>
+<p>It may seem like this arrangement is overly elaborate: why does the client need this much information if only the ticket is needed to request the data? To be honest, for the simple server-client examples I’ve used in this post, this level of complexity is not really needed. However, it’s extremely useful that it’s structured like this when we want to start adopting a more sophisticated setup. One thing it allows, for example, is an arrangement where both the server and client can be distributed across multiple machines, with different endpoints streaming different subsets of the data. Matt Topol discusses some examples where this architecture is employed in <a href="https://www.packtpub.com/product/in-memory-analytics-with-apache-arrow/9781801071031">In-Memory Analytics with Apache Arrow</a>.</p>
+<p>Once this flight information has been received by the client, we can extract the ticket from the relevant endpoint (there will be only one endpoint in the server I build in the next section). The client now calls:</p>
 <div class="sourceCode" id="cb23"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb23-1"><a href="#cb23-1" aria-hidden="true" tabindex="-1"></a><span class="fu">do_get</span>(ticket)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-<p>This returns a stream reader object that the client can use to receive the stream of data from the server.</p>
+<p>The server then sends a <strong>stream reader</strong> object that the client can use to receive the stream of data from the server.</p>
 <p><br></p>
 </section>
 </section>
@@ -526,9 +530,6 @@ See $metadata for additional Schema metadata</code></pre>
 <p><br></p>
 <section id="building-a-tiny-flight-server" class="level3">
 <h3 class="anchored" data-anchor-id="building-a-tiny-flight-server">Building a tiny flight server</h3>
-<blockquote class="blockquote">
-<p>It’s a subtle suffocation, a tiny little fix <br> They’re playing with fire and I’m playing with matchsticks <br> &nbsp;&nbsp; – <a href="https://music.youtube.com/watch?v=v2u3Yk0b_M0">Sprints</a></p>
-</blockquote>
 <p>Now that we have a basic understanding of what is happening at a lower level, we can build a server. At this point it’s handy to switch to Python. R doesn’t currently have an independent method to build the server: it’s actually a Python flight server under the hood, so we might as well write our server using Python.</p>
 <div class="cell">
 <div class="code-with-filename">
@@ -774,6 +775,7 @@ See $metadata for additional Schema metadata</code></pre>
 <li id="fn1"><p>All the way back to October 2019, which is like ancient history by Arrow standards. Sigh. This project moves too damned fast to keep pace with it all.<a href="#fnref1" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
 <li id="fn2"><p>One of my favourite things about having a quarto blog is that every post is a notebook. It’s technically possible to “cheat” by including hidden code chunks that execute different code than that shown in the post, but it’s something I do very sparingly and only when there’s some weirdness involved. I’m not doing that here. When this post is rendered, it does start a new instance of the demo server in a different R session: every flight server demonstrated here is in fact running in the background so that the post renders, and server side data are all stored by those other processes. There really is no copy of the <code>pollution_data</code> object in the R session used to render this post. It’s somewhere else, as it bloody well should be.<a href="#fnref2" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
 <li id="fn3"><p>Optionally, you can also pass a third “options” argument.<a href="#fnref3" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn4"><p>The examples in this post are simple ones where the server doesn’t actually send a response, so the reader object isn’t used for anything<a href="#fnref4" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
 </ol>
 </section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
   author = {Danielle Navarro},
