@@ -296,7 +296,7 @@ Let's start by looking at what happens when the server and client are initialise
 ```{python, filename="[server]", eval=FALSE}
 class TinyServer(flight.FlightServerBase):
   
-    def __init__(self, host = "localhost", port = 5678):
+    def __init__(self, host = 'localhost', port = 5678):
         self.tables = {}
         self.location = flight.Location.for_grpc_tcp(host, port)
         super().__init__(self.location)
@@ -305,7 +305,7 @@ class TinyServer(flight.FlightServerBase):
 ```{python, filename="[client]", eval=FALSE}
 class TinyClient:
 
-    def __init__(self, host = "localhost", port = 5678):
+    def __init__(self, host = 'localhost', port = 5678):
         self.location = flight.Location.for_grpc_tcp(host, port)
         self.con = flight.connect(self.location)
         self.con.wait_for_available()
@@ -314,7 +314,7 @@ class TinyClient:
 Some things to notice here. At start up, the server and client both call the `flight.Location.for_grpc_tcp()` function to generate a  [Location](https://arrow.apache.org/docs/python/generated/pyarrow.flight.Location.html) object used to specify the address of the server:
 
 ```{python, filename="[Python code]"}
-loc = flight.Location.for_grpc_tcp("localhost", 5678)
+loc = flight.Location.for_grpc_tcp('localhost', 5678)
 print(loc)
 ```
 
@@ -331,19 +331,20 @@ The other thing to notice here is the data structures set up in these initialisa
 Next, let's take a look at the code used to place data on the server. On the server side, we have to specify the `do_put()` method. In this case, all my code does is store a copy of the data in `self.tables` and prints a little message to the server console using the `server_message()` function:
 
 ```{python, filename="[server]", eval=FALSE}
-@staticmethod    
-def server_message(method, content):
-    print("(server) " + method + " " + content.decode("utf-8"))
+    @staticmethod    
+    def server_message(method, name):
+        print('(server) ' + method + ' ' + name.decode('utf-8'))
       
-def do_put(self, context, descriptor, reader, writer):
-    self.server_message("do_put", descriptor.command)
-    self.tables[descriptor.command] = reader.read_all()
+    def do_put(self, context, descriptor, reader, writer):
+        table_name = descriptor.command
+        self.server_message('do_put', table_name)
+        self.tables[table_name] = reader.read_all()
 ```
 
-There's a few things to comment on here. First, let's note that the `server_message()` function isn't very interesting for our purposes. It exists solely to print out messages so that the server announces what it is doing.^[As I mentioned in an earlier post, all the "strings" that the client and server are using to represent tickets, locations, etc are represented as byte literals. That means that the `content` argument that gets passed to `server_message()` will always be a byte literal, not utf-8 encoded. In order to print a message to the console, we need to decode the bytes into utf-8 format, which is why the code for `server_message()` uses `content.decode("utf-8")`.] So we can ignore it for now. The important part of this code is the second line in the `do_put()` function that does all the server-side work:
+There's a few things to comment on here. First, let's note that the `server_message()` function isn't very interesting for our purposes. It exists solely to print out messages so that the server announces what it is doing.^[As I mentioned in an earlier post, all the "strings" that the client and server are using to represent tickets, locations, etc are represented as byte literals. That means that the `content` argument that gets passed to `server_message()` will always be a byte literal, not utf-8 encoded. In order to print a message to the console, we need to decode the bytes into utf-8 format, which is why the code for `server_message()` uses `content.decode("utf-8")`.] So we can ignore it for now. The important part of this code is this line in the `do_put()` function that does all the server-side work:
 
-```{python, eval=FALSE}
-self.tables[descriptor.command] = reader.read_all()
+```{python, filename="[server]", eval=FALSE}
+        self.tables[table_name] = reader.read_all()
 ```
 
 Let's unpack this line one step at a time. The `reader` object has been passed to the server as one of the arguments to `do_put()`, and it's a  [RecordBatchStreamReader](https://arrow.apache.org/docs/python/generated/pyarrow.ipc.RecordBatchStreamReader.html). That is, it's an object capable of receiving a stream of Arrow data. When the `read_all()` method is called, it reads all record batches sent by the client and returns the final result as an Arrow table. This table is then stored in the `self.tables` dictionary. 
@@ -351,31 +352,34 @@ Let's unpack this line one step at a time. The `reader` object has been passed t
 Next, notice that the key against which the table is stored as the value is specified by `descriptor.command`. This part of the code also needs to be explained! What is a "descriptor" object? What is the "command" attribute of a descriptor? That's not at all obvious from inspection. To resolve our confusion, it helps to realise that this `descriptor` object is one of the arguments to the the server-side `do_put()` function, and the code that creates this object is over on the the client side. So let's look at the code I wrote for the client side:
 
 ```{python, filename="[client]", eval=FALSE}
-def put_table(self, name, table):
-    desc = flight.FlightDescriptor.for_command(name.encode("utf8"))
-    writer, reader = self.con.do_put(desc, table.schema)
-    writer.write(table)
-    writer.close()
+    def put_table(self, name, table):
+        table_name = name.encode('utf8')
+        descriptor = flight      \
+            .FlightDescriptor    \
+            .for_command(table_name)
+        writer, reader = self.con.do_put(descriptor, table.schema)
+        writer.write(table)
+        writer.close()
 ```
 
-Here we have a `put_table()` Python function does the same job that the `flight_put()` function does in the R example I presented earlier. It is a high-level wrapper function that sends a `do_put()` call to the server, streams the data across, then stops. The second line of code in this function is the one that makes the `do_put()` call:
+Here we have a `put_table()` Python function does the same job that the `flight_put()` function does in the R example I presented earlier. It is a high-level wrapper function that sends a `do_put()` call to the server, streams the data across, then stops. This line of code in this function is the one that makes the `do_put()` call:
 
-```{python, eval=FALSE}
-writer, reader = self.con.do_put(desc, table.schema)
+```{python, filename="[client]", eval=FALSE}
+        writer, reader = self.con.do_put(descriptor, table.schema)
 ```
 
-Okay, so the object that I've called `desc` on the client side is the flight descriptor, and it's also the thing that later gets used on the server side to create the key against which the table is stored. If we look at the preceding line of code, we can see that the `desc` object is an instance of the `FlightDescriptor` class. So let's actually step into the Python console and run the commands required to create a flight descriptor object:
+Okay, so the `descriptor` on the client side is also the thing that later gets used on the server side to create the key against which the table is stored. If we look at the preceding line of code, we can see that the `descriptor` object is an instance of the `FlightDescriptor` class. So let's actually step into the Python console and run the commands required to create a flight descriptor object:
 
 ```{python, filename="[Python code]"}
-name = "name-of-data"
-desc = flight.FlightDescriptor.for_command(name.encode("utf8"))
-print(desc)
+table_name = b'name-of-data'
+descriptor = flight.FlightDescriptor.for_command(table_name)
+print(descriptor)
 ```
 
-Perhaps unsurprisingly, the `command` attribute is in fact the (byte encoded) string that we used to specify the `name` of the data set. In other words, once we strip back all the layers here it turns out that the server stores the data set using the name that the client gave it!
+Perhaps unsurprisingly, the `command` attribute is in fact the (byte encoded) string that we used to specify the `name`. In other words, once we strip back all the layers here it turns out that the server stores the data set using the name that the client gave it!
 
 ```{python, filename="[Python code]"}
-desc.command
+descriptor.command
 ```
 
 <br>
@@ -385,27 +389,29 @@ desc.command
 Next, let's have a look at the code used to get data from the server. Just like last time, I'll put the relevant sections from the server code and the client side code side by side:
 
 ```{python, filename="[server]", eval=FALSE}
-def do_get(self, context, ticket):
-    self.server_message("do_get", ticket.ticket)
-    table = self.tables[ticket.ticket]
-    return flight.RecordBatchStream(table)
+    def do_get(self, context, ticket):
+        table_name = ticket.ticket
+        self.server_message('do_get', table_name)
+        table = self.tables[table_name]
+        return flight.RecordBatchStream(table)
 ```
 
 ```{python, filename="[client]", eval=FALSE}
-def get_table(self, name):
-    ticket = flight.Ticket(name.encode("utf8"))
-    reader = self.con.do_get(ticket)
-    return reader.read_all()
+    def get_table(self, name):
+        table_name = name.encode('utf8')
+        ticket = flight.Ticket(table_name)
+        reader = self.con.do_get(ticket)
+        return reader.read_all()
 ```
 
 On the client side, the `get_table()` helper function that I've written does two things. First it creates a `ticket` object from the `name` of the data table to be retrieved. It then calls the `do_get()` flight method to communicate with the server. Then, using the `reader` object returned by `do_get()`, it streams the data from the server. The server side code is the mirror image: when the ticket is received, it uses this ticket to retrieve the specific `table` from `self.tables`, and returns a stream. 
 
-Looking at these two code extracts side by side we can see that the ticket object created by the client when `flight.Ticket()` is called ends up being used by the server to retrieve the requested table. So we should take a look at what happens here. What we hope to see is that this ticket ends up producing the same key that would have been used to store the data originally: that is, when the server uses `self.tables[ticket.ticket]` to retrieve data with the `do_get()` method, it should be producing the same answer that we got in the server-side `do_put()` method in the previous section that used `self.tables[descriptor.command]` to store the data. Let's verify that this is actually true!
+Looking at these two code extracts side by side we can see that the ticket object created by the client when `flight.Ticket()` is called ends up being used by the server to retrieve the requested table. So we should take a look at what happens here. What we hope to see is that this ticket ends up producing the same key that would have been used to store the data originally: that is, when the server specifies the storage key with `table_name = ticket.ticket` in the `do_get()` method, it should be producing the same key that the `do_put()` method created when `table_name = descriptor.command` was executed. Let's verify that this is actually true!
 
-Since I already have a `name` object lying around from earlier, let's run that line of code shall we?
+Since I already have a `table_name` object lying around from earlier, let's run that line of code shall we?
 
 ```{python}
-ticket = flight.Ticket(name.encode("utf8"))
+ticket = flight.Ticket(table_name)
 print(ticket)
 ```
 
@@ -421,53 +427,55 @@ Well that's a relief. In the server-side code, the `descriptor.command` object a
 
 ### Getting information
 
-Client side code
+Our journey through the source code continues. On the client side I've written a function called `list_tables()` that returns the names of all tables stored on the server. 
 
 ```{python, filename="[client]", eval=FALSE}
-def list_tables(self):
-    names = []
-    for flight in self.con.list_flights():
-        names.append(flight.descriptor.command.decode('utf-8'))
-    return names
+    def list_tables(self):
+        names = []
+        for flight in self.con.list_flights():
+            table_name = flight.descriptor.command
+            names.append(table_name.decode('utf-8'))
+        return names
 ```
 
 Server code instantiating the `get_flight_info()` and `list_flights()` method:
 
 ```{python, filename="[server]", eval=FALSE}
-def get_flight_info(self, context, descriptor):
-    self.server_message("get_flight_info", descriptor.command)
-    return self.collect_flight_info(descriptor)        
+    def get_flight_info(self, context, descriptor):
+        table_name = descriptor.command
+        self.server_message('get_flight_info', table_name)
+        return self.collect_flight_info(descriptor)        
         
-def list_flights(self, context, criteria):
-    self.server_message("list_flights", b' ')
-    for key in self.tables.keys():
-        descriptor = flight.FlightDescriptor.for_command(key)
-        yield self.collect_flight_info(descriptor)
+    def list_flights(self, context, criteria):
+        self.server_message('list_flights', b' ')
+        for table_name in self.tables.keys():
+            descriptor = flight      \
+                .FlightDescriptor    \
+                .for_command(table_name)
+            yield self.collect_flight_info(descriptor)
 ```
 
 Notice that the server-side work is being done by the `collect_flight_info()` method. Here's the code for that one: 
 
 ```{python, filename="[server]", eval=FALSE}
-def collect_flight_info(self, descriptor):
-      
-    key = descriptor.command
-    table = self.tables[key]
+    def collect_flight_info(self, descriptor):
+        table_name = descriptor.command
+        table = self.tables[table_name]
+        schema = table.schema
+        ncases = table.num_rows
         
-    schema = table.schema
-    ncases = table.num_rows
+        output = pyarrow.MockOutputStream()
+        writer = pyarrow.RecordBatchStreamWriter(output, schema)
+        writer.write_table(table)
+        writer.close()
+        nbytes = output.size()
         
-    output = pyarrow.MockOutputStream()
-    writer = pyarrow.RecordBatchStreamWriter(output, schema)
-    writer.write_table(table)
-    writer.close()
-    nbytes = output.size()
+        ticket = flight.Ticket(table_name)
+        locations = [self.location.uri.decode('utf-8')]
+        endpoints = [flight.FlightEndpoint(ticket, locations)]
         
-    ticket = flight.Ticket(key)
-    locations = [self.location.uri.decode("utf-8")]
-    endpoints = [flight.FlightEndpoint(ticket, locations)]
-        
-    return flight.FlightInfo(schema, descriptor, endpoints, 
-                              ncases, nbytes)
+        return flight.FlightInfo(schema, descriptor, endpoints, 
+                                 ncases, nbytes)
 ```
 
 <br> 
@@ -475,30 +483,32 @@ def collect_flight_info(self, descriptor):
 ### Custom actions
 
 ```{python, filename="[server]", eval=FALSE}
-def do_action(self, context, action):
-    if action.type == "drop_table":
-        key = action.body.to_pybytes()
-        del self.tables[key]
-        self.server_message("drop_table", key)
+    def do_action(self, context, action):
+        if action.type == 'drop_table':
+            table_name = action.body.to_pybytes()
+            del self.tables[table_name]
+            self.server_message('drop_table', table_name)
             
-    elif action.type == "shutdown":
-        self.server_message("shutdown", b' ')
-        self.shutdown()
+        elif action.type == 'shutdown':
+            self.server_message('shutdown', b' ')
+            self.shutdown()
             
-    else:
-        raise KeyError("Unknown action {!r}".format(action.type))
+        else:
+            raise KeyError('Unknown action {!r}'.
+                           format(action.type))
 
-def list_actions(self, context):
-    return [
-        ("drop_table", "Drop the specified data set."),
-        ("shutdown", "Shut down this server."),
-    ]
+    def list_actions(self, context):
+        return [
+            ('drop_table', 'Drop the specified data set.'),
+            ('shutdown', 'Shut down this server.'),
+        ]
 ```
 
 ```{python, filename="[client]", eval=FALSE}
-def drop_table(self, name):
-    drop = flight.Action("drop_table", name.encode('utf-8')) 
-    self.con.do_action(drop)
+    def drop_table(self, name):
+        table_name = name.encode('utf8')
+        drop = flight.Action('drop_table', table_name) 
+        self.con.do_action(drop)
 ```
 
 <br>
