@@ -597,7 +597,7 @@ See $metadata for additional Schema metadata</code></pre>
 </section>
 <section id="getting-information" class="level3">
 <h3 class="anchored" data-anchor-id="getting-information">Getting information</h3>
-<p>Our journey through the source code continues. On the client side I’ve written a function called <code>list_tables()</code> that returns the names of all tables stored on the server.</p>
+<p>Our journey through the source code continues. On the client side I’ve written a function called <code>list_tables()</code> that returns the names of all tables stored on the server. Here’s what that looks like:</p>
 <div class="cell">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
@@ -611,7 +611,8 @@ See $metadata for additional Schema metadata</code></pre>
 <span id="cb45-128">        <span class="cf" style="color: #003B4F;">return</span> names</span></code></pre></div>
 </div>
 </div>
-<p>Server code instantiating the <code>get_flight_info()</code> and <code>list_flights()</code> method:</p>
+<p>The key part of this function is the call to <code>self.connection.list_flights()</code>. That’s where the client contacts the server and requests information. Everthing else in the function is there to extract the one piece of information (the name of the table) that we’re interested in and return it to the user.</p>
+<p>Pivoting over to the server code, there are two flight methods that are relevant here. The <code>get_flight_info()</code> function is a flight method that returns information about a single flight – where, in this case, there’s a one-to-one mapping between flights and tables – and the <code>list_flights()</code> method can be used to retrieve information about all flights stored on the server:</p>
 <div class="cell">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
@@ -632,7 +633,8 @@ See $metadata for additional Schema metadata</code></pre>
 <span id="cb46-74">            <span class="cf" style="color: #003B4F;">yield</span> <span class="va" style="color: #111111;">self</span>.flight_info(descriptor)</span></code></pre></div>
 </div>
 </div>
-<p>Notice that the server-side work is being done by the <code>flight_info()</code> helper method. Here’s the code for that one:</p>
+<p>There’s two things to comment on here. First, note that the <code>list_flight()</code> method iterates<sup>7</sup> over all the stored keys in the <code>tables</code> dictionary, uses the key to construct a flight descriptor, and then calls the <code>flight_info()</code> helper function that I’ll explain in a moment. In contrast, the <code>get_flight_info()</code> function receives a flight descriptor directly from the client, so it’s much simpler: it just calls <code>flight_info()</code> directly.</p>
+<p>Okay, so now let’s have a look at the <code>flight_info()</code> helper method. Here’s the code for that one:</p>
 <div class="cell">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
@@ -663,6 +665,34 @@ See $metadata for additional Schema metadata</code></pre>
 <span id="cb47-60">                                 nbytes)</span></code></pre></div>
 </div>
 </div>
+<p>Let’s start by looking at the return value. It’s constructed by a call to <code>flight.FlightInfo()</code> and it takes five arguments. As I mentioned earlier in the post, these arguments encode the following:</p>
+<ul>
+<li>The <code>schema</code> for the data stored by the flight,</li>
+<li>The flight <code>descriptor</code> object</li>
+<li>A list of one or more endpoints – in this cases, <code>[endpoint]</code> is a list containing a single endpoint – that specifies where the data are available for streaming. Each endpoint includes a <code>location</code> from which to stream, and the associated <code>ticket</code> for that location</li>
+<li>The total number of records stored is stored as <code>ncases</code></li>
+<li>The total number of bytes to be streamed is stored as <code>nbytes</code></li>
+</ul>
+<p>Looking at the rest of the function, you can see that some these values are relatively easy to compute. The <code>schema</code> and number of records (<code>ncases</code>), for instance, are both stored as attributes of the <code>table</code>: those can be read directly from the stored table. The <code>descriptor</code> is even easier: it’s one of the inputs to the function. It’s a little more effort to construct the <code>endpoint</code>, because we need to call <code>flight.Ticket()</code> to construct a ticket object, we need to extract the server <code>location</code> that we stored when the server was initialised, and then we call <code>flight.Endpoint()</code> to put these things together. There’s a little more code involved, but there’s nothing conceptually difficult here.</p>
+<p>The <code>nbytes</code> value is a different kettle of fish entirely! We need to calculate the total number of bytes required to stream the Arrow table. That’s not stored as an attribute of the table, so we have to compute it directly. Here’s the section of code that does this:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>tiny_flight.py [server]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb48" data-startfrom="44" style="background: #f1f3f5;"><pre class="sourceCode numberSource python numberLines number-lines code-with-copy"><code class="sourceCode python" style="counter-reset: source-line 43;"><span id="cb48-44">        output <span class="op" style="color: #5E5E5E;">=</span> pa.MockOutputStream()</span>
+<span id="cb48-45">        writer <span class="op" style="color: #5E5E5E;">=</span> pa.RecordBatchStreamWriter(output, </span>
+<span id="cb48-46">                                            schema)</span>
+<span id="cb48-47">        writer.write_table(table)</span>
+<span id="cb48-48">        writer.close()</span>
+<span id="cb48-49">        nbytes <span class="op" style="color: #5E5E5E;">=</span> output.size()</span></code></pre></div>
+</div>
+</div>
+<p>Superficially, this code looks like it’s writing data to a stream: the <code>writer</code> object constructed in the second line is a stream writer object, and the next two lines proceed to write the table and close the connection. So, we’re streaming? Not precisely: the <code>output</code> is a <a href="https://arrow.apache.org/docs/cpp/api/io.html?highlight=mockoutputstream#_CPPv4N5arrow2io16MockOutputStreamE">MockOutputStream</a>. As the documentation notes, this is:</p>
+<blockquote class="blockquote">
+<p>A helper class to track the size of allocations. Writes to this stream do not copy or retain any data, they just bump a size counter that can be later used to know exactly which data size needs to be allocated for actual writing.</p>
+</blockquote>
+<p>In other words, the mock output stream is used only to record the size of the stream, and we can read off that result in the final line shown in the previous code extract.</p>
 <p><br></p>
 </section>
 <section id="custom-actions" class="level3 page-columns page-full">
@@ -672,24 +702,24 @@ See $metadata for additional Schema metadata</code></pre>
 <div class="code-with-filename-file">
 <pre><strong>tiny_flight.py [server]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb48" data-startfrom="76" style="background: #f1f3f5;"><pre class="sourceCode numberSource python numberLines number-lines code-with-copy"><code class="sourceCode python" style="counter-reset: source-line 75;"><span id="cb48-76">    <span class="kw" style="color: #003B4F;">def</span> do_action(<span class="va" style="color: #111111;">self</span>, context, action):</span>
-<span id="cb48-77">        <span class="cf" style="color: #003B4F;">if</span> action.<span class="bu" style="color: null;">type</span> <span class="op" style="color: #5E5E5E;">==</span> <span class="st" style="color: #20794D;">'drop_table'</span>:</span>
-<span id="cb48-78">            table_name <span class="op" style="color: #5E5E5E;">=</span> action.body.to_pybytes()</span>
-<span id="cb48-79">            <span class="kw" style="color: #003B4F;">del</span> <span class="va" style="color: #111111;">self</span>.tables[table_name]</span>
-<span id="cb48-80">            <span class="va" style="color: #111111;">self</span>.server_message(<span class="st" style="color: #20794D;">'drop_table'</span>,</span>
-<span id="cb48-81">                                table_name)</span>
-<span id="cb48-82"></span>
-<span id="cb48-83">        <span class="cf" style="color: #003B4F;">elif</span> action.<span class="bu" style="color: null;">type</span> <span class="op" style="color: #5E5E5E;">==</span> <span class="st" style="color: #20794D;">'shutdown'</span>:</span>
-<span id="cb48-84">            <span class="va" style="color: #111111;">self</span>.server_message(<span class="st" style="color: #20794D;">'shutdown'</span>, <span class="st" style="color: #20794D;">b' '</span>)</span>
-<span id="cb48-85">            <span class="va" style="color: #111111;">self</span>.shutdown()</span>
-<span id="cb48-86"></span>
-<span id="cb48-87">        <span class="cf" style="color: #003B4F;">else</span>:</span>
-<span id="cb48-88">            <span class="cf" style="color: #003B4F;">raise</span> <span class="pp" style="color: #AD0000;">KeyError</span>(<span class="st" style="color: #20794D;">'Unknown action </span><span class="sc" style="color: #5E5E5E;">{!r}</span><span class="st" style="color: #20794D;">'</span>.</span>
-<span id="cb48-89">                           <span class="bu" style="color: null;">format</span>(action.<span class="bu" style="color: null;">type</span>))</span>
-<span id="cb48-90"></span>
-<span id="cb48-91">    <span class="kw" style="color: #003B4F;">def</span> list_actions(<span class="va" style="color: #111111;">self</span>, context):</span>
-<span id="cb48-92">        <span class="cf" style="color: #003B4F;">return</span> [(<span class="st" style="color: #20794D;">'drop_table'</span>, <span class="st" style="color: #20794D;">'Drop table'</span>),</span>
-<span id="cb48-93">                (<span class="st" style="color: #20794D;">'shutdown'</span>, <span class="st" style="color: #20794D;">'Shut down server'</span>)]</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb49" data-startfrom="76" style="background: #f1f3f5;"><pre class="sourceCode numberSource python numberLines number-lines code-with-copy"><code class="sourceCode python" style="counter-reset: source-line 75;"><span id="cb49-76">    <span class="kw" style="color: #003B4F;">def</span> do_action(<span class="va" style="color: #111111;">self</span>, context, action):</span>
+<span id="cb49-77">        <span class="cf" style="color: #003B4F;">if</span> action.<span class="bu" style="color: null;">type</span> <span class="op" style="color: #5E5E5E;">==</span> <span class="st" style="color: #20794D;">'drop_table'</span>:</span>
+<span id="cb49-78">            table_name <span class="op" style="color: #5E5E5E;">=</span> action.body.to_pybytes()</span>
+<span id="cb49-79">            <span class="kw" style="color: #003B4F;">del</span> <span class="va" style="color: #111111;">self</span>.tables[table_name]</span>
+<span id="cb49-80">            <span class="va" style="color: #111111;">self</span>.server_message(<span class="st" style="color: #20794D;">'drop_table'</span>,</span>
+<span id="cb49-81">                                table_name)</span>
+<span id="cb49-82"></span>
+<span id="cb49-83">        <span class="cf" style="color: #003B4F;">elif</span> action.<span class="bu" style="color: null;">type</span> <span class="op" style="color: #5E5E5E;">==</span> <span class="st" style="color: #20794D;">'shutdown'</span>:</span>
+<span id="cb49-84">            <span class="va" style="color: #111111;">self</span>.server_message(<span class="st" style="color: #20794D;">'shutdown'</span>, <span class="st" style="color: #20794D;">b' '</span>)</span>
+<span id="cb49-85">            <span class="va" style="color: #111111;">self</span>.shutdown()</span>
+<span id="cb49-86"></span>
+<span id="cb49-87">        <span class="cf" style="color: #003B4F;">else</span>:</span>
+<span id="cb49-88">            <span class="cf" style="color: #003B4F;">raise</span> <span class="pp" style="color: #AD0000;">KeyError</span>(<span class="st" style="color: #20794D;">'Unknown action </span><span class="sc" style="color: #5E5E5E;">{!r}</span><span class="st" style="color: #20794D;">'</span>.</span>
+<span id="cb49-89">                           <span class="bu" style="color: null;">format</span>(action.<span class="bu" style="color: null;">type</span>))</span>
+<span id="cb49-90"></span>
+<span id="cb49-91">    <span class="kw" style="color: #003B4F;">def</span> list_actions(<span class="va" style="color: #111111;">self</span>, context):</span>
+<span id="cb49-92">        <span class="cf" style="color: #003B4F;">return</span> [(<span class="st" style="color: #20794D;">'drop_table'</span>, <span class="st" style="color: #20794D;">'Drop table'</span>),</span>
+<span id="cb49-93">                (<span class="st" style="color: #20794D;">'shutdown'</span>, <span class="st" style="color: #20794D;">'Shut down server'</span>)]</span></code></pre></div>
 </div>
 </div>
 <div class="cell">
@@ -697,10 +727,10 @@ See $metadata for additional Schema metadata</code></pre>
 <div class="code-with-filename-file">
 <pre><strong>tiny_flight.py [client]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb49" data-startfrom="130" style="background: #f1f3f5;"><pre class="sourceCode numberSource python numberLines number-lines code-with-copy"><code class="sourceCode python" style="counter-reset: source-line 129;"><span id="cb49-130">    <span class="kw" style="color: #003B4F;">def</span> drop_table(<span class="va" style="color: #111111;">self</span>, name):</span>
-<span id="cb49-131">        table_name <span class="op" style="color: #5E5E5E;">=</span> name.encode(<span class="st" style="color: #20794D;">'utf8'</span>)</span>
-<span id="cb49-132">        drop <span class="op" style="color: #5E5E5E;">=</span> flight.Action(<span class="st" style="color: #20794D;">'drop_table'</span>, table_name) </span>
-<span id="cb49-133">        <span class="va" style="color: #111111;">self</span>.connection.do_action(drop)</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb50" data-startfrom="130" style="background: #f1f3f5;"><pre class="sourceCode numberSource python numberLines number-lines code-with-copy"><code class="sourceCode python" style="counter-reset: source-line 129;"><span id="cb50-130">    <span class="kw" style="color: #003B4F;">def</span> drop_table(<span class="va" style="color: #111111;">self</span>, name):</span>
+<span id="cb50-131">        table_name <span class="op" style="color: #5E5E5E;">=</span> name.encode(<span class="st" style="color: #20794D;">'utf8'</span>)</span>
+<span id="cb50-132">        drop <span class="op" style="color: #5E5E5E;">=</span> flight.Action(<span class="st" style="color: #20794D;">'drop_table'</span>, table_name) </span>
+<span id="cb50-133">        <span class="va" style="color: #111111;">self</span>.connection.do_action(drop)</span></code></pre></div>
 </div>
 </div>
 <p><br></p>
@@ -718,39 +748,39 @@ See $metadata for additional Schema metadata</code></pre>
 <h3 class="anchored" data-anchor-id="using-our-server">Using our server</h3>
 <p>Conveniently, the <a href="tiny_flight.py">tiny_flight.py</a> script is bundled with this post, so I can import it as a module:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb50" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb50-1"><span class="im" style="color: #00769E;">import</span> threading</span>
-<span id="cb50-2"><span class="im" style="color: #00769E;">import</span> tiny_flight <span class="im" style="color: #00769E;">as</span> tiny</span>
-<span id="cb50-3"></span>
-<span id="cb50-4">server <span class="op" style="color: #5E5E5E;">=</span> tiny.TinyServer(port <span class="op" style="color: #5E5E5E;">=</span> <span class="dv" style="color: #AD0000;">9001</span>)</span>
-<span id="cb50-5">thread <span class="op" style="color: #5E5E5E;">=</span> threading.Thread(target <span class="op" style="color: #5E5E5E;">=</span> <span class="kw" style="color: #003B4F;">lambda</span>: server.serve(), </span>
-<span id="cb50-6">                          daemon <span class="op" style="color: #5E5E5E;">=</span> <span class="va" style="color: #111111;">True</span>)</span>
-<span id="cb50-7">thread.start()</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb51" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb51-1"><span class="im" style="color: #00769E;">import</span> threading</span>
+<span id="cb51-2"><span class="im" style="color: #00769E;">import</span> tiny_flight <span class="im" style="color: #00769E;">as</span> tiny</span>
+<span id="cb51-3"></span>
+<span id="cb51-4">server <span class="op" style="color: #5E5E5E;">=</span> tiny.TinyServer(port <span class="op" style="color: #5E5E5E;">=</span> <span class="dv" style="color: #AD0000;">9001</span>)</span>
+<span id="cb51-5">thread <span class="op" style="color: #5E5E5E;">=</span> threading.Thread(target <span class="op" style="color: #5E5E5E;">=</span> <span class="kw" style="color: #003B4F;">lambda</span>: server.serve(), </span>
+<span id="cb51-6">                          daemon <span class="op" style="color: #5E5E5E;">=</span> <span class="va" style="color: #111111;">True</span>)</span>
+<span id="cb51-7">thread.start()</span></code></pre></div>
 </div>
 <p>Now let’s start our client…</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb51" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb51-1">client <span class="op" style="color: #5E5E5E;">=</span> tiny.TinyClient(port <span class="op" style="color: #5E5E5E;">=</span> <span class="dv" style="color: #AD0000;">9001</span>)</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb52" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb52-1">client <span class="op" style="color: #5E5E5E;">=</span> tiny.TinyClient(port <span class="op" style="color: #5E5E5E;">=</span> <span class="dv" style="color: #AD0000;">9001</span>)</span></code></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>(server) list_flights  </code></pre>
 </div>
 </div>
 <p>Let’s create some tables on the client side and cache them on the server:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb53" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb53-1"><span class="im" style="color: #00769E;">import</span> pyarrow <span class="im" style="color: #00769E;">as</span> pa</span>
-<span id="cb53-2">mario <span class="op" style="color: #5E5E5E;">=</span> pa.table([[<span class="st" style="color: #20794D;">"Mario"</span>, <span class="st" style="color: #20794D;">"Luigi"</span>, <span class="st" style="color: #20794D;">"Peach"</span>]], names<span class="op" style="color: #5E5E5E;">=</span>[<span class="st" style="color: #20794D;">"Character"</span>])</span>
-<span id="cb53-3">riots <span class="op" style="color: #5E5E5E;">=</span> pa.table([[<span class="st" style="color: #20794D;">"Stonewall"</span>, <span class="st" style="color: #20794D;">"Comptons"</span>, <span class="st" style="color: #20794D;">"Mardi Gras"</span>]], names<span class="op" style="color: #5E5E5E;">=</span>[<span class="st" style="color: #20794D;">"Riot"</span>])</span>
-<span id="cb53-4"></span>
-<span id="cb53-5">client.put_table(<span class="st" style="color: #20794D;">"mario"</span>, mario)</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb54" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb54-1"><span class="im" style="color: #00769E;">import</span> pyarrow <span class="im" style="color: #00769E;">as</span> pa</span>
+<span id="cb54-2">mario <span class="op" style="color: #5E5E5E;">=</span> pa.table([[<span class="st" style="color: #20794D;">"Mario"</span>, <span class="st" style="color: #20794D;">"Luigi"</span>, <span class="st" style="color: #20794D;">"Peach"</span>]], names<span class="op" style="color: #5E5E5E;">=</span>[<span class="st" style="color: #20794D;">"Character"</span>])</span>
+<span id="cb54-3">riots <span class="op" style="color: #5E5E5E;">=</span> pa.table([[<span class="st" style="color: #20794D;">"Stonewall"</span>, <span class="st" style="color: #20794D;">"Comptons"</span>, <span class="st" style="color: #20794D;">"Mardi Gras"</span>]], names<span class="op" style="color: #5E5E5E;">=</span>[<span class="st" style="color: #20794D;">"Riot"</span>])</span>
+<span id="cb54-4"></span>
+<span id="cb54-5">client.put_table(<span class="st" style="color: #20794D;">"mario"</span>, mario)</span></code></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>(server) do_put mario</code></pre>
 </div>
-<div class="sourceCode cell-code" id="cb55" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb55-1">client.put_table(<span class="st" style="color: #20794D;">"riots"</span>, riots)</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb56" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb56-1">client.put_table(<span class="st" style="color: #20794D;">"riots"</span>, riots)</span></code></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>(server) do_put riots</code></pre>
 </div>
 </div>
 <p>Now let’s ask the server to tell us what it’s storing:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb57" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb57-1">client.list_tables()</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb58" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb58-1">client.list_tables()</span></code></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>(server) list_flights  
 ['mario', 'riots']</code></pre>
@@ -758,11 +788,11 @@ See $metadata for additional Schema metadata</code></pre>
 </div>
 <p>Wait, we don’t want the mario table anymore:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb59" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb59-1">client.drop_table(<span class="st" style="color: #20794D;">"mario"</span>)</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb60" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb60-1">client.drop_table(<span class="st" style="color: #20794D;">"mario"</span>)</span></code></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>(server) drop_table mario</code></pre>
 </div>
-<div class="sourceCode cell-code" id="cb61" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb61-1">client.list_tables()</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb62" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb62-1">client.list_tables()</span></code></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>(server) list_flights  
 ['riots']</code></pre>
@@ -833,6 +863,7 @@ See $metadata for additional Schema metadata</code></pre>
 <li id="fn4"><p>The examples in this post are simple ones where the server doesn’t actually send a response, so the reader object isn’t used for anything↩︎</p></li>
 <li id="fn5"><p>People with more experience in Python than I would notice the importance of the <code>b''</code> notation. One thing I didn’t know about Python until recently is that it is quite explicit in specifying how strings are encoded. The <code>b''</code> notation is used to indicate that this is a “byte literal” string. To convert it to utf-8 text, it heeds to be explicitly decoded. I mention this here because later on in the post I’m going to call <code>.encode()</code> and <code>.decode()</code> string methods to switch back and forth between byte literals and utf-8 strings. I’m assuming this is common knowledge among Python users, but coming from R this was a little surprising!↩︎</p></li>
 <li id="fn6"><p>As I mentioned in an earlier post, all the “strings” that the client and server are using to represent tickets, locations, etc are represented as byte literals. That means that the <code>content</code> argument that gets passed to <code>server_message()</code> will always be a byte literal, not utf-8 encoded. In order to print a message to the console, we need to decode the bytes into utf-8 format, which is why the code for <code>server_message()</code> uses <code>content.decode("utf-8")</code>.↩︎</p></li>
+<li id="fn7"><p>For fellow Python newbies: if you’re unsure about why <code>list_flights()</code> generates return values with <code>yield</code> rather than <code>return</code>, it’s worth taking a little time to read up on Python iterables and generators. There’s an excellent explanation on <a href="https://stackoverflow.com/questions/231767/what-does-the-yield-keyword-do">this stackoverflow question</a>↩︎</p></li>
 </ol>
 </section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
   author = {Danielle Navarro},
