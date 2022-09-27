@@ -548,8 +548,8 @@ See $metadata for additional Schema metadata</code></pre>
 <div class="code-with-filename-file">
 <pre><strong>tiny_flight.py</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb24"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb24-1"><a href="#cb24-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> pyarrow</span>
-<span id="cb24-2"><a href="#cb24-2" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> pyarrow.flight <span class="im">as</span> flight</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb24" data-startfrom="3"><pre class="sourceCode numberSource python numberLines number-lines code-with-copy"><code class="sourceCode python" style="counter-reset: source-line 2;"><span id="cb24-3"><a href="#cb24-3"></a><span class="im">import</span> pyarrow <span class="im">as</span> pa</span>
+<span id="cb24-4"><a href="#cb24-4"></a><span class="im">import</span> pyarrow.flight <span class="im">as</span> flight</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 </div>
 <p>What I’ll do now is define a Python class called <code>TinyServer</code>. The job of this class is to provide server side flight methods for <code>do_get()</code>, <code>do_put()</code>, and others. We’ll be able to use this class to create specific server instances and set them running, in more or less the exact same fashion that we did previously in the R example.</p>
@@ -557,77 +557,95 @@ See $metadata for additional Schema metadata</code></pre>
 <div class="cell">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
-<pre><strong>tiny_flight.py</strong></pre>
+<pre><strong>tiny_flight.py [server]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb25"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb25-1"><a href="#cb25-1" aria-hidden="true" tabindex="-1"></a><span class="kw">class</span> TinyServer(flight.FlightServerBase):</span>
-<span id="cb25-2"><a href="#cb25-2" aria-hidden="true" tabindex="-1"></a>  </span>
-<span id="cb25-3"><a href="#cb25-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">def</span> <span class="fu">__init__</span>(<span class="va">self</span>, host <span class="op">=</span> <span class="st">"localhost"</span>, port <span class="op">=</span> <span class="dv">5678</span>):</span>
-<span id="cb25-4"><a href="#cb25-4" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.tables <span class="op">=</span> {}</span>
-<span id="cb25-5"><a href="#cb25-5" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.location <span class="op">=</span> flight.Location.for_grpc_tcp(host, port)</span>
-<span id="cb25-6"><a href="#cb25-6" aria-hidden="true" tabindex="-1"></a>        <span class="bu">super</span>().<span class="fu">__init__</span>(<span class="va">self</span>.location)</span>
-<span id="cb25-7"><a href="#cb25-7" aria-hidden="true" tabindex="-1"></a>    </span>
-<span id="cb25-8"><a href="#cb25-8" aria-hidden="true" tabindex="-1"></a>    <span class="at">@staticmethod</span>    </span>
-<span id="cb25-9"><a href="#cb25-9" aria-hidden="true" tabindex="-1"></a>    <span class="kw">def</span> server_message(method, content):</span>
-<span id="cb25-10"><a href="#cb25-10" aria-hidden="true" tabindex="-1"></a>        <span class="bu">print</span>(<span class="st">"(server) "</span> <span class="op">+</span> method <span class="op">+</span> <span class="st">" "</span> <span class="op">+</span> content.decode(<span class="st">"utf-8"</span>))</span>
-<span id="cb25-11"><a href="#cb25-11" aria-hidden="true" tabindex="-1"></a>      </span>
-<span id="cb25-12"><a href="#cb25-12" aria-hidden="true" tabindex="-1"></a>    <span class="kw">def</span> do_put(<span class="va">self</span>, context, descriptor, reader, writer):</span>
-<span id="cb25-13"><a href="#cb25-13" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.server_message(<span class="st">"do_put"</span>, descriptor.command)</span>
-<span id="cb25-14"><a href="#cb25-14" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.tables[descriptor.command] <span class="op">=</span> reader.read_all()</span>
-<span id="cb25-15"><a href="#cb25-15" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb25-16"><a href="#cb25-16" aria-hidden="true" tabindex="-1"></a>    <span class="kw">def</span> do_get(<span class="va">self</span>, context, ticket):</span>
-<span id="cb25-17"><a href="#cb25-17" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.server_message(<span class="st">"do_get"</span>, ticket.ticket)</span>
-<span id="cb25-18"><a href="#cb25-18" aria-hidden="true" tabindex="-1"></a>        table <span class="op">=</span> <span class="va">self</span>.tables[ticket.ticket]</span>
-<span id="cb25-19"><a href="#cb25-19" aria-hidden="true" tabindex="-1"></a>        <span class="cf">return</span> flight.RecordBatchStream(table)</span>
-<span id="cb25-20"><a href="#cb25-20" aria-hidden="true" tabindex="-1"></a>  </span>
-<span id="cb25-21"><a href="#cb25-21" aria-hidden="true" tabindex="-1"></a>    <span class="kw">def</span> collect_flight_info(<span class="va">self</span>, descriptor):</span>
-<span id="cb25-22"><a href="#cb25-22" aria-hidden="true" tabindex="-1"></a>      </span>
-<span id="cb25-23"><a href="#cb25-23" aria-hidden="true" tabindex="-1"></a>        key <span class="op">=</span> descriptor.command</span>
-<span id="cb25-24"><a href="#cb25-24" aria-hidden="true" tabindex="-1"></a>        table <span class="op">=</span> <span class="va">self</span>.tables[key]</span>
-<span id="cb25-25"><a href="#cb25-25" aria-hidden="true" tabindex="-1"></a>        </span>
-<span id="cb25-26"><a href="#cb25-26" aria-hidden="true" tabindex="-1"></a>        schema <span class="op">=</span> table.schema</span>
-<span id="cb25-27"><a href="#cb25-27" aria-hidden="true" tabindex="-1"></a>        ncases <span class="op">=</span> table.num_rows</span>
-<span id="cb25-28"><a href="#cb25-28" aria-hidden="true" tabindex="-1"></a>        </span>
-<span id="cb25-29"><a href="#cb25-29" aria-hidden="true" tabindex="-1"></a>        output <span class="op">=</span> pyarrow.MockOutputStream()</span>
-<span id="cb25-30"><a href="#cb25-30" aria-hidden="true" tabindex="-1"></a>        writer <span class="op">=</span> pyarrow.RecordBatchStreamWriter(output, schema)</span>
-<span id="cb25-31"><a href="#cb25-31" aria-hidden="true" tabindex="-1"></a>        writer.write_table(table)</span>
-<span id="cb25-32"><a href="#cb25-32" aria-hidden="true" tabindex="-1"></a>        writer.close()</span>
-<span id="cb25-33"><a href="#cb25-33" aria-hidden="true" tabindex="-1"></a>        nbytes <span class="op">=</span> output.size()</span>
-<span id="cb25-34"><a href="#cb25-34" aria-hidden="true" tabindex="-1"></a>        </span>
-<span id="cb25-35"><a href="#cb25-35" aria-hidden="true" tabindex="-1"></a>        ticket <span class="op">=</span> flight.Ticket(key)</span>
-<span id="cb25-36"><a href="#cb25-36" aria-hidden="true" tabindex="-1"></a>        locations <span class="op">=</span> [<span class="va">self</span>.location.uri.decode(<span class="st">"utf-8"</span>)]</span>
-<span id="cb25-37"><a href="#cb25-37" aria-hidden="true" tabindex="-1"></a>        endpoints <span class="op">=</span> [flight.FlightEndpoint(ticket, locations)]</span>
-<span id="cb25-38"><a href="#cb25-38" aria-hidden="true" tabindex="-1"></a>        </span>
-<span id="cb25-39"><a href="#cb25-39" aria-hidden="true" tabindex="-1"></a>        <span class="cf">return</span> flight.FlightInfo(schema, descriptor, endpoints, </span>
-<span id="cb25-40"><a href="#cb25-40" aria-hidden="true" tabindex="-1"></a>                                 ncases, nbytes)</span>
-<span id="cb25-41"><a href="#cb25-41" aria-hidden="true" tabindex="-1"></a>    </span>
-<span id="cb25-42"><a href="#cb25-42" aria-hidden="true" tabindex="-1"></a>    <span class="kw">def</span> get_flight_info(<span class="va">self</span>, context, descriptor):</span>
-<span id="cb25-43"><a href="#cb25-43" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.server_message(<span class="st">"get_flight_info"</span>, descriptor.command)</span>
-<span id="cb25-44"><a href="#cb25-44" aria-hidden="true" tabindex="-1"></a>        <span class="cf">return</span> <span class="va">self</span>.collect_flight_info(descriptor)        </span>
-<span id="cb25-45"><a href="#cb25-45" aria-hidden="true" tabindex="-1"></a>        </span>
-<span id="cb25-46"><a href="#cb25-46" aria-hidden="true" tabindex="-1"></a>    <span class="kw">def</span> list_flights(<span class="va">self</span>, context, criteria):</span>
-<span id="cb25-47"><a href="#cb25-47" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.server_message(<span class="st">"list_flights"</span>, <span class="st">b' '</span>)</span>
-<span id="cb25-48"><a href="#cb25-48" aria-hidden="true" tabindex="-1"></a>        <span class="cf">for</span> key <span class="kw">in</span> <span class="va">self</span>.tables.keys():</span>
-<span id="cb25-49"><a href="#cb25-49" aria-hidden="true" tabindex="-1"></a>            descriptor <span class="op">=</span> flight.FlightDescriptor.for_command(key)</span>
-<span id="cb25-50"><a href="#cb25-50" aria-hidden="true" tabindex="-1"></a>            <span class="cf">yield</span> <span class="va">self</span>.collect_flight_info(descriptor)</span>
-<span id="cb25-51"><a href="#cb25-51" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb25-52"><a href="#cb25-52" aria-hidden="true" tabindex="-1"></a>    <span class="kw">def</span> do_action(<span class="va">self</span>, context, action):</span>
-<span id="cb25-53"><a href="#cb25-53" aria-hidden="true" tabindex="-1"></a>        <span class="cf">if</span> action.<span class="bu">type</span> <span class="op">==</span> <span class="st">"drop_table"</span>:</span>
-<span id="cb25-54"><a href="#cb25-54" aria-hidden="true" tabindex="-1"></a>            key <span class="op">=</span> action.body.to_pybytes()</span>
-<span id="cb25-55"><a href="#cb25-55" aria-hidden="true" tabindex="-1"></a>            <span class="kw">del</span> <span class="va">self</span>.tables[key]</span>
-<span id="cb25-56"><a href="#cb25-56" aria-hidden="true" tabindex="-1"></a>            <span class="va">self</span>.server_message(<span class="st">"drop_table"</span>, key)</span>
-<span id="cb25-57"><a href="#cb25-57" aria-hidden="true" tabindex="-1"></a>            </span>
-<span id="cb25-58"><a href="#cb25-58" aria-hidden="true" tabindex="-1"></a>        <span class="cf">elif</span> action.<span class="bu">type</span> <span class="op">==</span> <span class="st">"shutdown"</span>:</span>
-<span id="cb25-59"><a href="#cb25-59" aria-hidden="true" tabindex="-1"></a>            <span class="va">self</span>.server_message(<span class="st">"shutdown"</span>, <span class="st">b' '</span>)</span>
-<span id="cb25-60"><a href="#cb25-60" aria-hidden="true" tabindex="-1"></a>            <span class="va">self</span>.shutdown()</span>
-<span id="cb25-61"><a href="#cb25-61" aria-hidden="true" tabindex="-1"></a>            </span>
-<span id="cb25-62"><a href="#cb25-62" aria-hidden="true" tabindex="-1"></a>        <span class="cf">else</span>:</span>
-<span id="cb25-63"><a href="#cb25-63" aria-hidden="true" tabindex="-1"></a>            <span class="cf">raise</span> <span class="pp">KeyError</span>(<span class="st">"Unknown action </span><span class="sc">{!r}</span><span class="st">"</span>.<span class="bu">format</span>(action.<span class="bu">type</span>))</span>
-<span id="cb25-64"><a href="#cb25-64" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb25-65"><a href="#cb25-65" aria-hidden="true" tabindex="-1"></a>    <span class="kw">def</span> list_actions(<span class="va">self</span>, context):</span>
-<span id="cb25-66"><a href="#cb25-66" aria-hidden="true" tabindex="-1"></a>        <span class="cf">return</span> [</span>
-<span id="cb25-67"><a href="#cb25-67" aria-hidden="true" tabindex="-1"></a>            (<span class="st">"drop_table"</span>, <span class="st">"Drop the specified data set."</span>),</span>
-<span id="cb25-68"><a href="#cb25-68" aria-hidden="true" tabindex="-1"></a>            (<span class="st">"shutdown"</span>, <span class="st">"Shut down this server."</span>),</span>
-<span id="cb25-69"><a href="#cb25-69" aria-hidden="true" tabindex="-1"></a>        ]</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb25" data-startfrom="7"><pre class="sourceCode numberSource python numberLines number-lines code-with-copy"><code class="sourceCode python" style="counter-reset: source-line 6;"><span id="cb25-7"><a href="#cb25-7"></a><span class="kw">class</span> TinyServer(flight.FlightServerBase):</span>
+<span id="cb25-8"><a href="#cb25-8"></a>  </span>
+<span id="cb25-9"><a href="#cb25-9"></a>    <span class="kw">def</span> <span class="fu">__init__</span>(<span class="va">self</span>, </span>
+<span id="cb25-10"><a href="#cb25-10"></a>                 host <span class="op">=</span> <span class="st">'localhost'</span>, </span>
+<span id="cb25-11"><a href="#cb25-11"></a>                 port <span class="op">=</span> <span class="dv">5678</span>):</span>
+<span id="cb25-12"><a href="#cb25-12"></a>        <span class="va">self</span>.tables <span class="op">=</span> {}</span>
+<span id="cb25-13"><a href="#cb25-13"></a>        <span class="va">self</span>.location <span class="op">=</span> flight                  <span class="op">\</span></span>
+<span id="cb25-14"><a href="#cb25-14"></a>                        .Location               <span class="op">\</span></span>
+<span id="cb25-15"><a href="#cb25-15"></a>                        .for_grpc_tcp(host, port)</span>
+<span id="cb25-16"><a href="#cb25-16"></a>        <span class="bu">super</span>().<span class="fu">__init__</span>(<span class="va">self</span>.location)</span>
+<span id="cb25-17"><a href="#cb25-17"></a>    </span>
+<span id="cb25-18"><a href="#cb25-18"></a>    <span class="at">@staticmethod</span>    </span>
+<span id="cb25-19"><a href="#cb25-19"></a>    <span class="kw">def</span> server_message(method, name):</span>
+<span id="cb25-20"><a href="#cb25-20"></a>        msg <span class="op">=</span> <span class="st">'(server) '</span>                       \</span>
+<span id="cb25-21"><a href="#cb25-21"></a>              <span class="op">+</span> method                          <span class="op">\</span></span>
+<span id="cb25-22"><a href="#cb25-22"></a>              <span class="op">+</span> <span class="st">' '</span>                             \</span>
+<span id="cb25-23"><a href="#cb25-23"></a>              <span class="op">+</span> name.decode(<span class="st">'utf-8'</span>)</span>
+<span id="cb25-24"><a href="#cb25-24"></a>        <span class="bu">print</span>(msg)</span>
+<span id="cb25-25"><a href="#cb25-25"></a>      </span>
+<span id="cb25-26"><a href="#cb25-26"></a>    <span class="kw">def</span> do_put(<span class="va">self</span>, context, descriptor, reader, </span>
+<span id="cb25-27"><a href="#cb25-27"></a>               writer):</span>
+<span id="cb25-28"><a href="#cb25-28"></a>        table_name <span class="op">=</span> descriptor.command</span>
+<span id="cb25-29"><a href="#cb25-29"></a>        <span class="va">self</span>.server_message(<span class="st">'do_put'</span>, table_name)</span>
+<span id="cb25-30"><a href="#cb25-30"></a>        <span class="va">self</span>.tables[table_name] <span class="op">=</span> reader.read_all()</span>
+<span id="cb25-31"><a href="#cb25-31"></a></span>
+<span id="cb25-32"><a href="#cb25-32"></a>    <span class="kw">def</span> do_get(<span class="va">self</span>, context, ticket):</span>
+<span id="cb25-33"><a href="#cb25-33"></a>        table_name <span class="op">=</span> ticket.ticket</span>
+<span id="cb25-34"><a href="#cb25-34"></a>        <span class="va">self</span>.server_message(<span class="st">'do_get'</span>, table_name)</span>
+<span id="cb25-35"><a href="#cb25-35"></a>        table <span class="op">=</span> <span class="va">self</span>.tables[table_name]</span>
+<span id="cb25-36"><a href="#cb25-36"></a>        <span class="cf">return</span> flight.RecordBatchStream(table)</span>
+<span id="cb25-37"><a href="#cb25-37"></a>  </span>
+<span id="cb25-38"><a href="#cb25-38"></a>    <span class="kw">def</span> flight_info(<span class="va">self</span>, descriptor):</span>
+<span id="cb25-39"><a href="#cb25-39"></a>        table_name <span class="op">=</span> descriptor.command</span>
+<span id="cb25-40"><a href="#cb25-40"></a>        table <span class="op">=</span> <span class="va">self</span>.tables[table_name]</span>
+<span id="cb25-41"><a href="#cb25-41"></a>        schema <span class="op">=</span> table.schema</span>
+<span id="cb25-42"><a href="#cb25-42"></a>        ncases <span class="op">=</span> table.num_rows</span>
+<span id="cb25-43"><a href="#cb25-43"></a>        </span>
+<span id="cb25-44"><a href="#cb25-44"></a>        output <span class="op">=</span> pa.MockOutputStream()</span>
+<span id="cb25-45"><a href="#cb25-45"></a>        writer <span class="op">=</span> pa.RecordBatchStreamWriter(output, </span>
+<span id="cb25-46"><a href="#cb25-46"></a>                                            schema)</span>
+<span id="cb25-47"><a href="#cb25-47"></a>        writer.write_table(table)</span>
+<span id="cb25-48"><a href="#cb25-48"></a>        writer.close()</span>
+<span id="cb25-49"><a href="#cb25-49"></a>        nbytes <span class="op">=</span> output.size()</span>
+<span id="cb25-50"><a href="#cb25-50"></a>        </span>
+<span id="cb25-51"><a href="#cb25-51"></a>        ticket <span class="op">=</span> flight.Ticket(table_name)</span>
+<span id="cb25-52"><a href="#cb25-52"></a>        location <span class="op">=</span> <span class="va">self</span>.location.uri.decode(<span class="st">'utf-8'</span>)</span>
+<span id="cb25-53"><a href="#cb25-53"></a>        endpoint <span class="op">=</span> flight.FlightEndpoint(ticket,</span>
+<span id="cb25-54"><a href="#cb25-54"></a>                                         [location])</span>
+<span id="cb25-55"><a href="#cb25-55"></a>        </span>
+<span id="cb25-56"><a href="#cb25-56"></a>        <span class="cf">return</span> flight.FlightInfo(schema, </span>
+<span id="cb25-57"><a href="#cb25-57"></a>                                 descriptor, </span>
+<span id="cb25-58"><a href="#cb25-58"></a>                                 [endpoint], </span>
+<span id="cb25-59"><a href="#cb25-59"></a>                                 ncases,</span>
+<span id="cb25-60"><a href="#cb25-60"></a>                                 nbytes)</span>
+<span id="cb25-61"><a href="#cb25-61"></a>    </span>
+<span id="cb25-62"><a href="#cb25-62"></a>    <span class="kw">def</span> get_flight_info(<span class="va">self</span>, context, descriptor):</span>
+<span id="cb25-63"><a href="#cb25-63"></a>        table_name <span class="op">=</span> descriptor.command</span>
+<span id="cb25-64"><a href="#cb25-64"></a>        <span class="va">self</span>.server_message(<span class="st">'get_flight_info'</span>,</span>
+<span id="cb25-65"><a href="#cb25-65"></a>                            table_name)</span>
+<span id="cb25-66"><a href="#cb25-66"></a>        <span class="cf">return</span> <span class="va">self</span>.flight_info(descriptor)        </span>
+<span id="cb25-67"><a href="#cb25-67"></a>        </span>
+<span id="cb25-68"><a href="#cb25-68"></a>    <span class="kw">def</span> list_flights(<span class="va">self</span>, context, criteria):</span>
+<span id="cb25-69"><a href="#cb25-69"></a>        <span class="va">self</span>.server_message(<span class="st">'list_flights'</span>, <span class="st">b' '</span>)</span>
+<span id="cb25-70"><a href="#cb25-70"></a>        <span class="cf">for</span> table_name <span class="kw">in</span> <span class="va">self</span>.tables.keys():</span>
+<span id="cb25-71"><a href="#cb25-71"></a>            descriptor <span class="op">=</span> flight                  <span class="op">\</span></span>
+<span id="cb25-72"><a href="#cb25-72"></a>                         .FlightDescriptor       <span class="op">\</span></span>
+<span id="cb25-73"><a href="#cb25-73"></a>                         .for_command(table_name)</span>
+<span id="cb25-74"><a href="#cb25-74"></a>            <span class="cf">yield</span> <span class="va">self</span>.flight_info(descriptor)</span>
+<span id="cb25-75"><a href="#cb25-75"></a></span>
+<span id="cb25-76"><a href="#cb25-76"></a>    <span class="kw">def</span> do_action(<span class="va">self</span>, context, action):</span>
+<span id="cb25-77"><a href="#cb25-77"></a>        <span class="cf">if</span> action.<span class="bu">type</span> <span class="op">==</span> <span class="st">'drop_table'</span>:</span>
+<span id="cb25-78"><a href="#cb25-78"></a>            table_name <span class="op">=</span> action.body.to_pybytes()</span>
+<span id="cb25-79"><a href="#cb25-79"></a>            <span class="kw">del</span> <span class="va">self</span>.tables[table_name]</span>
+<span id="cb25-80"><a href="#cb25-80"></a>            <span class="va">self</span>.server_message(<span class="st">'drop_table'</span>,</span>
+<span id="cb25-81"><a href="#cb25-81"></a>                                table_name)</span>
+<span id="cb25-82"><a href="#cb25-82"></a></span>
+<span id="cb25-83"><a href="#cb25-83"></a>        <span class="cf">elif</span> action.<span class="bu">type</span> <span class="op">==</span> <span class="st">'shutdown'</span>:</span>
+<span id="cb25-84"><a href="#cb25-84"></a>            <span class="va">self</span>.server_message(<span class="st">'shutdown'</span>, <span class="st">b' '</span>)</span>
+<span id="cb25-85"><a href="#cb25-85"></a>            <span class="va">self</span>.shutdown()</span>
+<span id="cb25-86"><a href="#cb25-86"></a></span>
+<span id="cb25-87"><a href="#cb25-87"></a>        <span class="cf">else</span>:</span>
+<span id="cb25-88"><a href="#cb25-88"></a>            <span class="cf">raise</span> <span class="pp">KeyError</span>(<span class="st">'Unknown action </span><span class="sc">{!r}</span><span class="st">'</span>.</span>
+<span id="cb25-89"><a href="#cb25-89"></a>                           <span class="bu">format</span>(action.<span class="bu">type</span>))</span>
+<span id="cb25-90"><a href="#cb25-90"></a></span>
+<span id="cb25-91"><a href="#cb25-91"></a>    <span class="kw">def</span> list_actions(<span class="va">self</span>, context):</span>
+<span id="cb25-92"><a href="#cb25-92"></a>        <span class="cf">return</span> [(<span class="st">'drop_table'</span>, <span class="st">'Drop table'</span>),</span>
+<span id="cb25-93"><a href="#cb25-93"></a>                (<span class="st">'shutdown'</span>, <span class="st">'Shut down server'</span>)]</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 </div>
 <p>Now, if you’re at all like me this code won’t immediately make sense. Probably you’ll skim over it, read bits of it, and <em>some</em> of it will make sense… but not all of it. There’s a couple of reasons for that. The first and most obvious reason is that it’s a big chunk of code that I haven’t explained yet! The second reason is that (in my opinion) server-side code never makes sense on its own: it only really makes sense when you can place it next to the client-side code so that you can see how the two parts fit together. With that in mind, let’s take a quick peek at the client-side code…</p>
@@ -639,35 +657,46 @@ See $metadata for additional Schema metadata</code></pre>
 <div class="cell">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
-<pre><strong>tiny_flight.py</strong></pre>
+<pre><strong>tiny_flight.py [client]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb26"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb26-1"><a href="#cb26-1" aria-hidden="true" tabindex="-1"></a><span class="kw">class</span> TinyClient:</span>
-<span id="cb26-2"><a href="#cb26-2" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb26-3"><a href="#cb26-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">def</span> <span class="fu">__init__</span>(<span class="va">self</span>, host <span class="op">=</span> <span class="st">"localhost"</span>, port <span class="op">=</span> <span class="dv">5678</span>):</span>
-<span id="cb26-4"><a href="#cb26-4" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.location <span class="op">=</span> flight.Location.for_grpc_tcp(host, port)</span>
-<span id="cb26-5"><a href="#cb26-5" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.con <span class="op">=</span> flight.<span class="ex">connect</span>(<span class="va">self</span>.location)</span>
-<span id="cb26-6"><a href="#cb26-6" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.con.wait_for_available()</span>
-<span id="cb26-7"><a href="#cb26-7" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb26-8"><a href="#cb26-8" aria-hidden="true" tabindex="-1"></a>    <span class="kw">def</span> put_table(<span class="va">self</span>, name, table):</span>
-<span id="cb26-9"><a href="#cb26-9" aria-hidden="true" tabindex="-1"></a>        desc <span class="op">=</span> flight.FlightDescriptor.for_command(name.encode(<span class="st">"utf8"</span>))</span>
-<span id="cb26-10"><a href="#cb26-10" aria-hidden="true" tabindex="-1"></a>        writer, reader <span class="op">=</span> <span class="va">self</span>.con.do_put(desc, table.schema)</span>
-<span id="cb26-11"><a href="#cb26-11" aria-hidden="true" tabindex="-1"></a>        writer.write(table)</span>
-<span id="cb26-12"><a href="#cb26-12" aria-hidden="true" tabindex="-1"></a>        writer.close()</span>
-<span id="cb26-13"><a href="#cb26-13" aria-hidden="true" tabindex="-1"></a>      </span>
-<span id="cb26-14"><a href="#cb26-14" aria-hidden="true" tabindex="-1"></a>    <span class="kw">def</span> get_table(<span class="va">self</span>, name):</span>
-<span id="cb26-15"><a href="#cb26-15" aria-hidden="true" tabindex="-1"></a>        ticket <span class="op">=</span> flight.Ticket(name.encode(<span class="st">"utf8"</span>))</span>
-<span id="cb26-16"><a href="#cb26-16" aria-hidden="true" tabindex="-1"></a>        reader <span class="op">=</span> <span class="va">self</span>.con.do_get(ticket)</span>
-<span id="cb26-17"><a href="#cb26-17" aria-hidden="true" tabindex="-1"></a>        <span class="cf">return</span> reader.read_all()</span>
-<span id="cb26-18"><a href="#cb26-18" aria-hidden="true" tabindex="-1"></a>    </span>
-<span id="cb26-19"><a href="#cb26-19" aria-hidden="true" tabindex="-1"></a>    <span class="kw">def</span> list_tables(<span class="va">self</span>):</span>
-<span id="cb26-20"><a href="#cb26-20" aria-hidden="true" tabindex="-1"></a>        names <span class="op">=</span> []</span>
-<span id="cb26-21"><a href="#cb26-21" aria-hidden="true" tabindex="-1"></a>        <span class="cf">for</span> flight <span class="kw">in</span> <span class="va">self</span>.con.list_flights():</span>
-<span id="cb26-22"><a href="#cb26-22" aria-hidden="true" tabindex="-1"></a>            names.append(flight.descriptor.command.decode(<span class="st">'utf-8'</span>))</span>
-<span id="cb26-23"><a href="#cb26-23" aria-hidden="true" tabindex="-1"></a>        <span class="cf">return</span> names</span>
-<span id="cb26-24"><a href="#cb26-24" aria-hidden="true" tabindex="-1"></a>    </span>
-<span id="cb26-25"><a href="#cb26-25" aria-hidden="true" tabindex="-1"></a>    <span class="kw">def</span> drop_table(<span class="va">self</span>, name):</span>
-<span id="cb26-26"><a href="#cb26-26" aria-hidden="true" tabindex="-1"></a>        drop <span class="op">=</span> flight.Action(<span class="st">"drop_table"</span>, name.encode(<span class="st">'utf-8'</span>)) </span>
-<span id="cb26-27"><a href="#cb26-27" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.con.do_action(drop)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb26" data-startfrom="96"><pre class="sourceCode numberSource python numberLines number-lines code-with-copy"><code class="sourceCode python" style="counter-reset: source-line 95;"><span id="cb26-96"><a href="#cb26-96"></a><span class="kw">class</span> TinyClient:</span>
+<span id="cb26-97"><a href="#cb26-97"></a></span>
+<span id="cb26-98"><a href="#cb26-98"></a>    <span class="kw">def</span> <span class="fu">__init__</span>(<span class="va">self</span>, host <span class="op">=</span> <span class="st">'localhost'</span>, port <span class="op">=</span> <span class="dv">5678</span>):</span>
+<span id="cb26-99"><a href="#cb26-99"></a>        <span class="va">self</span>.location <span class="op">=</span> flight                      <span class="op">\</span></span>
+<span id="cb26-100"><a href="#cb26-100"></a>                        .Location                   <span class="op">\</span></span>
+<span id="cb26-101"><a href="#cb26-101"></a>                        .for_grpc_tcp(host, port)</span>
+<span id="cb26-102"><a href="#cb26-102"></a>        <span class="va">self</span>.connection <span class="op">=</span> flight.<span class="ex">connect</span>(<span class="va">self</span>.location)</span>
+<span id="cb26-103"><a href="#cb26-103"></a>        <span class="va">self</span>.connection.wait_for_available()</span>
+<span id="cb26-104"><a href="#cb26-104"></a></span>
+<span id="cb26-105"><a href="#cb26-105"></a>    <span class="kw">def</span> put_table(<span class="va">self</span>, name, table):</span>
+<span id="cb26-106"><a href="#cb26-106"></a>        table_name <span class="op">=</span> name.encode(<span class="st">'utf8'</span>)</span>
+<span id="cb26-107"><a href="#cb26-107"></a>        descriptor <span class="op">=</span> flight                         <span class="op">\</span></span>
+<span id="cb26-108"><a href="#cb26-108"></a>                     .FlightDescriptor              <span class="op">\</span></span>
+<span id="cb26-109"><a href="#cb26-109"></a>                     .for_command(table_name)</span>
+<span id="cb26-110"><a href="#cb26-110"></a>        writer, reader <span class="op">=</span> <span class="va">self</span>                       <span class="op">\</span></span>
+<span id="cb26-111"><a href="#cb26-111"></a>                         .connection                <span class="op">\</span></span>
+<span id="cb26-112"><a href="#cb26-112"></a>                         .do_put(descriptor,</span>
+<span id="cb26-113"><a href="#cb26-113"></a>                                 table.schema)</span>
+<span id="cb26-114"><a href="#cb26-114"></a>        writer.write(table)</span>
+<span id="cb26-115"><a href="#cb26-115"></a>        writer.close()</span>
+<span id="cb26-116"><a href="#cb26-116"></a>      </span>
+<span id="cb26-117"><a href="#cb26-117"></a>    <span class="kw">def</span> get_table(<span class="va">self</span>, name):</span>
+<span id="cb26-118"><a href="#cb26-118"></a>        table_name <span class="op">=</span> name.encode(<span class="st">'utf8'</span>)</span>
+<span id="cb26-119"><a href="#cb26-119"></a>        ticket <span class="op">=</span> flight.Ticket(table_name)</span>
+<span id="cb26-120"><a href="#cb26-120"></a>        reader <span class="op">=</span> <span class="va">self</span>.connection.do_get(ticket)</span>
+<span id="cb26-121"><a href="#cb26-121"></a>        <span class="cf">return</span> reader.read_all()</span>
+<span id="cb26-122"><a href="#cb26-122"></a>    </span>
+<span id="cb26-123"><a href="#cb26-123"></a>    <span class="kw">def</span> list_tables(<span class="va">self</span>):</span>
+<span id="cb26-124"><a href="#cb26-124"></a>        names <span class="op">=</span> []</span>
+<span id="cb26-125"><a href="#cb26-125"></a>        <span class="cf">for</span> flight <span class="kw">in</span> <span class="va">self</span>.connection.list_flights():</span>
+<span id="cb26-126"><a href="#cb26-126"></a>            table_name <span class="op">=</span> flight.descriptor.command</span>
+<span id="cb26-127"><a href="#cb26-127"></a>            names.append(table_name.decode(<span class="st">'utf-8'</span>))</span>
+<span id="cb26-128"><a href="#cb26-128"></a>        <span class="cf">return</span> names</span>
+<span id="cb26-129"><a href="#cb26-129"></a>    </span>
+<span id="cb26-130"><a href="#cb26-130"></a>    <span class="kw">def</span> drop_table(<span class="va">self</span>, name):</span>
+<span id="cb26-131"><a href="#cb26-131"></a>        table_name <span class="op">=</span> name.encode(<span class="st">'utf8'</span>)</span>
+<span id="cb26-132"><a href="#cb26-132"></a>        drop <span class="op">=</span> flight.Action(<span class="st">'drop_table'</span>, table_name) </span>
+<span id="cb26-133"><a href="#cb26-133"></a>        <span class="va">self</span>.connection.do_action(drop)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 </div>
 <p>These two classes are designed to work in concert: the <code>do_put()</code> method for <code>TinyServer</code> is aligned with the <code>do_put()</code> method for <code>TinyClient</code>, and the <code>put_table()</code> function I wrote on the client side is a convenient high-level wrapper that manages the whole “put a table on the server” interaction without requiring the user to do anything other than write a single line of code. That’s the reason I started by showing you all the source code for both parts before explaining any of the specific methods: in the next few sections I’ll walk you through the code, placing the relevant snippets from the server code and the client code next to each other so you can more clearly see how they relate to each other.</p>
@@ -679,27 +708,33 @@ See $metadata for additional Schema metadata</code></pre>
 <div class="cell">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
-<pre><strong>[server]</strong></pre>
+<pre><strong>tiny_flight.py [server]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb27"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb27-1"><a href="#cb27-1" aria-hidden="true" tabindex="-1"></a><span class="kw">class</span> TinyServer(flight.FlightServerBase):</span>
-<span id="cb27-2"><a href="#cb27-2" aria-hidden="true" tabindex="-1"></a>  </span>
-<span id="cb27-3"><a href="#cb27-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">def</span> <span class="fu">__init__</span>(<span class="va">self</span>, host <span class="op">=</span> <span class="st">"localhost"</span>, port <span class="op">=</span> <span class="dv">5678</span>):</span>
-<span id="cb27-4"><a href="#cb27-4" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.tables <span class="op">=</span> {}</span>
-<span id="cb27-5"><a href="#cb27-5" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.location <span class="op">=</span> flight.Location.for_grpc_tcp(host, port)</span>
-<span id="cb27-6"><a href="#cb27-6" aria-hidden="true" tabindex="-1"></a>        <span class="bu">super</span>().<span class="fu">__init__</span>(<span class="va">self</span>.location)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb27" data-startfrom="7"><pre class="sourceCode numberSource python numberLines number-lines code-with-copy"><code class="sourceCode python" style="counter-reset: source-line 6;"><span id="cb27-7"><a href="#cb27-7"></a><span class="kw">class</span> TinyServer(flight.FlightServerBase):</span>
+<span id="cb27-8"><a href="#cb27-8"></a>  </span>
+<span id="cb27-9"><a href="#cb27-9"></a>    <span class="kw">def</span> <span class="fu">__init__</span>(<span class="va">self</span>, </span>
+<span id="cb27-10"><a href="#cb27-10"></a>                 host <span class="op">=</span> <span class="st">'localhost'</span>, </span>
+<span id="cb27-11"><a href="#cb27-11"></a>                 port <span class="op">=</span> <span class="dv">5678</span>):</span>
+<span id="cb27-12"><a href="#cb27-12"></a>        <span class="va">self</span>.tables <span class="op">=</span> {}</span>
+<span id="cb27-13"><a href="#cb27-13"></a>        <span class="va">self</span>.location <span class="op">=</span> flight                  <span class="op">\</span></span>
+<span id="cb27-14"><a href="#cb27-14"></a>                        .Location               <span class="op">\</span></span>
+<span id="cb27-15"><a href="#cb27-15"></a>                        .for_grpc_tcp(host, port)</span>
+<span id="cb27-16"><a href="#cb27-16"></a>        <span class="bu">super</span>().<span class="fu">__init__</span>(<span class="va">self</span>.location)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 </div>
 <div class="cell">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
-<pre><strong>[client]</strong></pre>
+<pre><strong>tiny_flight.py [client]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb28"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb28-1"><a href="#cb28-1" aria-hidden="true" tabindex="-1"></a><span class="kw">class</span> TinyClient:</span>
-<span id="cb28-2"><a href="#cb28-2" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb28-3"><a href="#cb28-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">def</span> <span class="fu">__init__</span>(<span class="va">self</span>, host <span class="op">=</span> <span class="st">"localhost"</span>, port <span class="op">=</span> <span class="dv">5678</span>):</span>
-<span id="cb28-4"><a href="#cb28-4" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.location <span class="op">=</span> flight.Location.for_grpc_tcp(host, port)</span>
-<span id="cb28-5"><a href="#cb28-5" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.con <span class="op">=</span> flight.<span class="ex">connect</span>(<span class="va">self</span>.location)</span>
-<span id="cb28-6"><a href="#cb28-6" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.con.wait_for_available()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb28" data-startfrom="96"><pre class="sourceCode numberSource python numberLines number-lines code-with-copy"><code class="sourceCode python" style="counter-reset: source-line 95;"><span id="cb28-96"><a href="#cb28-96"></a><span class="kw">class</span> TinyClient:</span>
+<span id="cb28-97"><a href="#cb28-97"></a></span>
+<span id="cb28-98"><a href="#cb28-98"></a>    <span class="kw">def</span> <span class="fu">__init__</span>(<span class="va">self</span>, host <span class="op">=</span> <span class="st">'localhost'</span>, port <span class="op">=</span> <span class="dv">5678</span>):</span>
+<span id="cb28-99"><a href="#cb28-99"></a>        <span class="va">self</span>.location <span class="op">=</span> flight                      <span class="op">\</span></span>
+<span id="cb28-100"><a href="#cb28-100"></a>                        .Location                   <span class="op">\</span></span>
+<span id="cb28-101"><a href="#cb28-101"></a>                        .for_grpc_tcp(host, port)</span>
+<span id="cb28-102"><a href="#cb28-102"></a>        <span class="va">self</span>.connection <span class="op">=</span> flight.<span class="ex">connect</span>(<span class="va">self</span>.location)</span>
+<span id="cb28-103"><a href="#cb28-103"></a>        <span class="va">self</span>.connection.wait_for_available()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 </div>
 <p>Some things to notice here. At start up, the server and client both call the <code>flight.Location.for_grpc_tcp()</code> function to generate a <a href="https://arrow.apache.org/docs/python/generated/pyarrow.flight.Location.html">Location</a> object used to specify the address of the server:</p>
@@ -708,7 +743,7 @@ See $metadata for additional Schema metadata</code></pre>
 <div class="code-with-filename-file">
 <pre><strong>[Python code]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb29"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb29-1"><a href="#cb29-1" aria-hidden="true" tabindex="-1"></a>loc <span class="op">=</span> flight.Location.for_grpc_tcp(<span class="st">"localhost"</span>, <span class="dv">5678</span>)</span>
+<div class="sourceCode cell-code" id="cb29"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb29-1"><a href="#cb29-1" aria-hidden="true" tabindex="-1"></a>loc <span class="op">=</span> flight.Location.for_grpc_tcp(<span class="st">'localhost'</span>, <span class="dv">5678</span>)</span>
 <span id="cb29-2"><a href="#cb29-2" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(loc)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <div class="cell-output cell-output-stdout">
@@ -726,60 +761,85 @@ See $metadata for additional Schema metadata</code></pre>
 <div class="cell">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
-<pre><strong>[server]</strong></pre>
+<pre><strong>tiny_flight.py [server]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb31"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb31-1"><a href="#cb31-1" aria-hidden="true" tabindex="-1"></a><span class="at">@staticmethod</span>    </span>
-<span id="cb31-2"><a href="#cb31-2" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> server_message(method, content):</span>
-<span id="cb31-3"><a href="#cb31-3" aria-hidden="true" tabindex="-1"></a>    <span class="bu">print</span>(<span class="st">"(server) "</span> <span class="op">+</span> method <span class="op">+</span> <span class="st">" "</span> <span class="op">+</span> content.decode(<span class="st">"utf-8"</span>))</span>
-<span id="cb31-4"><a href="#cb31-4" aria-hidden="true" tabindex="-1"></a>      </span>
-<span id="cb31-5"><a href="#cb31-5" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> do_put(<span class="va">self</span>, context, descriptor, reader, writer):</span>
-<span id="cb31-6"><a href="#cb31-6" aria-hidden="true" tabindex="-1"></a>    <span class="va">self</span>.server_message(<span class="st">"do_put"</span>, descriptor.command)</span>
-<span id="cb31-7"><a href="#cb31-7" aria-hidden="true" tabindex="-1"></a>    <span class="va">self</span>.tables[descriptor.command] <span class="op">=</span> reader.read_all()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb31" data-startfrom="18"><pre class="sourceCode numberSource python numberLines number-lines code-with-copy"><code class="sourceCode python" style="counter-reset: source-line 17;"><span id="cb31-18"><a href="#cb31-18"></a>    <span class="at">@staticmethod</span>    </span>
+<span id="cb31-19"><a href="#cb31-19"></a>    <span class="kw">def</span> server_message(method, name):</span>
+<span id="cb31-20"><a href="#cb31-20"></a>        msg <span class="op">=</span> <span class="st">'(server) '</span>                       \</span>
+<span id="cb31-21"><a href="#cb31-21"></a>              <span class="op">+</span> method                          <span class="op">\</span></span>
+<span id="cb31-22"><a href="#cb31-22"></a>              <span class="op">+</span> <span class="st">' '</span>                             \</span>
+<span id="cb31-23"><a href="#cb31-23"></a>              <span class="op">+</span> name.decode(<span class="st">'utf-8'</span>)</span>
+<span id="cb31-24"><a href="#cb31-24"></a>        <span class="bu">print</span>(msg)</span>
+<span id="cb31-25"><a href="#cb31-25"></a>      </span>
+<span id="cb31-26"><a href="#cb31-26"></a>    <span class="kw">def</span> do_put(<span class="va">self</span>, context, descriptor, reader, </span>
+<span id="cb31-27"><a href="#cb31-27"></a>               writer):</span>
+<span id="cb31-28"><a href="#cb31-28"></a>        table_name <span class="op">=</span> descriptor.command</span>
+<span id="cb31-29"><a href="#cb31-29"></a>        <span class="va">self</span>.server_message(<span class="st">'do_put'</span>, table_name)</span>
+<span id="cb31-30"><a href="#cb31-30"></a>        <span class="va">self</span>.tables[table_name] <span class="op">=</span> reader.read_all()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 </div>
-<p>There’s a few things to comment on here. First, let’s note that the <code>server_message()</code> function isn’t very interesting for our purposes. It exists solely to print out messages so that the server announces what it is doing.<a href="#fn6" class="footnote-ref" id="fnref6" role="doc-noteref"><sup>6</sup></a> So we can ignore it for now. The important part of this code is the second line in the <code>do_put()</code> function that does all the server-side work:</p>
+<p>There’s a few things to comment on here. First, let’s note that the <code>server_message()</code> function isn’t very interesting for our purposes. It exists solely to print out messages so that the server announces what it is doing.<a href="#fn6" class="footnote-ref" id="fnref6" role="doc-noteref"><sup>6</sup></a> So we can ignore it for now. The important part of this code is this line in the <code>do_put()</code> function that does all the server-side work:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb32"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb32-1"><a href="#cb32-1" aria-hidden="true" tabindex="-1"></a><span class="va">self</span>.tables[descriptor.command] <span class="op">=</span> reader.read_all()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>tiny_flight.py [server]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb32" data-startfrom="30"><pre class="sourceCode numberSource python numberLines number-lines code-with-copy"><code class="sourceCode python" style="counter-reset: source-line 29;"><span id="cb32-30"><a href="#cb32-30"></a>        <span class="va">self</span>.tables[table_name] <span class="op">=</span> reader.read_all()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
 </div>
 <p>Let’s unpack this line one step at a time. The <code>reader</code> object has been passed to the server as one of the arguments to <code>do_put()</code>, and it’s a <a href="https://arrow.apache.org/docs/python/generated/pyarrow.ipc.RecordBatchStreamReader.html">RecordBatchStreamReader</a>. That is, it’s an object capable of receiving a stream of Arrow data. When the <code>read_all()</code> method is called, it reads all record batches sent by the client and returns the final result as an Arrow table. This table is then stored in the <code>self.tables</code> dictionary.</p>
 <p>Next, notice that the key against which the table is stored as the value is specified by <code>descriptor.command</code>. This part of the code also needs to be explained! What is a “descriptor” object? What is the “command” attribute of a descriptor? That’s not at all obvious from inspection. To resolve our confusion, it helps to realise that this <code>descriptor</code> object is one of the arguments to the the server-side <code>do_put()</code> function, and the code that creates this object is over on the the client side. So let’s look at the code I wrote for the client side:</p>
 <div class="cell">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
-<pre><strong>[client]</strong></pre>
+<pre><strong>tiny_flight.py [client]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb33"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb33-1"><a href="#cb33-1" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> put_table(<span class="va">self</span>, name, table):</span>
-<span id="cb33-2"><a href="#cb33-2" aria-hidden="true" tabindex="-1"></a>    desc <span class="op">=</span> flight.FlightDescriptor.for_command(name.encode(<span class="st">"utf8"</span>))</span>
-<span id="cb33-3"><a href="#cb33-3" aria-hidden="true" tabindex="-1"></a>    writer, reader <span class="op">=</span> <span class="va">self</span>.con.do_put(desc, table.schema)</span>
-<span id="cb33-4"><a href="#cb33-4" aria-hidden="true" tabindex="-1"></a>    writer.write(table)</span>
-<span id="cb33-5"><a href="#cb33-5" aria-hidden="true" tabindex="-1"></a>    writer.close()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb33" data-startfrom="105"><pre class="sourceCode numberSource python numberLines number-lines code-with-copy"><code class="sourceCode python" style="counter-reset: source-line 104;"><span id="cb33-105"><a href="#cb33-105"></a>    <span class="kw">def</span> put_table(<span class="va">self</span>, name, table):</span>
+<span id="cb33-106"><a href="#cb33-106"></a>        table_name <span class="op">=</span> name.encode(<span class="st">'utf8'</span>)</span>
+<span id="cb33-107"><a href="#cb33-107"></a>        descriptor <span class="op">=</span> flight                         <span class="op">\</span></span>
+<span id="cb33-108"><a href="#cb33-108"></a>                     .FlightDescriptor              <span class="op">\</span></span>
+<span id="cb33-109"><a href="#cb33-109"></a>                     .for_command(table_name)</span>
+<span id="cb33-110"><a href="#cb33-110"></a>        writer, reader <span class="op">=</span> <span class="va">self</span>                       <span class="op">\</span></span>
+<span id="cb33-111"><a href="#cb33-111"></a>                         .connection                <span class="op">\</span></span>
+<span id="cb33-112"><a href="#cb33-112"></a>                         .do_put(descriptor,</span>
+<span id="cb33-113"><a href="#cb33-113"></a>                                 table.schema)</span>
+<span id="cb33-114"><a href="#cb33-114"></a>        writer.write(table)</span>
+<span id="cb33-115"><a href="#cb33-115"></a>        writer.close()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 </div>
-<p>Here we have a <code>put_table()</code> Python function does the same job that the <code>flight_put()</code> function does in the R example I presented earlier. It is a high-level wrapper function that sends a <code>do_put()</code> call to the server, streams the data across, then stops. The second line of code in this function is the one that makes the <code>do_put()</code> call:</p>
+<p>Here we have a <code>put_table()</code> Python function does the same job that the <code>flight_put()</code> function does in the R example I presented earlier. It is a high-level wrapper function that sends a <code>do_put()</code> call to the server, streams the data across, then stops. This line of code in this function is the one that makes the <code>do_put()</code> call:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb34"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb34-1"><a href="#cb34-1" aria-hidden="true" tabindex="-1"></a>writer, reader <span class="op">=</span> <span class="va">self</span>.con.do_put(desc, table.schema)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>tiny_flight.py [client]</strong></pre>
 </div>
-<p>Okay, so the object that I’ve called <code>desc</code> on the client side is the flight descriptor, and it’s also the thing that later gets used on the server side to create the key against which the table is stored. If we look at the preceding line of code, we can see that the <code>desc</code> object is an instance of the <code>FlightDescriptor</code> class. So let’s actually step into the Python console and run the commands required to create a flight descriptor object:</p>
+<div class="sourceCode cell-code" id="cb34" data-startfrom="110"><pre class="sourceCode numberSource python numberLines number-lines code-with-copy"><code class="sourceCode python" style="counter-reset: source-line 109;"><span id="cb34-110"><a href="#cb34-110"></a>        writer, reader <span class="op">=</span> <span class="va">self</span>                       <span class="op">\</span></span>
+<span id="cb34-111"><a href="#cb34-111"></a>                         .connection                <span class="op">\</span></span>
+<span id="cb34-112"><a href="#cb34-112"></a>                         .do_put(descriptor,</span>
+<span id="cb34-113"><a href="#cb34-113"></a>                                 table.schema)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+<p>Okay, so the <code>descriptor</code> on the client side is also the thing that later gets used on the server side to create the key against which the table is stored. If we look at the preceding line of code, we can see that the <code>descriptor</code> object is an instance of the <code>FlightDescriptor</code> class. So let’s actually step into the Python console and run the commands required to create a flight descriptor object:</p>
 <div class="cell">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
 <pre><strong>[Python code]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb35"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb35-1"><a href="#cb35-1" aria-hidden="true" tabindex="-1"></a>name <span class="op">=</span> <span class="st">"name-of-data"</span></span>
-<span id="cb35-2"><a href="#cb35-2" aria-hidden="true" tabindex="-1"></a>desc <span class="op">=</span> flight.FlightDescriptor.for_command(name.encode(<span class="st">"utf8"</span>))</span>
-<span id="cb35-3"><a href="#cb35-3" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(desc)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb35"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb35-1"><a href="#cb35-1" aria-hidden="true" tabindex="-1"></a>table_name <span class="op">=</span> <span class="st">b'name-of-data'</span></span>
+<span id="cb35-2"><a href="#cb35-2" aria-hidden="true" tabindex="-1"></a>descriptor <span class="op">=</span> flight.FlightDescriptor.for_command(table_name)</span>
+<span id="cb35-3"><a href="#cb35-3" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(descriptor)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <div class="cell-output cell-output-stdout">
 <pre><code>&lt;FlightDescriptor command: b'name-of-data'&gt;</code></pre>
 </div>
 </div>
-<p>Perhaps unsurprisingly, the <code>command</code> attribute is in fact the (byte encoded) string that we used to specify the <code>name</code> of the data set. In other words, once we strip back all the layers here it turns out that the server stores the data set using the name that the client gave it!</p>
+<p>Perhaps unsurprisingly, the <code>command</code> attribute is in fact the (byte encoded) string that we used to specify the <code>name</code>. In other words, once we strip back all the layers here it turns out that the server stores the data set using the name that the client gave it!</p>
 <div class="cell">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
 <pre><strong>[Python code]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb37"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb37-1"><a href="#cb37-1" aria-hidden="true" tabindex="-1"></a>desc.command</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb37"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb37-1"><a href="#cb37-1" aria-hidden="true" tabindex="-1"></a>descriptor.command</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <div class="cell-output cell-output-stdout">
 <pre><code>b'name-of-data'</code></pre>
@@ -793,38 +853,50 @@ See $metadata for additional Schema metadata</code></pre>
 <div class="cell">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
-<pre><strong>[server]</strong></pre>
+<pre><strong>tiny_flight.py [server]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb39"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb39-1"><a href="#cb39-1" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> do_get(<span class="va">self</span>, context, ticket):</span>
-<span id="cb39-2"><a href="#cb39-2" aria-hidden="true" tabindex="-1"></a>    <span class="va">self</span>.server_message(<span class="st">"do_get"</span>, ticket.ticket)</span>
-<span id="cb39-3"><a href="#cb39-3" aria-hidden="true" tabindex="-1"></a>    table <span class="op">=</span> <span class="va">self</span>.tables[ticket.ticket]</span>
-<span id="cb39-4"><a href="#cb39-4" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> flight.RecordBatchStream(table)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb39" data-startfrom="32"><pre class="sourceCode numberSource python numberLines number-lines code-with-copy"><code class="sourceCode python" style="counter-reset: source-line 31;"><span id="cb39-32"><a href="#cb39-32"></a>    <span class="kw">def</span> do_get(<span class="va">self</span>, context, ticket):</span>
+<span id="cb39-33"><a href="#cb39-33"></a>        table_name <span class="op">=</span> ticket.ticket</span>
+<span id="cb39-34"><a href="#cb39-34"></a>        <span class="va">self</span>.server_message(<span class="st">'do_get'</span>, table_name)</span>
+<span id="cb39-35"><a href="#cb39-35"></a>        table <span class="op">=</span> <span class="va">self</span>.tables[table_name]</span>
+<span id="cb39-36"><a href="#cb39-36"></a>        <span class="cf">return</span> flight.RecordBatchStream(table)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 </div>
 <div class="cell">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
-<pre><strong>[client]</strong></pre>
+<pre><strong>tiny_flight.py [client]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb40"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb40-1"><a href="#cb40-1" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> get_table(<span class="va">self</span>, name):</span>
-<span id="cb40-2"><a href="#cb40-2" aria-hidden="true" tabindex="-1"></a>    ticket <span class="op">=</span> flight.Ticket(name.encode(<span class="st">"utf8"</span>))</span>
-<span id="cb40-3"><a href="#cb40-3" aria-hidden="true" tabindex="-1"></a>    reader <span class="op">=</span> <span class="va">self</span>.con.do_get(ticket)</span>
-<span id="cb40-4"><a href="#cb40-4" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> reader.read_all()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb40" data-startfrom="117"><pre class="sourceCode numberSource python numberLines number-lines code-with-copy"><code class="sourceCode python" style="counter-reset: source-line 116;"><span id="cb40-117"><a href="#cb40-117"></a>    <span class="kw">def</span> get_table(<span class="va">self</span>, name):</span>
+<span id="cb40-118"><a href="#cb40-118"></a>        table_name <span class="op">=</span> name.encode(<span class="st">'utf8'</span>)</span>
+<span id="cb40-119"><a href="#cb40-119"></a>        ticket <span class="op">=</span> flight.Ticket(table_name)</span>
+<span id="cb40-120"><a href="#cb40-120"></a>        reader <span class="op">=</span> <span class="va">self</span>.connection.do_get(ticket)</span>
+<span id="cb40-121"><a href="#cb40-121"></a>        <span class="cf">return</span> reader.read_all()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 </div>
 <p>On the client side, the <code>get_table()</code> helper function that I’ve written does two things. First it creates a <code>ticket</code> object from the <code>name</code> of the data table to be retrieved. It then calls the <code>do_get()</code> flight method to communicate with the server. Then, using the <code>reader</code> object returned by <code>do_get()</code>, it streams the data from the server. The server side code is the mirror image: when the ticket is received, it uses this ticket to retrieve the specific <code>table</code> from <code>self.tables</code>, and returns a stream.</p>
-<p>Looking at these two code extracts side by side we can see that the ticket object created by the client when <code>flight.Ticket()</code> is called ends up being used by the server to retrieve the requested table. So we should take a look at what happens here. What we hope to see is that this ticket ends up producing the same key that would have been used to store the data originally: that is, when the server uses <code>self.tables[ticket.ticket]</code> to retrieve data with the <code>do_get()</code> method, it should be producing the same answer that we got in the server-side <code>do_put()</code> method in the previous section that used <code>self.tables[descriptor.command]</code> to store the data. Let’s verify that this is actually true!</p>
-<p>Since I already have a <code>name</code> object lying around from earlier, let’s run that line of code shall we?</p>
+<p>Looking at these two code extracts side by side we can see that the ticket object created by the client when <code>flight.Ticket()</code> is called ends up being used by the server to retrieve the requested table. So we should take a look at what happens here. What we hope to see is that this ticket ends up producing the same key that would have been used to store the data originally: that is, when the server specifies the storage key with <code>table_name = ticket.ticket</code> in the <code>do_get()</code> method, it should be producing the same key that the <code>do_put()</code> method created when <code>table_name = descriptor.command</code> was executed. Let’s verify that this is actually true!</p>
+<p>Since I already have a <code>table_name</code> object lying around from earlier, let’s run that line of code shall we?</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb41"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb41-1"><a href="#cb41-1" aria-hidden="true" tabindex="-1"></a>ticket <span class="op">=</span> flight.Ticket(name.encode(<span class="st">"utf8"</span>))</span>
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[Python code]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb41"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb41-1"><a href="#cb41-1" aria-hidden="true" tabindex="-1"></a>ticket <span class="op">=</span> flight.Ticket(table_name)</span>
 <span id="cb41-2"><a href="#cb41-2" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(ticket)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
 <div class="cell-output cell-output-stdout">
 <pre><code>&lt;Ticket b'name-of-data'&gt;</code></pre>
 </div>
 </div>
 <p>That looks promising. If we take a peek at the <code>ticket.ticket</code> object that gets used on the server side, we see that – yet again – under the hood the ticket is really just an alias for the name of the data set:</p>
 <div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>[Python code]</strong></pre>
+</div>
 <div class="sourceCode cell-code" id="cb43"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb43-1"><a href="#cb43-1" aria-hidden="true" tabindex="-1"></a>ticket.ticket</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
 <div class="cell-output cell-output-stdout">
 <pre><code>b'name-of-data'</code></pre>
 </div>
@@ -834,62 +906,70 @@ See $metadata for additional Schema metadata</code></pre>
 </section>
 <section id="getting-information" class="level3">
 <h3 class="anchored" data-anchor-id="getting-information">Getting information</h3>
-<p>Client side code</p>
+<p>Our journey through the source code continues. On the client side I’ve written a function called <code>list_tables()</code> that returns the names of all tables stored on the server.</p>
 <div class="cell">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
-<pre><strong>[client]</strong></pre>
+<pre><strong>tiny_flight.py [client]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb45"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb45-1"><a href="#cb45-1" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> list_tables(<span class="va">self</span>):</span>
-<span id="cb45-2"><a href="#cb45-2" aria-hidden="true" tabindex="-1"></a>    names <span class="op">=</span> []</span>
-<span id="cb45-3"><a href="#cb45-3" aria-hidden="true" tabindex="-1"></a>    <span class="cf">for</span> flight <span class="kw">in</span> <span class="va">self</span>.con.list_flights():</span>
-<span id="cb45-4"><a href="#cb45-4" aria-hidden="true" tabindex="-1"></a>        names.append(flight.descriptor.command.decode(<span class="st">'utf-8'</span>))</span>
-<span id="cb45-5"><a href="#cb45-5" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> names</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb45" data-startfrom="123"><pre class="sourceCode numberSource python numberLines number-lines code-with-copy"><code class="sourceCode python" style="counter-reset: source-line 122;"><span id="cb45-123"><a href="#cb45-123"></a>    <span class="kw">def</span> list_tables(<span class="va">self</span>):</span>
+<span id="cb45-124"><a href="#cb45-124"></a>        names <span class="op">=</span> []</span>
+<span id="cb45-125"><a href="#cb45-125"></a>        <span class="cf">for</span> flight <span class="kw">in</span> <span class="va">self</span>.connection.list_flights():</span>
+<span id="cb45-126"><a href="#cb45-126"></a>            table_name <span class="op">=</span> flight.descriptor.command</span>
+<span id="cb45-127"><a href="#cb45-127"></a>            names.append(table_name.decode(<span class="st">'utf-8'</span>))</span>
+<span id="cb45-128"><a href="#cb45-128"></a>        <span class="cf">return</span> names</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 </div>
 <p>Server code instantiating the <code>get_flight_info()</code> and <code>list_flights()</code> method:</p>
 <div class="cell">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
-<pre><strong>[server]</strong></pre>
+<pre><strong>tiny_flight.py [server]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb46"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb46-1"><a href="#cb46-1" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> get_flight_info(<span class="va">self</span>, context, descriptor):</span>
-<span id="cb46-2"><a href="#cb46-2" aria-hidden="true" tabindex="-1"></a>    <span class="va">self</span>.server_message(<span class="st">"get_flight_info"</span>, descriptor.command)</span>
-<span id="cb46-3"><a href="#cb46-3" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> <span class="va">self</span>.collect_flight_info(descriptor)        </span>
-<span id="cb46-4"><a href="#cb46-4" aria-hidden="true" tabindex="-1"></a>        </span>
-<span id="cb46-5"><a href="#cb46-5" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> list_flights(<span class="va">self</span>, context, criteria):</span>
-<span id="cb46-6"><a href="#cb46-6" aria-hidden="true" tabindex="-1"></a>    <span class="va">self</span>.server_message(<span class="st">"list_flights"</span>, <span class="st">b' '</span>)</span>
-<span id="cb46-7"><a href="#cb46-7" aria-hidden="true" tabindex="-1"></a>    <span class="cf">for</span> key <span class="kw">in</span> <span class="va">self</span>.tables.keys():</span>
-<span id="cb46-8"><a href="#cb46-8" aria-hidden="true" tabindex="-1"></a>        descriptor <span class="op">=</span> flight.FlightDescriptor.for_command(key)</span>
-<span id="cb46-9"><a href="#cb46-9" aria-hidden="true" tabindex="-1"></a>        <span class="cf">yield</span> <span class="va">self</span>.collect_flight_info(descriptor)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb46" data-startfrom="62"><pre class="sourceCode numberSource python numberLines number-lines code-with-copy"><code class="sourceCode python" style="counter-reset: source-line 61;"><span id="cb46-62"><a href="#cb46-62"></a>    <span class="kw">def</span> get_flight_info(<span class="va">self</span>, context, descriptor):</span>
+<span id="cb46-63"><a href="#cb46-63"></a>        table_name <span class="op">=</span> descriptor.command</span>
+<span id="cb46-64"><a href="#cb46-64"></a>        <span class="va">self</span>.server_message(<span class="st">'get_flight_info'</span>,</span>
+<span id="cb46-65"><a href="#cb46-65"></a>                            table_name)</span>
+<span id="cb46-66"><a href="#cb46-66"></a>        <span class="cf">return</span> <span class="va">self</span>.flight_info(descriptor)        </span>
+<span id="cb46-67"><a href="#cb46-67"></a>        </span>
+<span id="cb46-68"><a href="#cb46-68"></a>    <span class="kw">def</span> list_flights(<span class="va">self</span>, context, criteria):</span>
+<span id="cb46-69"><a href="#cb46-69"></a>        <span class="va">self</span>.server_message(<span class="st">'list_flights'</span>, <span class="st">b' '</span>)</span>
+<span id="cb46-70"><a href="#cb46-70"></a>        <span class="cf">for</span> table_name <span class="kw">in</span> <span class="va">self</span>.tables.keys():</span>
+<span id="cb46-71"><a href="#cb46-71"></a>            descriptor <span class="op">=</span> flight                  <span class="op">\</span></span>
+<span id="cb46-72"><a href="#cb46-72"></a>                         .FlightDescriptor       <span class="op">\</span></span>
+<span id="cb46-73"><a href="#cb46-73"></a>                         .for_command(table_name)</span>
+<span id="cb46-74"><a href="#cb46-74"></a>            <span class="cf">yield</span> <span class="va">self</span>.flight_info(descriptor)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 </div>
-<p>Notice that the server-side work is being done by the <code>collect_flight_info()</code> method. Here’s the code for that one:</p>
+<p>Notice that the server-side work is being done by the <code>flight_info()</code> helper method. Here’s the code for that one:</p>
 <div class="cell">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
-<pre><strong>[server]</strong></pre>
+<pre><strong>tiny_flight.py [server]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb47"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb47-1"><a href="#cb47-1" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> collect_flight_info(<span class="va">self</span>, descriptor):</span>
-<span id="cb47-2"><a href="#cb47-2" aria-hidden="true" tabindex="-1"></a>      </span>
-<span id="cb47-3"><a href="#cb47-3" aria-hidden="true" tabindex="-1"></a>    key <span class="op">=</span> descriptor.command</span>
-<span id="cb47-4"><a href="#cb47-4" aria-hidden="true" tabindex="-1"></a>    table <span class="op">=</span> <span class="va">self</span>.tables[key]</span>
-<span id="cb47-5"><a href="#cb47-5" aria-hidden="true" tabindex="-1"></a>        </span>
-<span id="cb47-6"><a href="#cb47-6" aria-hidden="true" tabindex="-1"></a>    schema <span class="op">=</span> table.schema</span>
-<span id="cb47-7"><a href="#cb47-7" aria-hidden="true" tabindex="-1"></a>    ncases <span class="op">=</span> table.num_rows</span>
-<span id="cb47-8"><a href="#cb47-8" aria-hidden="true" tabindex="-1"></a>        </span>
-<span id="cb47-9"><a href="#cb47-9" aria-hidden="true" tabindex="-1"></a>    output <span class="op">=</span> pyarrow.MockOutputStream()</span>
-<span id="cb47-10"><a href="#cb47-10" aria-hidden="true" tabindex="-1"></a>    writer <span class="op">=</span> pyarrow.RecordBatchStreamWriter(output, schema)</span>
-<span id="cb47-11"><a href="#cb47-11" aria-hidden="true" tabindex="-1"></a>    writer.write_table(table)</span>
-<span id="cb47-12"><a href="#cb47-12" aria-hidden="true" tabindex="-1"></a>    writer.close()</span>
-<span id="cb47-13"><a href="#cb47-13" aria-hidden="true" tabindex="-1"></a>    nbytes <span class="op">=</span> output.size()</span>
-<span id="cb47-14"><a href="#cb47-14" aria-hidden="true" tabindex="-1"></a>        </span>
-<span id="cb47-15"><a href="#cb47-15" aria-hidden="true" tabindex="-1"></a>    ticket <span class="op">=</span> flight.Ticket(key)</span>
-<span id="cb47-16"><a href="#cb47-16" aria-hidden="true" tabindex="-1"></a>    locations <span class="op">=</span> [<span class="va">self</span>.location.uri.decode(<span class="st">"utf-8"</span>)]</span>
-<span id="cb47-17"><a href="#cb47-17" aria-hidden="true" tabindex="-1"></a>    endpoints <span class="op">=</span> [flight.FlightEndpoint(ticket, locations)]</span>
-<span id="cb47-18"><a href="#cb47-18" aria-hidden="true" tabindex="-1"></a>        </span>
-<span id="cb47-19"><a href="#cb47-19" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> flight.FlightInfo(schema, descriptor, endpoints, </span>
-<span id="cb47-20"><a href="#cb47-20" aria-hidden="true" tabindex="-1"></a>                              ncases, nbytes)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb47" data-startfrom="38"><pre class="sourceCode numberSource python numberLines number-lines code-with-copy"><code class="sourceCode python" style="counter-reset: source-line 37;"><span id="cb47-38"><a href="#cb47-38"></a>    <span class="kw">def</span> flight_info(<span class="va">self</span>, descriptor):</span>
+<span id="cb47-39"><a href="#cb47-39"></a>        table_name <span class="op">=</span> descriptor.command</span>
+<span id="cb47-40"><a href="#cb47-40"></a>        table <span class="op">=</span> <span class="va">self</span>.tables[table_name]</span>
+<span id="cb47-41"><a href="#cb47-41"></a>        schema <span class="op">=</span> table.schema</span>
+<span id="cb47-42"><a href="#cb47-42"></a>        ncases <span class="op">=</span> table.num_rows</span>
+<span id="cb47-43"><a href="#cb47-43"></a>        </span>
+<span id="cb47-44"><a href="#cb47-44"></a>        output <span class="op">=</span> pa.MockOutputStream()</span>
+<span id="cb47-45"><a href="#cb47-45"></a>        writer <span class="op">=</span> pa.RecordBatchStreamWriter(output, </span>
+<span id="cb47-46"><a href="#cb47-46"></a>                                            schema)</span>
+<span id="cb47-47"><a href="#cb47-47"></a>        writer.write_table(table)</span>
+<span id="cb47-48"><a href="#cb47-48"></a>        writer.close()</span>
+<span id="cb47-49"><a href="#cb47-49"></a>        nbytes <span class="op">=</span> output.size()</span>
+<span id="cb47-50"><a href="#cb47-50"></a>        </span>
+<span id="cb47-51"><a href="#cb47-51"></a>        ticket <span class="op">=</span> flight.Ticket(table_name)</span>
+<span id="cb47-52"><a href="#cb47-52"></a>        location <span class="op">=</span> <span class="va">self</span>.location.uri.decode(<span class="st">'utf-8'</span>)</span>
+<span id="cb47-53"><a href="#cb47-53"></a>        endpoint <span class="op">=</span> flight.FlightEndpoint(ticket,</span>
+<span id="cb47-54"><a href="#cb47-54"></a>                                         [location])</span>
+<span id="cb47-55"><a href="#cb47-55"></a>        </span>
+<span id="cb47-56"><a href="#cb47-56"></a>        <span class="cf">return</span> flight.FlightInfo(schema, </span>
+<span id="cb47-57"><a href="#cb47-57"></a>                                 descriptor, </span>
+<span id="cb47-58"><a href="#cb47-58"></a>                                 [endpoint], </span>
+<span id="cb47-59"><a href="#cb47-59"></a>                                 ncases,</span>
+<span id="cb47-60"><a href="#cb47-60"></a>                                 nbytes)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 </div>
 <p><br></p>
@@ -899,36 +979,37 @@ See $metadata for additional Schema metadata</code></pre>
 <div class="cell">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
-<pre><strong>[server]</strong></pre>
+<pre><strong>tiny_flight.py [server]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb48"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb48-1"><a href="#cb48-1" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> do_action(<span class="va">self</span>, context, action):</span>
-<span id="cb48-2"><a href="#cb48-2" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> action.<span class="bu">type</span> <span class="op">==</span> <span class="st">"drop_table"</span>:</span>
-<span id="cb48-3"><a href="#cb48-3" aria-hidden="true" tabindex="-1"></a>        key <span class="op">=</span> action.body.to_pybytes()</span>
-<span id="cb48-4"><a href="#cb48-4" aria-hidden="true" tabindex="-1"></a>        <span class="kw">del</span> <span class="va">self</span>.tables[key]</span>
-<span id="cb48-5"><a href="#cb48-5" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.server_message(<span class="st">"drop_table"</span>, key)</span>
-<span id="cb48-6"><a href="#cb48-6" aria-hidden="true" tabindex="-1"></a>            </span>
-<span id="cb48-7"><a href="#cb48-7" aria-hidden="true" tabindex="-1"></a>    <span class="cf">elif</span> action.<span class="bu">type</span> <span class="op">==</span> <span class="st">"shutdown"</span>:</span>
-<span id="cb48-8"><a href="#cb48-8" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.server_message(<span class="st">"shutdown"</span>, <span class="st">b' '</span>)</span>
-<span id="cb48-9"><a href="#cb48-9" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.shutdown()</span>
-<span id="cb48-10"><a href="#cb48-10" aria-hidden="true" tabindex="-1"></a>            </span>
-<span id="cb48-11"><a href="#cb48-11" aria-hidden="true" tabindex="-1"></a>    <span class="cf">else</span>:</span>
-<span id="cb48-12"><a href="#cb48-12" aria-hidden="true" tabindex="-1"></a>        <span class="cf">raise</span> <span class="pp">KeyError</span>(<span class="st">"Unknown action </span><span class="sc">{!r}</span><span class="st">"</span>.<span class="bu">format</span>(action.<span class="bu">type</span>))</span>
-<span id="cb48-13"><a href="#cb48-13" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb48-14"><a href="#cb48-14" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> list_actions(<span class="va">self</span>, context):</span>
-<span id="cb48-15"><a href="#cb48-15" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> [</span>
-<span id="cb48-16"><a href="#cb48-16" aria-hidden="true" tabindex="-1"></a>        (<span class="st">"drop_table"</span>, <span class="st">"Drop the specified data set."</span>),</span>
-<span id="cb48-17"><a href="#cb48-17" aria-hidden="true" tabindex="-1"></a>        (<span class="st">"shutdown"</span>, <span class="st">"Shut down this server."</span>),</span>
-<span id="cb48-18"><a href="#cb48-18" aria-hidden="true" tabindex="-1"></a>    ]</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb48" data-startfrom="76"><pre class="sourceCode numberSource python numberLines number-lines code-with-copy"><code class="sourceCode python" style="counter-reset: source-line 75;"><span id="cb48-76"><a href="#cb48-76"></a>    <span class="kw">def</span> do_action(<span class="va">self</span>, context, action):</span>
+<span id="cb48-77"><a href="#cb48-77"></a>        <span class="cf">if</span> action.<span class="bu">type</span> <span class="op">==</span> <span class="st">'drop_table'</span>:</span>
+<span id="cb48-78"><a href="#cb48-78"></a>            table_name <span class="op">=</span> action.body.to_pybytes()</span>
+<span id="cb48-79"><a href="#cb48-79"></a>            <span class="kw">del</span> <span class="va">self</span>.tables[table_name]</span>
+<span id="cb48-80"><a href="#cb48-80"></a>            <span class="va">self</span>.server_message(<span class="st">'drop_table'</span>,</span>
+<span id="cb48-81"><a href="#cb48-81"></a>                                table_name)</span>
+<span id="cb48-82"><a href="#cb48-82"></a></span>
+<span id="cb48-83"><a href="#cb48-83"></a>        <span class="cf">elif</span> action.<span class="bu">type</span> <span class="op">==</span> <span class="st">'shutdown'</span>:</span>
+<span id="cb48-84"><a href="#cb48-84"></a>            <span class="va">self</span>.server_message(<span class="st">'shutdown'</span>, <span class="st">b' '</span>)</span>
+<span id="cb48-85"><a href="#cb48-85"></a>            <span class="va">self</span>.shutdown()</span>
+<span id="cb48-86"><a href="#cb48-86"></a></span>
+<span id="cb48-87"><a href="#cb48-87"></a>        <span class="cf">else</span>:</span>
+<span id="cb48-88"><a href="#cb48-88"></a>            <span class="cf">raise</span> <span class="pp">KeyError</span>(<span class="st">'Unknown action </span><span class="sc">{!r}</span><span class="st">'</span>.</span>
+<span id="cb48-89"><a href="#cb48-89"></a>                           <span class="bu">format</span>(action.<span class="bu">type</span>))</span>
+<span id="cb48-90"><a href="#cb48-90"></a></span>
+<span id="cb48-91"><a href="#cb48-91"></a>    <span class="kw">def</span> list_actions(<span class="va">self</span>, context):</span>
+<span id="cb48-92"><a href="#cb48-92"></a>        <span class="cf">return</span> [(<span class="st">'drop_table'</span>, <span class="st">'Drop table'</span>),</span>
+<span id="cb48-93"><a href="#cb48-93"></a>                (<span class="st">'shutdown'</span>, <span class="st">'Shut down server'</span>)]</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 </div>
 <div class="cell">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
-<pre><strong>[client]</strong></pre>
+<pre><strong>tiny_flight.py [client]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb49"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb49-1"><a href="#cb49-1" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> drop_table(<span class="va">self</span>, name):</span>
-<span id="cb49-2"><a href="#cb49-2" aria-hidden="true" tabindex="-1"></a>    drop <span class="op">=</span> flight.Action(<span class="st">"drop_table"</span>, name.encode(<span class="st">'utf-8'</span>)) </span>
-<span id="cb49-3"><a href="#cb49-3" aria-hidden="true" tabindex="-1"></a>    <span class="va">self</span>.con.do_action(drop)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb49" data-startfrom="130"><pre class="sourceCode numberSource python numberLines number-lines code-with-copy"><code class="sourceCode python" style="counter-reset: source-line 129;"><span id="cb49-130"><a href="#cb49-130"></a>    <span class="kw">def</span> drop_table(<span class="va">self</span>, name):</span>
+<span id="cb49-131"><a href="#cb49-131"></a>        table_name <span class="op">=</span> name.encode(<span class="st">'utf8'</span>)</span>
+<span id="cb49-132"><a href="#cb49-132"></a>        drop <span class="op">=</span> flight.Action(<span class="st">'drop_table'</span>, table_name) </span>
+<span id="cb49-133"><a href="#cb49-133"></a>        <span class="va">self</span>.connection.do_action(drop)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 </div>
 <p><br></p>
@@ -968,9 +1049,9 @@ See $metadata for additional Schema metadata</code></pre>
 <div class="code-with-filename-file">
 <pre><strong>[Python code]</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb53"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb53-1"><a href="#cb53-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> pyarrow</span>
-<span id="cb53-2"><a href="#cb53-2" aria-hidden="true" tabindex="-1"></a>mario <span class="op">=</span> pyarrow.table([[<span class="st">"Mario"</span>, <span class="st">"Luigi"</span>, <span class="st">"Peach"</span>]], names<span class="op">=</span>[<span class="st">"Character"</span>])</span>
-<span id="cb53-3"><a href="#cb53-3" aria-hidden="true" tabindex="-1"></a>riots <span class="op">=</span> pyarrow.table([[<span class="st">"Stonewall"</span>, <span class="st">"Comptons"</span>, <span class="st">"Mardi Gras"</span>]], names<span class="op">=</span>[<span class="st">"Riot"</span>])</span>
+<div class="sourceCode cell-code" id="cb53"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb53-1"><a href="#cb53-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> pyarrow <span class="im">as</span> pa</span>
+<span id="cb53-2"><a href="#cb53-2" aria-hidden="true" tabindex="-1"></a>mario <span class="op">=</span> pa.table([[<span class="st">"Mario"</span>, <span class="st">"Luigi"</span>, <span class="st">"Peach"</span>]], names<span class="op">=</span>[<span class="st">"Character"</span>])</span>
+<span id="cb53-3"><a href="#cb53-3" aria-hidden="true" tabindex="-1"></a>riots <span class="op">=</span> pa.table([[<span class="st">"Stonewall"</span>, <span class="st">"Comptons"</span>, <span class="st">"Mardi Gras"</span>]], names<span class="op">=</span>[<span class="st">"Riot"</span>])</span>
 <span id="cb53-4"><a href="#cb53-4" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb53-5"><a href="#cb53-5" aria-hidden="true" tabindex="-1"></a>client.put_table(<span class="st">"mario"</span>, mario)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
