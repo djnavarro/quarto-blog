@@ -517,7 +517,7 @@ Well that's a relief. In the server-side code, the `descriptor.command` object a
 
 ### Getting information
 
-Our journey through the source code continues. On the client side I've written a function called `list_tables()` that returns the names of all tables stored on the server. 
+Our journey through the source code continues. On the client side I've written a function called `list_tables()` that returns the names of all tables stored on the server. Here's what that looks like:
 
 ```{python, attr.source='.numberLines startFrom="123"'}
 #| filename: "tiny_flight.py [client]"
@@ -531,7 +531,9 @@ Our journey through the source code continues. On the client side I've written a
         return names
 ```
 
-Server code instantiating the `get_flight_info()` and `list_flights()` method:
+The key part of this function is the call to `self.connection.list_flights()`. That's where the client contacts the server and requests information. Everthing else in the function is there to extract the one piece of information (the name of the table) that we're interested in and return it to the user. 
+
+Pivoting over to the server code, there are two flight methods that are relevant here. The `get_flight_info()` function is a flight method that returns information about a single flight -- where, in this case, there's a one-to-one mapping between flights and tables -- and the `list_flights()` method can be used to retrieve information about all flights stored on the server:
 
 ```{python, attr.source='.numberLines startFrom="62"'}
 #| filename: "tiny_flight.py [server]"
@@ -552,7 +554,9 @@ Server code instantiating the `get_flight_info()` and `list_flights()` method:
             yield self.flight_info(descriptor)
 ```
 
-Notice that the server-side work is being done by the `flight_info()` helper method. Here's the code for that one: 
+There's two things to comment on here. First, note that the `list_flight()` method iterates^[For fellow Python newbies: if you're unsure about why `list_flights()` generates return values with `yield` rather than `return`, it's worth taking a little time to read up on Python iterables and generators. There's an excellent explanation on [this stackoverflow question](https://stackoverflow.com/questions/231767/what-does-the-yield-keyword-do)] over all the stored keys in the `tables` dictionary, uses the key to construct a flight descriptor, and then calls the `flight_info()` helper function that I'll explain in a moment. In contrast, the `get_flight_info()` function receives a flight descriptor directly from the client, so it's much simpler: it just calls `flight_info()` directly. 
+
+Okay, so now let's have a look at the `flight_info()` helper method. Here's the code for that one: 
 
 ```{python, attr.source='.numberLines startFrom="38"'}
 #| filename: "tiny_flight.py [server]"
@@ -582,6 +586,36 @@ Notice that the server-side work is being done by the `flight_info()` helper met
                                  ncases,
                                  nbytes)
 ```
+
+Let's start by looking at the return value. It's constructed by a call to `flight.FlightInfo()` and it takes five arguments. As I mentioned earlier in the post, these arguments encode the following:
+
+- The `schema` for the data stored by the flight, 
+- The flight `descriptor` object
+- A list of one or more endpoints -- in this cases, `[endpoint]` is a list containing a single endpoint -- that specifies where the data are available for streaming. Each endpoint includes a `location` from which to stream, and the associated `ticket` for that location
+- The total number of records stored is stored as `ncases` 
+- The total number of bytes to be streamed is stored as `nbytes`
+
+Looking at the rest of the function, you can see that some these values are relatively easy to compute. The `schema` and number of records (`ncases`), for instance, are both stored as attributes of the `table`: those can be read directly from the stored table. The `descriptor` is even easier: it's one of the inputs to the function. It's a little more effort to construct the `endpoint`, because we need to call `flight.Ticket()` to construct a ticket object, we need to extract the server `location` that we stored when the server was initialised, and then we call `flight.Endpoint()` to put these things together. There's a little more code involved, but there's nothing conceptually difficult here.
+
+The `nbytes` value is a different kettle of fish entirely! We need to calculate the total number of bytes required to stream the Arrow table. That's not stored as an attribute of the table, so we have to compute it directly. Here's the section of code that does this:
+
+```{python, attr.source='.numberLines startFrom="44"'}
+#| filename: "tiny_flight.py [server]"
+#| code-line-numbers: true
+#| eval: false
+        output = pa.MockOutputStream()
+        writer = pa.RecordBatchStreamWriter(output, 
+                                            schema)
+        writer.write_table(table)
+        writer.close()
+        nbytes = output.size()
+```
+
+Superficially, this code looks like it's writing data to a stream: the `writer` object constructed in the second line is a stream writer object, and the next two lines proceed to write the table and close the connection. So, we're streaming? Not precisely: the `output` is a [MockOutputStream](https://arrow.apache.org/docs/cpp/api/io.html?highlight=mockoutputstream#_CPPv4N5arrow2io16MockOutputStreamE). As the documentation notes, this is:
+
+> A helper class to track the size of allocations. Writes to this stream do not copy or retain any data, they just bump a size counter that can be later used to know exactly which data size needs to be allocated for actual writing. 
+
+In other words, the mock output stream is used only to record the size of the stream, and we can read off that result in the final line shown in the previous code extract.
 
 <br> 
 
