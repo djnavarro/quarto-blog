@@ -26,11 +26,6 @@
 
 
 <!-- 
-rendering from terminal:
-  cd ~/GitHub/sites/quarto-blog/posts/2022-09-23_flight
-  
--->
-<!-- 
 cover image: https://unsplash.com/photos/aWwFbn0ZW6A
 credit: Hennie Stander
 licence: open via unsplash licence
@@ -60,14 +55,9 @@ licence: open via unsplash licence
 <p>For the purposes of this post I’m going to start with R because the arrow package in R exposes a “high-level” interface that will allow us to start using a flight server without having to dive deeply into how it all works. However, as we’ll see, there are some limitations to this approach – not least of which is the fact that the R implementation turns out to secretly be a Python implementation under the hood – and as the post progresses I’ll pivot to Python in order to unpack some of the lower-level functionality.</p>
 <p>To do this I’ll need access to the arrow and reticulate packages, and I’ll need to make certain that the Python environment is one that has pyarrow installed. For my machine, the commands to do this look like this:</p>
 <div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>[R code]</strong></pre>
-</div>
 <div class="sourceCode cell-code" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><span class="fu" style="color: #4758AB;">library</span>(arrow)</span>
 <span id="cb1-2"><span class="fu" style="color: #4758AB;">library</span>(reticulate)</span>
 <span id="cb1-3"><span class="fu" style="color: #4758AB;">use_miniconda</span>(<span class="st" style="color: #20794D;">"base"</span>)</span></code></pre></div>
-</div>
 </div>
 <p>It may be a little different for you depending on your configuration. For more information on this, take a look at the <a href="https://blog.djnavarro.net/posts/2022-09-09_reticulated-arrow/">reticulate post</a> I wrote recently.</p>
 <p><br></p>
@@ -76,53 +66,26 @@ licence: open via unsplash licence
 <p>Okay, so let’s get started by thinking about the simplest possible scenario for using a flight server. In this set up all we want the server to do is to act as a “cache” for Arrow tables. Clients can upload tables to the server, download tables from the server, and so on. That’s all we’re really trying to accomplish, and happily for us this use case is supported out of the box in R.</p>
 <p>Here’s how it works. As I mentioned earlier, R doesn’t actually implement the flight protocol itself: it’s just a wrapper around the Python tools. What that means is the underlying flight server is actually written in Python, and if we want to start that server running from R we have to call the <code>load_flight_server()</code> function that will allow us access to this server from R. Conveniently, the arrow R package comes bundled with a “demo” server that already provides the server side functionality that we want, and I can import it like this:</p>
 <div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>[R code]</strong></pre>
-</div>
 <div class="sourceCode cell-code" id="cb2" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1">server_class <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">load_flight_server</span>(<span class="st" style="color: #20794D;">"demo_flight_server"</span>)</span></code></pre></div>
-</div>
 </div>
 <p>When I do this, all I’ve done is obtain access to the relevant Python code. I haven’t created a server yet and I haven’t started it running either. Create an instance of the “demo server”, I call the <code>DemoFlightServer()</code> method attached to the <code>server_class()</code> object:</p>
 <div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>[R code]</strong></pre>
-</div>
 <div class="sourceCode cell-code" id="cb3" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1">server <span class="ot" style="color: #003B4F;">&lt;-</span> server_class_object<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">DemoFlightServer</span>(<span class="at" style="color: #657422;">port =</span> <span class="dv" style="color: #AD0000;">8089</span>)</span></code></pre></div>
-</div>
 </div>
 <p>We have now defined a server that, once started, will run on port 8089. The <code>server</code> object has a <code>serve()</code> method that I can call to start it running:</p>
 <div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>[R code]</strong></pre>
-</div>
 <div class="sourceCode cell-code" id="cb4" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1">server<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">serve</span>()</span></code></pre></div>
 </div>
-</div>
 <p>I’ve written a short script called <a href="./start_demo_server.R">start_demo_server.R</a> that bundles all these operations together, and the easiest way to start a server running in its very own R process (i.e., an R session that isn’t the one you’re currently working in) would be to type this at the terminal:</p>
-<div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>[terminal]</strong></pre>
-</div>
-<div class="sourceCode cell-code" id="cb5" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb5-1"><span class="ex" style="color: null;">Rscript</span> start_demo_server.R <span class="kw" style="color: #003B4F;">&amp;</span></span></code></pre></div>
-</div>
-</div>
+<div class="sourceCode" id="cb5" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb5-1"><span class="ex" style="color: null;">Rscript</span> start_demo_server.R <span class="kw" style="color: #003B4F;">&amp;</span></span></code></pre></div>
 <p>This will start an R process as a background job that will create a server and start it running. As an alternative, if you’re comfortable with using the <a href="https://callr.r-lib.org/">callr</a> package, you can use <code>callr::r_bg()</code> to create a child R process from your current one. The child process will run in the background, and we can start start the server within that R session without blocking the current one. Here’s some code that will do exactly that:</p>
 <div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>[R code]</strong></pre>
-</div>
 <div class="sourceCode cell-code" id="cb6" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1">r_process <span class="ot" style="color: #003B4F;">&lt;-</span> callr<span class="sc" style="color: #5E5E5E;">::</span><span class="fu" style="color: #4758AB;">r_bg</span>(<span class="cf" style="color: #003B4F;">function</span>() {</span>
 <span id="cb6-2">  reticulate<span class="sc" style="color: #5E5E5E;">::</span><span class="fu" style="color: #4758AB;">use_miniconda</span>(<span class="st" style="color: #20794D;">"base"</span>)  </span>
 <span id="cb6-3">  demo <span class="ot" style="color: #003B4F;">&lt;-</span> arrow<span class="sc" style="color: #5E5E5E;">::</span><span class="fu" style="color: #4758AB;">load_flight_server</span>(<span class="st" style="color: #20794D;">"demo_flight_server"</span>)</span>
 <span id="cb6-4">  server <span class="ot" style="color: #003B4F;">&lt;-</span> demo<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">DemoFlightServer</span>(<span class="at" style="color: #657422;">port =</span> <span class="dv" style="color: #AD0000;">8089</span>)</span>
 <span id="cb6-5">  server<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">serve</span>()</span>
 <span id="cb6-6">})</span></code></pre></div>
-</div>
 </div>
 <p>Regardless of what method you’ve chosen, I’ll now assume that the demo server is now running in the background on port 8089.</p>
 <p><br></p>
@@ -131,35 +94,20 @@ licence: open via unsplash licence
 <h3 class="anchored" data-anchor-id="the-flight-client">The flight client</h3>
 <p>Now that I have this server running quietly in the background on port 8089, I can define a flight client in my current R session that can interact with it. To do that, I call <code>flight_connect()</code>:</p>
 <div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>[R code]</strong></pre>
-</div>
 <div class="sourceCode cell-code" id="cb7" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1">client <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">flight_connect</span>(<span class="at" style="color: #657422;">port =</span> <span class="dv" style="color: #AD0000;">8089</span>)</span></code></pre></div>
-</div>
 </div>
 <p>Perhaps unsurprisingly, the R object <code>client</code> is a wrapper around a Python flight client. It comes with various methods that implement low-level flight operations, but I’m going to hold off talking about those for a moment because we won’t need to use the low-level interface in this initial example.</p>
 <p>Let’s start by using the client to as ask a simple question: what is stored on the server? The way that data source are conceptualised in Arrow flight is as a set of “flights”. Each individual “flight” corresponds to a data stream from which the client can download data. The precise implementation of this idea (e.g., what data structures are stored in a single flight) varies from server to server, but in both examples in this post each flight stores a single Arrow table.</p>
 <p>In any case, to find out what flights are currently available on our server, we can call the <code>list_flights()</code> function:</p>
 <div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>[R code]</strong></pre>
-</div>
 <div class="sourceCode cell-code" id="cb8" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1"><span class="fu" style="color: #4758AB;">list_flights</span>(client)</span></code></pre></div>
-</div>
 <div class="cell-output cell-output-stdout">
 <pre><code>list()</code></pre>
 </div>
 </div>
 <p>Hm, okay, there’s nothing there. That makes sense because I haven’t actually uploaded anything to the server yet! Okay, well, let’s suppose I want to store a copy of the <code>airquality</code> data as an Arrow table on my server. As R users are probably aware, this is a data set that comes bundled with R, but just so we’re all on the same page here’s the first few rows of the data set:</p>
 <div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>[R code]</strong></pre>
-</div>
 <div class="sourceCode cell-code" id="cb10" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1"><span class="fu" style="color: #4758AB;">head</span>(airquality)</span></code></pre></div>
-</div>
 <div class="cell-output cell-output-stdout">
 <pre><code>  Ozone Solar.R Wind Temp Month Day
 1    41     190  7.4   67     5   1
@@ -172,21 +120,11 @@ licence: open via unsplash licence
 </div>
 <p>This object is a regular data frame in R, not an Arrow table, and strictly speaking what we want our client to do is send an Arrow table version of this data set to the server. Happily for us, the <code>flight_put()</code> function supplied by the arrow package will take care of the conversion for us, and we can cache a copy of the data as an Arrow table on the server in one line of code:</p>
 <div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>[R code]</strong></pre>
-</div>
 <div class="sourceCode cell-code" id="cb12" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb12-1"><span class="fu" style="color: #4758AB;">flight_put</span>(client, <span class="at" style="color: #657422;">data =</span> airquality, <span class="at" style="color: #657422;">path =</span> <span class="st" style="color: #20794D;">"pollution_data"</span>)</span></code></pre></div>
-</div>
 </div>
 <p>In this code, the <code>flight_put()</code> function uses the <code>client</code> object to communicate with the server, it uses the <code>data</code> argument to find the local copy of the data set, and the <code>path</code> argument is used to provide a name for the data set on the server (i.e., on the server this data set will be called <code>pollution_data</code>). Now that we’ve done the upload, if we try calling <code>list_flights()</code> again we get this as the result:</p>
 <div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>[R code]</strong></pre>
-</div>
 <div class="sourceCode cell-code" id="cb13" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1"><span class="fu" style="color: #4758AB;">list_flights</span>(client)</span></code></pre></div>
-</div>
 <div class="cell-output cell-output-stdout">
 <pre><code>[1] "pollution_data"</code></pre>
 </div>
@@ -194,24 +132,14 @@ licence: open via unsplash licence
 <p>Yay!</p>
 <p>Now, just to prove to you that I’m not cheating, let’s check to make sure that there is no object called <code>pollution_data</code> stored locally within my R session:<sup>2</sup></p>
 <div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>[R code]</strong></pre>
-</div>
 <div class="sourceCode cell-code" id="cb15" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb15-1">pollution_data</span></code></pre></div>
-</div>
 <div class="cell-output cell-output-error">
 <pre><code>Error in eval(expr, envir, enclos): object 'pollution_data' not found</code></pre>
 </div>
 </div>
 <p>Clearly there is no object called <code>pollution_data</code> available in my current R session. That data set is stored only on the server. To get access to the data cached on the server, I use the <code>flight_get()</code> function:</p>
 <div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>[R code]</strong></pre>
-</div>
 <div class="sourceCode cell-code" id="cb17" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb17-1"><span class="fu" style="color: #4758AB;">flight_get</span>(client, <span class="st" style="color: #20794D;">"pollution_data"</span>)</span></code></pre></div>
-</div>
 <div class="cell-output cell-output-stdout">
 <pre><code>Table
 153 rows x 6 columns
@@ -482,13 +410,8 @@ See $metadata for additional Schema metadata</code></pre>
 </div>
 <p>Some things to notice here. At start up, the server and client both call the <code>flight.Location.for_grpc_tcp()</code> function to generate a <a href="https://arrow.apache.org/docs/python/generated/pyarrow.flight.Location.html">Location</a> object used to specify the address of the server:</p>
 <div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>[Python code]</strong></pre>
-</div>
 <div class="sourceCode cell-code" id="cb29" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb29-1">loc <span class="op" style="color: #5E5E5E;">=</span> flight.Location.for_grpc_tcp(<span class="st" style="color: #20794D;">'localhost'</span>, <span class="dv" style="color: #AD0000;">5678</span>)</span>
 <span id="cb29-2"><span class="bu" style="color: null;">print</span>(loc)</span></code></pre></div>
-</div>
 <div class="cell-output cell-output-stdout">
 <pre><code>&lt;Location b'grpc+tcp://localhost:5678'&gt;</code></pre>
 </div>
@@ -564,26 +487,16 @@ See $metadata for additional Schema metadata</code></pre>
 </div>
 <p>Okay, so the <code>descriptor</code> on the client side is also the thing that later gets used on the server side to create the key against which the table is stored. If we look at the preceding line of code, we can see that the <code>descriptor</code> object is an instance of the <code>FlightDescriptor</code> class. So let’s actually step into the Python console and run the commands required to create a flight descriptor object:</p>
 <div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>[Python code]</strong></pre>
-</div>
 <div class="sourceCode cell-code" id="cb35" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb35-1">table_name <span class="op" style="color: #5E5E5E;">=</span> <span class="st" style="color: #20794D;">b'name-of-data'</span></span>
 <span id="cb35-2">descriptor <span class="op" style="color: #5E5E5E;">=</span> flight.FlightDescriptor.for_command(table_name)</span>
 <span id="cb35-3"><span class="bu" style="color: null;">print</span>(descriptor)</span></code></pre></div>
-</div>
 <div class="cell-output cell-output-stdout">
 <pre><code>&lt;FlightDescriptor command: b'name-of-data'&gt;</code></pre>
 </div>
 </div>
 <p>Perhaps unsurprisingly, the <code>command</code> attribute is in fact the (byte encoded) string that we used to specify the <code>name</code>. In other words, once we strip back all the layers here it turns out that the server stores the data set using the name that the client gave it!</p>
 <div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>[Python code]</strong></pre>
-</div>
 <div class="sourceCode cell-code" id="cb37" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb37-1">descriptor.command</span></code></pre></div>
-</div>
 <div class="cell-output cell-output-stdout">
 <pre><code>b'name-of-data'</code></pre>
 </div>
@@ -621,25 +534,15 @@ See $metadata for additional Schema metadata</code></pre>
 <p>Looking at these two code extracts side by side we can see that the ticket object created by the client when <code>flight.Ticket()</code> is called ends up being used by the server to retrieve the requested table. So we should take a look at what happens here. What we hope to see is that this ticket ends up producing the same key that would have been used to store the data originally: that is, when the server specifies the storage key with <code>table_name = ticket.ticket</code> in the <code>do_get()</code> method, it should be producing the same key that the <code>do_put()</code> method created when <code>table_name = descriptor.command</code> was executed. Let’s verify that this is actually true!</p>
 <p>Since I already have a <code>table_name</code> object lying around from earlier, let’s run that line of code shall we?</p>
 <div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>[Python code]</strong></pre>
-</div>
 <div class="sourceCode cell-code" id="cb41" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb41-1">ticket <span class="op" style="color: #5E5E5E;">=</span> flight.Ticket(table_name)</span>
 <span id="cb41-2"><span class="bu" style="color: null;">print</span>(ticket)</span></code></pre></div>
-</div>
 <div class="cell-output cell-output-stdout">
 <pre><code>&lt;Ticket b'name-of-data'&gt;</code></pre>
 </div>
 </div>
 <p>That looks promising. If we take a peek at the <code>ticket.ticket</code> object that gets used on the server side, we see that – yet again – under the hood the ticket is really just an alias for the name of the data set:</p>
 <div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>[Python code]</strong></pre>
-</div>
 <div class="sourceCode cell-code" id="cb43" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb43-1">ticket.ticket</span></code></pre></div>
-</div>
 <div class="cell-output cell-output-stdout">
 <pre><code>b'name-of-data'</code></pre>
 </div>
@@ -761,10 +664,6 @@ See $metadata for additional Schema metadata</code></pre>
 <h3 class="anchored" data-anchor-id="using-our-server">Using our server</h3>
 <p>Conveniently, the <a href="tiny_flight.py">tiny_flight.py</a> script is bundled with this post, so I can import it as a module:</p>
 <div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>[Python code]</strong></pre>
-</div>
 <div class="sourceCode cell-code" id="cb50" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb50-1"><span class="im" style="color: #00769E;">import</span> threading</span>
 <span id="cb50-2"><span class="im" style="color: #00769E;">import</span> tiny_flight <span class="im" style="color: #00769E;">as</span> tiny</span>
 <span id="cb50-3"></span>
@@ -773,31 +672,20 @@ See $metadata for additional Schema metadata</code></pre>
 <span id="cb50-6">                          daemon <span class="op" style="color: #5E5E5E;">=</span> <span class="va" style="color: #111111;">True</span>)</span>
 <span id="cb50-7">thread.start()</span></code></pre></div>
 </div>
-</div>
 <p>Now let’s start our client…</p>
 <div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>[Python code]</strong></pre>
-</div>
 <div class="sourceCode cell-code" id="cb51" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb51-1">client <span class="op" style="color: #5E5E5E;">=</span> tiny.TinyClient(port <span class="op" style="color: #5E5E5E;">=</span> <span class="dv" style="color: #AD0000;">9001</span>)</span></code></pre></div>
-</div>
 <div class="cell-output cell-output-stdout">
 <pre><code>(server) list_flights  </code></pre>
 </div>
 </div>
 <p>Let’s create some tables on the client side and cache them on the server:</p>
 <div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>[Python code]</strong></pre>
-</div>
 <div class="sourceCode cell-code" id="cb53" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb53-1"><span class="im" style="color: #00769E;">import</span> pyarrow <span class="im" style="color: #00769E;">as</span> pa</span>
 <span id="cb53-2">mario <span class="op" style="color: #5E5E5E;">=</span> pa.table([[<span class="st" style="color: #20794D;">"Mario"</span>, <span class="st" style="color: #20794D;">"Luigi"</span>, <span class="st" style="color: #20794D;">"Peach"</span>]], names<span class="op" style="color: #5E5E5E;">=</span>[<span class="st" style="color: #20794D;">"Character"</span>])</span>
 <span id="cb53-3">riots <span class="op" style="color: #5E5E5E;">=</span> pa.table([[<span class="st" style="color: #20794D;">"Stonewall"</span>, <span class="st" style="color: #20794D;">"Comptons"</span>, <span class="st" style="color: #20794D;">"Mardi Gras"</span>]], names<span class="op" style="color: #5E5E5E;">=</span>[<span class="st" style="color: #20794D;">"Riot"</span>])</span>
 <span id="cb53-4"></span>
 <span id="cb53-5">client.put_table(<span class="st" style="color: #20794D;">"mario"</span>, mario)</span></code></pre></div>
-</div>
 <div class="cell-output cell-output-stdout">
 <pre><code>(server) do_put mario</code></pre>
 </div>
@@ -808,12 +696,7 @@ See $metadata for additional Schema metadata</code></pre>
 </div>
 <p>Now let’s ask the server to tell us what it’s storing:</p>
 <div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>[Python code]</strong></pre>
-</div>
 <div class="sourceCode cell-code" id="cb57" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb57-1">client.list_tables()</span></code></pre></div>
-</div>
 <div class="cell-output cell-output-stdout">
 <pre><code>(server) list_flights  
 ['mario', 'riots']</code></pre>
@@ -821,12 +704,7 @@ See $metadata for additional Schema metadata</code></pre>
 </div>
 <p>Wait, we don’t want the mario table anymore:</p>
 <div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>[Python code]</strong></pre>
-</div>
 <div class="sourceCode cell-code" id="cb59" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb59-1">client.drop_table(<span class="st" style="color: #20794D;">"mario"</span>)</span></code></pre></div>
-</div>
 <div class="cell-output cell-output-stdout">
 <pre><code>(server) drop_table mario</code></pre>
 </div>
