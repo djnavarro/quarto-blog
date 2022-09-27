@@ -264,14 +264,20 @@ knitr::read_chunk("tiny_flight.py")
 
 Our goal in this section is to write our own flight server in Python that does the same job as the one we saw earlier in the R example: it's a server that allows you to cache copies of Arrow tables. To do so, we'll start our Python script the way one usually does, with some imports:
 
-```{python imports, filename="tiny_flight.py", eval = TRUE}
+```{python imports, attr.source='.numberLines startFrom="3"'}
+#| filename: "tiny_flight.py"
+#| code-line-numbers: true
+#| eval: true
 ```
 
 What I'll do now is define a Python class called `TinyServer`. The job of this class is to provide server side flight methods for `do_get()`, `do_put()`, and others. We'll be able to use this class to create specific server instances and set them running, in more or less the exact same fashion that we did previously in the R example. 
 
 I'll explain the code in more detail in a moment after I've shown you both the server and the client, but let's start just by looking at the code. You can find all the code in the [tiny_flight.py](tiny_flight.py) script that accompanies this post. Here's the complete code used to define the `TinyServer` class:
 
-```{python tiny-server, filename = "tiny_flight.py", eval = FALSE}
+```{python tiny-server, attr.source='.numberLines startFrom="7"'}
+#| filename: "tiny_flight.py [server]"
+#| code-line-numbers: true
+#| eval: false
 ```
 
 Now, if you're at all like me this code won't immediately make sense. Probably you'll skim over it, read bits of it, and *some* of it will make sense... but not all of it. There's a couple of reasons for that. The first and most obvious reason is that it's a big chunk of code that I haven't explained yet! The second reason is that (in my opinion) server-side code never makes sense on its own: it only really makes sense when you can place it next to the client-side code so that you can see how the two parts fit together. With that in mind, let's take a quick peek at the client-side code...
@@ -282,7 +288,10 @@ Now, if you're at all like me this code won't immediately make sense. Probably y
 
 To accompany a `TinyServer`, we'll need a `TinyClient` that knows how to talk to it. Happily for us, it's easier to define the client than to define the server, so the source code that defines the `TinyClient` class is considerably shorter:
 
-```{python tiny-client, filename="tiny_flight.py", eval = FALSE}
+```{python tiny-client, attr.source='.numberLines startFrom="96"'}
+#| filename: "tiny_flight.py [client]"
+#| code-line-numbers: true
+#| eval: false
 ```
 
 These two classes are designed to work in concert: the `do_put()` method for `TinyServer` is aligned with the `do_put()` method for `TinyClient`, and the `put_table()` function I wrote on the client side is a convenient high-level wrapper that manages the whole "put a table on the server" interaction without requiring the user to do anything other than write a single line of code. That's the reason I started by showing you all the source code for both parts before explaining any of the specific methods: in the next few sections I'll walk you through the code, placing the relevant snippets from the server code and the client code next to each other so you can more clearly see how they relate to each other.
@@ -293,27 +302,40 @@ These two classes are designed to work in concert: the `do_put()` method for `Ti
 
 Let's start by looking at what happens when the server and client are initialised. When a new `TinyServer` or `TinyClient` object is created, the `__init__` function is called:
 
-```{python, filename="[server]", eval=FALSE}
+```{python, attr.source='.numberLines startFrom="7"'}
+#| filename: "tiny_flight.py [server]"
+#| code-line-numbers: true
+#| eval: false
 class TinyServer(flight.FlightServerBase):
   
-    def __init__(self, host = 'localhost', port = 5678):
+    def __init__(self, 
+                 host = 'localhost', 
+                 port = 5678):
         self.tables = {}
-        self.location = flight.Location.for_grpc_tcp(host, port)
+        self.location = flight                  \
+                        .Location               \
+                        .for_grpc_tcp(host, port)
         super().__init__(self.location)
 ```
 
-```{python, filename="[client]", eval=FALSE}
+```{python, attr.source='.numberLines startFrom="96"'}
+#| filename: "tiny_flight.py [client]"
+#| code-line-numbers: true
+#| eval: false
 class TinyClient:
 
     def __init__(self, host = 'localhost', port = 5678):
-        self.location = flight.Location.for_grpc_tcp(host, port)
-        self.con = flight.connect(self.location)
-        self.con.wait_for_available()
+        self.location = flight                      \
+                        .Location                   \
+                        .for_grpc_tcp(host, port)
+        self.connection = flight.connect(self.location)
+        self.connection.wait_for_available()
 ```
 
 Some things to notice here. At start up, the server and client both call the `flight.Location.for_grpc_tcp()` function to generate a  [Location](https://arrow.apache.org/docs/python/generated/pyarrow.flight.Location.html) object used to specify the address of the server:
 
-```{python, filename="[Python code]"}
+```{python}
+#| filename: "[Python code]"
 loc = flight.Location.for_grpc_tcp('localhost', 5678)
 print(loc)
 ```
@@ -330,12 +352,20 @@ The other thing to notice here is the data structures set up in these initialisa
 
 Next, let's take a look at the code used to place data on the server. On the server side, we have to specify the `do_put()` method. In this case, all my code does is store a copy of the data in `self.tables` and prints a little message to the server console using the `server_message()` function:
 
-```{python, filename="[server]", eval=FALSE}
+```{python, attr.source='.numberLines startFrom="18"'}
+#| filename: "tiny_flight.py [server]"
+#| code-line-numbers: true
+#| eval: false
     @staticmethod    
     def server_message(method, name):
-        print('(server) ' + method + ' ' + name.decode('utf-8'))
+        msg = '(server) '                       \
+              + method                          \
+              + ' '                             \
+              + name.decode('utf-8')
+        print(msg)
       
-    def do_put(self, context, descriptor, reader, writer):
+    def do_put(self, context, descriptor, reader, 
+               writer):
         table_name = descriptor.command
         self.server_message('do_put', table_name)
         self.tables[table_name] = reader.read_all()
@@ -343,7 +373,10 @@ Next, let's take a look at the code used to place data on the server. On the ser
 
 There's a few things to comment on here. First, let's note that the `server_message()` function isn't very interesting for our purposes. It exists solely to print out messages so that the server announces what it is doing.^[As I mentioned in an earlier post, all the "strings" that the client and server are using to represent tickets, locations, etc are represented as byte literals. That means that the `content` argument that gets passed to `server_message()` will always be a byte literal, not utf-8 encoded. In order to print a message to the console, we need to decode the bytes into utf-8 format, which is why the code for `server_message()` uses `content.decode("utf-8")`.] So we can ignore it for now. The important part of this code is this line in the `do_put()` function that does all the server-side work:
 
-```{python, filename="[server]", eval=FALSE}
+```{python, attr.source='.numberLines startFrom="30"'}
+#| filename: "tiny_flight.py [server]"
+#| code-line-numbers: true
+#| eval: false
         self.tables[table_name] = reader.read_all()
 ```
 
@@ -351,21 +384,33 @@ Let's unpack this line one step at a time. The `reader` object has been passed t
 
 Next, notice that the key against which the table is stored as the value is specified by `descriptor.command`. This part of the code also needs to be explained! What is a "descriptor" object? What is the "command" attribute of a descriptor? That's not at all obvious from inspection. To resolve our confusion, it helps to realise that this `descriptor` object is one of the arguments to the the server-side `do_put()` function, and the code that creates this object is over on the the client side. So let's look at the code I wrote for the client side:
 
-```{python, filename="[client]", eval=FALSE}
+```{python, attr.source='.numberLines startFrom="105"'}
+#| filename: "tiny_flight.py [client]"
+#| code-line-numbers: true
+#| eval: false
     def put_table(self, name, table):
         table_name = name.encode('utf8')
-        descriptor = flight      \
-            .FlightDescriptor    \
-            .for_command(table_name)
-        writer, reader = self.con.do_put(descriptor, table.schema)
+        descriptor = flight                         \
+                     .FlightDescriptor              \
+                     .for_command(table_name)
+        writer, reader = self                       \
+                         .connection                \
+                         .do_put(descriptor,
+                                 table.schema)
         writer.write(table)
         writer.close()
 ```
 
 Here we have a `put_table()` Python function does the same job that the `flight_put()` function does in the R example I presented earlier. It is a high-level wrapper function that sends a `do_put()` call to the server, streams the data across, then stops. This line of code in this function is the one that makes the `do_put()` call:
 
-```{python, filename="[client]", eval=FALSE}
-        writer, reader = self.con.do_put(descriptor, table.schema)
+```{python, attr.source='.numberLines startFrom="110"'}
+#| filename: "tiny_flight.py [client]"
+#| code-line-numbers: true
+#| eval: false
+        writer, reader = self                       \
+                         .connection                \
+                         .do_put(descriptor,
+                                 table.schema)
 ```
 
 Okay, so the `descriptor` on the client side is also the thing that later gets used on the server side to create the key against which the table is stored. If we look at the preceding line of code, we can see that the `descriptor` object is an instance of the `FlightDescriptor` class. So let's actually step into the Python console and run the commands required to create a flight descriptor object:
@@ -388,7 +433,10 @@ descriptor.command
 
 Next, let's have a look at the code used to get data from the server. Just like last time, I'll put the relevant sections from the server code and the client side code side by side:
 
-```{python, filename="[server]", eval=FALSE}
+```{python, attr.source='.numberLines startFrom="32"'}
+#| filename: "tiny_flight.py [server]"
+#| code-line-numbers: true
+#| eval: false
     def do_get(self, context, ticket):
         table_name = ticket.ticket
         self.server_message('do_get', table_name)
@@ -396,11 +444,14 @@ Next, let's have a look at the code used to get data from the server. Just like 
         return flight.RecordBatchStream(table)
 ```
 
-```{python, filename="[client]", eval=FALSE}
+```{python, attr.source='.numberLines startFrom="117"'}
+#| filename: "tiny_flight.py [client]"
+#| code-line-numbers: true
+#| eval: false
     def get_table(self, name):
         table_name = name.encode('utf8')
         ticket = flight.Ticket(table_name)
-        reader = self.con.do_get(ticket)
+        reader = self.connection.do_get(ticket)
         return reader.read_all()
 ```
 
@@ -411,6 +462,7 @@ Looking at these two code extracts side by side we can see that the ticket objec
 Since I already have a `table_name` object lying around from earlier, let's run that line of code shall we?
 
 ```{python}
+#| filename: "[Python code]"
 ticket = flight.Ticket(table_name)
 print(ticket)
 ```
@@ -418,6 +470,7 @@ print(ticket)
 That looks promising. If we take a peek at the `ticket.ticket` object that gets used on the server side, we see that -- yet again -- under the hood the ticket is really just an alias for the name of the data set:
 
 ```{python}
+#| filename: "[Python code]"
 ticket.ticket
 ```
 
@@ -429,10 +482,13 @@ Well that's a relief. In the server-side code, the `descriptor.command` object a
 
 Our journey through the source code continues. On the client side I've written a function called `list_tables()` that returns the names of all tables stored on the server. 
 
-```{python, filename="[client]", eval=FALSE}
+```{python, attr.source='.numberLines startFrom="123"'}
+#| filename: "tiny_flight.py [client]"
+#| code-line-numbers: true
+#| eval: false
     def list_tables(self):
         names = []
-        for flight in self.con.list_flights():
+        for flight in self.connection.list_flights():
             table_name = flight.descriptor.command
             names.append(table_name.decode('utf-8'))
         return names
@@ -440,75 +496,92 @@ Our journey through the source code continues. On the client side I've written a
 
 Server code instantiating the `get_flight_info()` and `list_flights()` method:
 
-```{python, filename="[server]", eval=FALSE}
+```{python, attr.source='.numberLines startFrom="62"'}
+#| filename: "tiny_flight.py [server]"
+#| code-line-numbers: true
+#| eval: false
     def get_flight_info(self, context, descriptor):
         table_name = descriptor.command
-        self.server_message('get_flight_info', table_name)
-        return self.collect_flight_info(descriptor)        
+        self.server_message('get_flight_info',
+                            table_name)
+        return self.flight_info(descriptor)        
         
     def list_flights(self, context, criteria):
         self.server_message('list_flights', b' ')
         for table_name in self.tables.keys():
-            descriptor = flight      \
-                .FlightDescriptor    \
-                .for_command(table_name)
-            yield self.collect_flight_info(descriptor)
+            descriptor = flight                  \
+                         .FlightDescriptor       \
+                         .for_command(table_name)
+            yield self.flight_info(descriptor)
 ```
 
-Notice that the server-side work is being done by the `collect_flight_info()` method. Here's the code for that one: 
+Notice that the server-side work is being done by the `flight_info()` helper method. Here's the code for that one: 
 
-```{python, filename="[server]", eval=FALSE}
-    def collect_flight_info(self, descriptor):
+```{python, attr.source='.numberLines startFrom="38"'}
+#| filename: "tiny_flight.py [server]"
+#| code-line-numbers: true
+#| eval: false
+    def flight_info(self, descriptor):
         table_name = descriptor.command
         table = self.tables[table_name]
         schema = table.schema
         ncases = table.num_rows
         
-        output = pyarrow.MockOutputStream()
-        writer = pyarrow.RecordBatchStreamWriter(output, schema)
+        output = pa.MockOutputStream()
+        writer = pa.RecordBatchStreamWriter(output, 
+                                            schema)
         writer.write_table(table)
         writer.close()
         nbytes = output.size()
         
         ticket = flight.Ticket(table_name)
-        locations = [self.location.uri.decode('utf-8')]
-        endpoints = [flight.FlightEndpoint(ticket, locations)]
+        location = self.location.uri.decode('utf-8')
+        endpoint = flight.FlightEndpoint(ticket,
+                                         [location])
         
-        return flight.FlightInfo(schema, descriptor, endpoints, 
-                                 ncases, nbytes)
+        return flight.FlightInfo(schema, 
+                                 descriptor, 
+                                 [endpoint], 
+                                 ncases,
+                                 nbytes)
 ```
 
 <br> 
 
 ### Custom actions
 
-```{python, filename="[server]", eval=FALSE}
+```{python, attr.source='.numberLines startFrom="76"'}
+#| filename: "tiny_flight.py [server]"
+#| code-line-numbers: true
+#| eval: false
     def do_action(self, context, action):
         if action.type == 'drop_table':
             table_name = action.body.to_pybytes()
             del self.tables[table_name]
-            self.server_message('drop_table', table_name)
-            
+            self.server_message('drop_table',
+                                table_name)
+
         elif action.type == 'shutdown':
             self.server_message('shutdown', b' ')
             self.shutdown()
-            
+
         else:
             raise KeyError('Unknown action {!r}'.
                            format(action.type))
 
     def list_actions(self, context):
-        return [
-            ('drop_table', 'Drop the specified data set.'),
-            ('shutdown', 'Shut down this server.'),
-        ]
+        return [('drop_table', 'Drop table'),
+                ('shutdown', 'Shut down server')]
 ```
 
-```{python, filename="[client]", eval=FALSE}
+```{python, attr.source='.numberLines startFrom="130"'}
+#| filename: "tiny_flight.py [client]"
+#| code-line-numbers: true
+#| eval: false
     def drop_table(self, name):
         table_name = name.encode('utf8')
         drop = flight.Action('drop_table', table_name) 
-        self.con.do_action(drop)
+        self.connection.do_action(drop)
 ```
 
 <br>
@@ -517,7 +590,8 @@ Notice that the server-side work is being done by the `collect_flight_info()` me
 
 Conveniently, the [tiny_flight.py](tiny_flight.py) script is bundled with this post, so I can import it as a module:
 
-```{python, filename="[Python code]"}
+```{python}
+#| filename: "[Python code]"
 import threading
 import tiny_flight as tiny
 
@@ -532,16 +606,18 @@ thread.start()
 Now let's start our client...
 
 
-```{python, filename="[Python code]"}
+```{python}
+#| filename: "[Python code]"
 client = tiny.TinyClient(port = 9001)
 ```
 
 Let's create some tables on the client side and cache them on the server:
 
-```{python, filename="[Python code]"}
-import pyarrow
-mario = pyarrow.table([["Mario", "Luigi", "Peach"]], names=["Character"])
-riots = pyarrow.table([["Stonewall", "Comptons", "Mardi Gras"]], names=["Riot"])
+```{python}
+#| filename: "[Python code]"
+import pyarrow as pa
+mario = pa.table([["Mario", "Luigi", "Peach"]], names=["Character"])
+riots = pa.table([["Stonewall", "Comptons", "Mardi Gras"]], names=["Riot"])
 
 client.put_table("mario", mario)
 client.put_table("riots", riots)
@@ -549,13 +625,15 @@ client.put_table("riots", riots)
 
 Now let's ask the server to tell us what it's storing:
 
-```{python, filename="[Python code]"}
+```{python}
+#| filename: "[Python code]"
 client.list_tables()
 ```
 
 Wait, we don't want the mario table anymore:
 
-```{python, filename="[Python code]"}
+```{python}
+#| filename: "[Python code]"
 client.drop_table("mario")
 client.list_tables()
 ```
