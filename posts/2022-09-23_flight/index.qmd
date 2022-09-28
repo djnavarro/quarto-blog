@@ -412,7 +412,15 @@ Next, let's take a look at the code used to place data on the server. On the ser
         self.tables[table_name] = reader.read_all()
 ```
 
-There's a few things to comment on here. First, let's note that the `server_message()` function isn't very interesting for our purposes. It exists solely to print out messages so that the server announces what it is doing.^[As I mentioned in an earlier post, all the "strings" that the client and server are using to represent tickets, locations, etc are represented as byte literals. That means that the `content` argument that gets passed to `server_message()` will always be a byte literal, not utf-8 encoded. In order to print a message to the console, we need to decode the bytes into utf-8 format, which is why the code for `server_message()` uses `content.decode("utf-8")`.] So we can ignore it for now. The important part of this code is this line in the `do_put()` function that does all the server-side work:
+There's a few things to comment on here. First, let's note that the `server_message()` function isn't very interesting for our purposes. It exists solely to print out messages,^[As an aside, note that all the "strings" that the client and server are using to represent tickets, locations, etc are represented as byte literals. That means that the `name` argument that gets passed to `server_message()` will always be a byte literal, not utf-8 encoded. In order to print a message to the console, we need to decode the bytes into utf-8 format, which is why the code for `server_message()` uses `name.decode("utf-8")`.] thereby allowing the server to announce what it's doing, but the server would work just fine without these messages. However, it does give me an opportunity to mention some things about the arguments to the various functions defined in this code:
+
+- `server_message()` is a static method -- which is why it doesn't take a `self` argument. The arguments listed in the function definition are exactly the same as the arguments that are included in function calls later.
+
+- `do_put()` is a class method, and so it takes `self` as the first argument. As is typical for object oriented programming systems, the `self` argument in class methods is passed implicitly. It's included in the function definition, but not in the function calls. Internally, what's going on is that a call like `object.method(argument)` is translated to `Class.method(object, argument)` and therefore the object itself implicitly becomes the first argument.
+
+- `do_put()` is an Arrow Flight method (as well as a Python class method), and because of that it also takes a `context` argument that, much like `self` is passed implicitly. This post isn't the place to have that discussion -- it's too long already -- but for now it suffices to note that Arrow will handle the `context` argument for us, in an analogous fashion to how Python handles self for us.
+
+Now that we have that sorted, let's have a look at the part of the code that actually does the server-side work. Specifically, it's this line in  `do_put()`:
 
 ```{python, attr.source='.numberLines startFrom="30"'}
 #| filename: "tiny_flight.py [server]"
@@ -421,7 +429,9 @@ There's a few things to comment on here. First, let's note that the `server_mess
         self.tables[table_name] = reader.read_all()
 ```
 
-Let's unpack this line one step at a time. The `reader` object has been passed to the server as one of the arguments to `do_put()`, and it's a  [RecordBatchStreamReader](https://arrow.apache.org/docs/python/generated/pyarrow.ipc.RecordBatchStreamReader.html). That is, it's an object capable of receiving a stream of Arrow data. When the `read_all()` method is called, it reads all record batches sent by the client and returns the final result as an Arrow table. This table is then stored in the `self.tables` dictionary. 
+Let's unpack this line one step at a time. 
+
+The `reader` object has been passed to the server as one of the arguments to `do_put()`, and it's a  [RecordBatchStreamReader](https://arrow.apache.org/docs/python/generated/pyarrow.ipc.RecordBatchStreamReader.html). That is, it's an object capable of receiving a stream of Arrow data. When the `read_all()` method is called, it reads all record batches sent by the client and returns the final result as an Arrow table. This table is then stored in the `self.tables` dictionary. 
 
 Next, notice that the key against which the table is stored as the value is specified by `descriptor.command`. This part of the code also needs to be explained! What is a "descriptor" object? What is the "command" attribute of a descriptor? That's not at all obvious from inspection. To resolve our confusion, it helps to realise that this `descriptor` object is one of the arguments to the the server-side `do_put()` function, and the code that creates this object is over on the the client side. So let's look at the code I wrote for the client side:
 
@@ -442,7 +452,7 @@ Next, notice that the key against which the table is stored as the value is spec
         writer.close()
 ```
 
-Here we have a `put_table()` Python function does the same job that the `flight_put()` function does in the R example I presented earlier. It is a high-level wrapper function that sends a `do_put()` call to the server, streams the data across, then stops. This line of code in this function is the one that makes the `do_put()` call:
+Here we have a `put_table()` function written in Python that does roughly the same job that the `flight_put()` function was doing for us in the R example I presented earlier. It's a high-level wrapper function that sends a `do_put()` call to the server, streams the data across, and then stops. This line of code in this function is the one that makes the `do_put()` call:
 
 ```{python, attr.source='.numberLines startFrom="110"'}
 #| filename: "tiny_flight.py [client]"
