@@ -1,6 +1,6 @@
 ---
 title: "Building an Arrow Flight server"
-description: "This post makes total sense, honest. I am definitely not in over my head. I'm waving hello at you and totally not drowning. Et cetera."
+description: "A step by step walkthrough introducing the reader to Arrow Flight, with examples in R and Python"
 date: "2022-09-23"
 categories: [Apache Arrow, Networking, R, Python]
 image: "img/biplane.jpg"
@@ -42,7 +42,7 @@ To put this in context, it helps to have a little recap of how the project has g
 
 Arrow Flight evolved from a similar practical concern. It's pretty trivial to point out that we live in a networked world now, and as consequence it is hard to avoid situations where the data to be analysed are stored on a different machine than the one that does the analysis. In my earlier posts on [reticulate](https://blog.djnavarro.net/posts/2022-09-09_reticulated-arrow/) and [rpy2](https://blog.djnavarro.net/posts/2022-09-16_arrow-and-rpy2/) I talked about how to efficiently share an Arrow data set between *languages*, but I implicitly assumed in those posts that the R process and the Python process were running on the same *machine*. The moment we have processes running on different machines, those tricks don't work anymore! 
 
-Flight is designed to solve this problem. It's not a fancypants protocol with lots of different parts. It exists for one purpose: it makes it super easy to transfer Arrow-formatted data. That's it. It's pretty flexible though, and you can build other stuff on top of flight (more on that later), but the design of flight is deliberately simple. It's *meant* to be pretty minimal, so you can "just use it" without having to think too hard or do any of the obnoxious implementation work yourself. 
+Flight is designed to solve this problem. It's not a fancypants protocol with lots of different parts. It exists for one purpose: it makes it super easy to transfer Arrow-formatted data. That's it. It's pretty flexible though, and you can build other stuff on top of flight, but the design of flight is deliberately simple. It's *meant* to be pretty minimal, so you can "just use it" without having to think too hard or do any of the obnoxious implementation work yourself. 
 
 <br>
 
@@ -82,7 +82,7 @@ It may be a little different for you depending on your configuration. For more i
 
 Okay, so let's get started by thinking about the simplest possible scenario for using a flight server. In this set up all we want the server to do is to act as a "cache" for Arrow tables. Clients can upload tables to the server, download tables from the server, and so on. That's all we're really trying to accomplish, and happily for us this use case is supported out of the box in R. 
 
-Here's how it works. As I mentioned earlier, R doesn't actually implement the flight protocol itself: it's just a wrapper around the Python tools. What that means is the underlying flight server is actually written in Python, and if we want to start that server running from R we have to call the `load_flight_server()` function that will allow us access to this server from R. Conveniently, the arrow R package comes bundled with a "demo" server that already provides the server side functionality that we want, and I can import it like this:
+Here's how it works. As I mentioned earlier, R doesn't actually implement the flight protocol itself: it's just a wrapper around the Python tools. What that means is the underlying flight server is actually written in Python, and if we want to start that server running from R we have to call the [`load_flight_server()`](https://arrow.apache.org/docs/r/reference/load_flight_server.html) function that will allow us access to this server from R. Conveniently, the arrow R package comes bundled with a "demo" server that already provides the server side functionality that we want, and I can import it like this:
 
 ```{r}
 #| eval: false
@@ -144,7 +144,7 @@ Regardless of what method you've chosen, I'll now assume that the demo server is
 
 ### The flight client
 
-Now that I have this server running quietly in the background on port 8089, I can define a flight client in my current R session that can interact with it. To do that, I call  `flight_connect()`:
+Now that I have this server running, I'll define a flight client in my current R session that can interact with it. To do that, I call  [`flight_connect()`](https://arrow.apache.org/docs/r/reference/flight_connect.html):
 
 ```{r}
 client <- flight_connect(port = 8089)
@@ -152,9 +152,9 @@ client <- flight_connect(port = 8089)
 
 Perhaps unsurprisingly, the R object `client` is a wrapper around a Python flight client. It comes with various methods that implement low-level flight operations, but I'm going to hold off talking about those for a moment because we won't need to use the low-level interface in this initial example.
 
-Let's start by using the client to as ask a simple question: what is stored on the server? The way that data source are conceptualised in Arrow flight is as a set of "flights". Each individual "flight" corresponds to a data stream from which the client can download data. The precise implementation of this idea (e.g., what data structures are stored in a single flight) varies from server to server, but in both examples in this post each flight stores a single Arrow table. 
+Let's start by using the client to ask a simple question: what is stored on the server? The way that data sources are conceptualised in Arrow Flight is as a set of "flights". Each individual "flight" is a data stream from which the client can download data. The precise implementation of this idea (e.g., what data structures are stored in a single flight) varies from server to server, but in both examples in this post one flight corresponds to one Arrow table. 
 
-In any case, to find out what flights are currently available on our server, we can call the `list_flights()` function:
+To find out what flights are currently available on our server, we can call the [`list_flights()`](https://arrow.apache.org/docs/r/reference/list_flights.html) function:
 
 ```{r}
 list_flights(client)
@@ -166,13 +166,13 @@ Hm, okay, there's nothing there. That makes sense because I haven't actually upl
 head(airquality)
 ```
 
-This object is a regular data frame in R, not an Arrow table, and strictly speaking what we want our client to do is send an Arrow table version of this data set to the server. Happily for us, the `flight_put()` function supplied by the arrow package will take care of the conversion for us, and we can cache a copy of the data as an Arrow table on the server in one line of code: 
+This object is a regular data frame in R: it's not an Arrow table. Strictly speaking what we want our client to do is send the Arrow table version of this data set to the server, so it will need to be converted. Happily for us, the [`flight_put()`](https://arrow.apache.org/docs/r/reference/flight_put.html) function supplied by the arrow package takes care of that conversion for us. As a result, we can cache am Arrow table copy of the data on the server with one line of code: 
 
 ```{r}
 flight_put(client, data = airquality, path = "pollution_data")
 ```
 
-In this code, the `flight_put()` function uses the `client` object to communicate with the server, it uses the `data` argument to find the local copy of the data set, and the `path` argument is used to provide a name for the data set on the server (i.e., on the server this data set will be called `pollution_data`). Now that we've done the upload, if we try calling `list_flights()` again we get this as the result:
+In this code, the `flight_put()` function uses the `client` object to communicate with the server. The `data` argument specifies the local copy of the data set, and the `path` argument provides the name for the data on the server. Having uploaded the data we can once again call `list_flights()`, and we get this as the result:
 
 ```{r}
 list_flights(client)
@@ -187,17 +187,13 @@ Now, just to prove to you that I'm not cheating, let's check to make sure that t
 pollution_data
 ```
 
-Clearly there is no object called `pollution_data` available in my current R session. That data set is stored only on the server. To get access to the data cached on the server, I use the `flight_get()` function:
+Unsurprisingly, there is no object called `pollution_data` available in my current R session. The `pollution_data` object is stored on the server, not the client. To access that data from the client I can use the [`flight_get()`](https://arrow.apache.org/docs/r/reference/flight_get.html) function:
 
 ```{r}
 flight_get(client, "pollution_data")
 ```
 
-What has just happened is our client contacted the server and downloaded a copy of the Arrow table stored remotely. It works! 
-
-At the very least we have proof-of-concept that we can start a flight server and use it to upload and download data. But there's a lot that hasn't really been explained properly here. The time has come to start digging a little deeper, so we can really get a sense of what's going on under the hood and how this simple example can be extended.
-
-
+It works! 
 
 <br>
 
@@ -211,7 +207,11 @@ At the very least we have proof-of-concept that we can start a flight server and
 
 ## Unpacking the data exchange process
 
-One thing that I like about the flight functionality exposed through `flight_connect()`, `flight_put()`, `flight_get()`, etc is that it operates at a high level of abstraction. In my day-to-day data analysis work I really don't want to spend my time thinking about low-level operations. When I tell R to "put" a data set onto the server I *want* it to happen with one line of code. This high level API is super useful to me on an everyday basis, but it also masks some of the details about how flight works. To give you a sense of what's being hidden, we can take a closer look at the `client` object. Here's a list of some of the methods that are available through the object itself:
+The example in the last section is a nice proof-of-concept. It shows that we can use R to start a flight server and use it to upload and download data. But there's a lot that hasn't really been explained properly here. The time has come to start digging a little deeper, so we can really get a sense of what's going on under the hood and how this simple example can be extended. That's our goal in this section.
+
+One thing that I like about the flight functionality exposed through `flight_connect()`, `flight_put()`, `flight_get()`, etc is that it operates at a high level of abstraction. In my day-to-day data analysis work I really don't want to spend my time thinking about low-level operations. When I tell R to "put" a data set onto the server I want this to happen with one line of code. This high level API is super useful to me on an everyday basis, but it also masks some of the details about how flight works. 
+
+To give you a sense of what's being hidden, we can take a closer look at the `client` object. Here's a list of some of the methods that are available through the object itself:
 
 ``` r
 client$do_put()
@@ -222,9 +222,9 @@ client$list_flights()
 client$get_flight_info()
 ```
 
-Each of these methods describes a low level operation available to the flight client, and because the R implementation is built on top of the Python version, these are all Python methods that are available in R thanks to the magic of [reticulate](https://rstudio.github.io/reticulate/). What we're seeing exposed here are the actual Arrow flight methods, and it's helpful to unpack things a little so we can see how these methods are related to the functions I've been calling in R. 
+Each of these methods describes a low level operation available to the flight client. More precisely, these are the actual methods prescribed by the [Arrow Flight protocol](https://arrow.apache.org/docs/format/Flight.html). Moreover, although I'm showing you this as an R object, in truth these are all Python methods: the R implementation of Arrow Flight is essentially a wrapper around the Python implementation. We can access these methods from R thanks to the magic of [reticulate](https://rstudio.github.io/reticulate/), but -- to foreshadow the pivot coming in the next section -- eventually we will need to start working with the underlying Python code. 
 
-As you might expect, the `do_put()` method for the client is very closely related to the `flight_put()` function that I called earlier! However, they aren't the same. The `do_put()` method doesn't actually upload any data, it merely opens a connection to the server, which we can then use to stream data from the client to the server. If you were calling the `do_put()` method directly, you would need to take care of that yourself. But it's tiresome to write that code over and over, so the  `flight_put()` function provides a convenient high-level wrapper that abstracts over all that. 
+When we look at the names of flight methods, we can see there's (unsurprisingly) a relationship between those names and the names of the functions exposed in the high-level R interface. As you might expect, the `do_put()` method for the client is very closely related to the `flight_put()` function. However, they aren't the same. The `do_put()` method doesn't stream any data to the server: it merely opens a connection to the server, from which we can then stream data with subsequent commands. When calling the `do_put()` method directly, you have to take care of the streaming yourself. But from the user perspective it's tiresome to write that code over and over, so the `flight_put()` function in the R interface provides a convenient high-level wrapper that abstracts over all that. 
 
 If you're the analyst working with the data, this is fabulous. But if you're looking to implement your very own flight server, you probably need to understand what these low level operations are. So that's where we're headed next...
 
@@ -232,7 +232,7 @@ If you're the analyst working with the data, this is fabulous. But if you're loo
 
 ### Unpacking flight_put()
 
-Let's start by taking a look at what happens when we call the R function `flight_put()`. Our goal is to transmit the data to the server, and there's an Arrow Flight method called `do_put()` that can do this for us. However, the structure of the interaction is a little more complicated than simply calling `do_put()`. It's a multi-step operation that unfolds as shown below:
+Let's start by taking a look at what happens when we call the R function `flight_put()`. For now, we won't write any actual code (don't worry, that will come later!). All we want to do is think about the sequence of operations that takes place. Our goal is to transmit the data to the server, and there's an Arrow Flight method called `do_put()` that can do this for us. However, the structure of the interaction is a little more complicated than simply calling `do_put()`. It's a multi-step operation that unfolds as shown below:
 
 ![](img/do_put.png)
 
@@ -326,7 +326,7 @@ I'll explain the code in more detail in a moment after I've shown you both the s
 #| eval: false
 ```
 
-Now, if you're at all like me this code won't immediately make sense. Probably you'll skim over it, read bits of it, and *some* of it will make sense... but not all of it. There's a couple of reasons for that. The first and most obvious reason is that it's a big chunk of code that I haven't explained yet! The second reason is that (in my opinion) server-side code never makes sense on its own: it only really makes sense when you can place it next to the client-side code so that you can see how the two parts fit together. With that in mind, let's take a quick peek at the client-side code...
+Now, if you're at all like me this code won't immediately make sense. Probably you'll skim over it, read bits of it, and *some* of it will make sense... but not all of it. There's a couple of reasons for that. The first and most obvious reason is that it's a big chunk of code that I haven't explained yet! The second reason is that (in my opinion) server-side code never makes sense on its own: it only really makes sense when you can place it next to the client-side code so that you can see how the two parts fit together.^[If I were so inclined I'd probably point out this is the maybe the clearest illustration that we're adopting an RPC approach to distributed computing -- this is not a REST API. After all, if the server code doesn't make sense without looking at the client code, there's a pretty good chance you don't meet the "uniform interface" REST criterion. This isn't a criticism of flight, of course: there are good reasons to adopt a non-RESTful RPC approach sometimes. However, that's beyond the scope of this post. It's already too long as it is!] With that in mind, let's take a quick peek at the client-side code...
 
 <br>
 
@@ -392,11 +392,11 @@ loc = flight.Location.for_grpc_tcp('localhost', 5678)
 print(loc)
 ```
 
-The important thing in this output the server address. The `localhost:5678` part indicates that the server is running locally on port 5678, and the `grpc+tcp://` part tells us what communication protocols are being used. For this server, those protocols are [gRPC](https://grpc.io/) and [TCP](https://en.wikipedia.org/wiki/Transmission_Control_Protocol). I'll talk about this more later. For now, it's sufficient to recognise that this location object does store the server address. If I'd really wanted to, I could have written code that constructs this string manually^[People with more experience in Python (well, more than me) would notice the importance of the `b''` notation. One thing I didn't know about Python until recently is that it is quite explicit in specifying how strings are encoded. The `b''` notation is used to indicate that this is a "byte literal" string. To convert it to utf-8 text, it needs to be explicitly decoded. I mention this here because later on in the post I'm going to call `.encode()` and `.decode()` string methods to switch back and forth between byte literals and utf-8 strings. I'm assuming this is common knowledge among Python users, but coming from R this was a little surprising!] but there's no need to do that when the pyarrow flight module supplies built-in location classes to do this for us!
+The important thing in this output the server address. The `localhost:5678` part indicates that the server is running locally on port 5678, and the `grpc+tcp://` part tells us what communication protocols are being used. For this server, those protocols are [gRPC](https://grpc.io/) and [TCP](https://en.wikipedia.org/wiki/Transmission_Control_Protocol). TCP is probably familiar to most data scientists since it's one of the core protocols of the internet, but gRPC (wonderful as it is) is a little more specialised. I'm not going to talk about how gRPC works in this post, but there are some references at the end. For now, it's sufficient to recognise that this location object does store the server address. If I'd really wanted to, I could have written code that constructs this string manually^[People with more experience in Python (well, more than me) would notice the importance of the `b''` notation. One thing I didn't know about Python until recently is that it is quite explicit in specifying how strings are encoded. The `b''` notation is used to indicate that this is a "byte literal" string. To convert it to utf-8 text, it needs to be explicitly decoded. I mention this here because later on in the post I'm going to call `.encode()` and `.decode()` string methods to switch back and forth between byte literals and utf-8 strings. I'm assuming this is common knowledge among Python users, but coming from R this was a little surprising!] but there's no need to do that when the pyarrow flight module supplies built-in location classes to do this for us!
 
-The rest of the code is used for initialisation. On the server side, we initialise the server object as an instance of the parent class (i.e., `FlightServerBase`). On the client side, the first action is to call `flight.connect()`: this is also an initialisation action that returns an instance of the `FlightClient` class. In other words there's a symmetry here: the `TinyServer` is built on top of the `FlightServerBase` class, and the `TinyClient` is built on top of the `FlightClient` class. 
+The rest of the code is used for initialisation. On the server side, we initialise the server object as an instance of the parent class (i.e., [FlightServerBase](https://arrow.apache.org/docs/python/generated/pyarrow.flight.FlightServerBase.html)). On the client side, the first action is to call `flight.connect()`: this is also an initialisation action that returns an instance of the [FlightClient](https://arrow.apache.org/docs/python/generated/pyarrow.flight.FlightClient.html) class. In other words there's a kind of symmetry here: the `TinyServer` is built on top of the `FlightServerBase` class, and the `TinyClient` is built on top of the `FlightClient` class.^[That said, the symmetry isn't exact: the `TinyServer` object explicitly subclasses `FlightServerBase` and overrides several of its methods in order to provide server functionality. In contrast, `TinyClient` is not a subclass. Rather, every `TinyClient` object contains a `connection` object that is a `FlightClient` instance. The explicitly-defined methods for the `TinyClient` class internally call the methods of the `connection` object whenever the client needs to call a flight method.] 
 
-The other thing to notice here is the data structures set up in these initialisations. On the server side we create an empty dictionary called `tables` (referred to as `self.tables` since it belongs to the instance not the class) that the server uses to store any data sets that it is sent. On the client side, the `self.con` object is used to represent our connection to the server: it is this object that is an intance of the `FlightClient` class, and it comes equipped with client side methods for `do_put()`, `do_get()` etc. Finally, notice that the last action that the client takes when it is initialised is to wait for the connection to the server to be established. 
+The other thing to notice here is the data structures set up in these initialisations. On the server side we create an empty dictionary called `tables` (referred to as `self.tables` since it belongs to the instance not the class) that the server uses to store any data sets that it is sent. On the client side, the `self.connection` object is used to represent our connection to the server: this object  is an instance of the `FlightClient` class, and it comes equipped with client side methods for `do_put()`, `do_get()` etc. Finally, notice that the last action that the client takes when it is initialised is to wait for the connection to the server to be established. 
 
 <br>
 
@@ -475,7 +475,7 @@ Here we have a `put_table()` function written in Python that does roughly the sa
                                  table.schema)
 ```
 
-Okay, so the `descriptor` on the client side is also the thing that later gets used on the server side to create the key against which the table is stored. If we look at the preceding line of code, we can see that the `descriptor` object is an instance of the `FlightDescriptor` class. So let's actually step into the Python console and run the commands required to create a flight descriptor object:
+Okay, so the `descriptor` on the client side is also the thing that later gets used on the server side to create the key against which the table is stored. If we look at the preceding line of code, we can see that the `descriptor` object is an instance of the [FlightDescriptor](https://arrow.apache.org/docs/python/generated/pyarrow.flight.FlightDescriptor.html) class. So let's actually step into the Python console and run the commands required to create a flight descriptor object:^[In this example I've used the `for_command()` method to construct the flight descriptor. This isn't the only way to do it: you can use the `for_path()` method also. I'm only mentioning this because when you look at the code used in other flight servers, you'll sometimes see the `for_path()` method used in a similar fashion to the way I'm using `for_command()` here.]
 
 ```{python}
 table_name = b'name-of-data'
@@ -517,9 +517,11 @@ Next, let's have a look at the code used to get data from the server. Just like 
         return reader.read_all()
 ```
 
-On the client side, the `get_table()` helper function that I've written does two things. First it creates a `ticket` object from the `name` of the data table to be retrieved. It then calls the `do_get()` flight method to communicate with the server. Then, using the `reader` object returned by `do_get()`, it streams the data from the server. The server side code is the mirror image: when the ticket is received, it uses this ticket to retrieve the specific `table` from `self.tables`, and returns a stream. 
+On the client side, the `get_table()` helper function that I've written does two things. First it creates a [Ticket](https://arrow.apache.org/docs/python/generated/pyarrow.flight.Ticket.html) object from the `name` of the data table to be retrieved. It then calls the `do_get()` flight method to communicate with the server. Then, using the `reader` object returned by `do_get()`, it streams the data from the server. The server side code is the mirror image: when the ticket is received, it uses this ticket to retrieve the specific `table` from `self.tables`, and returns a stream. 
 
-Looking at these two code extracts side by side we can see that the ticket object created by the client when `flight.Ticket()` is called ends up being used by the server to retrieve the requested table. So we should take a look at what happens here. What we hope to see is that this ticket ends up producing the same key that would have been used to store the data originally: that is, when the server specifies the storage key with `table_name = ticket.ticket` in the `do_get()` method, it should be producing the same key that the `do_put()` method created when `table_name = descriptor.command` was executed. Let's verify that this is actually true!
+Looking at these two code extracts side by side we can see that the ticket object returned client-side by `flight.Ticket()` gets used server-side to retrieve the requested table. So we should take a look at what happens here. What we hope to see is that this ticket produces the same key used to store the data originally: that is, when the server specifies a storage key with `table_name = ticket.ticket` in the `do_get()` method, it should match the key created by `do_put()` when `table_name = descriptor.command` was executed. 
+
+Let's verify that this is true!
 
 Since I already have a `table_name` object lying around from earlier, let's run that line of code shall we?
 
@@ -528,7 +530,7 @@ ticket = flight.Ticket(table_name)
 print(ticket)
 ```
 
-That looks promising. If we take a peek at the `ticket.ticket` object that gets used on the server side, we see that -- yet again -- under the hood the ticket is really just an alias for the name of the data set:
+That looks promising. If we take a peek at `ticket.ticket`, we see that -- yet again -- under the hood the ticket is just an alias for the name of the data set:
 
 ```{python}
 ticket.ticket
@@ -561,7 +563,7 @@ Our journey through the source code continues. On the client side I've written a
         return names
 ```
 
-The key part of this function is the call to `self.connection.list_flights()`. That's where the client contacts the server and requests information. Everthing else in the function is there to extract the one piece of information (the name of the table) that we're interested in and return it to the user. 
+The key part of this function is the call to `self.connection.list_flights()`. That's where the client contacts the server and requests information. Everything else in the function is there to extract the one piece of information (the name of the table) that we're interested in and return it to the user. 
 
 Pivoting over to the server code, there are two flight methods that are relevant here. The `get_flight_info()` function is a flight method that returns information about a single flight -- where, in this case, there's a one-to-one mapping between flights and tables -- and the `list_flights()` method can be used to retrieve information about all flights stored on the server:
 
@@ -617,7 +619,7 @@ Okay, so now let's have a look at the `flight_info()` helper method. Here's the 
                                  nbytes)
 ```
 
-Let's start by looking at the return value. It's constructed by a call to `flight.FlightInfo()` and it takes five arguments. As I mentioned earlier in the post, these arguments encode the following:
+Let's start by looking at the return value. It's a [FlightInfo](https://arrow.apache.org/docs/python/generated/pyarrow.flight.FlightInfo.html) object and as I mentioned earlier there are five things needed to create it:
 
 - The `schema` for the data stored by the flight, 
 - The flight `descriptor` object
@@ -675,7 +677,7 @@ To give you a sense of how this works, we'll add two custom actions to our serve
                            format(action.type))
 ```
 
-The `do_action()` method expects to receive a [flight.Action object](https://arrow.apache.org/docs/python/generated/pyarrow.flight.Action.html) as input to the `action` argument. The `action.type` attribute is where the name of the action is stored, so the code here uses if-else to decide which action to perform, or raise an error if the action type is not recognised. The code implementing the actions is pretty minimal. On a shutdown action, the server calls the `self.shutdown()` method: this is inherited from FlightServerBase, I didn't have to implement it myself. For a drop table action, the server inspects the `action.body` argument to determine the name of the table to be dropped, and then deletes it from `self.tables`.^[If I were being more rigorous I'd include some input checking here, but let's be realistic: that's not even close to the most unsafe thing about my simple example. I cannot stress enough that this code is for explanatory purposes, it's not production code!]
+The `do_action()` method expects to receive an [Action](https://arrow.apache.org/docs/python/generated/pyarrow.flight.Action.html) object as input to the `action` argument. The `action.type` attribute is where the name of the action is stored, so the code here uses if-else to decide which action to perform, or raise an error if the action type is not recognised. The code implementing the actions is pretty minimal. On a shutdown action, the server calls the `self.shutdown()` method: this is inherited from FlightServerBase, I didn't have to implement it myself. For a drop table action, the server inspects the `action.body` argument to determine the name of the table to be dropped, and then deletes it from `self.tables`.^[If I were being more rigorous I'd include some input checking here, but let's be realistic: that's not even close to the most unsafe thing about my simple example. I cannot stress enough that this code is for explanatory purposes, it's not production code!]
 
 How does the client call this method? To see an example of this, let's flip over to the client side of the code and look at the `drop_table()` function:
 
