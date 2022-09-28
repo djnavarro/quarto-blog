@@ -633,6 +633,10 @@ In other words, the mock output stream is used only to record the size of the st
 
 ### Custom actions
 
+We've encountered (and implemented) four of the methods defined by the Arrow Flight protocol, and as we've seen they server different purposes. The `do_put()` and `do_get()` methods are used to stream data to and from the server.^[There is also a `do_exchange()` method that allows bidirectional streaming, but I'm not going to talk about it in this post] In contrast, the `get_flight_info()` and `list_flights()` methods are used to retrieve metadata about the data stored on the server. In this example, these four methods are sufficient to provide all the core functionality. I could stop here if I absolutely wanted to. But there's one more method I want to draw your attention to: `do_action()`. In recognition of the fact that real world applications will always need to perform custom operations that weren't originally built into the protocol, the `do_action()` method exists to allow the client to request (and the server to perform) custom actions that you can define however you like. 
+
+To give you a sense of how this works, we'll add two custom actions to our server: when the client requests a `'drop_table'` action, the corresponding table will be deleted from the server, and when the client requests a `'shutdown'` action the server will shut itself down.^[I mean yeah, in real life you might want to have some... um... authentication in place before letting an arbitrary client take these kinds of actions, but I'm not going to talk about that here!] Let's take a look at the server-side code implementing this:
+
 ```{python, attr.source='.numberLines startFrom="76"'}
 #| filename: "tiny_flight.py [server]"
 #| code-line-numbers: true
@@ -651,11 +655,11 @@ In other words, the mock output stream is used only to record the size of the st
         else:
             raise KeyError('Unknown action {!r}'.
                            format(action.type))
-
-    def list_actions(self, context):
-        return [('drop_table', 'Drop table'),
-                ('shutdown', 'Shut down server')]
 ```
+
+The `do_action()` method expects to receive a [flight.Action object](https://arrow.apache.org/docs/python/generated/pyarrow.flight.Action.html) as input to the `action` argument. The `action.type` attribute is where the name of the action is stored, so the code here uses if-else to decide which action to perform, or raise an error if the action type is not recognised. The code implementing the actions is pretty minimal. On a shutdown action, the server calls the `self.shutdown()` method: this is inherited from FlightServerBase, I didn't have to implement it myself. For a drop table action, the server inspects the `action.body` argument to determine the name of the table to be dropped, and then deletes it from `self.tables`.^[If I were being more rigorous I'd include some input checking here, but let's be realistic: that's not even close to the most unsafe thing about my simple example. I cannot stress enough that this code is for explanatory purposes, it's not production code!]
+
+How does the client call this method? To see an example of this, let's flip over to the client side of the code and look at the `drop_table()` function:
 
 ```{python, attr.source='.numberLines startFrom="130"'}
 #| filename: "tiny_flight.py [client]"
@@ -667,6 +671,9 @@ In other words, the mock output stream is used only to record the size of the st
         self.connection.do_action(drop)
 ```
 
+Happily, it turns out to be simple: first we call `flight.Action()` to construct the action object itself, passing the action type and action body as arguments. Then we call the built-in `do_action()` client-side method, which as usual we can access from the `self.connection` object.
+
+Voilà! We are done. The server and client are both ready to go. Let's take them for a spin, shall we?
 
 <br>
 
