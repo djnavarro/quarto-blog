@@ -334,7 +334,7 @@ Now, if you're at all like me this code won't immediately make sense. Probably y
 
 To accompany a `TinyServer`, we'll need a `TinyClient` that knows how to talk to it. Happily for us, it's easier to define the client than to define the server, so the source code that defines the `TinyClient` class is considerably shorter:
 
-```{python tiny-client, attr.source='.numberLines startFrom="96"'}
+```{python tiny-client, attr.source='.numberLines startFrom="87"'}
 #| filename: "tiny_flight.py [client]"
 #| code-line-numbers: true
 #| eval: false
@@ -371,7 +371,7 @@ class TinyServer(flight.FlightServerBase):
         super().__init__(self.location)
 ```
 
-```{python, attr.source='.numberLines startFrom="96"'}
+```{python, attr.source='.numberLines startFrom="87"'}
 #| filename: "tiny_flight.py [client]"
 #| code-line-numbers: true
 #| eval: false
@@ -446,7 +446,7 @@ The `reader` object has been passed to the server as one of the arguments to `do
 
 Next, notice that the key against which the table is stored as the value is specified by `descriptor.command`. This part of the code also needs to be explained! What is a "descriptor" object? What is the "command" attribute of a descriptor? That's not at all obvious from inspection. To resolve our confusion, it helps to realise that this `descriptor` object is one of the arguments to the the server-side `do_put()` function, and the code that creates this object is over on the the client side. So let's look at the code I wrote for the client side:
 
-```{python, attr.source='.numberLines startFrom="105"'}
+```{python, attr.source='.numberLines startFrom="96"'}
 #| filename: "tiny_flight.py [client]"
 #| code-line-numbers: true
 #| eval: false
@@ -465,7 +465,7 @@ Next, notice that the key against which the table is stored as the value is spec
 
 Here we have a `put_table()` function written in Python that does roughly the same job that the `flight_put()` function was doing for us in the R example I presented earlier. It's a high-level wrapper function that sends a `do_put()` call to the server, streams the data across, and then stops. This line of code in this function is the one that makes the `do_put()` call:
 
-```{python, attr.source='.numberLines startFrom="110"'}
+```{python, attr.source='.numberLines startFrom="101"'}
 #| filename: "tiny_flight.py [client]"
 #| code-line-numbers: true
 #| eval: false
@@ -506,7 +506,7 @@ Next, let's have a look at the code used to get data from the server. Just like 
         return flight.RecordBatchStream(table)
 ```
 
-```{python, attr.source='.numberLines startFrom="117"'}
+```{python, attr.source='.numberLines startFrom="108"'}
 #| filename: "tiny_flight.py [client]"
 #| code-line-numbers: true
 #| eval: false
@@ -551,7 +551,7 @@ Well that's a relief. In the server-side code, the `descriptor.command` object a
 
 Our journey through the source code continues. On the client side I've written a function called `list_tables()` that returns the names of all tables stored on the server. Here's what that looks like:
 
-```{python, attr.source='.numberLines startFrom="123"'}
+```{python, attr.source='.numberLines startFrom="114"'}
 #| filename: "tiny_flight.py [client]"
 #| code-line-numbers: true
 #| eval: false
@@ -567,7 +567,7 @@ The key part of this function is the call to `self.connection.list_flights()`. T
 
 Pivoting over to the server code, there are two flight methods that are relevant here. The `get_flight_info()` function is a flight method that returns information about a single flight -- where, in this case, there's a one-to-one mapping between flights and tables -- and the `list_flights()` method can be used to retrieve information about all flights stored on the server:
 
-```{python, attr.source='.numberLines startFrom="62"'}
+```{python, attr.source='.numberLines startFrom="53"'}
 #| filename: "tiny_flight.py [server]"
 #| code-line-numbers: true
 #| eval: false
@@ -597,57 +597,29 @@ Okay, so now let's have a look at the `flight_info()` helper method. Here's the 
     def flight_info(self, descriptor):
         table_name = descriptor.command
         table = self.tables[table_name]
-        schema = table.schema
-        ncases = table.num_rows
-        
-        output = pa.MockOutputStream()
-        writer = pa.RecordBatchStreamWriter(output, 
-                                            schema)
-        writer.write_table(table)
-        writer.close()
-        nbytes = output.size()
-        
+
         ticket = flight.Ticket(table_name)
         location = self.location.uri.decode('utf-8')
         endpoint = flight.FlightEndpoint(ticket,
                                          [location])
         
-        return flight.FlightInfo(schema, 
+        return flight.FlightInfo(table.schema, 
                                  descriptor, 
                                  [endpoint], 
-                                 ncases,
-                                 nbytes)
+                                 table.num_rows,
+                                 table.nbytes)
 ```
 
 Let's start by looking at the return value. It's a [FlightInfo](https://arrow.apache.org/docs/python/generated/pyarrow.flight.FlightInfo.html) object and as I mentioned earlier there are five things needed to create it:
 
-- The `schema` for the data stored by the flight, 
-- The flight `descriptor` object
-- A list of one or more endpoints -- in this cases, `[endpoint]` is a list containing a single endpoint -- that specifies where the data are available for streaming. Each endpoint includes a `location` from which to stream, and the associated `ticket` for that location
-- The total number of records stored is stored as `ncases` 
-- The total number of bytes to be streamed is stored as `nbytes`
+- `table.schema` is the [Schema](https://arrow.apache.org/docs/python/generated/pyarrow.Schema.html) for the data stored by the flight
+- The flight `descriptor` object, which was passed as input
+- A list of one or more [FlightEndpoint](https://arrow.apache.org/docs/python/generated/pyarrow.flight.FlightEndpoint.html) objects -- in this cases, `[endpoint]` is a list containing a single endpoint -- that specifies where the data are available for streaming. Each endpoint includes a `location` from which to stream, and the associated `ticket` for that location
+- The total number of records can be accessed from  `table.num_rows` 
+- The total number of bytes can be accessed from `table.nbytes`
 
-Looking at the rest of the function, you can see that some these values are relatively easy to compute. The `schema` and number of records (`ncases`), for instance, are both stored as attributes of the `table`: those can be read directly from the stored table. The `descriptor` is even easier: it's one of the inputs to the function. It's a little more effort to construct the `endpoint`, because we need to call `flight.Ticket()` to construct a ticket object, we need to extract the server `location` that we stored when the server was initialised, and then we call `flight.Endpoint()` to put these things together. There's a little more code involved, but there's nothing conceptually difficult here.
+Looking at the rest of the function, you can see that the list of endpoints requires a little work to construct. We need to call `flight.Ticket()` to construct a ticket object, we need to extract the server `location` that we stored when the server was initialised, and then we need to call `flight.Endpoint()` to put these things together. There's a little more code involved, but thankfully it's not conceptually difficult.
 
-The `nbytes` value is a different kettle of fish entirely! We need to calculate the total number of bytes required to stream the Arrow table. That's not stored as an attribute of the table, so we have to compute it directly. Here's the section of code that does this:
-
-```{python, attr.source='.numberLines startFrom="44"'}
-#| filename: "tiny_flight.py [server]"
-#| code-line-numbers: true
-#| eval: false
-        output = pa.MockOutputStream()
-        writer = pa.RecordBatchStreamWriter(output, 
-                                            schema)
-        writer.write_table(table)
-        writer.close()
-        nbytes = output.size()
-```
-
-Superficially, this code looks like it's writing data to a stream: the `writer` object constructed in the second line is a stream writer object, and the next two lines proceed to write the table and close the connection. So, we're streaming? Not precisely: the `output` is a [MockOutputStream](https://arrow.apache.org/docs/cpp/api/io.html?highlight=mockoutputstream#_CPPv4N5arrow2io16MockOutputStreamE). As the documentation notes, this is:
-
-> A helper class to track the size of allocations. Writes to this stream do not copy or retain any data, they just bump a size counter that can be later used to know exactly which data size needs to be allocated for actual writing. 
-
-In other words, the mock output stream is used only to record the size of the stream, and we can read off that result in the final line shown in the previous code extract.
 
 <br> 
 
@@ -657,7 +629,7 @@ We've encountered (and implemented) four of the methods defined by the Arrow Fli
 
 To give you a sense of how this works, we'll add two custom actions to our server: when the client requests a `'drop_table'` action, the corresponding table will be deleted from the server, and when the client requests a `'shutdown'` action the server will shut itself down.^[I mean yeah, in real life you might want to have some... um... authentication in place before letting an arbitrary client take these kinds of actions, but I'm not going to talk about that here!] Let's take a look at the server-side code implementing this:
 
-```{python, attr.source='.numberLines startFrom="76"'}
+```{python, attr.source='.numberLines startFrom="67"'}
 #| filename: "tiny_flight.py [server]"
 #| code-line-numbers: true
 #| eval: false
@@ -681,7 +653,7 @@ The `do_action()` method expects to receive an [Action](https://arrow.apache.org
 
 How does the client call this method? To see an example of this, let's flip over to the client side of the code and look at the `drop_table()` function:
 
-```{python, attr.source='.numberLines startFrom="130"'}
+```{python, attr.source='.numberLines startFrom="121"'}
 #| filename: "tiny_flight.py [client]"
 #| code-line-numbers: true
 #| eval: false
@@ -798,6 +770,8 @@ Compared to the rest of the Apache Arrow project, it's not so easy to find tutor
 
 - Along similar lines there are some examples in the [R cookbook](https://arrow.apache.org/cookbook/r/flight.html), but they are also quite minimal.
 
+- Should you be interested in writing an Arrow Flight service in C++, the [documentation pages for the C++ Flight implementation](https://arrow.apache.org/docs/dev/cpp/flight.html) may come in handy!
+
 - If you're willing to spend some money I thoroughly recommend the chapter on Arrow flight in Matt Topol's book [In-Memory Analytics with Apache Arrow](https://www.packtpub.com/product/in-memory-analytics-with-apache-arrow/9781801071031). I found it really helpful for cementing my own understanding. In addition to the worked examples in  Python, C++, and Go, the chapter provides some historical context for understanding the difference between RPC frameworks and REST frameworks, and is also the only resource I'm aware of that goes into detail about how more sophisticated network architectures are supported by flight.
 
 - If you're keen to understand what is happening under the hood, at some point you're going to want to read about gRPC. The flight protocol is built on top of gRPC, and a lot of the advanced content you'll encounter on flight doesn't make a lot of sense until you've started to wrap your head around it. To that end, I found the [introduction to gRPC](https://grpc.io/docs/what-is-grpc/introduction/) documentation really helpful. You may also want to take a look at the documentation for [protocol buffers](https://developers.google.com/protocol-buffers) because in practice that's doing a lot of the work for us here!
@@ -817,5 +791,9 @@ client$do_action("shutdown")
 
 
 <!--------------- appendices go here ----------------->
+
+## Acknowledgements {.appendix}
+
+My sincere thanks to Rok Mihevc, David Li, and François Michonneau for reviewing earlier versions of this post.
 
 
