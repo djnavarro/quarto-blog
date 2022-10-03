@@ -38,26 +38,17 @@ class TinyServer(flight.FlightServerBase):
     def flight_info(self, descriptor):
         table_name = descriptor.command
         table = self.tables[table_name]
-        schema = table.schema
-        ncases = table.num_rows
-        
-        output = pa.MockOutputStream()
-        writer = pa.RecordBatchStreamWriter(output, 
-                                            schema)
-        writer.write_table(table)
-        writer.close()
-        nbytes = output.size()
-        
+
         ticket = flight.Ticket(table_name)
         location = self.location.uri.decode('utf-8')
         endpoint = flight.FlightEndpoint(ticket,
                                          [location])
         
-        return flight.FlightInfo(schema, 
+        return flight.FlightInfo(table.schema, 
                                  descriptor, 
                                  [endpoint], 
-                                 ncases,
-                                 nbytes)
+                                 table.num_rows,
+                                 table.nbytes)
     
     def get_flight_info(self, context, descriptor):
         table_name = descriptor.command
