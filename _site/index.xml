@@ -15,7 +15,894 @@
 <link>https://blog.djnavarro.net/index.html</link>
 </image>
 <generator>quarto-1.1.149</generator>
-<lastBuildDate>Thu, 15 Sep 2022 14:00:00 GMT</lastBuildDate>
+<lastBuildDate>Mon, 17 Oct 2022 13:00:00 GMT</lastBuildDate>
+<item>
+  <title>Building an Arrow Flight server</title>
+  <dc:creator>Danielle Navarro</dc:creator>
+  <link>https://blog.djnavarro.net/posts/2022-10-18_arrow-flight/index.html</link>
+  <description><![CDATA[ 
+
+
+
+
+<!-- 
+cover image: https://unsplash.com/photos/aWwFbn0ZW6A
+credit: Hennie Stander
+licence: open via unsplash licence
+-->
+<!--------------- my typical setup ----------------->
+<!--------------- post begins here ----------------->
+<p>This is a post about Arrow Flight. I will probably tell a whimsical anecdote to open this post. Or not. Who knows. Maybe I’ll leave the introductory paragraph like this. That would be pretty on-brand for me actually.</p>
+<p><br></p>
+<section id="the-what-and-why-of-arrow-flight" class="level2 page-columns page-full">
+<h2 class="anchored" data-anchor-id="the-what-and-why-of-arrow-flight">The what and why of Arrow Flight</h2>
+<p>The central idea behind flight is deceptively simple: it provides a standard protocol for transferring Arrow data over a network. But to understand why this is a Big Deal, you need to have a good sense of what the Arrow ecosystem is all about. For that, I found it helpful to go all the way back<sup>1</sup> to the <a href="https://arrow.apache.org/blog/2019/10/13/introducing-arrow-flight/">original announcement of flight by Wes McKinney</a>. Here’s how he explained the motivation:</p>
+<blockquote class="blockquote">
+<p>Our design goal for Flight is to create a new protocol for data services that uses the Arrow columnar format as both the over-the-wire data representation as well as the public API presented to developers. In doing so, we reduce or remove the serialization costs associated with data transport and increase the overall efficiency of distributed data systems. Additionally, two systems that are already using Apache Arrow for other purposes can communicate data to each other with extreme efficiency.</p>
+</blockquote>
+<p>To put this in context, it helps to have a little recap of how the project has grown: Arrow was originally introduced to provide an efficient and language-agnostic <a href="https://arrow.apache.org/docs/format/Columnar.html">standard for representing tabular data in-memory</a>, but as the project has grown it has necessarily expanded in scope. For example, storing data in-memory is not entirely useful if you can’t manipulate it, so Arrow now supplies a powerful <a href="https://arrow.apache.org/docs/cpp/compute.html">compute engine</a> that underpins both the <a href="https://arrow.apache.org/docs/r/index.html">arrow package in R</a> and the <a href="https://arrow.apache.org/docs/python/index.html">pyarrow library in Python</a>, and several others besides. In other words, the compute engine has been developed to solve a practical data science problem.</p>
+<p>Arrow Flight evolved from a similar practical concern. It’s pretty trivial to point out that we live in a networked world now, and as consequence it is hard to avoid situations where the data to be analysed are stored on a different machine than the one that does the analysis. In my earlier posts on <a href="https://blog.djnavarro.net/posts/2022-09-09_reticulated-arrow/">reticulate</a> and <a href="https://blog.djnavarro.net/posts/2022-09-16_arrow-and-rpy2/">rpy2</a> I talked about how to efficiently share an Arrow data set between <em>languages</em>, but I implicitly assumed in those posts that the R process and the Python process were running on the same <em>machine</em>. The moment we have processes running on different machines, those tricks don’t work anymore!</p>
+<p>Flight is designed to solve this problem. It’s not a fancypants protocol with lots of different parts. It exists for one purpose: it makes it super easy to transfer Arrow-formatted data. That’s it. It’s pretty flexible though, and you can build other stuff on top of flight, but the design of flight is deliberately simple. It’s <em>meant</em> to be pretty minimal, so you can “just use it” without having to think too hard or do any of the obnoxious implementation work yourself.</p>
+<p><br></p>
+<div class="column-body-outset">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://blog.djnavarro.net/posts/2022-10-18_arrow-flight/img/biplane.jpg" class="img-fluid figure-img"></p>
+<p></p><figcaption class="figure-caption">A biplane in flight. <a href="https://pixabay.com/photos/aircraft-flight-sunset-clouds-1756149/">Image by Gerhard from Pixabay</a></figcaption><p></p>
+</figure>
+</div>
+</div>
+<p><br></p>
+<section id="prerequisites" class="level3">
+<h3 class="anchored" data-anchor-id="prerequisites">Prerequisites</h3>
+<p>There are a couple of prerequisites for this post. Specifically I’ll assume you have the <a href="https://arrow.apache.org/docs/r/">arrow</a> and <a href="https://rstudio.github.io/reticulate/">reticulate</a> packages installed in your R environment, and similarly that your Python environment has <a href="https://arrow.apache.org/docs/python/index.html">pyarrow</a> installed. If you’re only interested in the Python side, you probably don’t need either of the R packages, but R users will need to have the pyarrow installation because the R flight implementation builds on pyarrow.</p>
+<p><br></p>
+</section>
+</section>
+<section id="an-r-example" class="level2 page-columns page-full">
+<h2 class="anchored" data-anchor-id="an-r-example">An R example</h2>
+<p>The implementation of Arrow Flight varies a little across languages. In this post I’m going to focus on the two languages I use most – R and Python – but there’s nothing stopping you from using other languages. For example, the book <a href="https://www.packtpub.com/product/in-memory-analytics-with-apache-arrow/9781801071031">In-Memory Analytics with Apache Arrow</a> by <a href="https://twitter.com/zeroshade">Matt Topol</a> has worked examples using C++ and Go, in addition to Python.</p>
+<p>For the purposes of this post I’m going to start with R because the arrow package in R exposes a “high-level” interface that will allow us to start using a flight server without having to dive deeply into how it all works. However, as we’ll see, there are some limitations to this approach – not least of which is the fact that the R implementation turns out to secretly be a Python implementation under the hood – and as the post progresses I’ll pivot to Python in order to unpack some of the lower-level functionality.</p>
+<p>To do this I’ll need access to the arrow and reticulate packages, and I’ll need to make certain that the Python environment is one that has pyarrow installed. For my machine, the commands to do this look like this:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><span class="fu" style="color: #4758AB;">library</span>(arrow)</span>
+<span id="cb1-2"><span class="fu" style="color: #4758AB;">library</span>(reticulate)</span>
+<span id="cb1-3"><span class="fu" style="color: #4758AB;">use_miniconda</span>(<span class="st" style="color: #20794D;">"base"</span>)</span></code></pre></div>
+</div>
+<p>It may be a little different for you depending on your configuration. For more information on this, take a look at the <a href="https://blog.djnavarro.net/posts/2022-09-09_reticulated-arrow/">reticulate post</a> I wrote recently.</p>
+<p><br></p>
+<section id="the-flight-server" class="level3 page-columns page-full">
+<h3 class="anchored" data-anchor-id="the-flight-server">The flight server</h3>
+<p>Okay, so let’s get started by thinking about the simplest possible scenario for using a flight server. In this set up all we want the server to do is to act as a “cache” for Arrow tables. Clients can upload tables to the server, download tables from the server, and so on. That’s all we’re really trying to accomplish, and happily for us this use case is supported out of the box in R.</p>
+<p>Here’s how it works. As I mentioned earlier, R doesn’t actually implement the flight protocol itself: it’s just a wrapper around the Python tools. What that means is the underlying flight server is actually written in Python, and if we want to start that server running from R we have to call the <a href="https://arrow.apache.org/docs/r/reference/load_flight_server.html"><code>load_flight_server()</code></a> function that will allow us access to this server from R. Conveniently, the arrow R package comes bundled with a “demo” server that already provides the server side functionality that we want, and I can import it like this:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb2" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1">server_class <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">load_flight_server</span>(<span class="st" style="color: #20794D;">"demo_flight_server"</span>)</span></code></pre></div>
+</div>
+<p>When I do this, all I’ve done is obtain access to the relevant Python code. I haven’t created a server yet and I haven’t started it running either. Create an instance of the “demo server”, I call the <code>DemoFlightServer()</code> method attached to the <code>server_class()</code> object:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb3" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1">server <span class="ot" style="color: #003B4F;">&lt;-</span> server_class_object<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">DemoFlightServer</span>(<span class="at" style="color: #657422;">port =</span> <span class="dv" style="color: #AD0000;">8089</span>)</span></code></pre></div>
+</div>
+<p>We have now defined a server that, once started, will run on port 8089. The <code>server</code> object has a <code>serve()</code> method that I can call to start it running:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb4" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1">server<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">serve</span>()</span></code></pre></div>
+</div>
+<p>I’ve written a short script called <a href="./start_demo_server.R">start_demo_server.R</a> that bundles all these operations together:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>start_demo_server.R</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb5" data-startfrom="3" style="background: #f1f3f5;"><pre class="sourceCode numberSource r numberLines number-lines code-with-copy"><code class="sourceCode r" style="counter-reset: source-line 2;"><span id="cb5-3"><span class="co" style="color: #5E5E5E;"># load R packages and specify the Python environment</span></span>
+<span id="cb5-4"><span class="fu" style="color: #4758AB;">library</span>(arrow)</span>
+<span id="cb5-5"><span class="fu" style="color: #4758AB;">library</span>(reticulate)</span>
+<span id="cb5-6"><span class="fu" style="color: #4758AB;">use_miniconda</span>(<span class="st" style="color: #20794D;">"base"</span>)</span>
+<span id="cb5-7"></span>
+<span id="cb5-8"><span class="co" style="color: #5E5E5E;"># load server class, create instance, start serving</span></span>
+<span id="cb5-9">server_class <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">load_flight_server</span>(<span class="st" style="color: #20794D;">"demo_flight_server"</span>)</span>
+<span id="cb5-10">server <span class="ot" style="color: #003B4F;">&lt;-</span> server_class<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">DemoFlightServer</span>(<span class="at" style="color: #657422;">port =</span> <span class="dv" style="color: #AD0000;">8089</span>)</span>
+<span id="cb5-11">server<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">serve</span>()</span></code></pre></div>
+</div>
+</div>
+<p>The easiest way to start a server running in its very own R process would be to execute this script – or a suitably modified version that refers to an appropriate Python environment and server port – at the terminal, which I could do like this:</p>
+<div class="sourceCode" id="cb6" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb6-1"><span class="ex" style="color: null;">Rscript</span> start_demo_server.R <span class="kw" style="color: #003B4F;">&amp;</span></span></code></pre></div>
+<p>This would start an R process as a background job that creates a server and start it running. As an alternative, if you’re comfortable with using the <a href="https://callr.r-lib.org/">callr</a> package, you can use <code>callr::r_bg()</code> to create a child R process from your current one. The child process will run in the background, and we can start start the server within that R session without blocking the current one. This code will do exactly that:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb7" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1">r_process <span class="ot" style="color: #003B4F;">&lt;-</span> callr<span class="sc" style="color: #5E5E5E;">::</span><span class="fu" style="color: #4758AB;">r_bg</span>(<span class="cf" style="color: #003B4F;">function</span>() {</span>
+<span id="cb7-2">  reticulate<span class="sc" style="color: #5E5E5E;">::</span><span class="fu" style="color: #4758AB;">use_miniconda</span>(<span class="st" style="color: #20794D;">"base"</span>)  </span>
+<span id="cb7-3">  demo <span class="ot" style="color: #003B4F;">&lt;-</span> arrow<span class="sc" style="color: #5E5E5E;">::</span><span class="fu" style="color: #4758AB;">load_flight_server</span>(<span class="st" style="color: #20794D;">"demo_flight_server"</span>)</span>
+<span id="cb7-4">  server <span class="ot" style="color: #003B4F;">&lt;-</span> demo<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">DemoFlightServer</span>(<span class="at" style="color: #657422;">port =</span> <span class="dv" style="color: #AD0000;">8089</span>)</span>
+<span id="cb7-5">  server<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">serve</span>()</span>
+<span id="cb7-6">})</span></code></pre></div>
+</div>
+<p>Regardless of what method you’ve chosen, I’ll now assume that the demo server is now running quietly in the background on port 8089.</p>
+<p><br></p>
+<div class="column-body-outset">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://blog.djnavarro.net/posts/2022-10-18_arrow-flight/img/hummingbird.jpg" class="img-fluid figure-img"></p>
+<p></p><figcaption class="figure-caption">A hummingbird in flight. <a href="https://pixabay.com/photos/hummingbird-bird-flight-avian-1854225/">Image by Pexels from Pixabay</a></figcaption><p></p>
+</figure>
+</div>
+</div>
+<p><br></p>
+</section>
+<section id="the-flight-client" class="level3 page-columns page-full">
+<h3 class="anchored" data-anchor-id="the-flight-client">The flight client</h3>
+<p>Now that I have this server running, I’ll define a flight client in my current R session that can interact with it. To do that, I call <a href="https://arrow.apache.org/docs/r/reference/flight_connect.html"><code>flight_connect()</code></a>:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb8" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1">client <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">flight_connect</span>(<span class="at" style="color: #657422;">port =</span> <span class="dv" style="color: #AD0000;">8089</span>)</span></code></pre></div>
+</div>
+<p>Perhaps unsurprisingly, the R object <code>client</code> is a wrapper around a Python flight client. It comes with various methods that implement low-level flight operations, but I’m going to hold off talking about those for a moment because we won’t need to use the low-level interface in this initial example.</p>
+<p>Let’s start by using the client to ask a simple question: what is stored on the server? The way that data sources are conceptualised in Arrow Flight is as a set of “flights”. Each individual “flight” is a data stream from which the client can download data. The precise implementation of this idea (e.g., what data structures are stored in a single flight) varies from server to server, but in both examples in this post one flight corresponds to one Arrow table.</p>
+<p>To find out what flights are currently available on our server, we can call the <a href="https://arrow.apache.org/docs/r/reference/list_flights.html"><code>list_flights()</code></a> function:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb9" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1"><span class="fu" style="color: #4758AB;">list_flights</span>(client)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>list()</code></pre>
+</div>
+</div>
+<p>Hm, okay, there’s nothing there. That makes sense because I haven’t actually uploaded anything to the server yet! Okay, well, let’s suppose I want to store a copy of the <code>airquality</code> data as an Arrow table on my server. As R users are probably aware, this is a data set that comes bundled with R, but just so we’re all on the same page here’s the first few rows of the data set:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb11" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb11-1"><span class="fu" style="color: #4758AB;">head</span>(airquality)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>  Ozone Solar.R Wind Temp Month Day
+1    41     190  7.4   67     5   1
+2    36     118  8.0   72     5   2
+3    12     149 12.6   74     5   3
+4    18     313 11.5   62     5   4
+5    NA      NA 14.3   56     5   5
+6    28      NA 14.9   66     5   6</code></pre>
+</div>
+</div>
+<p>This object is a regular data frame in R: it’s not an Arrow table. Strictly speaking what we want our client to do is send the Arrow table version of this data set to the server, so it will need to be converted. Happily for us, the <a href="https://arrow.apache.org/docs/r/reference/flight_put.html"><code>flight_put()</code></a> function supplied by the arrow package takes care of that conversion for us. As a result, we can cache am Arrow table copy of the data on the server with one line of code:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb13" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1"><span class="fu" style="color: #4758AB;">flight_put</span>(client, <span class="at" style="color: #657422;">data =</span> airquality, <span class="at" style="color: #657422;">path =</span> <span class="st" style="color: #20794D;">"pollution_data"</span>)</span></code></pre></div>
+</div>
+<p>In this code, the <code>flight_put()</code> function uses the <code>client</code> object to communicate with the server. The <code>data</code> argument specifies the local copy of the data set, and the <code>path</code> argument provides the name for the data on the server. Having uploaded the data we can once again call <code>list_flights()</code>, and we get this as the result:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb14" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb14-1"><span class="fu" style="color: #4758AB;">list_flights</span>(client)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] "pollution_data"</code></pre>
+</div>
+</div>
+<p>Yay!</p>
+<p>Now, just to prove to you that I’m not cheating, let’s check to make sure that there is no object called <code>pollution_data</code> stored locally within my R session:<sup>2</sup></p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb16" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb16-1">pollution_data</span></code></pre></div>
+<div class="cell-output cell-output-error">
+<pre><code>Error in eval(expr, envir, enclos): object 'pollution_data' not found</code></pre>
+</div>
+</div>
+<p>Unsurprisingly, there is no object called <code>pollution_data</code> available in my current R session. The <code>pollution_data</code> object is stored on the server, not the client. To access that data from the client I can use the <a href="https://arrow.apache.org/docs/r/reference/flight_get.html"><code>flight_get()</code></a> function:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb18" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1"><span class="fu" style="color: #4758AB;">flight_get</span>(client, <span class="st" style="color: #20794D;">"pollution_data"</span>)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Table
+153 rows x 6 columns
+$Ozone &lt;int32&gt;
+$Solar.R &lt;int32&gt;
+$Wind &lt;double&gt;
+$Temp &lt;int32&gt;
+$Month &lt;int32&gt;
+$Day &lt;int32&gt;
+
+See $metadata for additional Schema metadata</code></pre>
+</div>
+</div>
+<p>It works!</p>
+<p><br></p>
+<div class="column-body-outset">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://blog.djnavarro.net/posts/2022-10-18_arrow-flight/img/staircase.jpg" class="img-fluid figure-img"></p>
+<p></p><figcaption class="figure-caption">A flight of stairs. <a href="https://pixabay.com/photos/staircase-upwards-rails-railings-274614/">Image by Francis from Pixabay</a></figcaption><p></p>
+</figure>
+</div>
+</div>
+<p><br></p>
+</section>
+</section>
+<section id="unpacking-the-data-exchange-process" class="level2 page-columns page-full">
+<h2 class="anchored" data-anchor-id="unpacking-the-data-exchange-process">Unpacking the data exchange process</h2>
+<p>The example in the last section is a nice proof-of-concept. It shows that we can use R to start a flight server and use it to upload and download data. But there’s a lot that hasn’t really been explained properly here. The time has come to start digging a little deeper, so we can really get a sense of what’s going on under the hood and how this simple example can be extended. That’s our goal in this section.</p>
+<p>One thing that I like about the flight functionality exposed through <code>flight_connect()</code>, <code>flight_put()</code>, <code>flight_get()</code>, etc is that it operates at a high level of abstraction. In my day-to-day data analysis work I really don’t want to spend my time thinking about low-level operations. When I tell R to “put” a data set onto the server I want this to happen with one line of code. This high level API is super useful to me on an everyday basis, but it also masks some of the details about how flight works.</p>
+<p>To give you a sense of what’s being hidden, we can take a closer look at the <code>client</code> object. Here’s a list of some of the methods that are available through the object itself:</p>
+<div class="sourceCode" id="cb20" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb20-1">client<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">do_put</span>()</span>
+<span id="cb20-2">client<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">do_get</span>()</span>
+<span id="cb20-3">client<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">do_action</span>()</span>
+<span id="cb20-4">client<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">list_action</span>()</span>
+<span id="cb20-5">client<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">list_flights</span>()</span>
+<span id="cb20-6">client<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">get_flight_info</span>()</span></code></pre></div>
+<p>Each of these methods describes a low level operation available to the flight client. More precisely, these are the actual methods prescribed by the <a href="https://arrow.apache.org/docs/format/Flight.html">Arrow Flight protocol</a>. Moreover, although I’m showing you this as an R object, in truth these are all Python methods: the R implementation of Arrow Flight is essentially a wrapper around the Python implementation. We can access these methods from R thanks to the magic of <a href="https://rstudio.github.io/reticulate/">reticulate</a>, but – to foreshadow the pivot coming in the next section – eventually we will need to start working with the underlying Python code.</p>
+<p>When we look at the names of flight methods, we can see there’s (unsurprisingly) a relationship between those names and the names of the functions exposed in the high-level R interface. As you might expect, the <code>do_put()</code> method for the client is very closely related to the <code>flight_put()</code> function. However, they aren’t the same. The <code>do_put()</code> method doesn’t stream any data to the server: it merely opens a connection to the server, from which we can then stream data with subsequent commands. When calling the <code>do_put()</code> method directly, you have to take care of the streaming yourself. But from the user perspective it’s tiresome to write that code over and over, so the <code>flight_put()</code> function in the R interface provides a convenient high-level wrapper that abstracts over all that.</p>
+<p>If you’re the analyst working with the data, this is fabulous. But if you’re looking to implement your very own flight server, you probably need to understand what these low level operations are. So that’s where we’re headed next…</p>
+<p><br></p>
+<section id="unpacking-flight_put" class="level3">
+<h3 class="anchored" data-anchor-id="unpacking-flight_put">Unpacking flight_put()</h3>
+<p>Let’s start by taking a look at what happens when we call the R function <code>flight_put()</code>. For now, we won’t write any actual code (don’t worry, that will come later!). All we want to do is think about the sequence of operations that takes place. Our goal is to transmit the data to the server, and there’s an Arrow Flight method called <code>do_put()</code> that can do this for us. However, the structure of the interaction is a little more complicated than simply calling <code>do_put()</code>. It’s a multi-step operation that unfolds as shown below:</p>
+<p><img src="https://blog.djnavarro.net/posts/2022-10-18_arrow-flight/img/do_put.png" class="img-fluid"></p>
+<p>The first step in the process occurs when the client calls <code>do_put()</code>, a flight method that takes two arguments: a <strong>flight descriptor</strong> object that is used to identify the specific data stream that the client wants to be sent – and later on I’ll talk what the descriptor actually looks like – and the <a href="https://arrow.apache.org/docs/r/reference/Schema.html">schema</a> for the flight data.<sup>3</sup> Setting aside the particulars of the syntax – which might be different in every language – here’s what the <code>do_put()</code> function call looks like on the client side:</p>
+<div class="sourceCode" id="cb21" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb21-1">do_put(descriptor, schema)</span></code></pre></div>
+<p>Passing the schema on the client side serves a particular purpose: it allows the client to create <strong>stream writer</strong> and <strong>stream reader</strong> objects that are returned to the client-side user, and are also passed along to the server. The writer object is the thing that will take care of streaming data to the server, and the reader object is responsible for reading any metadata response that the server happens to send.<sup>4</sup></p>
+<p>Now let’s have a look at the server side, where the <code>do_put()</code> method expects three inputs: the flight descriptor, the writer, and the reader. So here’s the signature on the server side:</p>
+<div class="sourceCode" id="cb22" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb22-1">do_put(descriptor, reader, writer)</span></code></pre></div>
+<p>As long as these methods are written appropriately for both the client and the server, we now have a situation where both machines agree on the description of the data and have objects that can take care of the streaming process.</p>
+<p>We now move to step two in the communication, in which the client streams the data to the server. Once the data arrive on the server side, the <code>do_put()</code> method for the server stores the data along with an appropriate descriptor, so that it can be found later. Optionally, this is followed by a third stage in which the server sends a response containing metadata to the client. In the example server I’ll build in the next section, I won’t bother with that step!</p>
+<p><br></p>
+</section>
+<section id="unpacking-flight_get" class="level3 page-columns page-full">
+<h3 class="anchored" data-anchor-id="unpacking-flight_get">Unpacking flight_get()</h3>
+<p>Next let’s look at <code>flight_get()</code>. When I called this function earlier, it triggered two separate interactions between the client and server. First, the client calls the <code>get_flight_info()</code> method, and the server responds with some information about the data source that includes – among other things – a <strong>ticket</strong>. Again, the ticket is a particular data structure that I’ll talk more about later, but for now it’s enough to note that it’s a token that uniquely specifies which flight is requested.</p>
+<p>Once in possession of this ticket, the client can call <code>do_get()</code> to request that the server send the data that matches the ticket, which the server then streams. So the whole exchange looks like this:</p>
+<p><img src="https://blog.djnavarro.net/posts/2022-10-18_arrow-flight/img/do_get.png" class="img-fluid"></p>
+<p>So, in the previous example when I called <code>flight_get()</code>, the process looked like this. On the client side, we used the <code>"pollution_data"</code> path to construct a descriptor object and the client used <code>get_flight_info()</code> to request that information about this “flight” from the server:</p>
+<div class="sourceCode" id="cb23" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb23-1">get_flight_info(descriptor)</span></code></pre></div>
+<p>On the server side, once the descriptor is received, a <strong>flight info</strong> object is constructed. The flight info object is comprised of five parts:</p>
+<ul>
+<li>The schema for the data stored by the flight,</li>
+<li>The flight descriptor object</li>
+<li>A list of one or more endpoints that specify where the data are available for streaming. Each end point includes a location from which to stream, and the associated ticket for that location</li>
+<li>The total number of records (i.e.&nbsp;rows) stored</li>
+<li>The total number of bytes to be streamed (i.e., the size of the data)</li>
+</ul>
+<p>This flight info is then returned to the client.</p>
+<p>It may seem like this arrangement is overly elaborate: why does the client need this much information if only the ticket is needed to request the data? To be honest, for the simple server-client examples I’ve used in this post, this level of complexity is not really needed. However, it’s extremely useful that it’s structured like this when we want to start adopting a more sophisticated setup. One thing it allows, for example, is an arrangement where both the server and client can be distributed across multiple machines, with different endpoints streaming different subsets of the data. Matt Topol discusses some examples where this architecture is employed in <a href="https://www.packtpub.com/product/in-memory-analytics-with-apache-arrow/9781801071031">In-Memory Analytics with Apache Arrow</a>.</p>
+<p>Once this flight information has been received by the client, we can extract the ticket from the relevant endpoint (there will be only one endpoint in the server I build in the next section). The client now calls:</p>
+<div class="sourceCode" id="cb24" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb24-1"><span class="fu" style="color: #4758AB;">do_get</span>(ticket)</span></code></pre></div>
+<p>The server then sends a <strong>stream reader</strong> object that the client can use to receive the stream of data from the server.</p>
+<p><br></p>
+<div class="column-body-outset">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://blog.djnavarro.net/posts/2022-10-18_arrow-flight/img/balloons.jpg" class="img-fluid figure-img"></p>
+<p></p><figcaption class="figure-caption">Balloons in flight. <a href="https://pixabay.com/photos/hot-air-balloons-adventure-balloons-1867279/">Image by Pexels from Pixabay</a></figcaption><p></p>
+</figure>
+</div>
+</div>
+<p><br></p>
+</section>
+</section>
+<section id="a-python-example" class="level2 page-columns page-full">
+<h2 class="anchored" data-anchor-id="a-python-example">A Python example</h2>
+<p>Now that we have a basic understanding of what is happening at a lower level, we can build a flight server of our very own. To do this I’ll switch over to Python. There’s two reasons for doing this. The first reason is that R doesn’t currently have a low level implementation of flight: at the moment it relies on the Python implementation, so it’s easiest to switch completely to Python for the rest of this post.<sup>5</sup> The second reason is that Python doesn’t supply a high level API analogous to <code>flight_put()</code>, <code>flight_get()</code> etc, and instead adheres tightly to the Arrow Flight specification. That’s super helpful if you need to design a custom flight server because you get access to the all Arrow Flight functionality, but it also means you need to write a lot more code. To help make that process a little easier, I’ll walk you through how that works in Python now!</p>
+<p><br></p>
+<section id="a-tiny-flight-server" class="level3">
+<h3 class="anchored" data-anchor-id="a-tiny-flight-server">A tiny flight server</h3>
+<p>Our goal in this section is to write our own flight server in Python that does the same job as the one we saw earlier in the R example: it’s a server that allows you to cache copies of Arrow tables. To do so, we’ll start our Python script the way one usually does, with some imports:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>tiny_flight.py</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb25" data-startfrom="3" style="background: #f1f3f5;"><pre class="sourceCode numberSource python numberLines number-lines code-with-copy"><code class="sourceCode python" style="counter-reset: source-line 2;"><span id="cb25-3"><span class="im" style="color: #00769E;">import</span> pyarrow <span class="im" style="color: #00769E;">as</span> pa</span>
+<span id="cb25-4"><span class="im" style="color: #00769E;">import</span> pyarrow.flight <span class="im" style="color: #00769E;">as</span> flight</span></code></pre></div>
+</div>
+</div>
+<p>What I’ll do now is define a Python class called <code>TinyServer</code>. The job of this class is to provide server side flight methods for <code>do_get()</code>, <code>do_put()</code>, and others. We’ll be able to use this class to create specific server instances and set them running, in more or less the exact same fashion that we did previously in the R example.</p>
+<p>I’ll explain the code in more detail in a moment after I’ve shown you both the server and the client, but let’s start just by looking at the code. You can find all the code in the <a href="tiny_flight.py">tiny_flight.py</a> script that accompanies this post. Here’s the complete code used to define the <code>TinyServer</code> class:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>tiny_flight.py [server]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb26" data-startfrom="7" style="background: #f1f3f5;"><pre class="sourceCode numberSource python numberLines number-lines code-with-copy"><code class="sourceCode python" style="counter-reset: source-line 6;"><span id="cb26-7"><span class="kw" style="color: #003B4F;">class</span> TinyServer(flight.FlightServerBase):</span>
+<span id="cb26-8">  </span>
+<span id="cb26-9">    <span class="kw" style="color: #003B4F;">def</span> <span class="fu" style="color: #4758AB;">__init__</span>(<span class="va" style="color: #111111;">self</span>, </span>
+<span id="cb26-10">                 host <span class="op" style="color: #5E5E5E;">=</span> <span class="st" style="color: #20794D;">'localhost'</span>, </span>
+<span id="cb26-11">                 port <span class="op" style="color: #5E5E5E;">=</span> <span class="dv" style="color: #AD0000;">5678</span>):</span>
+<span id="cb26-12">        <span class="va" style="color: #111111;">self</span>.tables <span class="op" style="color: #5E5E5E;">=</span> {}</span>
+<span id="cb26-13">        <span class="va" style="color: #111111;">self</span>.location <span class="op" style="color: #5E5E5E;">=</span> flight                  <span class="op" style="color: #5E5E5E;">\</span></span>
+<span id="cb26-14">                        .Location               <span class="op" style="color: #5E5E5E;">\</span></span>
+<span id="cb26-15">                        .for_grpc_tcp(host, port)</span>
+<span id="cb26-16">        <span class="bu" style="color: null;">super</span>().<span class="fu" style="color: #4758AB;">__init__</span>(<span class="va" style="color: #111111;">self</span>.location)</span>
+<span id="cb26-17">    </span>
+<span id="cb26-18">    <span class="at" style="color: #657422;">@staticmethod</span>    </span>
+<span id="cb26-19">    <span class="kw" style="color: #003B4F;">def</span> server_message(method, name):</span>
+<span id="cb26-20">        msg <span class="op" style="color: #5E5E5E;">=</span> <span class="st" style="color: #20794D;">'(server) '</span>                       \</span>
+<span id="cb26-21">              <span class="op" style="color: #5E5E5E;">+</span> method                          <span class="op" style="color: #5E5E5E;">\</span></span>
+<span id="cb26-22">              <span class="op" style="color: #5E5E5E;">+</span> <span class="st" style="color: #20794D;">' '</span>                             \</span>
+<span id="cb26-23">              <span class="op" style="color: #5E5E5E;">+</span> name.decode(<span class="st" style="color: #20794D;">'utf-8'</span>)</span>
+<span id="cb26-24">        <span class="bu" style="color: null;">print</span>(msg)</span>
+<span id="cb26-25">      </span>
+<span id="cb26-26">    <span class="kw" style="color: #003B4F;">def</span> do_put(<span class="va" style="color: #111111;">self</span>, context, descriptor, reader, </span>
+<span id="cb26-27">               writer):</span>
+<span id="cb26-28">        table_name <span class="op" style="color: #5E5E5E;">=</span> descriptor.command</span>
+<span id="cb26-29">        <span class="va" style="color: #111111;">self</span>.server_message(<span class="st" style="color: #20794D;">'do_put'</span>, table_name)</span>
+<span id="cb26-30">        <span class="va" style="color: #111111;">self</span>.tables[table_name] <span class="op" style="color: #5E5E5E;">=</span> reader.read_all()</span>
+<span id="cb26-31"></span>
+<span id="cb26-32">    <span class="kw" style="color: #003B4F;">def</span> do_get(<span class="va" style="color: #111111;">self</span>, context, ticket):</span>
+<span id="cb26-33">        table_name <span class="op" style="color: #5E5E5E;">=</span> ticket.ticket</span>
+<span id="cb26-34">        <span class="va" style="color: #111111;">self</span>.server_message(<span class="st" style="color: #20794D;">'do_get'</span>, table_name)</span>
+<span id="cb26-35">        table <span class="op" style="color: #5E5E5E;">=</span> <span class="va" style="color: #111111;">self</span>.tables[table_name]</span>
+<span id="cb26-36">        <span class="cf" style="color: #003B4F;">return</span> flight.RecordBatchStream(table)</span>
+<span id="cb26-37">  </span>
+<span id="cb26-38">    <span class="kw" style="color: #003B4F;">def</span> flight_info(<span class="va" style="color: #111111;">self</span>, descriptor):</span>
+<span id="cb26-39">        table_name <span class="op" style="color: #5E5E5E;">=</span> descriptor.command</span>
+<span id="cb26-40">        table <span class="op" style="color: #5E5E5E;">=</span> <span class="va" style="color: #111111;">self</span>.tables[table_name]</span>
+<span id="cb26-41"></span>
+<span id="cb26-42">        ticket <span class="op" style="color: #5E5E5E;">=</span> flight.Ticket(table_name)</span>
+<span id="cb26-43">        location <span class="op" style="color: #5E5E5E;">=</span> <span class="va" style="color: #111111;">self</span>.location.uri.decode(<span class="st" style="color: #20794D;">'utf-8'</span>)</span>
+<span id="cb26-44">        endpoint <span class="op" style="color: #5E5E5E;">=</span> flight.FlightEndpoint(ticket,</span>
+<span id="cb26-45">                                         [location])</span>
+<span id="cb26-46">        </span>
+<span id="cb26-47">        <span class="cf" style="color: #003B4F;">return</span> flight.FlightInfo(table.schema, </span>
+<span id="cb26-48">                                 descriptor, </span>
+<span id="cb26-49">                                 [endpoint], </span>
+<span id="cb26-50">                                 table.num_rows,</span>
+<span id="cb26-51">                                 table.nbytes)</span>
+<span id="cb26-52">    </span>
+<span id="cb26-53">    <span class="kw" style="color: #003B4F;">def</span> get_flight_info(<span class="va" style="color: #111111;">self</span>, context, descriptor):</span>
+<span id="cb26-54">        table_name <span class="op" style="color: #5E5E5E;">=</span> descriptor.command</span>
+<span id="cb26-55">        <span class="va" style="color: #111111;">self</span>.server_message(<span class="st" style="color: #20794D;">'get_flight_info'</span>,</span>
+<span id="cb26-56">                            table_name)</span>
+<span id="cb26-57">        <span class="cf" style="color: #003B4F;">return</span> <span class="va" style="color: #111111;">self</span>.flight_info(descriptor)        </span>
+<span id="cb26-58">        </span>
+<span id="cb26-59">    <span class="kw" style="color: #003B4F;">def</span> list_flights(<span class="va" style="color: #111111;">self</span>, context, criteria):</span>
+<span id="cb26-60">        <span class="va" style="color: #111111;">self</span>.server_message(<span class="st" style="color: #20794D;">'list_flights'</span>, <span class="st" style="color: #20794D;">b' '</span>)</span>
+<span id="cb26-61">        <span class="cf" style="color: #003B4F;">for</span> table_name <span class="kw" style="color: #003B4F;">in</span> <span class="va" style="color: #111111;">self</span>.tables.keys():</span>
+<span id="cb26-62">            descriptor <span class="op" style="color: #5E5E5E;">=</span> flight                  <span class="op" style="color: #5E5E5E;">\</span></span>
+<span id="cb26-63">                         .FlightDescriptor       <span class="op" style="color: #5E5E5E;">\</span></span>
+<span id="cb26-64">                         .for_command(table_name)</span>
+<span id="cb26-65">            <span class="cf" style="color: #003B4F;">yield</span> <span class="va" style="color: #111111;">self</span>.flight_info(descriptor)</span>
+<span id="cb26-66"></span>
+<span id="cb26-67">    <span class="kw" style="color: #003B4F;">def</span> do_action(<span class="va" style="color: #111111;">self</span>, context, action):</span>
+<span id="cb26-68">        <span class="cf" style="color: #003B4F;">if</span> action.<span class="bu" style="color: null;">type</span> <span class="op" style="color: #5E5E5E;">==</span> <span class="st" style="color: #20794D;">'drop_table'</span>:</span>
+<span id="cb26-69">            table_name <span class="op" style="color: #5E5E5E;">=</span> action.body.to_pybytes()</span>
+<span id="cb26-70">            <span class="kw" style="color: #003B4F;">del</span> <span class="va" style="color: #111111;">self</span>.tables[table_name]</span>
+<span id="cb26-71">            <span class="va" style="color: #111111;">self</span>.server_message(<span class="st" style="color: #20794D;">'drop_table'</span>,</span>
+<span id="cb26-72">                                table_name)</span>
+<span id="cb26-73"></span>
+<span id="cb26-74">        <span class="cf" style="color: #003B4F;">elif</span> action.<span class="bu" style="color: null;">type</span> <span class="op" style="color: #5E5E5E;">==</span> <span class="st" style="color: #20794D;">'shutdown'</span>:</span>
+<span id="cb26-75">            <span class="va" style="color: #111111;">self</span>.server_message(<span class="st" style="color: #20794D;">'shutdown'</span>, <span class="st" style="color: #20794D;">b' '</span>)</span>
+<span id="cb26-76">            <span class="va" style="color: #111111;">self</span>.shutdown()</span>
+<span id="cb26-77"></span>
+<span id="cb26-78">        <span class="cf" style="color: #003B4F;">else</span>:</span>
+<span id="cb26-79">            <span class="cf" style="color: #003B4F;">raise</span> <span class="pp" style="color: #AD0000;">KeyError</span>(<span class="st" style="color: #20794D;">'Unknown action </span><span class="sc" style="color: #5E5E5E;">{!r}</span><span class="st" style="color: #20794D;">'</span>.</span>
+<span id="cb26-80">                           <span class="bu" style="color: null;">format</span>(action.<span class="bu" style="color: null;">type</span>))</span>
+<span id="cb26-81"></span>
+<span id="cb26-82">    <span class="kw" style="color: #003B4F;">def</span> list_actions(<span class="va" style="color: #111111;">self</span>, context):</span>
+<span id="cb26-83">        <span class="cf" style="color: #003B4F;">return</span> [(<span class="st" style="color: #20794D;">'drop_table'</span>, <span class="st" style="color: #20794D;">'Drop table'</span>),</span>
+<span id="cb26-84">                (<span class="st" style="color: #20794D;">'shutdown'</span>, <span class="st" style="color: #20794D;">'Shut down server'</span>)]</span></code></pre></div>
+</div>
+</div>
+<p>Now, if you’re at all like me this code won’t immediately make sense. Probably you’ll skim over it, read bits of it, and <em>some</em> of it will make sense… but not all of it. There’s a couple of reasons for that. The first and most obvious reason is that it’s a big chunk of code that I haven’t explained yet! The second reason is that (in my opinion) server-side code never makes sense on its own: it only really makes sense when you can place it next to the client-side code so that you can see how the two parts fit together.<sup>6</sup> With that in mind, let’s take a quick peek at the client-side code…</p>
+<p><br></p>
+</section>
+<section id="a-tiny-flight-client" class="level3 page-columns page-full">
+<h3 class="anchored" data-anchor-id="a-tiny-flight-client">A tiny flight client</h3>
+<p>To accompany a <code>TinyServer</code>, we’ll need a <code>TinyClient</code> that knows how to talk to it. Happily for us, it’s easier to define the client than to define the server, so the source code that defines the <code>TinyClient</code> class is considerably shorter:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>tiny_flight.py [client]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb27" data-startfrom="87" style="background: #f1f3f5;"><pre class="sourceCode numberSource python numberLines number-lines code-with-copy"><code class="sourceCode python" style="counter-reset: source-line 86;"><span id="cb27-87"><span class="kw" style="color: #003B4F;">class</span> TinyClient:</span>
+<span id="cb27-88"></span>
+<span id="cb27-89">    <span class="kw" style="color: #003B4F;">def</span> <span class="fu" style="color: #4758AB;">__init__</span>(<span class="va" style="color: #111111;">self</span>, host <span class="op" style="color: #5E5E5E;">=</span> <span class="st" style="color: #20794D;">'localhost'</span>, port <span class="op" style="color: #5E5E5E;">=</span> <span class="dv" style="color: #AD0000;">5678</span>):</span>
+<span id="cb27-90">        <span class="va" style="color: #111111;">self</span>.location <span class="op" style="color: #5E5E5E;">=</span> flight                      <span class="op" style="color: #5E5E5E;">\</span></span>
+<span id="cb27-91">                        .Location                   <span class="op" style="color: #5E5E5E;">\</span></span>
+<span id="cb27-92">                        .for_grpc_tcp(host, port)</span>
+<span id="cb27-93">        <span class="va" style="color: #111111;">self</span>.connection <span class="op" style="color: #5E5E5E;">=</span> flight.<span class="ex" style="color: null;">connect</span>(<span class="va" style="color: #111111;">self</span>.location)</span>
+<span id="cb27-94">        <span class="va" style="color: #111111;">self</span>.connection.wait_for_available()</span>
+<span id="cb27-95"></span>
+<span id="cb27-96">    <span class="kw" style="color: #003B4F;">def</span> put_table(<span class="va" style="color: #111111;">self</span>, name, table):</span>
+<span id="cb27-97">        table_name <span class="op" style="color: #5E5E5E;">=</span> name.encode(<span class="st" style="color: #20794D;">'utf8'</span>)</span>
+<span id="cb27-98">        descriptor <span class="op" style="color: #5E5E5E;">=</span> flight                         <span class="op" style="color: #5E5E5E;">\</span></span>
+<span id="cb27-99">                     .FlightDescriptor              <span class="op" style="color: #5E5E5E;">\</span></span>
+<span id="cb27-100">                     .for_command(table_name)</span>
+<span id="cb27-101">        writer, reader <span class="op" style="color: #5E5E5E;">=</span> <span class="va" style="color: #111111;">self</span>                       <span class="op" style="color: #5E5E5E;">\</span></span>
+<span id="cb27-102">                         .connection                <span class="op" style="color: #5E5E5E;">\</span></span>
+<span id="cb27-103">                         .do_put(descriptor,</span>
+<span id="cb27-104">                                 table.schema)</span>
+<span id="cb27-105">        writer.write(table)</span>
+<span id="cb27-106">        writer.close()</span>
+<span id="cb27-107">      </span>
+<span id="cb27-108">    <span class="kw" style="color: #003B4F;">def</span> get_table(<span class="va" style="color: #111111;">self</span>, name):</span>
+<span id="cb27-109">        table_name <span class="op" style="color: #5E5E5E;">=</span> name.encode(<span class="st" style="color: #20794D;">'utf8'</span>)</span>
+<span id="cb27-110">        ticket <span class="op" style="color: #5E5E5E;">=</span> flight.Ticket(table_name)</span>
+<span id="cb27-111">        reader <span class="op" style="color: #5E5E5E;">=</span> <span class="va" style="color: #111111;">self</span>.connection.do_get(ticket)</span>
+<span id="cb27-112">        <span class="cf" style="color: #003B4F;">return</span> reader.read_all()</span>
+<span id="cb27-113">    </span>
+<span id="cb27-114">    <span class="kw" style="color: #003B4F;">def</span> list_tables(<span class="va" style="color: #111111;">self</span>):</span>
+<span id="cb27-115">        names <span class="op" style="color: #5E5E5E;">=</span> []</span>
+<span id="cb27-116">        <span class="cf" style="color: #003B4F;">for</span> flight <span class="kw" style="color: #003B4F;">in</span> <span class="va" style="color: #111111;">self</span>.connection.list_flights():</span>
+<span id="cb27-117">            table_name <span class="op" style="color: #5E5E5E;">=</span> flight.descriptor.command</span>
+<span id="cb27-118">            names.append(table_name.decode(<span class="st" style="color: #20794D;">'utf-8'</span>))</span>
+<span id="cb27-119">        <span class="cf" style="color: #003B4F;">return</span> names</span>
+<span id="cb27-120">    </span>
+<span id="cb27-121">    <span class="kw" style="color: #003B4F;">def</span> drop_table(<span class="va" style="color: #111111;">self</span>, name):</span>
+<span id="cb27-122">        table_name <span class="op" style="color: #5E5E5E;">=</span> name.encode(<span class="st" style="color: #20794D;">'utf8'</span>)</span>
+<span id="cb27-123">        drop <span class="op" style="color: #5E5E5E;">=</span> flight.Action(<span class="st" style="color: #20794D;">'drop_table'</span>, table_name) </span>
+<span id="cb27-124">        <span class="va" style="color: #111111;">self</span>.connection.do_action(drop)</span></code></pre></div>
+</div>
+</div>
+<p>These two classes are designed to work in concert: the <code>do_put()</code> method for <code>TinyServer</code> is aligned with the <code>do_put()</code> method for <code>TinyClient</code>, and the <code>put_table()</code> function I wrote on the client side is a convenient high-level wrapper that manages the whole “put a table on the server” interaction without requiring the user to do anything other than write a single line of code. That’s the reason I started by showing you all the source code for both parts before explaining any of the specific methods: in the next few sections I’ll walk you through the code, placing the relevant snippets from the server code and the client code next to each other so you can more clearly see how they relate to each other.</p>
+<p><br></p>
+<div class="column-body-outset">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://blog.djnavarro.net/posts/2022-10-18_arrow-flight/img/kite.jpg" class="img-fluid figure-img"></p>
+<p></p><figcaption class="figure-caption">A kite in flight. <a href="https://pixabay.com/photos/child-boy-dragon-dragon-flight-2887483/">Image by Anja from Pixabay</a></figcaption><p></p>
+</figure>
+</div>
+</div>
+<p><br></p>
+</section>
+<section id="initialisation" class="level3">
+<h3 class="anchored" data-anchor-id="initialisation">Initialisation</h3>
+<p>Let’s start by looking at what happens when the server and client are initialised. When a new <code>TinyServer</code> or <code>TinyClient</code> object is created, the <code>__init__</code> function is called:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>tiny_flight.py [server]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb28" data-startfrom="7" style="background: #f1f3f5;"><pre class="sourceCode numberSource python numberLines number-lines code-with-copy"><code class="sourceCode python" style="counter-reset: source-line 6;"><span id="cb28-7"><span class="kw" style="color: #003B4F;">class</span> TinyServer(flight.FlightServerBase):</span>
+<span id="cb28-8">  </span>
+<span id="cb28-9">    <span class="kw" style="color: #003B4F;">def</span> <span class="fu" style="color: #4758AB;">__init__</span>(<span class="va" style="color: #111111;">self</span>, </span>
+<span id="cb28-10">                 host <span class="op" style="color: #5E5E5E;">=</span> <span class="st" style="color: #20794D;">'localhost'</span>, </span>
+<span id="cb28-11">                 port <span class="op" style="color: #5E5E5E;">=</span> <span class="dv" style="color: #AD0000;">5678</span>):</span>
+<span id="cb28-12">        <span class="va" style="color: #111111;">self</span>.tables <span class="op" style="color: #5E5E5E;">=</span> {}</span>
+<span id="cb28-13">        <span class="va" style="color: #111111;">self</span>.location <span class="op" style="color: #5E5E5E;">=</span> flight                  <span class="op" style="color: #5E5E5E;">\</span></span>
+<span id="cb28-14">                        .Location               <span class="op" style="color: #5E5E5E;">\</span></span>
+<span id="cb28-15">                        .for_grpc_tcp(host, port)</span>
+<span id="cb28-16">        <span class="bu" style="color: null;">super</span>().<span class="fu" style="color: #4758AB;">__init__</span>(<span class="va" style="color: #111111;">self</span>.location)</span></code></pre></div>
+</div>
+</div>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>tiny_flight.py [client]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb29" data-startfrom="87" style="background: #f1f3f5;"><pre class="sourceCode numberSource python numberLines number-lines code-with-copy"><code class="sourceCode python" style="counter-reset: source-line 86;"><span id="cb29-87"><span class="kw" style="color: #003B4F;">class</span> TinyClient:</span>
+<span id="cb29-88"></span>
+<span id="cb29-89">    <span class="kw" style="color: #003B4F;">def</span> <span class="fu" style="color: #4758AB;">__init__</span>(<span class="va" style="color: #111111;">self</span>, host <span class="op" style="color: #5E5E5E;">=</span> <span class="st" style="color: #20794D;">'localhost'</span>, port <span class="op" style="color: #5E5E5E;">=</span> <span class="dv" style="color: #AD0000;">5678</span>):</span>
+<span id="cb29-90">        <span class="va" style="color: #111111;">self</span>.location <span class="op" style="color: #5E5E5E;">=</span> flight                      <span class="op" style="color: #5E5E5E;">\</span></span>
+<span id="cb29-91">                        .Location                   <span class="op" style="color: #5E5E5E;">\</span></span>
+<span id="cb29-92">                        .for_grpc_tcp(host, port)</span>
+<span id="cb29-93">        <span class="va" style="color: #111111;">self</span>.connection <span class="op" style="color: #5E5E5E;">=</span> flight.<span class="ex" style="color: null;">connect</span>(<span class="va" style="color: #111111;">self</span>.location)</span>
+<span id="cb29-94">        <span class="va" style="color: #111111;">self</span>.connection.wait_for_available()</span></code></pre></div>
+</div>
+</div>
+<p>Some things to notice here. At start up, the server and client both call the <code>flight.Location.for_grpc_tcp()</code> function to generate a <a href="https://arrow.apache.org/docs/python/generated/pyarrow.flight.Location.html">Location</a> object used to specify the address of the server:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb30" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb30-1">loc <span class="op" style="color: #5E5E5E;">=</span> flight.Location.for_grpc_tcp(<span class="st" style="color: #20794D;">'localhost'</span>, <span class="dv" style="color: #AD0000;">5678</span>)</span>
+<span id="cb30-2"><span class="bu" style="color: null;">print</span>(loc)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>&lt;Location b'grpc+tcp://localhost:5678'&gt;</code></pre>
+</div>
+</div>
+<p>The important thing in this output is the server address. The <code>localhost:5678</code> part indicates that the server is running locally on port 5678, and the <code>grpc+tcp://</code> part tells us what communication protocols are being used. For this server, those protocols are <a href="https://grpc.io/">gRPC</a> and <a href="https://en.wikipedia.org/wiki/Transmission_Control_Protocol">TCP</a>. TCP is probably familiar to most data scientists since it’s one of the core protocols of the internet, but gRPC (wonderful as it is) is a little more specialised. I’m not going to talk about how gRPC works in this post, but there are some references at the end. For now, it’s sufficient to recognise that this location object does store the server address. If I’d really wanted to, I could have written code that constructs this string manually<sup>7</sup> but there’s no need to do that when the pyarrow flight module supplies built-in location classes to do this for us!</p>
+<p>The rest of the code is used for initialisation. On the server side, we initialise the server object as an instance of the parent class (i.e., <a href="https://arrow.apache.org/docs/python/generated/pyarrow.flight.FlightServerBase.html">FlightServerBase</a>). On the client side, the first action is to call <code>flight.connect()</code>: this is also an initialisation action that returns an instance of the <a href="https://arrow.apache.org/docs/python/generated/pyarrow.flight.FlightClient.html">FlightClient</a> class. In other words there’s a kind of symmetry here: the <code>TinyServer</code> is built on top of the <code>FlightServerBase</code> class, and the <code>TinyClient</code> is built on top of the <code>FlightClient</code> class.<sup>8</sup></p>
+<p>The other thing to notice here is the data structures set up in these initialisations. On the server side we create an empty dictionary called <code>tables</code> (referred to as <code>self.tables</code> since it belongs to the instance not the class) that the server uses to store any data sets that it is sent. On the client side, the <code>self.connection</code> object is used to represent our connection to the server: this object is an instance of the <code>FlightClient</code> class, and it comes equipped with client side methods for <code>do_put()</code>, <code>do_get()</code> etc. Finally, notice that the last action that the client takes when it is initialised is to wait for the connection to the server to be established.</p>
+<p><br></p>
+</section>
+<section id="putting-a-table" class="level3">
+<h3 class="anchored" data-anchor-id="putting-a-table">Putting a table</h3>
+<p>Next, let’s take a look at the code used to place data on the server. On the server side, we have to specify the <code>do_put()</code> method. In this case, all my code does is store a copy of the data in <code>self.tables</code> and prints a little message to the server console using the <code>server_message()</code> function:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>tiny_flight.py [server]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb32" data-startfrom="18" style="background: #f1f3f5;"><pre class="sourceCode numberSource python numberLines number-lines code-with-copy"><code class="sourceCode python" style="counter-reset: source-line 17;"><span id="cb32-18">    <span class="at" style="color: #657422;">@staticmethod</span>    </span>
+<span id="cb32-19">    <span class="kw" style="color: #003B4F;">def</span> server_message(method, name):</span>
+<span id="cb32-20">        msg <span class="op" style="color: #5E5E5E;">=</span> <span class="st" style="color: #20794D;">'(server) '</span>                       \</span>
+<span id="cb32-21">              <span class="op" style="color: #5E5E5E;">+</span> method                          <span class="op" style="color: #5E5E5E;">\</span></span>
+<span id="cb32-22">              <span class="op" style="color: #5E5E5E;">+</span> <span class="st" style="color: #20794D;">' '</span>                             \</span>
+<span id="cb32-23">              <span class="op" style="color: #5E5E5E;">+</span> name.decode(<span class="st" style="color: #20794D;">'utf-8'</span>)</span>
+<span id="cb32-24">        <span class="bu" style="color: null;">print</span>(msg)</span>
+<span id="cb32-25">      </span>
+<span id="cb32-26">    <span class="kw" style="color: #003B4F;">def</span> do_put(<span class="va" style="color: #111111;">self</span>, context, descriptor, reader, </span>
+<span id="cb32-27">               writer):</span>
+<span id="cb32-28">        table_name <span class="op" style="color: #5E5E5E;">=</span> descriptor.command</span>
+<span id="cb32-29">        <span class="va" style="color: #111111;">self</span>.server_message(<span class="st" style="color: #20794D;">'do_put'</span>, table_name)</span>
+<span id="cb32-30">        <span class="va" style="color: #111111;">self</span>.tables[table_name] <span class="op" style="color: #5E5E5E;">=</span> reader.read_all()</span></code></pre></div>
+</div>
+</div>
+<p>There’s a few things to comment on here. First, let’s note that the <code>server_message()</code> function isn’t very interesting for our purposes. It exists solely to print out messages,<sup>9</sup> thereby allowing the server to announce what it’s doing, but the server would work just fine without these messages. However, it does give me an opportunity to mention some things about the arguments to the various functions defined in this code:</p>
+<ul>
+<li><p><code>server_message()</code> is a static method – which is why it doesn’t take a <code>self</code> argument. The arguments listed in the function definition are exactly the same as the arguments that are included in function calls later.</p></li>
+<li><p><code>do_put()</code> is a class method, and so it takes <code>self</code> as the first argument. As is typical for object oriented programming systems, the <code>self</code> argument in class methods is passed implicitly. It’s included in the function definition, but not in the function calls. Internally, what’s going on is that a call like <code>object.method(argument)</code> is translated to <code>Class.method(object, argument)</code> and therefore the object itself implicitly becomes the first argument.</p></li>
+<li><p><code>do_put()</code> is an Arrow Flight method (as well as a Python class method), and because of that it also takes a <code>context</code> argument that, much like <code>self</code> is passed implicitly. This post isn’t the place to have that discussion – it’s too long already – but for now it suffices to note that Arrow will handle the <code>context</code> argument for us, in an analogous fashion to how Python handles self for us.</p></li>
+</ul>
+<p>Now that we have that sorted, let’s have a look at the part of the code that actually does the server-side work. Specifically, it’s this line in <code>do_put()</code>:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>tiny_flight.py [server]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb33" data-startfrom="30" style="background: #f1f3f5;"><pre class="sourceCode numberSource python numberLines number-lines code-with-copy"><code class="sourceCode python" style="counter-reset: source-line 29;"><span id="cb33-30">        <span class="va" style="color: #111111;">self</span>.tables[table_name] <span class="op" style="color: #5E5E5E;">=</span> reader.read_all()</span></code></pre></div>
+</div>
+</div>
+<p>Let’s unpack this line one step at a time.</p>
+<p>The <code>reader</code> object has been passed to the server as one of the arguments to <code>do_put()</code>, and it’s a <a href="https://arrow.apache.org/docs/python/generated/pyarrow.ipc.RecordBatchStreamReader.html">RecordBatchStreamReader</a>. That is, it’s an object capable of receiving a stream of Arrow data. When the <code>read_all()</code> method is called, it reads all record batches sent by the client and returns the final result as an Arrow table. This table is then stored in the <code>self.tables</code> dictionary.</p>
+<p>Next, notice that the key against which the table is stored as the value is specified by <code>descriptor.command</code>. This part of the code also needs to be explained! What is a “descriptor” object? What is the “command” attribute of a descriptor? That’s not at all obvious from inspection. To resolve our confusion, it helps to realise that this <code>descriptor</code> object is one of the arguments to the the server-side <code>do_put()</code> function, and the code that creates this object is over on the the client side. So let’s look at the code I wrote for the client side:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>tiny_flight.py [client]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb34" data-startfrom="96" style="background: #f1f3f5;"><pre class="sourceCode numberSource python numberLines number-lines code-with-copy"><code class="sourceCode python" style="counter-reset: source-line 95;"><span id="cb34-96">    <span class="kw" style="color: #003B4F;">def</span> put_table(<span class="va" style="color: #111111;">self</span>, name, table):</span>
+<span id="cb34-97">        table_name <span class="op" style="color: #5E5E5E;">=</span> name.encode(<span class="st" style="color: #20794D;">'utf8'</span>)</span>
+<span id="cb34-98">        descriptor <span class="op" style="color: #5E5E5E;">=</span> flight                         <span class="op" style="color: #5E5E5E;">\</span></span>
+<span id="cb34-99">                     .FlightDescriptor              <span class="op" style="color: #5E5E5E;">\</span></span>
+<span id="cb34-100">                     .for_command(table_name)</span>
+<span id="cb34-101">        writer, reader <span class="op" style="color: #5E5E5E;">=</span> <span class="va" style="color: #111111;">self</span>                       <span class="op" style="color: #5E5E5E;">\</span></span>
+<span id="cb34-102">                         .connection                <span class="op" style="color: #5E5E5E;">\</span></span>
+<span id="cb34-103">                         .do_put(descriptor,</span>
+<span id="cb34-104">                                 table.schema)</span>
+<span id="cb34-105">        writer.write(table)</span>
+<span id="cb34-106">        writer.close()</span></code></pre></div>
+</div>
+</div>
+<p>Here we have a <code>put_table()</code> function written in Python that does roughly the same job that the <code>flight_put()</code> function was doing for us in the R example I presented earlier. It’s a high-level wrapper function that sends a <code>do_put()</code> call to the server, streams the data across, and then stops. This line of code in this function is the one that makes the <code>do_put()</code> call:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>tiny_flight.py [client]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb35" data-startfrom="101" style="background: #f1f3f5;"><pre class="sourceCode numberSource python numberLines number-lines code-with-copy"><code class="sourceCode python" style="counter-reset: source-line 100;"><span id="cb35-101">        writer, reader <span class="op" style="color: #5E5E5E;">=</span> <span class="va" style="color: #111111;">self</span>                       <span class="op" style="color: #5E5E5E;">\</span></span>
+<span id="cb35-102">                         .connection                <span class="op" style="color: #5E5E5E;">\</span></span>
+<span id="cb35-103">                         .do_put(descriptor,</span>
+<span id="cb35-104">                                 table.schema)</span></code></pre></div>
+</div>
+</div>
+<p>Okay, so the <code>descriptor</code> on the client side is also the thing that later gets used on the server side to create the key against which the table is stored. If we look at the preceding line of code, we can see that the <code>descriptor</code> object is an instance of the <a href="https://arrow.apache.org/docs/python/generated/pyarrow.flight.FlightDescriptor.html">FlightDescriptor</a> class. So let’s actually step into the Python console and run the commands required to create a flight descriptor object:<sup>10</sup></p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb36" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb36-1">table_name <span class="op" style="color: #5E5E5E;">=</span> <span class="st" style="color: #20794D;">b'name-of-data'</span></span>
+<span id="cb36-2">descriptor <span class="op" style="color: #5E5E5E;">=</span> flight.FlightDescriptor.for_command(table_name)</span>
+<span id="cb36-3"><span class="bu" style="color: null;">print</span>(descriptor)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>&lt;FlightDescriptor command: b'name-of-data'&gt;</code></pre>
+</div>
+</div>
+<p>Perhaps unsurprisingly, the <code>command</code> attribute is in fact the (byte encoded) string that we used to specify the <code>name</code>. In other words, once we strip back all the layers here it turns out that the server stores the data set using the name that the client gave it!</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb38" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb38-1">descriptor.command</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>b'name-of-data'</code></pre>
+</div>
+</div>
+<p><br></p>
+</section>
+<section id="getting-a-table" class="level3 page-columns page-full">
+<h3 class="anchored" data-anchor-id="getting-a-table">Getting a table</h3>
+<p>Next, let’s have a look at the code used to get data from the server. Just like last time, I’ll put the relevant sections from the server code and the client side code side by side:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>tiny_flight.py [server]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb40" data-startfrom="32" style="background: #f1f3f5;"><pre class="sourceCode numberSource python numberLines number-lines code-with-copy"><code class="sourceCode python" style="counter-reset: source-line 31;"><span id="cb40-32">    <span class="kw" style="color: #003B4F;">def</span> do_get(<span class="va" style="color: #111111;">self</span>, context, ticket):</span>
+<span id="cb40-33">        table_name <span class="op" style="color: #5E5E5E;">=</span> ticket.ticket</span>
+<span id="cb40-34">        <span class="va" style="color: #111111;">self</span>.server_message(<span class="st" style="color: #20794D;">'do_get'</span>, table_name)</span>
+<span id="cb40-35">        table <span class="op" style="color: #5E5E5E;">=</span> <span class="va" style="color: #111111;">self</span>.tables[table_name]</span>
+<span id="cb40-36">        <span class="cf" style="color: #003B4F;">return</span> flight.RecordBatchStream(table)</span></code></pre></div>
+</div>
+</div>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>tiny_flight.py [client]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb41" data-startfrom="108" style="background: #f1f3f5;"><pre class="sourceCode numberSource python numberLines number-lines code-with-copy"><code class="sourceCode python" style="counter-reset: source-line 107;"><span id="cb41-108">    <span class="kw" style="color: #003B4F;">def</span> get_table(<span class="va" style="color: #111111;">self</span>, name):</span>
+<span id="cb41-109">        table_name <span class="op" style="color: #5E5E5E;">=</span> name.encode(<span class="st" style="color: #20794D;">'utf8'</span>)</span>
+<span id="cb41-110">        ticket <span class="op" style="color: #5E5E5E;">=</span> flight.Ticket(table_name)</span>
+<span id="cb41-111">        reader <span class="op" style="color: #5E5E5E;">=</span> <span class="va" style="color: #111111;">self</span>.connection.do_get(ticket)</span>
+<span id="cb41-112">        <span class="cf" style="color: #003B4F;">return</span> reader.read_all()</span></code></pre></div>
+</div>
+</div>
+<p>On the client side, the <code>get_table()</code> helper function that I’ve written does two things. First it creates a <a href="https://arrow.apache.org/docs/python/generated/pyarrow.flight.Ticket.html">Ticket</a> object from the <code>name</code> of the data table to be retrieved. It then calls the <code>do_get()</code> flight method to communicate with the server. Then, using the <code>reader</code> object returned by <code>do_get()</code>, it streams the data from the server. The server side code is the mirror image: when the ticket is received, it uses this ticket to retrieve the specific <code>table</code> from <code>self.tables</code>, and returns a stream.</p>
+<p>Looking at these two code extracts side by side we can see that the ticket object returned client-side by <code>flight.Ticket()</code> gets used server-side to retrieve the requested table. So we should take a look at what happens here. What we hope to see is that this ticket produces the same key used to store the data originally: that is, when the server specifies a storage key with <code>table_name = ticket.ticket</code> in the <code>do_get()</code> method, it should match the key created by <code>do_put()</code> when <code>table_name = descriptor.command</code> was executed.</p>
+<p>Let’s verify that this is true!</p>
+<p>Since I already have a <code>table_name</code> object lying around from earlier, let’s run that line of code shall we?</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb42" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb42-1">ticket <span class="op" style="color: #5E5E5E;">=</span> flight.Ticket(table_name)</span>
+<span id="cb42-2"><span class="bu" style="color: null;">print</span>(ticket)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>&lt;Ticket b'name-of-data'&gt;</code></pre>
+</div>
+</div>
+<p>That looks promising. If we take a peek at <code>ticket.ticket</code>, we see that – yet again – under the hood the ticket is just an alias for the name of the data set:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb44" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb44-1">ticket.ticket</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>b'name-of-data'</code></pre>
+</div>
+</div>
+<p>Well that’s a relief. In the server-side code, the <code>descriptor.command</code> object and the <code>ticket.ticket</code> object both produce the correct key used to index a table.</p>
+<p><br></p>
+<div class="column-body-outset">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://blog.djnavarro.net/posts/2022-10-18_arrow-flight/img/boarding-pass.jpg" class="img-fluid figure-img"></p>
+<p></p><figcaption class="figure-caption">Boarding a flight. <a href="https://pixabay.com/photos/travel-airport-boarding-pass-5219496/">Image by Joshua Woroniecki from Pixabay</a></figcaption><p></p>
+</figure>
+</div>
+</div>
+<p><br></p>
+</section>
+<section id="getting-information" class="level3">
+<h3 class="anchored" data-anchor-id="getting-information">Getting information</h3>
+<p>Our journey through the source code continues. On the client side I’ve written a function called <code>list_tables()</code> that returns the names of all tables stored on the server. Here’s what that looks like:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>tiny_flight.py [client]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb46" data-startfrom="114" style="background: #f1f3f5;"><pre class="sourceCode numberSource python numberLines number-lines code-with-copy"><code class="sourceCode python" style="counter-reset: source-line 113;"><span id="cb46-114">    <span class="kw" style="color: #003B4F;">def</span> list_tables(<span class="va" style="color: #111111;">self</span>):</span>
+<span id="cb46-115">        names <span class="op" style="color: #5E5E5E;">=</span> []</span>
+<span id="cb46-116">        <span class="cf" style="color: #003B4F;">for</span> flight <span class="kw" style="color: #003B4F;">in</span> <span class="va" style="color: #111111;">self</span>.connection.list_flights():</span>
+<span id="cb46-117">            table_name <span class="op" style="color: #5E5E5E;">=</span> flight.descriptor.command</span>
+<span id="cb46-118">            names.append(table_name.decode(<span class="st" style="color: #20794D;">'utf-8'</span>))</span>
+<span id="cb46-119">        <span class="cf" style="color: #003B4F;">return</span> names</span></code></pre></div>
+</div>
+</div>
+<p>The key part of this function is the call to <code>self.connection.list_flights()</code>. That’s where the client contacts the server and requests information. Everything else in the function is there to extract the one piece of information (the name of the table) that we’re interested in and return it to the user.</p>
+<p>Pivoting over to the server code, there are two flight methods that are relevant here. The <code>get_flight_info()</code> function is a flight method that returns information about a single flight – where, in this case, there’s a one-to-one mapping between flights and tables – and the <code>list_flights()</code> method can be used to retrieve information about all flights stored on the server:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>tiny_flight.py [server]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb47" data-startfrom="53" style="background: #f1f3f5;"><pre class="sourceCode numberSource python numberLines number-lines code-with-copy"><code class="sourceCode python" style="counter-reset: source-line 52;"><span id="cb47-53">    <span class="kw" style="color: #003B4F;">def</span> get_flight_info(<span class="va" style="color: #111111;">self</span>, context, descriptor):</span>
+<span id="cb47-54">        table_name <span class="op" style="color: #5E5E5E;">=</span> descriptor.command</span>
+<span id="cb47-55">        <span class="va" style="color: #111111;">self</span>.server_message(<span class="st" style="color: #20794D;">'get_flight_info'</span>,</span>
+<span id="cb47-56">                            table_name)</span>
+<span id="cb47-57">        <span class="cf" style="color: #003B4F;">return</span> <span class="va" style="color: #111111;">self</span>.flight_info(descriptor)        </span>
+<span id="cb47-58">        </span>
+<span id="cb47-59">    <span class="kw" style="color: #003B4F;">def</span> list_flights(<span class="va" style="color: #111111;">self</span>, context, criteria):</span>
+<span id="cb47-60">        <span class="va" style="color: #111111;">self</span>.server_message(<span class="st" style="color: #20794D;">'list_flights'</span>, <span class="st" style="color: #20794D;">b' '</span>)</span>
+<span id="cb47-61">        <span class="cf" style="color: #003B4F;">for</span> table_name <span class="kw" style="color: #003B4F;">in</span> <span class="va" style="color: #111111;">self</span>.tables.keys():</span>
+<span id="cb47-62">            descriptor <span class="op" style="color: #5E5E5E;">=</span> flight                  <span class="op" style="color: #5E5E5E;">\</span></span>
+<span id="cb47-63">                         .FlightDescriptor       <span class="op" style="color: #5E5E5E;">\</span></span>
+<span id="cb47-64">                         .for_command(table_name)</span>
+<span id="cb47-65">            <span class="cf" style="color: #003B4F;">yield</span> <span class="va" style="color: #111111;">self</span>.flight_info(descriptor)</span></code></pre></div>
+</div>
+</div>
+<p>There’s two things to comment on here. First, note that the <code>list_flight()</code> method iterates<sup>11</sup> over all the stored keys in the <code>tables</code> dictionary, uses the key to construct a flight descriptor, and then calls the <code>flight_info()</code> helper function that I’ll explain in a moment. In contrast, the <code>get_flight_info()</code> function receives a flight descriptor directly from the client, so it’s much simpler: it just calls <code>flight_info()</code> directly.</p>
+<p>Okay, so now let’s have a look at the <code>flight_info()</code> helper method. Here’s the code for that one:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>tiny_flight.py [server]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb48" data-startfrom="38" style="background: #f1f3f5;"><pre class="sourceCode numberSource python numberLines number-lines code-with-copy"><code class="sourceCode python" style="counter-reset: source-line 37;"><span id="cb48-38">    <span class="kw" style="color: #003B4F;">def</span> flight_info(<span class="va" style="color: #111111;">self</span>, descriptor):</span>
+<span id="cb48-39">        table_name <span class="op" style="color: #5E5E5E;">=</span> descriptor.command</span>
+<span id="cb48-40">        table <span class="op" style="color: #5E5E5E;">=</span> <span class="va" style="color: #111111;">self</span>.tables[table_name]</span>
+<span id="cb48-41"></span>
+<span id="cb48-42">        ticket <span class="op" style="color: #5E5E5E;">=</span> flight.Ticket(table_name)</span>
+<span id="cb48-43">        location <span class="op" style="color: #5E5E5E;">=</span> <span class="va" style="color: #111111;">self</span>.location.uri.decode(<span class="st" style="color: #20794D;">'utf-8'</span>)</span>
+<span id="cb48-44">        endpoint <span class="op" style="color: #5E5E5E;">=</span> flight.FlightEndpoint(ticket,</span>
+<span id="cb48-45">                                         [location])</span>
+<span id="cb48-46">        </span>
+<span id="cb48-47">        <span class="cf" style="color: #003B4F;">return</span> flight.FlightInfo(table.schema, </span>
+<span id="cb48-48">                                 descriptor, </span>
+<span id="cb48-49">                                 [endpoint], </span>
+<span id="cb48-50">                                 table.num_rows,</span>
+<span id="cb48-51">                                 table.nbytes)</span></code></pre></div>
+</div>
+</div>
+<p>Let’s start by looking at the return value. It’s a <a href="https://arrow.apache.org/docs/python/generated/pyarrow.flight.FlightInfo.html">FlightInfo</a> object and as I mentioned earlier there are five things needed to create it:</p>
+<ul>
+<li><code>table.schema</code> is the <a href="https://arrow.apache.org/docs/python/generated/pyarrow.Schema.html">Schema</a> for the data stored by the flight</li>
+<li>The flight <code>descriptor</code> object, which was passed as input</li>
+<li>A list of one or more <a href="https://arrow.apache.org/docs/python/generated/pyarrow.flight.FlightEndpoint.html">FlightEndpoint</a> objects – in this cases, <code>[endpoint]</code> is a list containing a single endpoint – that specifies where the data are available for streaming. Each endpoint includes a <code>location</code> from which to stream, and the associated <code>ticket</code> for that location</li>
+<li>The total number of records can be accessed from <code>table.num_rows</code></li>
+<li>The total number of bytes can be accessed from <code>table.nbytes</code></li>
+</ul>
+<p>Looking at the rest of the function, you can see that the list of endpoints requires a little work to construct. We need to call <code>flight.Ticket()</code> to construct a ticket object, we need to extract the server <code>location</code> that we stored when the server was initialised, and then we need to call <code>flight.Endpoint()</code> to put these things together. There’s a little more code involved, but thankfully it’s not conceptually difficult.</p>
+<p><br></p>
+</section>
+<section id="custom-actions" class="level3 page-columns page-full">
+<h3 class="anchored" data-anchor-id="custom-actions">Custom actions</h3>
+<p>We’ve encountered (and implemented) four of the methods defined by the Arrow Flight protocol, and as we’ve seen they server different purposes. The <code>do_put()</code> and <code>do_get()</code> methods are used to stream data to and from the server.<sup>12</sup> In contrast, the <code>get_flight_info()</code> and <code>list_flights()</code> methods are used to retrieve metadata about the data stored on the server. In this example, these four methods are sufficient to provide all the core functionality. I could stop here if I absolutely wanted to. But there’s one more method I want to draw your attention to: <code>do_action()</code>. In recognition of the fact that real world applications will always need to perform custom operations that weren’t originally built into the protocol, the <code>do_action()</code> method exists to allow the client to request (and the server to perform) custom actions that you can define however you like.</p>
+<p>To give you a sense of how this works, we’ll add two custom actions to our server: when the client requests a <code>'drop_table'</code> action, the corresponding table will be deleted from the server, and when the client requests a <code>'shutdown'</code> action the server will shut itself down.<sup>13</sup> Let’s take a look at the server-side code implementing this:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>tiny_flight.py [server]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb49" data-startfrom="67" style="background: #f1f3f5;"><pre class="sourceCode numberSource python numberLines number-lines code-with-copy"><code class="sourceCode python" style="counter-reset: source-line 66;"><span id="cb49-67">    <span class="kw" style="color: #003B4F;">def</span> do_action(<span class="va" style="color: #111111;">self</span>, context, action):</span>
+<span id="cb49-68">        <span class="cf" style="color: #003B4F;">if</span> action.<span class="bu" style="color: null;">type</span> <span class="op" style="color: #5E5E5E;">==</span> <span class="st" style="color: #20794D;">'drop_table'</span>:</span>
+<span id="cb49-69">            table_name <span class="op" style="color: #5E5E5E;">=</span> action.body.to_pybytes()</span>
+<span id="cb49-70">            <span class="kw" style="color: #003B4F;">del</span> <span class="va" style="color: #111111;">self</span>.tables[table_name]</span>
+<span id="cb49-71">            <span class="va" style="color: #111111;">self</span>.server_message(<span class="st" style="color: #20794D;">'drop_table'</span>,</span>
+<span id="cb49-72">                                table_name)</span>
+<span id="cb49-73"></span>
+<span id="cb49-74">        <span class="cf" style="color: #003B4F;">elif</span> action.<span class="bu" style="color: null;">type</span> <span class="op" style="color: #5E5E5E;">==</span> <span class="st" style="color: #20794D;">'shutdown'</span>:</span>
+<span id="cb49-75">            <span class="va" style="color: #111111;">self</span>.server_message(<span class="st" style="color: #20794D;">'shutdown'</span>, <span class="st" style="color: #20794D;">b' '</span>)</span>
+<span id="cb49-76">            <span class="va" style="color: #111111;">self</span>.shutdown()</span>
+<span id="cb49-77"></span>
+<span id="cb49-78">        <span class="cf" style="color: #003B4F;">else</span>:</span>
+<span id="cb49-79">            <span class="cf" style="color: #003B4F;">raise</span> <span class="pp" style="color: #AD0000;">KeyError</span>(<span class="st" style="color: #20794D;">'Unknown action </span><span class="sc" style="color: #5E5E5E;">{!r}</span><span class="st" style="color: #20794D;">'</span>.</span>
+<span id="cb49-80">                           <span class="bu" style="color: null;">format</span>(action.<span class="bu" style="color: null;">type</span>))</span></code></pre></div>
+</div>
+</div>
+<p>The <code>do_action()</code> method expects to receive an <a href="https://arrow.apache.org/docs/python/generated/pyarrow.flight.Action.html">Action</a> object as input to the <code>action</code> argument. The <code>action.type</code> attribute is where the name of the action is stored, so the code here uses if-else to decide which action to perform, or raise an error if the action type is not recognised. The code implementing the actions is pretty minimal. On a shutdown action, the server calls the <code>self.shutdown()</code> method: this is inherited from FlightServerBase, I didn’t have to implement it myself. For a drop table action, the server inspects the <code>action.body</code> argument to determine the name of the table to be dropped, and then deletes it from <code>self.tables</code>.<sup>14</sup></p>
+<p>How does the client call this method? To see an example of this, let’s flip over to the client side of the code and look at the <code>drop_table()</code> function:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>tiny_flight.py [client]</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb50" data-startfrom="121" style="background: #f1f3f5;"><pre class="sourceCode numberSource python numberLines number-lines code-with-copy"><code class="sourceCode python" style="counter-reset: source-line 120;"><span id="cb50-121">    <span class="kw" style="color: #003B4F;">def</span> drop_table(<span class="va" style="color: #111111;">self</span>, name):</span>
+<span id="cb50-122">        table_name <span class="op" style="color: #5E5E5E;">=</span> name.encode(<span class="st" style="color: #20794D;">'utf8'</span>)</span>
+<span id="cb50-123">        drop <span class="op" style="color: #5E5E5E;">=</span> flight.Action(<span class="st" style="color: #20794D;">'drop_table'</span>, table_name) </span>
+<span id="cb50-124">        <span class="va" style="color: #111111;">self</span>.connection.do_action(drop)</span></code></pre></div>
+</div>
+</div>
+<p>Happily, it turns out to be simple: first we call <code>flight.Action()</code> to construct the action object itself, passing the action type and action body as arguments. Then we call the built-in <code>do_action()</code> client-side method, which as usual we can access from the <code>self.connection</code> object.</p>
+<p>Voilà! We are done. The server and client are both ready to go. Let’s take them for a spin, shall we?</p>
+<p><br></p>
+<div class="column-body-outset">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://blog.djnavarro.net/posts/2022-10-18_arrow-flight/img/bumblebee.jpg" class="img-fluid figure-img"></p>
+<p></p><figcaption class="figure-caption">Bee flight. <a href="https://pixabay.com/photos/bumblebee-hovering-nectar-insect-6326653/">Image by Gary Stearman from Pixabay</a></figcaption><p></p>
+</figure>
+</div>
+</div>
+<p><br></p>
+</section>
+<section id="using-our-server" class="level3 page-columns page-full">
+<h3 class="anchored" data-anchor-id="using-our-server">Using our server</h3>
+<p>Let’s start with a few imports. In this demonstration I’m going to read data from csv files, so I’ll import the csv submodule from pyarrow. Obviously, I’ll also need access to the server classes, and since the <a href="tiny_flight.py">tiny_flight.py</a> script is bundled with this post I can import that too. Finally, I’m going to start the server running in its own thread, so I’ll import threading too:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb51" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb51-1"><span class="im" style="color: #00769E;">import</span> threading</span>
+<span id="cb51-2"><span class="im" style="color: #00769E;">import</span> tiny_flight <span class="im" style="color: #00769E;">as</span> tiny</span>
+<span id="cb51-3"><span class="im" style="color: #00769E;">from</span> pyarrow <span class="im" style="color: #00769E;">import</span> csv</span></code></pre></div>
+</div>
+<p>Next, I’ll initialise a server running on port 9001 and start it running in its own thread. This will turn out to be handy because when the client starts interacting with the server, we’ll see the server messages as well as the client output!</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb52" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb52-1">server <span class="op" style="color: #5E5E5E;">=</span> tiny.TinyServer(port <span class="op" style="color: #5E5E5E;">=</span> <span class="dv" style="color: #AD0000;">9001</span>)</span>
+<span id="cb52-2">thread <span class="op" style="color: #5E5E5E;">=</span> threading.Thread(target <span class="op" style="color: #5E5E5E;">=</span> <span class="kw" style="color: #003B4F;">lambda</span>: server.serve(), </span>
+<span id="cb52-3">                          daemon <span class="op" style="color: #5E5E5E;">=</span> <span class="va" style="color: #111111;">True</span>)</span>
+<span id="cb52-4">thread.start()</span></code></pre></div>
+</div>
+<p>Now that the server is up and running, let’s instantiate a client and have it connect to the server:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb53" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb53-1">client <span class="op" style="color: #5E5E5E;">=</span> tiny.TinyClient(port <span class="op" style="color: #5E5E5E;">=</span> <span class="dv" style="color: #AD0000;">9001</span>)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>(server) list_flights  </code></pre>
+</div>
+</div>
+<p>Notice the message prefixed with <code>(server)</code> here: that part of the output is generated by the server running in the thread. It’s not client-side output. We’re only seeing it here because when the client is initialised by the call to <code>flight.connect()</code>, it calls the <code>list_flights()</code> flight method, and the server prints a message using its internal <code>server_message()</code> function.</p>
+<p>Okay. So far so good. Our next step is to create some Arrow tables client side. To make this simpler I have csv files containing copies of the freely-available <a href="https://rdrr.io/cran/bestglm/man/AirQuality.html">1973 New York city air quality</a> and <a href="https://www.rdocumentation.org/packages/datasets/versions/3.6.2/topics/quakes">earthquakes near Fiji since 1964</a> data sets that are both bundled by the datasets R package. I’ll import them both as pyarrow tables:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb55" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb55-1">fijiquakes <span class="op" style="color: #5E5E5E;">=</span> csv.read_csv(<span class="st" style="color: #20794D;">"fijiquakes.csv"</span>)</span>
+<span id="cb55-2">airquality <span class="op" style="color: #5E5E5E;">=</span> csv.read_csv(<span class="st" style="color: #20794D;">"airquality.csv"</span>)</span></code></pre></div>
+</div>
+<p>At the moment both tables exist on the client, and we’d like to cache them on the server. We can do this by calling the <code>put_table()</code> method:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb56" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb56-1">client.put_table(<span class="st" style="color: #20794D;">"fijiquakes"</span>, fijiquakes)</span>
+<span id="cb56-2">client.put_table(<span class="st" style="color: #20794D;">"airquality"</span>, airquality)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>(server) do_put fijiquakes
+(server) do_put airquality</code></pre>
+</div>
+</div>
+<p>Again, notice that the server prints messages which make clear that the data have arrived on the server side. Of course, the client doesn’t actually know this because my server-side code for <code>do_put()</code> doesn’t implement a server response for the client. But no matter: the client can check manually by calling <code>list_tables()</code>:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb58" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb58-1">client.list_tables()</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>(server) list_flights  
+['fijiquakes', 'airquality']</code></pre>
+</div>
+</div>
+<p>Here we see two lines of output: the first one is the server-side log, and the second is the output returned client-side showing that both tables exist on the server.</p>
+<p>We can take this a step further, of course, by retrieving the data from the server cache. We can do that straightforwardly by calling <code>get_table()</code>, and again see that a server-side message is printed, while the table itself is returned to the client:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb60" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb60-1">client.get_table(<span class="st" style="color: #20794D;">"fijiquakes"</span>)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>(server) do_get fijiquakes
+pyarrow.Table
+lat: double
+long: double
+depth: int64
+mag: double
+stations: int64
+----
+lat: [[-20.42,-20.62,-26,-17.97,-20.42,...,-25.93,-12.28,-20.13,-17.4,-21.59]]
+long: [[181.62,181.03,184.1,181.66,181.96,...,179.54,167.06,184.2,187.8,170.56]]
+depth: [[562,650,42,626,649,...,470,248,244,40,165]]
+mag: [[4.8,4.2,5.4,4.1,4,...,4.4,4.7,4.5,4.5,6]]
+stations: [[41,15,43,19,11,...,22,35,34,14,119]]</code></pre>
+</div>
+</div>
+<p>Now, perhaps we decided that we don’t need a cached copy of the airquality table any longer. We can ask the server to remove it by calling <code>drop_table()</code>, and we can confirm the result by calling <code>list_tables()</code> again:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb62" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb62-1">client.drop_table(<span class="st" style="color: #20794D;">"airquality"</span>)</span>
+<span id="cb62-2">client.list_tables()</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>(server) drop_table airquality
+(server) list_flights  
+['fijiquakes']</code></pre>
+</div>
+</div>
+<p>Yep, that all looks right!</p>
+<p><br></p>
+<div class="column-body-outset">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="https://blog.djnavarro.net/posts/2022-10-18_arrow-flight/img/birds.jpg" class="img-fluid figure-img"></p>
+<p></p><figcaption class="figure-caption">Birds in flight. <a href="https://pixabay.com/photos/nature-animals-bird-migratory-bird-2746726/">Image by Gerhard from Pixabay</a></figcaption><p></p>
+</figure>
+</div>
+</div>
+<p><br></p>
+</section>
+</section>
+<section id="where-to-next" class="level2">
+<h2 class="anchored" data-anchor-id="where-to-next">Where to next?</h2>
+<p>Compared to the rest of the Apache Arrow project, it’s not so easy to find tutorials and documentation about flight. It’s still a little piecemeal. With that in mind, here’s an annotated reading list that will be helpful if you want to explore flight further:</p>
+<ul>
+<li><p><a href="https://arrow.apache.org/blog/2019/10/13/introducing-arrow-flight/">The original announcement of flight</a> by Wes McKinney on the Apache Arrow blog gives a very good overview of the motivation for why flight was introduced.</p></li>
+<li><p><a href="https://voltrondata.com/news/data-transfer-at-the-speed-of-flight/">Data transfer at the speed of flight</a> by Tom Drabas, Fernanda Foertter, and David Li. This is a blog post on the Voltron Data blog that provides a concrete example of a working flight server written in Python. The Python code I’ve discussed in this post is an elaboration of the content in that post. It’s a good starting point</p></li>
+<li><p><a href="https://voltrondata.com/news/apache-arrow-flight-primer/">Apache Arrow Flight: A Primer</a> by David Li and Tom Drabas. This is another blog post on the Voltron Data website. This one doesn’t have any working code for you to look at, but it provides a good summary of the technologies that Arrow Flight is built upon. It’s a little intense for novices but is pretty handy for intermediate level users who want to take a peek under the hood.</p></li>
+<li><p><a href="https://arrow.apache.org/docs/python/flight.html">The Python documentation flight vignette</a> is pretty readable and goes into a moderate amount of detail, but be aware it implicitly assumes some familiarity with remote procedure calls.</p></li>
+<li><p><a href="https://arrow.apache.org/cookbook/py/flight.html">The Python cookbook for Arrow</a> contains the most thorough worked example I’ve seen anywhere. It’s a little dense for novice users, but it’s still the one of the most comprehensive resources I’ve seen, and the only one that talks about issues like authentication (which I have not discussed at all here!)</p></li>
+<li><p><a href="https://arrow.apache.org/docs/r/articles/flight.html">The R documentation flight vignette</a> has a succinct overview of how you can use the high-level interface provided by <code>flight_put()</code>, <code>flight_get()</code>, etc. What it doesn’t do (yet?) is discuss the low-level features. At the moment you won’t find a discussion of say <code>client$do_get()</code> and how it relates to <code>flight_get()</code>.</p></li>
+<li><p>Along similar lines there are some examples in the <a href="https://arrow.apache.org/cookbook/r/flight.html">R cookbook</a>, but they are also quite minimal.</p></li>
+<li><p>Should you be interested in writing an Arrow Flight service in C++, the <a href="https://arrow.apache.org/docs/dev/cpp/flight.html">documentation pages for the C++ Flight implementation</a> may come in handy!</p></li>
+<li><p>If you’re willing to spend some money I thoroughly recommend the chapter on Arrow flight in Matt Topol’s book <a href="https://www.packtpub.com/product/in-memory-analytics-with-apache-arrow/9781801071031">In-Memory Analytics with Apache Arrow</a>. I found it really helpful for cementing my own understanding. In addition to the worked examples in Python, C++, and Go, the chapter provides some historical context for understanding the difference between RPC frameworks and REST frameworks, and is also the only resource I’m aware of that goes into detail about how more sophisticated network architectures are supported by flight.</p></li>
+<li><p>If you’re keen to understand what is happening under the hood, at some point you’re going to want to read about gRPC. The flight protocol is built on top of gRPC, and a lot of the advanced content you’ll encounter on flight doesn’t make a lot of sense until you’ve started to wrap your head around it. To that end, I found the <a href="https://grpc.io/docs/what-is-grpc/introduction/">introduction to gRPC</a> documentation really helpful. You may also want to take a look at the documentation for <a href="https://developers.google.com/protocol-buffers">protocol buffers</a> because in practice that’s doing a lot of the work for us here!</p></li>
+<li><p>If you want to understand the backdrop against which all this sits, it’s also pretty handy to do a bit of digging around and reading the history around <a href="https://en.wikipedia.org/wiki/Remote_procedure_call">remote procedure call (RPC) approaches to distributed computing</a> and <a href="https://en.wikipedia.org/wiki/Representational_state_transfer">representational state transfer (REST) approaches</a>. Even skimming the two linked Wikipedia articles was helpful for me.</p></li>
+<li><p>When digging around in source code, I found it handy to take a look at these parts of the code base: source code for the <a href="https://github.com/apache/arrow/blob/master/r/inst/demo_flight_server.py">R demo server</a>, a <a href="https://github.com/apache/arrow/blob/master/python/examples/flight/server.py">Python example server</a>, and the <a href="https://github.com/apache/arrow/blob/master/python/pyarrow/_flight.pyx">pyarrow flight implementation</a></p></li>
+<li><p>Finally, while neither one is ideal as a place to start, once I started getting the hang of what I was doing, I have found it handy to browse through the <a href="https://arrow.apache.org/docs/python/api/flight.html">Python flight API reference pages</a>, and to occasionally dip into the official <a href="https://arrow.apache.org/docs/format/Flight.html">Arrow flight RPC specification</a>. Regarding the latter, my experience was that the images showing how each of the flight methods operates were handy, and the <a href="https://arrow.apache.org/docs/format/Flight.html#protocol-buffer-definitions">comments</a> shown in the in the “protocol buffer definitions” are nice because they’re maybe the clearest verbal description of what each of the flight methods expects as input and what objects they will return.</p></li>
+</ul>
+<p>Happy hunting!</p>
+<div class="cell">
+
+</div>
+<!--------------- appendices go here ----------------->
+</section>
+
+
+
+<div id="quarto-appendix" class="default"><section id="acknowledgements" class="level2 appendix"><h2 class="quarto-appendix-heading">Acknowledgements</h2><div class="quarto-appendix-contents">
+
+<p>My sincere thanks to Rok Mihevc, David Li, and François Michonneau for reviewing earlier versions of this post.</p>
+
+
+</div></section><section id="footnotes" class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
+
+<ol>
+<li id="fn1"><p>All the way back to October 2019, which is like ancient history by Arrow standards. Sigh. This project moves too damned fast to keep pace with it all.↩︎</p></li>
+<li id="fn2"><p>One of my favourite things about having a quarto blog is that every post is a notebook. It’s technically possible to “cheat” by including hidden code chunks that execute different code than that shown in the post, but it’s something I do very sparingly and only when there’s some weirdness involved. I’m not doing that here. When this post is rendered, it does start a new instance of the demo server in a different R session: every flight server demonstrated here is in fact running in the background so that the post renders, and server side data are all stored by those other processes. There really is no copy of the <code>pollution_data</code> object in the R session used to render this post. It’s somewhere else, as it bloody well should be.↩︎</p></li>
+<li id="fn3"><p>Optionally, you can also pass a third “options” argument.↩︎</p></li>
+<li id="fn4"><p>The examples in this post are simple ones where the server doesn’t actually send a response, so the reader object isn’t used for anything↩︎</p></li>
+<li id="fn5"><p>As an aside, it’s not clear to me that this will remain true in the long run. There are a lot of advantages to having access to all the features of the Arrow Flight RPC specification, and if my dev skills are up to the task I may attempt to update the R bindings. No promises though :-)↩︎</p></li>
+<li id="fn6"><p>If I were so inclined I’d probably point out this is the maybe the clearest illustration that we’re adopting an RPC approach to distributed computing – this is not a REST API. After all, if the server code doesn’t make sense without looking at the client code, there’s a pretty good chance you don’t meet the “uniform interface” REST criterion. This isn’t a criticism of flight, of course: there are good reasons to adopt a non-RESTful RPC approach sometimes. However, that’s beyond the scope of this post. It’s already too long as it is!↩︎</p></li>
+<li id="fn7"><p>People with more experience in Python (well, more than me) would notice the importance of the <code>b''</code> notation. One thing I didn’t know about Python until recently is that it is quite explicit in specifying how strings are encoded. The <code>b''</code> notation is used to indicate that this is a “byte literal” string. To convert it to utf-8 text, it needs to be explicitly decoded. I mention this here because later on in the post I’m going to call <code>.encode()</code> and <code>.decode()</code> string methods to switch back and forth between byte literals and utf-8 strings. I’m assuming this is common knowledge among Python users, but coming from R this was a little surprising!↩︎</p></li>
+<li id="fn8"><p>That said, the symmetry isn’t exact: the <code>TinyServer</code> object explicitly subclasses <code>FlightServerBase</code> and overrides several of its methods in order to provide server functionality. In contrast, <code>TinyClient</code> is not a subclass. Rather, every <code>TinyClient</code> object contains a <code>connection</code> object that is a <code>FlightClient</code> instance. The explicitly-defined methods for the <code>TinyClient</code> class internally call the methods of the <code>connection</code> object whenever the client needs to call a flight method.↩︎</p></li>
+<li id="fn9"><p>As an aside, note that all the “strings” that the client and server are using to represent tickets, locations, etc are represented as byte literals. That means that the <code>name</code> argument that gets passed to <code>server_message()</code> will always be a byte literal, not utf-8 encoded. In order to print a message to the console, we need to decode the bytes into utf-8 format, which is why the code for <code>server_message()</code> uses <code>name.decode("utf-8")</code>.↩︎</p></li>
+<li id="fn10"><p>In this example I’ve used the <code>for_command()</code> method to construct the flight descriptor. This isn’t the only way to do it: you can use the <code>for_path()</code> method also. I’m only mentioning this because when you look at the code used in other flight servers, you’ll sometimes see the <code>for_path()</code> method used in a similar fashion to the way I’m using <code>for_command()</code> here.↩︎</p></li>
+<li id="fn11"><p>For fellow Python newbies: if you’re unsure about why <code>list_flights()</code> generates return values with <code>yield</code> rather than <code>return</code>, it’s worth taking a little time to read up on Python iterables and generators. There’s an excellent explanation on <a href="https://stackoverflow.com/questions/231767/what-does-the-yield-keyword-do">this stackoverflow question</a>↩︎</p></li>
+<li id="fn12"><p>There is also a <code>do_exchange()</code> method that allows bidirectional streaming, but I’m not going to talk about it in this post↩︎</p></li>
+<li id="fn13"><p>I mean yeah, in real life you might want to have some… um… authentication in place before letting an arbitrary client take these kinds of actions, but I’m not going to talk about that here!↩︎</p></li>
+<li id="fn14"><p>If I were being more rigorous I’d include some input checking here, but let’s be realistic: that’s not even close to the most unsafe thing about my simple example. I cannot stress enough that this code is for explanatory purposes, it’s not production code!↩︎</p></li>
+</ol>
+</section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
+  author = {Danielle Navarro},
+  editor = {},
+  title = {Building an {Arrow} {Flight} Server},
+  date = {2022-10-18},
+  url = {https://blog.djnavarro.net/posts/2022-10-18_arrow-flight},
+  langid = {en}
+}
+</code></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2022" class="csl-entry quarto-appendix-citeas">
+Danielle Navarro. 2022. <span>“Building an Arrow Flight Server.”</span>
+October 18, 2022. <a href="https://blog.djnavarro.net/posts/2022-10-18_arrow-flight">https://blog.djnavarro.net/posts/2022-10-18_arrow-flight</a>.
+</div></div></section></div> ]]></description>
+  <category>Apache Arrow</category>
+  <category>Networking</category>
+  <category>R</category>
+  <category>Python</category>
+  <guid>https://blog.djnavarro.net/posts/2022-10-18_arrow-flight/index.html</guid>
+  <pubDate>Mon, 17 Oct 2022 13:00:00 GMT</pubDate>
+  <media:content url="https://blog.djnavarro.net/posts/2022-10-18_arrow-flight/img/biplane.jpg" medium="image" type="image/jpeg"/>
+</item>
 <item>
   <title>Data transfer between Python and R with rpy2 and Apache Arrow</title>
   <dc:creator>Danielle Navarro</dc:creator>
@@ -11141,242 +12028,6 @@ Colours.”</span> September 7, 2021. <a href="https://blog.djnavarro.net/water-
   <guid>https://blog.djnavarro.net/posts/2021-09-07_water-colours/index.html</guid>
   <pubDate>Mon, 06 Sep 2021 14:00:00 GMT</pubDate>
   <media:content url="https://blog.djnavarro.net/posts/2021-09-07_water-colours/jasmine-recollected.png" medium="image" type="image/png" height="89" width="144"/>
-</item>
-<item>
-  <title>Managing GitHub credentials from R, difficulty level linux</title>
-  <dc:creator>Danielle Navarro</dc:creator>
-  <link>https://blog.djnavarro.net/posts/2021-08-08_git-credential-helpers/index.html</link>
-  <description><![CDATA[ 
-
-
-
-
-<!--------------- my typical setup ----------------->
-<!--------------- post begins here ----------------->
-<p>There are days when I regret switching to linux as an R user. It’s not that I’m particularly enamoured of Apple or Microsoft, and I do enjoy the freedom to tinker that linux systems provide, but without the same resourcing that underpins Windows or Mac OS, I do spent a disproportionate amount my time trying to make my long-suffering Ubuntu laptop do something that would “just work” if I’d gone with one of the more traditional options. But such is life, and besides, there’s a case to be made that the time I spend on these things is not wasted: usually, I end up learning something useful.</p>
-
-<div class="no-row-height column-margin column-container"><div class="">
-<p><img src="https://blog.djnavarro.net/posts/2021-08-08_git-credential-helpers/https:/media.giphy.com/media/DEaRw1U6F4s9O/giphy.gif" width="100%"> La la la la la. (Figure from giphy.com)</p>
-</div></div><p>This is one of those stories.</p>
-<section id="the-story-is-quite-short" class="level2 page-columns page-full">
-<h2 class="anchored" data-anchor-id="the-story-is-quite-short">The story is quite short…</h2>
-<section id="using-github-credentials-with-r" class="level3">
-<h3 class="anchored" data-anchor-id="using-github-credentials-with-r">Using GitHub credentials with R</h3>
-<p>For some years now I have been using git repositories for version control, with some ambivalence to my feelings. I absolutely love version control, and I think GitHub is a fabulous tool, but git itself gives me headaches. It feels counterintuitive and untidy, and I am resistant to learning new git tricks because of that. However, now that GitHub is moving to <a href="https://github.blog/2020-12-15-token-authentication-requirements-for-git-operations/">end password authentication for git operations</a>, I find myself needing to do precisely that. Sigh.</p>
-<p>Like many R users, whenever I encounter a git problem my first impulse is to see whether <a href="https://happygitwithr.com/">Happy Git and GitHub for the useR</a> <span class="citation" data-cites="bryan2018happy">(Bryan 2018)</span> can help me out, and true to form, it can. Having decided that I will revert to being an https girl, renouncing my flirtation with ssh, I’ve found the chapter on <a href="https://happygitwithr.com/credential-caching.html">caching https credentials</a> extremely useful. The usethis article on <a href="https://usethis.r-lib.org/articles/articles/git-credentials.html">git credentials</a> is also worth the read.</p>
-<p>The problem can be broken into three parts:</p>
-<ul>
-<li>How do I set up an authentication token on my GitHub account?</li>
-<li>How do I configure my git installation to use the authentication token?</li>
-<li>How do I ensure that R detects these credentials?</li>
-</ul>
-<p>Thanks to the fabulous work of the <a href="https://www.tidyverse.org/">tidyverse</a> team, it’s possible for R users to solve the problem in a fairly painless way. The solution has been documented repeatedly, but for the sake of completeness I’ll repeat the advice here.</p>
-</section>
-<section id="setting-up-the-credentials" class="level3 page-columns page-full">
-<h3 class="anchored" data-anchor-id="setting-up-the-credentials">Setting up the credentials</h3>
-<p>The first thing you’ll need to do is set up a GitHub token. You can do this on the GitHub website, but for an R user it’s probably easiest to use the usethis package <span class="citation" data-cites="usethis">(Wickham and Bryan 2021)</span>:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1">usethis<span class="sc" style="color: #5E5E5E;">::</span><span class="fu" style="color: #4758AB;">create_github_token</span>()</span></code></pre></div>
-</div>
-<p>This will open GitHub in a browser window, take you to the “create a new token page”, and pre-populate all the fields with sensible default values. After accepting these values, the token is created and you’ll be given a PAT, a “personal authentication token”. It’ll look something like this…</p>
-<pre><code>ghp_dgdfasdklfjsdklfjsadfDKFJASDLKFJ3453</code></pre>
-<p>…and you should immediately save this in a secure password manager, like <a href="https://1password.com/">1password</a>, <a href="https://www.lastpass.com/">lastpass</a>, etc, because GitHub will only show it to you this one time. <br><br><br>You did save it to your password manager, right? <br><br><br>Right? <br><br><br>I mean, you might need it again. <br><br><br>You really might. <br><br><br>Yes, you. <br><br><br>All right then. <br><br><br>I’ll trust you’ve taken sensible precautions now, so let’s keep going. The next step in the process is to configure your git installation to use your token. This is, once again, quite easy to do with gitcreds <span class="citation" data-cites="gitcreds">(Csárdi 2020)</span>:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb3" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1">gitcreds<span class="sc" style="color: #5E5E5E;">::</span><span class="fu" style="color: #4758AB;">gitcreds_set</span>()</span></code></pre></div>
-</div>
-<p>When you call this function interactively, R will ask for your PAT. Paste it into the console, hit enter, and you are done. Your git installation is now configured to use the token. Yay! Let’s move onto the third step, which is to ensure that R will recognise and use these credentials. As it turns out, step three doesn’t require you to do anything, because it happens automatically! Functions like <code>usethis::pr_push()</code> recognise your credentials as soon as gitcreds sets them up, and everything works perfectly…</p>
-
-<div class="no-row-height column-margin column-container"><div class="">
-<p><img src="https://blog.djnavarro.net/posts/2021-08-08_git-credential-helpers/https:/media.giphy.com/media/BC87NFCPxG0M0/giphy.gif" width="100%"> Quinn. (Figure from giphy.com)</p>
-</div></div></section>
-</section>
-<section id="unless-youre-on-linux" class="level2 page-columns page-full">
-<h2 class="anchored" data-anchor-id="unless-youre-on-linux">… unless you’re on linux</h2>
-<p>If you’re on linux, you might find yourself in the same boat I was. The credentials you just set up work flawlessly for about 15 minutes, at which time R complains that it cannot find any credentials and you spend the next 15 minutes crying melodramatically.</p>
-<p>When this happened to me I assumed the problem was my R environment. I tried updating gitcreds, usethis, and every other R package I could think of that might possibly be involved in communicating with git. Nothing worked. The reason nothing worked is that the problem wasn’t with R at all… it was git, and in hindsight I realise that the problem is specific to git on linux. All those beautiful people with their fancy Windows and Mac machines won’t run into the problem I encountered. They won’t spend an entire Saturday trying to teach themselves git credential management. They will never know my pain. Curse them and their superior purchasing decisions.</p>
-
-<div class="no-row-height column-margin column-container"><div class="">
-<p><img src="https://blog.djnavarro.net/posts/2021-08-08_git-credential-helpers/https:/media.giphy.com/media/4vhF7cLLmu4zC/giphy.gif" width="100%"> Daria. (Figure from giphy.com)</p>
-</div></div><p>Just kidding. I love my quirky little Ubuntu box and I have a lot of fun learning how to fix her up every time she sets herself on fire.</p>
-<section id="where-did-i-leave-my-config" class="level3">
-<h3 class="anchored" data-anchor-id="where-did-i-leave-my-config">Where did I leave my config?</h3>
-<p>Okay, I’m going to need to make changes to my git configuration. Although git makes it possible to store configuration locally, at the repository level, I rarely need this flexibility. The relevant information is stored in the global configuration file: on my machine, this is located at <code>/home/danielle/.gitconfig</code>. I can use <a href="https://www.atlassian.com/git/tutorials/setting-up-a-repository/git-config">git config</a> to list these configuration settings, like this</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb4" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb4-1"><span class="fu" style="color: #4758AB;">git</span> config <span class="at" style="color: #657422;">--global</span> <span class="at" style="color: #657422;">--list</span></span></code></pre></div>
-</div>
-<p>and at the start of this exercise the output would have looked like this:</p>
-<pre><code>user.name=Danielle Navarro
-user.email=d.navarro@unsw.edu.au</code></pre>
-<p>I’m not sure why this is, but I always feel slightly more reassured when I’m able to inspect the configuration file itself. Opening my <code>.gitconfig</code> file shows the same information, but the formatting is slightly different in the raw file:</p>
-<pre><code>[user]
-    name = Danielle Navarro
-    email = d.navarro@unsw.edu.au</code></pre>
-<p>To solve the git credential problem, we’re going to need to edit this configuration information. Depending on which solution you go with, you might need to install new software too.</p>
-</section>
-<section id="dont-forget-to-update-git" class="level3">
-<h3 class="anchored" data-anchor-id="dont-forget-to-update-git">Don’t forget to update git</h3>
-<p>Before starting, it’s a good idea to make sure you have the latest version of git: older versions may not have the tools you need. As it happens, I had already updated git to the most recent version (2.32.0 at the time of writing), but in case anyone ends up relying on this post, here’s how you do it:</p>
-<pre><code>sudo add-apt-repository ppa:git-core/ppa
-sudo apt update
-sudo apt install git</code></pre>
-</section>
-</section>
-<section id="three-solutions" class="level2 page-columns page-full">
-<h2 class="anchored" data-anchor-id="three-solutions">Three solutions</h2>
-<section id="set-a-long-timeout-for-the-git-cache" class="level3 page-columns page-full">
-<h3 class="anchored" data-anchor-id="set-a-long-timeout-for-the-git-cache">1. Set a long timeout for the git cache</h3>
-<p>Recent versions of git are released with a <a href="https://git-scm.com/docs/git-credential-cache">credential cache</a> that retains your credentials in memory temporarily. The information is never written to disk, and it expires after a time. You can tell git to use this cache as your “credential helper” by typing the following command at the terminal:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb8" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb8-1"><span class="fu" style="color: #4758AB;">git</span> config <span class="at" style="color: #657422;">--global</span> credential.helper cache</span></code></pre></div>
-</div>
-<p>After doing this, my <code>.gitconfig</code> file now looks like this:</p>
-<pre><code>[user]
-    name = Danielle Navarro
-    email = d.navarro@unsw.edu.au
-[credential]
-    helper = cache</code></pre>
-<p>Unfortunately this isn’t an ideal solution, because the cache expires after 900 seconds (15 minutes). As soon as the cache expires, git loses track of your GitHub credentials and so does R. So you have to set the credentials again by calling <code>gitcreds::gitcreds_set()</code> and entering the PAT again. That’s annoying, but you did store the PAT in a password manager right? You were smart. You definitely aren’t going to be foolish like me, forget to store your PAT every time, and end up needing to create a new GitHub token every 15 minutes.</p>
-<p>A simple solution to this problem is to ask git to store information in the cache for just a teeny tiny little bit longer. Instead of having the cache expire after the default 900 seconds, maybe set it to expire after 10 million seconds. That way, you’ll only have to refresh the cache using <code>gitcreds::gitcreds_set()</code> once every four months instead of four times an hour. Implementing this solution requires only one line of code at the terminal:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb10" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb10-1"><span class="fu" style="color: #4758AB;">git</span> config <span class="at" style="color: #657422;">--global</span> credential.helper <span class="st" style="color: #20794D;">'cache --timeout=10000000'</span></span></code></pre></div>
-</div>
-<p>After typing this, my <code>.gitconfig</code> file looks like this:</p>
-<pre><code>[user]
-    name = Danielle Navarro
-    email = d.navarro@unsw.edu.au
-[credential]
-    helper = cache --timeout=10000000</code></pre>
-<p>In some ways this is a bit of a hack. If cache expiry normally happens every 15 minutes, there’s something a little odd about dragging it out and making it hang around for 16 weeks. That being said, I’ve done many stranger things than this in my life. It may not be the most elegant way to solve the problem, but it works.</p>
-
-<div class="no-row-height column-margin column-container"><div class="">
-<p><img src="https://blog.djnavarro.net/posts/2021-08-08_git-credential-helpers/https:/media.giphy.com/media/6qt69qcDApRU4/giphy.gif" width="100%"> Trent. (Figure from giphy.com)</p>
-</div></div></section>
-<section id="use-libsecret-credential-manager" class="level3 page-columns page-full">
-<h3 class="anchored" data-anchor-id="use-libsecret-credential-manager">2. Use libsecret credential manager</h3>
-<p>It puzzled me slightly that this problem only exists for linux computers, so I did a little more reading on how <a href="https://git-scm.com/book/en/v2/Git-Tools-Credential-Storage">git manages credentials</a>. It turns out you don’t have to rely on the in-memory cache: you can tell git to use some other program to supply the credentials. This is what all those swanky Mac and Windows people have been doing all along. On Macs, for example, git defaults to using the OS X keychain to store credentials safely on disk. It’s possible to do the same thing on linux using <a href="https://wiki.gnome.org/Projects/Libsecret">libsecret</a> (source on <a href="https://gitlab.gnome.org/GNOME/libsecret">gitlab</a>) and thankfully it’s not much harder to set this up than to use the “long cache” trick described in the previous section.</p>
-<p>The first step is ensuring libsecret is installed on your machine. It probably is (or at least, it was on my Ubuntu 20.04 box), but in case it isn’t here’s the command you need</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb12" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb12-1"><span class="fu" style="color: #4758AB;">sudo</span> apt install libsecret-1-0 libsecret-1-dev</span></code></pre></div>
-</div>
-<p>It helps to realise that libsecret isn’t an application designed to work with git (i.e., it’s not the credential manager), nor is it the <a href="https://itsfoss.com/ubuntu-keyring/">keyring</a> where the passwords are stored. Rather, it’s a library that communicates with the keyring: I found <a href="https://rtfm.co.ua/en/what-is-linux-keyring-gnome-keyring-secret-service-and-d-bus/">this post</a> useful for making sense of it. So if we want to use libsecret to access the keyring, we’re going to need a git credential manager that knows how to talk to libsecret. As it turns out, git comes with one already, you just have to build it using <code>make</code>:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb13" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb13-1"><span class="bu" style="color: null;">cd</span> /usr/share/doc/git/contrib/credential/libsecret</span>
-<span id="cb13-2"><span class="fu" style="color: #4758AB;">sudo</span> make</span></code></pre></div>
-</div>
-<p>This will build the <code>git-credential-libsecret</code> application for you and now all you have to do is tell git to use this as the “credential helper” application that supplies the GitHub credentials:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb14" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb14-1"><span class="fu" style="color: #4758AB;">git</span> config <span class="at" style="color: #657422;">--global</span> credential.helper <span class="dt" style="color: #AD0000;">\</span></span>
-<span id="cb14-2">  /usr/share/doc/git/contrib/credential/libsecret/git-credential-libsecret</span></code></pre></div>
-</div>
-<p>After typing that, my <code>.gitconfig</code> file looks like this…</p>
-<pre><code>[user]
-    name = Danielle Navarro
-    email = d.navarro@unsw.edu.au
-[credential]
-    helper = /usr/share/doc/git/contrib/credential/libsecret/git-credential-libsecret</code></pre>
-<p>… and I’m all set and ready to go.</p>
-<p>One thing I found handy during this step is to check that R was reading the correct configuration information. It’s possible to do this with gitcreds:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb16" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb16-1">gitcreds<span class="sc" style="color: #5E5E5E;">::</span><span class="fu" style="color: #4758AB;">gitcreds_list_helpers</span>()</span></code></pre></div>
-</div>
-<div class="cell">
-<div class="cell-output cell-output-stdout">
-<pre><code>[1] "/usr/share/doc/git/contrib/credential/libsecret/git-credential-libsecret"</code></pre>
-</div>
-</div>
-<p>In any case, if all the applications are talking to each other properly, the next time you call <code>gitcreds::gitcreds_set()</code> they’ll all send the message along: R will pass your PAT to git, git will pass it to git-credential-libsecret, git-credential-libsecret will pass it to libsecret, and the PAT will end up in your linux keychain. Whenever you need to authenticate and push some commits up to GitHub from R, it should find the credentials using the same communication channel. Everything should work swimmingly.</p>
-
-<div class="no-row-height column-margin column-container"><div class="">
-<p><img src="https://blog.djnavarro.net/posts/2021-08-08_git-credential-helpers/https:/media.giphy.com/media/10c3XjPPw2Kkbm/giphy.gif" width="100%"> Quinn et al.&nbsp;(Figure from giphy.com)</p>
-</div></div></section>
-<section id="use-gcm-core" class="level3 page-columns page-full">
-<h3 class="anchored" data-anchor-id="use-gcm-core">3. Use GCM core</h3>
-<p>As far as I can tell, the libsecret credential manager is a perfectly good solution to the problem, but in the end I made a different choice: I decided to go with “git credential manager core”, or <a href="https://github.com/microsoft/Git-Credential-Manager-Core">GCM Core</a>. It’s developed by Microsoft and, perhaps unsurprisingly, it is what GitHub currently <a href="https://docs.github.com/en/get-started/getting-started-with-git/caching-your-github-credentials-in-git">recommends</a>. It’s slightly more painful to set up, and the <a href="https://github.com/microsoft/Git-Credential-Manager-Core#linux-install-instructions">installation instructions</a> are different depending on what flavour of linux you’re running. Because I’m on Ubuntu 20.04, I downloaded the .deb file associated with the <a href="https://github.com/microsoft/Git-Credential-Manager-Core/releases/latest">most recent release of GCM core</a>, and then installed the application using the <code>dpkg</code> command:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb18" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb18-1"><span class="fu" style="color: #4758AB;">sudo</span> dpkg <span class="at" style="color: #657422;">-i</span> <span class="op" style="color: #5E5E5E;">&lt;</span>path-to-deb-file<span class="op" style="color: #5E5E5E;">&gt;</span></span></code></pre></div>
-</div>
-<p>This will build GCM core on your system, and once that’s done you can ask it to take care of the git configuration for you:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb19" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb19-1"><span class="ex" style="color: null;">git-credential-manager-core</span> configure</span></code></pre></div>
-</div>
-<p>This will edit the <code>.gitconfig</code> file, so for me it now looks like this:</p>
-<pre><code>[user]
-    name = Danielle Navarro
-    email = d.navarro@unsw.edu.au
-[credential]
-    helper = 
-    helper = /usr/bin/git-credential-manager-core
-[credential "https://dev.azure.com"]
-    useHttpPath = true</code></pre>
-<p>In a happier world you would be done at this point, but we don’t live in a happy world. We live in a sick sad world that has global pandemics and pineapple on pizzas. So there’s still one job left to do.</p>
-<p>Much like the libsecret credential manager I built in the previous section, GCM core is “just” a git credential manager: it communicates with git, but it isn’t a password manager or a keyring, and it doesn’t store the PAT itself. Instead, it offers you several different <a href="https://github.com/microsoft/Git-Credential-Manager-Core/blob/main/docs/linuxcredstores.md">options</a> for how the PAT is to be stored. If you click through and take a look at the list, the first suggested option is to connect to a <a href="https://specifications.freedesktop.org/secret-service/">secret service API</a>. As far as I can tell “secret service” isn’t an application, it’s a specification, and in practice it’s just a fancy way of referring to a linux keychain. Just as the libsecret credential manager needs some way of communicating with the keychain (i.e., the libsecret library itself), GCM core needs an intermediary. In fact, it turns out GCM core also uses libsecret to talk to the keychain. So that’s the option I went with. The terminal command to set this up is this:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb21" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb21-1"><span class="fu" style="color: #4758AB;">git</span> config <span class="at" style="color: #657422;">--global</span> credential.credentialStore secretservice</span></code></pre></div>
-</div>
-<p>After running the command, my <code>.gitconfig</code> file looks like this:</p>
-<pre><code>[user]
-    name = Danielle Navarro
-    email = d.navarro@unsw.edu.au
-[credential]
-    helper = 
-    helper = /usr/bin/git-credential-manager-core
-    credentialStore = secretservice
-[credential "https://dev.azure.com"]
-    useHttpPath = true</code></pre>
-
-<div class="no-row-height column-margin column-container"><div class="">
-<p><img src="https://blog.djnavarro.net/posts/2021-08-08_git-credential-helpers/https:/media.giphy.com/media/xrbdBK5A5cIYo/giphy.gif" width="100%"> Jane. (Figure from giphy.com)</p>
-</div></div><p>As before, I can check that R is reading the correct configuration information…</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb23" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb23-1">gitcreds<span class="sc" style="color: #5E5E5E;">::</span><span class="fu" style="color: #4758AB;">gitcreds_list_helpers</span>()</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>[1] "/usr/local/share/gcm-core/git-credential-manager-core"</code></pre>
-</div>
-</div>
-<p>…and now I’m ready to go. My problems are solved. The sun is shining, the birds are singing, and git is working properly from R again. All is well in heaven and earth. Oh the sheer excitement of it all. I hope I can contain my boundless enthusiasm and joy.</p>
-
-<!--------------- appendices go here ----------------->
-<div class="no-row-height column-margin column-container"><div class="">
-<p><img src="https://blog.djnavarro.net/posts/2021-08-08_git-credential-helpers/https:/media.giphy.com/media/S0l1Ah4cjIdwY/giphy.gif" width="100%"> Daria. (Figure from giphy.com)</p>
-</div></div><div class="cell">
-
-</div>
-
-
-
-</section>
-</section>
-
-<div id="quarto-appendix" class="default"><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">References</h2><div id="refs" class="references csl-bib-body hanging-indent">
-<div id="ref-bryan2018happy" class="csl-entry">
-Bryan, Jennifer. 2018. <em>Happy Git and GitHub for the useR</em>. GitHub.
-</div>
-<div id="ref-gitcreds" class="csl-entry">
-Csárdi, Gábor. 2020. <em>Gitcreds: Query ’Git’ Credentials from ’r’</em>. <a href="https://CRAN.R-project.org/package=gitcreds">https://CRAN.R-project.org/package=gitcreds</a>.
-</div>
-<div id="ref-usethis" class="csl-entry">
-Wickham, Hadley, and Jennifer Bryan. 2021. <em>Usethis: Automate Package and Project Setup</em>. <a href="https://CRAN.R-project.org/package=usethis">https://CRAN.R-project.org/package=usethis</a>.
-</div>
-</div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2021,
-  author = {Danielle Navarro},
-  editor = {},
-  title = {Managing {GitHub} Credentials from {R,} Difficulty Level
-    Linux},
-  date = {2021-08-08},
-  url = {https://blog.djnavarro.net/git-credential-helpers},
-  langid = {en}
-}
-</code></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2021" class="csl-entry quarto-appendix-citeas">
-Danielle Navarro. 2021. <span>“Managing GitHub Credentials from R,
-Difficulty Level Linux.”</span> August 8, 2021. <a href="https://blog.djnavarro.net/git-credential-helpers">https://blog.djnavarro.net/git-credential-helpers</a>.
-</div></div></section></div> ]]></description>
-  <category>Git</category>
-  <category>Credentials</category>
-  <category>Linux</category>
-  <category>R</category>
-  <guid>https://blog.djnavarro.net/posts/2021-08-08_git-credential-helpers/index.html</guid>
-  <pubDate>Sat, 07 Aug 2021 14:00:00 GMT</pubDate>
-  <media:content url="https://blog.djnavarro.net/posts/2021-08-08_git-credential-helpers/credentials.jpg" medium="image" type="image/jpeg"/>
 </item>
 </channel>
 </rss>
