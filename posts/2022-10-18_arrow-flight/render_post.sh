@@ -1,5 +1,5 @@
 #! /usr/bin/bash
 
-cd ~/GitHub/sites/quarto-blog/posts/2022-09-23_flight
+cd ~/GitHub/sites/quarto-blog/posts/2022-10-18_arrow-flight
 Rscript start_demo_server.R &
 quarto render index.qmd
