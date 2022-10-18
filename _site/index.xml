@@ -15,7 +15,687 @@
 <link>https://blog.djnavarro.net/index.html</link>
 </image>
 <generator>quarto-1.1.149</generator>
-<lastBuildDate>Mon, 17 Oct 2022 13:00:00 GMT</lastBuildDate>
+<lastBuildDate>Sat, 29 Oct 2022 13:00:00 GMT</lastBuildDate>
+<item>
+  <title>Faster data processing with Apache Arrow and Parquet</title>
+  <dc:creator>Danielle Navarro</dc:creator>
+  <dc:creator>Tom Drabas, Weston Pace, Danielle Navarro</dc:creator>
+  <link>https://blog.djnavarro.net/posts/2022-10-30_transcoding-csv-to-parquet/index.html</link>
+  <description><![CDATA[ 
+
+
+
+
+<p><strong>Note:</strong> This post is an extended version of a post previously published on the Voltron Data blog</p>
+<p>Reading and writing data across different systems requires a file format that is understood by both. File formats like CSV or JSON are highly portable as they are text-based. However, they lack a schema definition thus requiring either the user to specify the schema upfront or the system to infer the data types of columns. Apache Parquet or ORC are column-oriented file formats that support compression and provide schema which makes reading the data much more efficient.</p>
+<p>In a recent post, <a href="https://voltrondata.com/news/creating-an-arrow-dataset/">François Michonneau</a> talks about creating an Arrow dataset and explores various file formats supported by the Arrow ecosystem and shows the efficiency of the parquet format for storing and reading the data. In this post, we’ll continue that thought and showcase how to seamlessly convert large CSV files to parquet so you can take advantage of the space and time benefits.</p>
+<section id="apache-parquet" class="level2">
+<h2 class="anchored" data-anchor-id="apache-parquet">Apache Parquet</h2>
+<p><a href="https://arrow.apache.org/">Apache Arrow</a> and <a href="https://parquet.apache.org/">Apache Parquet</a> go hand in hand. Apache Parquet is a columnar format and Parquet formatted files can be read into Arrow arrays and, vice versa, Arrow arrays written back to Parquet files. Apache Parquet format also carries metadata so each column read back will retain the proper data type. The same, unfortunately, cannot be said for CSV files.</p>
+<p>The best gift you can give yourself as a data scientist or engineer is to ditch CSVs and move to Parquet! Yes that does mean you will have to read those CSV files one more time, but once you transcode them to Parquet format you can step away and watch your data pipelines start flowing smoothly again!</p>
+<p>Here’s how.</p>
+</section>
+<section id="preliminaries" class="level2">
+<h2 class="anchored" data-anchor-id="preliminaries">Preliminaries</h2>
+<p>Our first step is to use the right tools: in Python we’ll begin with our imports, in R we’ll load some packages.</p>
+<div class="panel-tabset">
+<ul class="nav nav-tabs"><li class="nav-item"><a class="nav-link active" id="tabset-1-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-1-1" aria-controls="tabset-1-1" aria-selected="true">Python</a></li><li class="nav-item"><a class="nav-link" id="tabset-1-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-1-2" aria-controls="tabset-1-2" aria-selected="false">R</a></li></ul>
+<div class="tab-content">
+<div id="tabset-1-1" class="tab-pane active" aria-labelledby="tabset-1-1-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb1-1"><span class="im" style="color: #00769E;">import</span> pyarrow <span class="im" style="color: #00769E;">as</span> pa</span>
+<span id="cb1-2"><span class="im" style="color: #00769E;">import</span> pyarrow.csv <span class="im" style="color: #00769E;">as</span> csv</span>
+<span id="cb1-3"><span class="im" style="color: #00769E;">import</span> pyarrow.parquet <span class="im" style="color: #00769E;">as</span> pq</span>
+<span id="cb1-4"><span class="im" style="color: #00769E;">import</span> pyarrow.dataset <span class="im" style="color: #00769E;">as</span> ds</span>
+<span id="cb1-5"><span class="im" style="color: #00769E;">import</span> pandas <span class="im" style="color: #00769E;">as</span> pd</span>
+<span id="cb1-6"><span class="im" style="color: #00769E;">import</span> numpy <span class="im" style="color: #00769E;">as</span> np</span>
+<span id="cb1-7"><span class="im" style="color: #00769E;">import</span> statistics</span>
+<span id="cb1-8"><span class="im" style="color: #00769E;">import</span> timeit</span>
+<span id="cb1-9"><span class="im" style="color: #00769E;">import</span> glob</span>
+<span id="cb1-10"><span class="im" style="color: #00769E;">import</span> os</span></code></pre></div>
+</div>
+</div>
+<div id="tabset-1-2" class="tab-pane" aria-labelledby="tabset-1-2-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb2" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1"><span class="fu" style="color: #4758AB;">library</span>(dplyr)</span>
+<span id="cb2-2"><span class="fu" style="color: #4758AB;">library</span>(arrow)</span>
+<span id="cb2-3"><span class="fu" style="color: #4758AB;">library</span>(bench)</span>
+<span id="cb2-4"><span class="fu" style="color: #4758AB;">library</span>(here)</span>
+<span id="cb2-5"><span class="fu" style="color: #4758AB;">library</span>(fs)</span></code></pre></div>
+</div>
+</div>
+</div>
+</div>
+<p>Let’s also create some helper variables to keep track of all the files we’re going to use as this post progresses. This step isn’t strictly needed but it will help keep our code tidy later.</p>
+<div class="panel-tabset">
+<ul class="nav nav-tabs"><li class="nav-item"><a class="nav-link active" id="tabset-2-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-2-1" aria-controls="tabset-2-1" aria-selected="true">Python</a></li><li class="nav-item"><a class="nav-link" id="tabset-2-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-2-2" aria-controls="tabset-2-2" aria-selected="false">R</a></li></ul>
+<div class="tab-content">
+<div id="tabset-2-1" class="tab-pane active" aria-labelledby="tabset-2-1-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb3" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb3-1"><span class="co" style="color: #5E5E5E;"># data directory</span></span>
+<span id="cb3-2">data_dir <span class="op" style="color: #5E5E5E;">=</span> <span class="st" style="color: #20794D;">'pydata'</span></span>
+<span id="cb3-3"><span class="cf" style="color: #003B4F;">if</span> <span class="kw" style="color: #003B4F;">not</span> os.path.isdir(data_dir):</span>
+<span id="cb3-4">    os.mkdir(data_dir)</span>
+<span id="cb3-5"></span>
+<span id="cb3-6"><span class="co" style="color: #5E5E5E;"># csv files</span></span>
+<span id="cb3-7">csv_file <span class="op" style="color: #5E5E5E;">=</span> <span class="ss" style="color: #20794D;">f'</span><span class="sc" style="color: #5E5E5E;">{</span>data_dir<span class="sc" style="color: #5E5E5E;">}</span><span class="ss" style="color: #20794D;">/large_dataset.csv'</span></span>
+<span id="cb3-8">csv_file_huge <span class="op" style="color: #5E5E5E;">=</span> <span class="ss" style="color: #20794D;">f'</span><span class="sc" style="color: #5E5E5E;">{</span>data_dir<span class="sc" style="color: #5E5E5E;">}</span><span class="ss" style="color: #20794D;">/huge_dataset.csv'</span></span>
+<span id="cb3-9"></span>
+<span id="cb3-10"><span class="co" style="color: #5E5E5E;"># parquet files</span></span>
+<span id="cb3-11">parquet_file_snappy <span class="op" style="color: #5E5E5E;">=</span> <span class="ss" style="color: #20794D;">f'</span><span class="sc" style="color: #5E5E5E;">{</span>data_dir<span class="sc" style="color: #5E5E5E;">}</span><span class="ss" style="color: #20794D;">/large_dataset_snappy.parquet'</span></span>
+<span id="cb3-12">parquet_file_gzip <span class="op" style="color: #5E5E5E;">=</span> <span class="ss" style="color: #20794D;">f'</span><span class="sc" style="color: #5E5E5E;">{</span>data_dir<span class="sc" style="color: #5E5E5E;">}</span><span class="ss" style="color: #20794D;">/large_dataset_gzip.parquet'</span></span>
+<span id="cb3-13"></span>
+<span id="cb3-14"><span class="co" style="color: #5E5E5E;"># folder for multi-file dataset</span></span>
+<span id="cb3-15">dataset_dir <span class="op" style="color: #5E5E5E;">=</span> <span class="ss" style="color: #20794D;">f'</span><span class="sc" style="color: #5E5E5E;">{</span>data_dir<span class="sc" style="color: #5E5E5E;">}</span><span class="ss" style="color: #20794D;">/huge_dataset'</span></span></code></pre></div>
+</div>
+</div>
+<div id="tabset-2-2" class="tab-pane" aria-labelledby="tabset-2-2-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb4" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><span class="co" style="color: #5E5E5E;"># data directory</span></span>
+<span id="cb4-2">data_dir <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="st" style="color: #20794D;">"rdata"</span></span>
+<span id="cb4-3"><span class="cf" style="color: #003B4F;">if</span>(<span class="sc" style="color: #5E5E5E;">!</span><span class="fu" style="color: #4758AB;">dir_exists</span>(data_dir)) {</span>
+<span id="cb4-4">  <span class="fu" style="color: #4758AB;">dir_create</span>(data_dir)</span>
+<span id="cb4-5">}</span>
+<span id="cb4-6"></span>
+<span id="cb4-7"><span class="co" style="color: #5E5E5E;"># csv files</span></span>
+<span id="cb4-8">csv_file <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">path</span>(<span class="st" style="color: #20794D;">"rdata"</span>, <span class="st" style="color: #20794D;">"large_dataset.csv"</span>)</span>
+<span id="cb4-9">csv_file_huge <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">path</span>(<span class="st" style="color: #20794D;">"rdata"</span>, <span class="st" style="color: #20794D;">"huge_dataset.csv"</span>)</span>
+<span id="cb4-10"></span>
+<span id="cb4-11"><span class="co" style="color: #5E5E5E;"># parquet files</span></span>
+<span id="cb4-12">parquet_file_snappy <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">path</span>(<span class="st" style="color: #20794D;">"rdata"</span>, <span class="st" style="color: #20794D;">"large_dataset_snappy.parquet"</span>)</span>
+<span id="cb4-13">parquet_file_gzip <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">path</span>(<span class="st" style="color: #20794D;">"rdata"</span>, <span class="st" style="color: #20794D;">"large_dataset_gzip.parquet"</span>)</span>
+<span id="cb4-14"></span>
+<span id="cb4-15"><span class="co" style="color: #5E5E5E;"># folder for multi-file dataset</span></span>
+<span id="cb4-16">dataset_dir <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">path</span>(<span class="st" style="color: #20794D;">"rdata"</span>, <span class="st" style="color: #20794D;">"huge_dataset"</span>)</span></code></pre></div>
+</div>
+</div>
+</div>
+</div>
+<p>Helper function to report the median time taken to execute a function:</p>
+<div class="panel-tabset">
+<ul class="nav nav-tabs"><li class="nav-item"><a class="nav-link active" id="tabset-3-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-3-1" aria-controls="tabset-3-1" aria-selected="true">Python</a></li><li class="nav-item"><a class="nav-link" id="tabset-3-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-3-2" aria-controls="tabset-3-2" aria-selected="false">R</a></li></ul>
+<div class="tab-content">
+<div id="tabset-3-1" class="tab-pane active" aria-labelledby="tabset-3-1-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb5" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb5-1"><span class="kw" style="color: #003B4F;">def</span> median_time(fun, repetitions <span class="op" style="color: #5E5E5E;">=</span> <span class="dv" style="color: #AD0000;">7</span>):</span>
+<span id="cb5-2">  time <span class="op" style="color: #5E5E5E;">=</span> timeit.repeat(fun, number <span class="op" style="color: #5E5E5E;">=</span> <span class="dv" style="color: #AD0000;">1</span>, repeat <span class="op" style="color: #5E5E5E;">=</span> repetitions)</span>
+<span id="cb5-3">  <span class="cf" style="color: #003B4F;">return</span>(statistics.median(time))</span></code></pre></div>
+</div>
+</div>
+<div id="tabset-3-2" class="tab-pane" aria-labelledby="tabset-3-2-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb6" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1">median_time <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>(fun, <span class="at" style="color: #657422;">repetitions =</span> <span class="dv" style="color: #AD0000;">7</span>) {</span>
+<span id="cb6-2">  benchmarks <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">mark</span>(<span class="fu" style="color: #4758AB;">fun</span>(), <span class="at" style="color: #657422;">iterations =</span> repetitions, <span class="at" style="color: #657422;">check =</span> <span class="cn" style="color: #8f5902;">FALSE</span>)</span>
+<span id="cb6-3">  <span class="fu" style="color: #4758AB;">return</span>(benchmarks<span class="sc" style="color: #5E5E5E;">$</span>median)</span>
+<span id="cb6-4">}</span></code></pre></div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<section id="generate-a-large-random-data-set" class="level2">
+<h2 class="anchored" data-anchor-id="generate-a-large-random-data-set">Generate a large random data set</h2>
+<p>To demonstrate how it all works, we’ll need some data. For this post, what we’ll do is create a table that will occupy roughly 2GB in memory. If we have 45 columns of double precision numeric data in our table, how many rows should our table have?</p>
+<div class="panel-tabset">
+<ul class="nav nav-tabs"><li class="nav-item"><a class="nav-link active" id="tabset-4-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-4-1" aria-controls="tabset-4-1" aria-selected="true">Python</a></li><li class="nav-item"><a class="nav-link" id="tabset-4-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-4-2" aria-controls="tabset-4-2" aria-selected="false">R</a></li></ul>
+<div class="tab-content">
+<div id="tabset-4-1" class="tab-pane active" aria-labelledby="tabset-4-1-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb7" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb7-1">columns <span class="op" style="color: #5E5E5E;">=</span> <span class="dv" style="color: #AD0000;">45</span></span>
+<span id="cb7-2">memory_size <span class="op" style="color: #5E5E5E;">=</span> <span class="dv" style="color: #AD0000;">2</span><span class="op" style="color: #5E5E5E;">*</span><span class="dv" style="color: #AD0000;">1024</span><span class="op" style="color: #5E5E5E;">**</span><span class="dv" style="color: #AD0000;">3</span></span>
+<span id="cb7-3">data_type <span class="op" style="color: #5E5E5E;">=</span> np.dtype(<span class="st" style="color: #20794D;">'float64'</span>)</span>
+<span id="cb7-4">rows <span class="op" style="color: #5E5E5E;">=</span> memory_size <span class="op" style="color: #5E5E5E;">/</span> columns <span class="op" style="color: #5E5E5E;">/</span> data_type.itemsize</span>
+<span id="cb7-5"></span>
+<span id="cb7-6"><span class="bu" style="color: null;">print</span>(<span class="ss" style="color: #20794D;">f'Size in memory: </span><span class="sc" style="color: #5E5E5E;">{</span>memory_size <span class="op" style="color: #5E5E5E;">/</span> (<span class="dv" style="color: #AD0000;">1024</span><span class="op" style="color: #5E5E5E;">**</span><span class="dv" style="color: #AD0000;">3</span>)<span class="sc" style="color: #5E5E5E;">}</span><span class="ss" style="color: #20794D;">GB'</span>)</span>
+<span id="cb7-7"><span class="bu" style="color: null;">print</span>(<span class="ss" style="color: #20794D;">f'Number of rows: </span><span class="sc" style="color: #5E5E5E;">{</span><span class="bu" style="color: null;">int</span>(rows)<span class="sc" style="color: #5E5E5E;">:,}</span><span class="ss" style="color: #20794D;">'</span>)</span>
+<span id="cb7-8"><span class="bu" style="color: null;">print</span>(<span class="ss" style="color: #20794D;">f'Number of columns: </span><span class="sc" style="color: #5E5E5E;">{</span>columns<span class="sc" style="color: #5E5E5E;">}</span><span class="ss" style="color: #20794D;">'</span>)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Size in memory: 2.0GB
+Number of rows: 5,965,232
+Number of columns: 45</code></pre>
+</div>
+</div>
+</div>
+<div id="tabset-4-2" class="tab-pane" aria-labelledby="tabset-4-2-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb9" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1">bytes_float <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="dv" style="color: #AD0000;">8</span></span>
+<span id="cb9-2">bytes_total <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="dv" style="color: #AD0000;">2</span> <span class="sc" style="color: #5E5E5E;">*</span> <span class="dv" style="color: #AD0000;">1024</span> <span class="sc" style="color: #5E5E5E;">^</span> <span class="dv" style="color: #AD0000;">3</span></span>
+<span id="cb9-3">n_columns <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="dv" style="color: #AD0000;">45</span></span>
+<span id="cb9-4">n_rows <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">round</span>(bytes_total <span class="sc" style="color: #5E5E5E;">/</span> (n_columns <span class="sc" style="color: #5E5E5E;">*</span> bytes_float)) </span>
+<span id="cb9-5"></span>
+<span id="cb9-6"><span class="fu" style="color: #4758AB;">cat</span>(<span class="st" style="color: #20794D;">"Size in memory:"</span>, <span class="fu" style="color: #4758AB;">round</span>(bytes_total <span class="sc" style="color: #5E5E5E;">/</span> (<span class="dv" style="color: #AD0000;">1024</span> <span class="sc" style="color: #5E5E5E;">^</span> <span class="dv" style="color: #AD0000;">3</span>), <span class="at" style="color: #657422;">digits =</span> <span class="dv" style="color: #AD0000;">1</span>), <span class="st" style="color: #20794D;">"GB</span><span class="sc" style="color: #5E5E5E;">\n</span><span class="st" style="color: #20794D;">"</span>)</span>
+<span id="cb9-7"><span class="fu" style="color: #4758AB;">cat</span>(<span class="st" style="color: #20794D;">"Number of rows:"</span>, n_rows, <span class="st" style="color: #20794D;">"</span><span class="sc" style="color: #5E5E5E;">\n</span><span class="st" style="color: #20794D;">"</span>)</span>
+<span id="cb9-8"><span class="fu" style="color: #4758AB;">cat</span>(<span class="st" style="color: #20794D;">"Number of columns:"</span>, n_columns, <span class="st" style="color: #20794D;">"</span><span class="sc" style="color: #5E5E5E;">\n</span><span class="st" style="color: #20794D;">"</span>)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Size in memory: 2 GB
+Number of rows: 5965232 
+Number of columns: 45 </code></pre>
+</div>
+</div>
+</div>
+</div>
+</div>
+<p>We’ll need about 6 million rows. Armed with this knowledge let’s create a data set of the appropriate size and write the results to a CSV file:</p>
+<div class="panel-tabset">
+<ul class="nav nav-tabs"><li class="nav-item"><a class="nav-link active" id="tabset-5-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-5-1" aria-controls="tabset-5-1" aria-selected="true">Python</a></li><li class="nav-item"><a class="nav-link" id="tabset-5-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-5-2" aria-controls="tabset-5-2" aria-selected="false">R</a></li></ul>
+<div class="tab-content">
+<div id="tabset-5-1" class="tab-pane active" aria-labelledby="tabset-5-1-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb11" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb11-1"><span class="cf" style="color: #003B4F;">if</span> <span class="kw" style="color: #003B4F;">not</span> os.path.isfile(csv_file):</span>
+<span id="cb11-2">    dataset <span class="op" style="color: #5E5E5E;">=</span> pa.table(</span>
+<span id="cb11-3">        {</span>
+<span id="cb11-4">            <span class="ss" style="color: #20794D;">f'col_</span><span class="sc" style="color: #5E5E5E;">{</span>i<span class="sc" style="color: #5E5E5E;">}</span><span class="ss" style="color: #20794D;">'</span>: np.random.randn(<span class="bu" style="color: null;">int</span>(rows))</span>
+<span id="cb11-5">            <span class="cf" style="color: #003B4F;">for</span> i <span class="kw" style="color: #003B4F;">in</span> <span class="bu" style="color: null;">range</span>(columns)</span>
+<span id="cb11-6">        }</span>
+<span id="cb11-7">    )</span>
+<span id="cb11-8">    options <span class="op" style="color: #5E5E5E;">=</span> csv.WriteOptions(include_header<span class="op" style="color: #5E5E5E;">=</span><span class="va" style="color: #111111;">True</span>)</span>
+<span id="cb11-9">    csv.write_csv(dataset, csv_file, options)</span></code></pre></div>
+</div>
+</div>
+<div id="tabset-5-2" class="tab-pane" aria-labelledby="tabset-5-2-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb12" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb12-1"><span class="cf" style="color: #003B4F;">if</span>(<span class="sc" style="color: #5E5E5E;">!</span><span class="fu" style="color: #4758AB;">file_exists</span>(csv_file)) {</span>
+<span id="cb12-2">  <span class="fu" style="color: #4758AB;">matrix</span>(</span>
+<span id="cb12-3">    <span class="at" style="color: #657422;">data =</span> <span class="fu" style="color: #4758AB;">rnorm</span>(n_rows <span class="sc" style="color: #5E5E5E;">*</span> n_columns),</span>
+<span id="cb12-4">    <span class="at" style="color: #657422;">nrow =</span> n_rows, </span>
+<span id="cb12-5">    <span class="at" style="color: #657422;">ncol =</span> n_columns</span>
+<span id="cb12-6">  ) <span class="sc" style="color: #5E5E5E;">|&gt;</span></span>
+<span id="cb12-7">    <span class="fu" style="color: #4758AB;">as.data.frame</span>() <span class="sc" style="color: #5E5E5E;">|&gt;</span></span>
+<span id="cb12-8">    <span class="fu" style="color: #4758AB;">write_csv_arrow</span>(csv_file)</span>
+<span id="cb12-9">}</span></code></pre></div>
+</div>
+</div>
+</div>
+</div>
+<p>When stored in memory, this object – by design – is about 2GB in size. How large is it on disk as a CSV file?</p>
+<div class="panel-tabset">
+<ul class="nav nav-tabs"><li class="nav-item"><a class="nav-link active" id="tabset-6-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-6-1" aria-controls="tabset-6-1" aria-selected="true">Python</a></li><li class="nav-item"><a class="nav-link" id="tabset-6-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-6-2" aria-controls="tabset-6-2" aria-selected="false">R</a></li></ul>
+<div class="tab-content">
+<div id="tabset-6-1" class="tab-pane active" aria-labelledby="tabset-6-1-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb13" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb13-1"><span class="kw" style="color: #003B4F;">def</span> file_size(<span class="bu" style="color: null;">file</span>):</span>
+<span id="cb13-2">    n_bytes <span class="op" style="color: #5E5E5E;">=</span> os.path.getsize(<span class="bu" style="color: null;">file</span>)</span>
+<span id="cb13-3">    <span class="bu" style="color: null;">print</span>(<span class="ss" style="color: #20794D;">f'</span><span class="sc" style="color: #5E5E5E;">{</span>(n_bytes <span class="op" style="color: #5E5E5E;">/</span> (<span class="dv" style="color: #AD0000;">1024</span><span class="op" style="color: #5E5E5E;">**</span><span class="dv" style="color: #AD0000;">3</span>))<span class="sc" style="color: #5E5E5E;">:.2f}</span><span class="ss" style="color: #20794D;">GB'</span>)</span>
+<span id="cb13-4"></span>
+<span id="cb13-5">file_size(csv_file)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>4.91GB</code></pre>
+</div>
+</div>
+</div>
+<div id="tabset-6-2" class="tab-pane" aria-labelledby="tabset-6-2-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb15" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb15-1"><span class="fu" style="color: #4758AB;">file_size</span>(csv_file)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>4.91G</code></pre>
+</div>
+</div>
+</div>
+</div>
+</div>
+<p>It’s almost 5GB: it’s more than doubled in size when we save to CSV. That’s not surprising because CSV isn’t designed to be efficient, but it’s not something any data scientist or engineer wants to see.</p>
+</section>
+<section id="transcoding-csv-to-parquet" class="level2">
+<h2 class="anchored" data-anchor-id="transcoding-csv-to-parquet">Transcoding CSV to Parquet</h2>
+<p>Apache Parquet format is a preferred way to store columnar data: it requires much less compute cycles and it supports compression, rendering much smaller file sizes. By default the compression used is snappy but we will also try GZip.</p>
+<section id="snappy-compression" class="level3">
+<h3 class="anchored" data-anchor-id="snappy-compression">Snappy compression</h3>
+<p>Let’s time how long it takes to transcode our CSV file to the parquet with Apache Arrow.</p>
+<div class="panel-tabset">
+<ul class="nav nav-tabs"><li class="nav-item"><a class="nav-link active" id="tabset-7-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-7-1" aria-controls="tabset-7-1" aria-selected="true">Python</a></li><li class="nav-item"><a class="nav-link" id="tabset-7-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-7-2" aria-controls="tabset-7-2" aria-selected="false">R</a></li></ul>
+<div class="tab-content">
+<div id="tabset-7-1" class="tab-pane active" aria-labelledby="tabset-7-1-tab">
+<div class="cell" data-hash="index_cache/html/py-csv-to-parquet-snappy_25db444f9a10c3ee56d62f42d747a2db">
+<div class="sourceCode cell-code" id="cb17" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb17-1"><span class="kw" style="color: #003B4F;">def</span> transcode_snappy():</span>
+<span id="cb17-2">  arrow_table <span class="op" style="color: #5E5E5E;">=</span> pa.csv.read_csv(csv_file)</span>
+<span id="cb17-3">  pq.write_table(arrow_table, parquet_file_snappy)<span class="op" style="color: #5E5E5E;">;</span></span>
+<span id="cb17-4"></span>
+<span id="cb17-5">median_time(transcode_snappy)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>11.038464039000246</code></pre>
+</div>
+</div>
+</div>
+<div id="tabset-7-2" class="tab-pane" aria-labelledby="tabset-7-2-tab">
+<div class="cell" data-hash="index_cache/html/r-csv-to-parquet-snappy_50a01f2da78810446307bc333ef2c7db">
+<div class="sourceCode cell-code" id="cb19" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb19-1">transcode_snappy <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>() {</span>
+<span id="cb19-2">  <span class="fu" style="color: #4758AB;">read_csv_arrow</span>(csv_file) <span class="sc" style="color: #5E5E5E;">|&gt;</span> <span class="fu" style="color: #4758AB;">write_parquet</span>(parquet_file_snappy)</span>
+<span id="cb19-3">}</span>
+<span id="cb19-4"></span>
+<span id="cb19-5"><span class="fu" style="color: #4758AB;">median_time</span>(transcode_snappy)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] 11.3s</code></pre>
+</div>
+</div>
+</div>
+</div>
+</div>
+<p>So, end-to-end it takes maybe 8 to 10 seconds to read CSV and save it to a parquet file. The size of the file is less than half of what it used to be in CSV:</p>
+<div class="panel-tabset">
+<ul class="nav nav-tabs"><li class="nav-item"><a class="nav-link active" id="tabset-8-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-8-1" aria-controls="tabset-8-1" aria-selected="true">Python</a></li><li class="nav-item"><a class="nav-link" id="tabset-8-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-8-2" aria-controls="tabset-8-2" aria-selected="false">R</a></li></ul>
+<div class="tab-content">
+<div id="tabset-8-1" class="tab-pane active" aria-labelledby="tabset-8-1-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb21" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb21-1">file_size(parquet_file_snappy)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>2.01GB</code></pre>
+</div>
+</div>
+</div>
+<div id="tabset-8-2" class="tab-pane" aria-labelledby="tabset-8-2-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb23" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb23-1"><span class="fu" style="color: #4758AB;">file_size</span>(parquet_file_snappy)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>2.01G</code></pre>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<section id="gzip-compression" class="level3">
+<h3 class="anchored" data-anchor-id="gzip-compression">GZip compression</h3>
+<p>Now let’s try with GZIP.</p>
+<div class="panel-tabset">
+<ul class="nav nav-tabs"><li class="nav-item"><a class="nav-link active" id="tabset-9-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-9-1" aria-controls="tabset-9-1" aria-selected="true">Python</a></li><li class="nav-item"><a class="nav-link" id="tabset-9-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-9-2" aria-controls="tabset-9-2" aria-selected="false">R</a></li></ul>
+<div class="tab-content">
+<div id="tabset-9-1" class="tab-pane active" aria-labelledby="tabset-9-1-tab">
+<div class="cell" data-hash="index_cache/html/py-csv-to-parquet-gzip_dd8f2ce9e68edc08bc5d8a076c53ea8c">
+<div class="sourceCode cell-code" id="cb25" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb25-1"><span class="kw" style="color: #003B4F;">def</span> transcode_gzip():</span>
+<span id="cb25-2">  arrow_table <span class="op" style="color: #5E5E5E;">=</span> pa.csv.read_csv(csv_file)</span>
+<span id="cb25-3">  pq.write_table(arrow_table, parquet_file_gzip, compression<span class="op" style="color: #5E5E5E;">=</span><span class="st" style="color: #20794D;">'gzip'</span>)<span class="op" style="color: #5E5E5E;">;</span></span>
+<span id="cb25-4"></span>
+<span id="cb25-5">median_time(transcode_gzip)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>94.39236859499943</code></pre>
+</div>
+</div>
+</div>
+<div id="tabset-9-2" class="tab-pane" aria-labelledby="tabset-9-2-tab">
+<div class="cell" data-hash="index_cache/html/r-csv-to-parquet-gzip_31541d11850343e9c6d526e66dafba42">
+<div class="sourceCode cell-code" id="cb27" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb27-1">transcode_gzip <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>() {</span>
+<span id="cb27-2">  <span class="fu" style="color: #4758AB;">read_csv_arrow</span>(csv_file) <span class="sc" style="color: #5E5E5E;">|&gt;</span> </span>
+<span id="cb27-3">    <span class="fu" style="color: #4758AB;">write_parquet</span>(parquet_file_gzip, <span class="at" style="color: #657422;">compression =</span> <span class="st" style="color: #20794D;">"gzip"</span>)</span>
+<span id="cb27-4">}</span>
+<span id="cb27-5"></span>
+<span id="cb27-6"><span class="fu" style="color: #4758AB;">median_time</span>(transcode_gzip)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] 1.5m</code></pre>
+</div>
+</div>
+</div>
+</div>
+</div>
+<p>Overall it takes about 10 times as long to complete the transcoding with gzip than it takes when using snappy, but you do get end up with a slightly more compressed file at the end. Is it worth the wait? You need to decide.</p>
+<div class="panel-tabset">
+<ul class="nav nav-tabs"><li class="nav-item"><a class="nav-link active" id="tabset-10-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-10-1" aria-controls="tabset-10-1" aria-selected="true">Python</a></li><li class="nav-item"><a class="nav-link" id="tabset-10-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-10-2" aria-controls="tabset-10-2" aria-selected="false">R</a></li></ul>
+<div class="tab-content">
+<div id="tabset-10-1" class="tab-pane active" aria-labelledby="tabset-10-1-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb29" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb29-1">file_size(parquet_file_gzip)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>1.93GB</code></pre>
+</div>
+</div>
+</div>
+<div id="tabset-10-2" class="tab-pane" aria-labelledby="tabset-10-2-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb31" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb31-1"><span class="fu" style="color: #4758AB;">file_size</span>(parquet_file_gzip)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>1.93G</code></pre>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+</section>
+<section id="reading-parquet-files" class="level2">
+<h2 class="anchored" data-anchor-id="reading-parquet-files">Reading Parquet Files</h2>
+<p>Having transcoded our data set from CSV to Apache Parquet, let’s compare read times for the two file formats. We’ll look at the CSV files first. To make things simple we’ll read the data to an Arrow Table, but we would still see the same performance difference between CSV and Parquet if we read the data to a panda in Python or a data frame in R.</p>
+<div class="panel-tabset">
+<ul class="nav nav-tabs"><li class="nav-item"><a class="nav-link active" id="tabset-11-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-11-1" aria-controls="tabset-11-1" aria-selected="true">Python</a></li><li class="nav-item"><a class="nav-link" id="tabset-11-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-11-2" aria-controls="tabset-11-2" aria-selected="false">R</a></li></ul>
+<div class="tab-content">
+<div id="tabset-11-1" class="tab-pane active" aria-labelledby="tabset-11-1-tab">
+<div class="cell" data-hash="index_cache/html/py-arrow-read-csv_760db68a8e08f45a535be1773974dcea">
+<div class="sourceCode cell-code" id="cb33" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb33-1"><span class="kw" style="color: #003B4F;">def</span> read_csv_data():</span>
+<span id="cb33-2">  csv.read_csv(csv_file)</span>
+<span id="cb33-3">  </span>
+<span id="cb33-4">median_time(read_csv_data)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>4.780269909999333</code></pre>
+</div>
+</div>
+</div>
+<div id="tabset-11-2" class="tab-pane" aria-labelledby="tabset-11-2-tab">
+<div class="cell" data-hash="index_cache/html/r-arrow-read-csv_8489e0cdc8882ee288810271a995ad9e">
+<div class="sourceCode cell-code" id="cb35" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb35-1">read_csv_data <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>() {</span>
+<span id="cb35-2">  <span class="fu" style="color: #4758AB;">read_csv_arrow</span>(csv_file, <span class="at" style="color: #657422;">as_data_frame =</span> <span class="cn" style="color: #8f5902;">FALSE</span>) </span>
+<span id="cb35-3">}</span>
+<span id="cb35-4"></span>
+<span id="cb35-5"><span class="fu" style="color: #4758AB;">median_time</span>(read_csv_data)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] 5.28s</code></pre>
+</div>
+</div>
+</div>
+</div>
+</div>
+<p>Now let’s try reading the Parquet files:</p>
+<div class="panel-tabset">
+<ul class="nav nav-tabs"><li class="nav-item"><a class="nav-link active" id="tabset-12-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-12-1" aria-controls="tabset-12-1" aria-selected="true">Python</a></li><li class="nav-item"><a class="nav-link" id="tabset-12-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-12-2" aria-controls="tabset-12-2" aria-selected="false">R</a></li></ul>
+<div class="tab-content">
+<div id="tabset-12-1" class="tab-pane active" aria-labelledby="tabset-12-1-tab">
+<div class="cell" data-hash="index_cache/html/pyarrow-read-parquet_d75ee729ff5ca708530ccbb35885a32a">
+<div class="sourceCode cell-code" id="cb37" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb37-1"><span class="kw" style="color: #003B4F;">def</span> read_parquet_arrow():</span>
+<span id="cb37-2">  pq.read_table(parquet_file_snappy)</span>
+<span id="cb37-3"></span>
+<span id="cb37-4">median_time(read_parquet_arrow)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>0.2946250789973419</code></pre>
+</div>
+</div>
+</div>
+<div id="tabset-12-2" class="tab-pane" aria-labelledby="tabset-12-2-tab">
+<div class="cell" data-hash="index_cache/html/table-read-parquet_751250e4e48099cb66c4ba4c59f09878">
+<div class="sourceCode cell-code" id="cb39" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb39-1">read_parquet_arrow <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>() {</span>
+<span id="cb39-2">  <span class="fu" style="color: #4758AB;">read_parquet</span>(parquet_file_snappy, <span class="at" style="color: #657422;">as_data_frame =</span> <span class="cn" style="color: #8f5902;">FALSE</span>)</span>
+<span id="cb39-3">}</span>
+<span id="cb39-4"></span>
+<span id="cb39-5"><span class="fu" style="color: #4758AB;">median_time</span>(read_parquet_arrow)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] 390ms</code></pre>
+</div>
+</div>
+</div>
+</div>
+</div>
+<p>About one third of a second. Not too bad!</p>
+
+<!--
+
+One takeaway lesson is to, if you really need to read CSV and then process the data using pandas, read the data with Arrow’s CSV reader and then convert the Arrow Table to pandas DataFrame.
+
+
+::: {.cell}
+
+```{.python .cell-code}
+def read_pandas_arrow():
+  pa.csv.read_csv(csv_file).to_pandas()
+
+timeit.timeit(read_pandas_arrow, number = 1)  
+```
+
+::: {.cell-output .cell-output-stdout}
+```
+5.283127844999399
+```
+:::
+:::
+
+
+Still slower than reading a parquet file but significantly faster than reading CSV with pandas.
+
+-->
+</section>
+<section id="comparing-parquet-to-compressed-csv" class="level2">
+<h2 class="anchored" data-anchor-id="comparing-parquet-to-compressed-csv">Comparing Parquet to Compressed CSV</h2>
+<p>At this point you might be wondering how Parquet files compare to compressed CSV. A common solution to the shortcomings of CSV files it to use <code>gzip</code> or similar utility to compress them. This can lead to substantially reduced file sizes. For example, the data set we’ve used in this blog post is about the same size when stored as a gzipped CSV file (2.4GB) as it is when stored as a snappy-compressed Parquet file (2.2GB). The reduced file size might lead to faster load times, but in a local setting these speed-ups are mostly a function of the file size: they don’t tell us much about how many CPU cycles reading these files consumes. On linux you can collect some performance statistics using the <code>perf</code> utility:</p>
+<!-- 
+for future reference, this is how you modify the perf_event_paranoid settings
+
+sudo sh -c 'echo kernel.perf_event_paranoid=1 > /etc/sysctl.d/local.conf 
+
+reset to 4 to be completely paranoid :-)
+-->
+<div class="panel-tabset">
+<ul class="nav nav-tabs"><li class="nav-item"><a class="nav-link active" id="tabset-13-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-13-1" aria-controls="tabset-13-1" aria-selected="true">Python</a></li><li class="nav-item"><a class="nav-link" id="tabset-13-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-13-2" aria-controls="tabset-13-2" aria-selected="false">R</a></li></ul>
+<div class="tab-content">
+<div id="tabset-13-1" class="tab-pane active" aria-labelledby="tabset-13-1-tab">
+<p>Here are the performance statistics for reading the gzipped CSV file:</p>
+<div class="sourceCode" id="cb41" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb41-1"><span class="ex" style="color: null;">perf</span> stat python <span class="at" style="color: #657422;">-c</span> <span class="st" style="color: #20794D;">"from pyarrow import csv; csv.read_csv('pydata/large_dataset.csv.gz')"</span></span></code></pre></div>
+<pre><code> Performance counter stats for 'python -c from pyarrow import csv; csv.read_csv('pydata/large_dataset.csv.gz')':
+
+         45,946.29 msec task-clock                #    2.458 CPUs utilized          
+            97,475      context-switches          #    2.121 K/sec                  
+            37,060      cpu-migrations            #  806.594 /sec                   
+         2,379,661      page-faults               #   51.792 K/sec                  
+   163,823,235,007      cycles                    #    3.566 GHz                    
+   266,069,641,526      instructions              #    1.62  insn per cycle         
+    40,294,887,901      branches                  #  877.000 M/sec                  
+     1,787,412,162      branch-misses             #    4.44% of all branches        
+   603,296,698,280      slots                     #   13.130 G/sec                  
+   136,118,412,337      topdown-retiring          #     19.2% retiring              
+   468,702,274,904      topdown-bad-spec          #     66.3% bad speculation       
+    67,807,557,217      topdown-fe-bound          #      9.6% frontend bound        
+    34,659,537,044      topdown-be-bound          #      4.9% backend bound         
+
+      18.692289542 seconds time elapsed
+
+      42.868337000 seconds user
+       6.071931000 seconds sys</code></pre>
+<p>To compare, this is what we get when reading the snappy-compressed parquet file:</p>
+<div class="sourceCode" id="cb43" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb43-1"><span class="ex" style="color: null;">perf</span> stat python <span class="at" style="color: #657422;">-c</span> <span class="st" style="color: #20794D;">"from pyarrow import parquet; parquet.read_table('pydata/large_dataset_snappy.parquet')"</span></span></code></pre></div>
+<pre><code> Performance counter stats for 'python -c from pyarrow import parquet; parquet.read_table('pydata/large_dataset_snappy.parquet')':
+
+          4,052.57 msec task-clock                #    2.507 CPUs utilized          
+             8,212      context-switches          #    2.026 K/sec                  
+             2,898      cpu-migrations            #  715.102 /sec                   
+         1,105,237      page-faults               #  272.725 K/sec                  
+    12,740,967,348      cycles                    #    3.144 GHz                    
+    11,629,653,540      instructions              #    0.91  insn per cycle         
+     1,953,615,539      branches                  #  482.069 M/sec                  
+        15,002,905      branch-misses             #    0.77% of all branches        
+    38,990,127,780      slots                     #    9.621 G/sec                  
+    11,304,974,170      topdown-retiring          #     26.6% retiring              
+    13,387,988,026      topdown-bad-spec          #     31.5% bad speculation       
+     7,239,172,422      topdown-fe-bound          #     17.0% frontend bound        
+    10,599,009,432      topdown-be-bound          #     24.9% backend bound         
+
+       1.616350503 seconds time elapsed
+
+       1.370856000 seconds user
+       2.709456000 seconds sys
+</code></pre>
+<p>Reading the parquet file consumes 12.7 billion CPU cycles; for the gzipped CSV the figure is 163.8 billion.</p>
+</div>
+<div id="tabset-13-2" class="tab-pane" aria-labelledby="tabset-13-2-tab">
+<p>Here are the performance statistics for reading the gzipped CSV file:</p>
+<div class="sourceCode" id="cb45" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb45-1"><span class="ex" style="color: null;">perf</span> stat Rscript <span class="at" style="color: #657422;">-e</span> <span class="st" style="color: #20794D;">"arrow::read_csv_arrow('rdata/large_dataset.csv.gz', as_data_frame = FALSE)"</span></span></code></pre></div>
+<pre><code> Performance counter stats for 'Rscript -e arrow::read_csv_arrow('rdata/large_dataset.csv.gz', as_data_frame = FALSE)':
+
+         49,814.86 msec task-clock                #    2.343 CPUs utilized          
+           104,662      context-switches          #    2.101 K/sec                  
+            39,809      cpu-migrations            #  799.139 /sec                   
+         2,444,561      page-faults               #   49.073 K/sec                  
+   176,418,525,767      cycles                    #    3.541 GHz                    
+   277,797,226,186      instructions              #    1.57  insn per cycle         
+    43,508,214,462      branches                  #  873.398 M/sec                  
+     1,777,773,657      branch-misses             #    4.09% of all branches        
+   656,019,283,120      slots                     #   13.169 G/sec                  
+   128,143,770,282      topdown-retiring          #     16.2% retiring              
+   534,939,317,766      topdown-bad-spec          #     67.8% bad speculation       
+    65,978,499,316      topdown-fe-bound          #      8.4% frontend bound        
+    60,111,173,500      topdown-be-bound          #      7.6% backend bound         
+
+      21.263720897 seconds time elapsed
+
+      47.243353000 seconds user
+       5.763587000 seconds sys</code></pre>
+<p>To compare, this is what we get when reading the snappy-compressed parquet file:</p>
+<div class="sourceCode" id="cb47" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb47-1"><span class="ex" style="color: null;">perf</span> stat Rscript <span class="at" style="color: #657422;">-e</span> <span class="st" style="color: #20794D;">"arrow::read_parquet('rdata/large_dataset_snappy.parquet', as_data_frame = FALSE)"</span></span></code></pre></div>
+<pre><code> Performance counter stats for 'Rscript -e arrow::read_parquet('rdata/large_dataset_snappy.parquet', as_data_frame = FALSE)':
+
+          2,675.35 msec task-clock                #    3.220 CPUs utilized          
+               535      context-switches          #  199.974 /sec                   
+                38      cpu-migrations            #   14.204 /sec                   
+           628,615      page-faults               #  234.966 K/sec                  
+     9,932,298,420      cycles                    #    3.713 GHz                    
+    11,800,309,617      instructions              #    1.19  insn per cycle         
+     2,155,219,064      branches                  #  805.585 M/sec                  
+        12,280,294      branch-misses             #    0.57% of all branches        
+    30,850,755,460      slots                     #   11.532 G/sec                  
+    11,784,389,574      topdown-retiring          #     36.8% retiring              
+     4,243,149,218      topdown-bad-spec          #     13.2% bad speculation       
+     6,247,234,332      topdown-fe-bound          #     19.5% frontend bound        
+     9,768,481,508      topdown-be-bound          #     30.5% backend bound         
+
+       0.830735747 seconds time elapsed
+
+       1.609327000 seconds user
+       1.073598000 seconds sys
+</code></pre>
+<p>Reading the parquet file consumes 9.9 billion CPU cycles; for the gzipped CSV the figure is 176.4 billion.</p>
+</div>
+</div>
+</div>
+<p>These results are of course specific to the machine we used for the tests – a 2022 Dell XPS 13 laptop running Ubuntu 20.04 – but so are all the other numbers reported here. The fine details are less important than the big picture result:</p>
+<p>Even when a compressed CSV file is similar in size to a Parquet file, it will consume far more time and system resources to read. Any time that you have to pay for time or CPU cycles, deploying a solution using Parquet files is likely to be much more cost-effective than using compressed CSV data.</p>
+<!-- A savvy user, who may want to store and use that data in the cloud, might want to test the I/O bandwidth because of the cloud latencies. Thus, reading these two files on a desktop machine might as well show that reading a compressed CSV is faster as the file size is smaller: we don’t need to read as many bytes as with parquet. However, on a system that is distributed (like, e.g. S3), reads are frequently done in parallel, resulting in a much higher bandwidth even with the penalty of having a more excessive latency compared to a local setting.  -->
+</section>
+<section id="transcoding-larger-than-memory-datasets" class="level2">
+<h2 class="anchored" data-anchor-id="transcoding-larger-than-memory-datasets">Transcoding Larger-Than-Memory Datasets</h2>
+<p>In all our examples so, the data set has been small enough that the CSV file could fit easily into the memory of a modern computer with 8GB of RAM. Plenty of times, however, you might find yourself with a data set that is much larger than the RAM available. This makes transcoding a little trickier, but Apache Arrow can help with this.</p>
+<p>First, with a simple bash script, we can create a huge data set by concatenating eight copies of our <code>large_dataset.csv</code> together, creating a data file that is roughly 40GB on disk. Our bash script might look like this:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>make-huge-csv.sh</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb49" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb49-1"><span class="co" style="color: #5E5E5E;">#!/bin/bash </span></span>
+<span id="cb49-2"><span class="va" style="color: #111111;">large_csv</span><span class="op" style="color: #5E5E5E;">=</span><span class="st" style="color: #20794D;">"</span><span class="va" style="color: #111111;">${1}</span><span class="st" style="color: #20794D;">/large_dataset.csv"</span></span>
+<span id="cb49-3"><span class="va" style="color: #111111;">huge_csv</span><span class="op" style="color: #5E5E5E;">=</span><span class="st" style="color: #20794D;">"</span><span class="va" style="color: #111111;">${1}</span><span class="st" style="color: #20794D;">/huge_dataset.csv"</span> </span>
+<span id="cb49-4"><span class="cf" style="color: #003B4F;">for</span> i <span class="kw" style="color: #003B4F;">in</span> <span class="dt" style="color: #AD0000;">{</span><span class="dv" style="color: #AD0000;">0</span><span class="dt" style="color: #AD0000;">..</span><span class="dv" style="color: #AD0000;">7</span><span class="dt" style="color: #AD0000;">}</span></span>
+<span id="cb49-5">  <span class="cf" style="color: #003B4F;">do</span></span>
+<span id="cb49-6">    <span class="cf" style="color: #003B4F;">if</span> <span class="kw" style="color: #003B4F;">[[</span> <span class="va" style="color: #111111;">$i</span> <span class="ot" style="color: #003B4F;">-eq</span> 0 <span class="kw" style="color: #003B4F;">]]</span> <span class="kw" style="color: #003B4F;">;</span> <span class="cf" style="color: #003B4F;">then</span></span>
+<span id="cb49-7">      <span class="fu" style="color: #4758AB;">head</span> <span class="at" style="color: #657422;">-1</span> <span class="va" style="color: #111111;">$large_csv</span> <span class="op" style="color: #5E5E5E;">&gt;</span> <span class="va" style="color: #111111;">$huge_csv</span></span>
+<span id="cb49-8">    <span class="cf" style="color: #003B4F;">fi</span></span>
+<span id="cb49-9">    <span class="fu" style="color: #4758AB;">tail</span> <span class="at" style="color: #657422;">-n</span> +2 <span class="va" style="color: #111111;">$large_csv</span> <span class="op" style="color: #5E5E5E;">&gt;&gt;</span> <span class="va" style="color: #111111;">$huge_csv</span></span>
+<span id="cb49-10">  <span class="cf" style="color: #003B4F;">done</span></span></code></pre></div>
+</div>
+</div>
+<p>At the terminal we’d use a command like one of thee two, depending on whether we are looking in the R data folder or the Python data folder:</p>
+<div class="sourceCode" id="cb50" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb50-1"><span class="ex" style="color: null;">./make-huge-csv.sh</span> <span class="st" style="color: #20794D;">"../pydata"</span>  <span class="co" style="color: #5E5E5E;"># Python</span></span>
+<span id="cb50-2"><span class="ex" style="color: null;">./make-huge-csv.sh</span> <span class="st" style="color: #20794D;">"../rdata"</span>   <span class="co" style="color: #5E5E5E;"># R</span></span></code></pre></div>
+<p>Having run this script, let’s check the size of the huge CSV file we have created:</p>
+<div class="panel-tabset">
+<ul class="nav nav-tabs"><li class="nav-item"><a class="nav-link active" id="tabset-14-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-14-1" aria-controls="tabset-14-1" aria-selected="true">Python</a></li><li class="nav-item"><a class="nav-link" id="tabset-14-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-14-2" aria-controls="tabset-14-2" aria-selected="false">R</a></li></ul>
+<div class="tab-content">
+<div id="tabset-14-1" class="tab-pane active" aria-labelledby="tabset-14-1-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb51" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb51-1">file_size(csv_file_huge)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>39.26GB</code></pre>
+</div>
+</div>
+</div>
+<div id="tabset-14-2" class="tab-pane" aria-labelledby="tabset-14-2-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb53" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb53-1"><span class="fu" style="color: #4758AB;">file_size</span>(csv_file_huge)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>39.3G</code></pre>
+</div>
+</div>
+</div>
+</div>
+</div>
+<p>That’s close to 40GB. This won’t fit in RAM for a typical machine. However, using Arrow’s dataset interface we can use the “backpressure” functionality to slow down the read of a CSV file as we write out its parquet counterpart. The backpressure feature simply prevents the system from running out-of-memory when reading the data: when Arrow’s writer cannot keep up with the amount of incoming bytes from the reader it sends a backpressure message to the reader to slow down the reading.</p>
+<p>It shows well on this graph.</p>
+<p><img src="https://blog.djnavarro.net/posts/2022-10-30_transcoding-csv-to-parquet/img/backpressure.png" class="img-fluid"></p>
+<p>Initially, there’s plenty of RAM available so reading and writing rates are high. However, once the disk cache gets full Arrow slows down, maintaining a relatively stable amount of occupied memory until it is done reading the file. At this point, Arrow will start releasing the memory and the writing rate will peak up a bit until done.</p>
+<p>The backpressure feature has been automatically available in Arrow since version 6.0.0 and is used automatically when using the dataset API. Let’s put it to work:</p>
+<div class="panel-tabset">
+<ul class="nav nav-tabs"><li class="nav-item"><a class="nav-link active" id="tabset-15-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-15-1" aria-controls="tabset-15-1" aria-selected="true">Python</a></li><li class="nav-item"><a class="nav-link" id="tabset-15-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-15-2" aria-controls="tabset-15-2" aria-selected="false">R</a></li></ul>
+<div class="tab-content">
+<div id="tabset-15-1" class="tab-pane active" aria-labelledby="tabset-15-1-tab">
+<div class="cell" data-hash="index_cache/html/py-write-dataset_9aa7f8666213f30b52a194206bc083c3">
+<div class="sourceCode cell-code" id="cb55" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb55-1"><span class="kw" style="color: #003B4F;">def</span> transcode_huge_csv():</span>
+<span id="cb55-2">  dataset <span class="op" style="color: #5E5E5E;">=</span> ds.dataset(csv_file_huge, <span class="bu" style="color: null;">format</span><span class="op" style="color: #5E5E5E;">=</span><span class="st" style="color: #20794D;">'csv'</span>)</span>
+<span id="cb55-3">  ds.write_dataset(dataset, dataset_dir, <span class="bu" style="color: null;">format</span><span class="op" style="color: #5E5E5E;">=</span><span class="st" style="color: #20794D;">'parquet'</span>)</span>
+<span id="cb55-4"></span>
+<span id="cb55-5">median_time(transcode_huge_csv, repetitions <span class="op" style="color: #5E5E5E;">=</span> <span class="dv" style="color: #AD0000;">1</span>)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>184.2342482189997</code></pre>
+</div>
+</div>
+</div>
+<div id="tabset-15-2" class="tab-pane" aria-labelledby="tabset-15-2-tab">
+<div class="cell" data-hash="index_cache/html/r-write-dataset_1bc5a55a562fc7715ac4630d4dbd46a1">
+<div class="sourceCode cell-code" id="cb57" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb57-1">transcode_huge_csv <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>() {</span>
+<span id="cb57-2">  csv_file_huge <span class="sc" style="color: #5E5E5E;">|&gt;</span></span>
+<span id="cb57-3">    <span class="fu" style="color: #4758AB;">open_dataset</span>(<span class="at" style="color: #657422;">format =</span> <span class="st" style="color: #20794D;">"csv"</span>) <span class="sc" style="color: #5E5E5E;">|&gt;</span></span>
+<span id="cb57-4">    <span class="fu" style="color: #4758AB;">write_dataset</span>(<span class="at" style="color: #657422;">path =</span> dataset_dir)</span>
+<span id="cb57-5">}</span>
+<span id="cb57-6"></span>
+<span id="cb57-7"><span class="fu" style="color: #4758AB;">median_time</span>(transcode_huge_csv, <span class="at" style="color: #657422;">repetitions =</span> <span class="dv" style="color: #AD0000;">1</span>)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] 3.16m</code></pre>
+</div>
+</div>
+</div>
+</div>
+</div>
+<p>This time around we only ran each test once because it’s a little time consuming, but it’s enough to give you a pretty good sense of how long it takes to read and convert a 40GB CSV file to parquet format on a laptop: about 2-3 minutes.</p>
+<p>What about the file size? As you can see from the results below, if we use snappy compression the file size for the parquet encoded data is roughly half:</p>
+<div class="panel-tabset">
+<ul class="nav nav-tabs"><li class="nav-item"><a class="nav-link active" id="tabset-16-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-16-1" aria-controls="tabset-16-1" aria-selected="true">Python</a></li><li class="nav-item"><a class="nav-link" id="tabset-16-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-16-2" aria-controls="tabset-16-2" aria-selected="false">R</a></li></ul>
+<div class="tab-content">
+<div id="tabset-16-1" class="tab-pane active" aria-labelledby="tabset-16-1-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb59" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb59-1">n_bytes <span class="op" style="color: #5E5E5E;">=</span> <span class="dv" style="color: #AD0000;">0</span></span>
+<span id="cb59-2">filenames <span class="op" style="color: #5E5E5E;">=</span> glob.glob(<span class="ss" style="color: #20794D;">f'</span><span class="sc" style="color: #5E5E5E;">{</span>dataset_dir<span class="sc" style="color: #5E5E5E;">}</span><span class="ss" style="color: #20794D;">/*'</span>) </span>
+<span id="cb59-3"><span class="cf" style="color: #003B4F;">for</span> fn <span class="kw" style="color: #003B4F;">in</span> filenames:</span>
+<span id="cb59-4">  n_bytes <span class="op" style="color: #5E5E5E;">+=</span> os.path.getsize(fn)</span>
+<span id="cb59-5"><span class="bu" style="color: null;">print</span>(<span class="ss" style="color: #20794D;">f'</span><span class="sc" style="color: #5E5E5E;">{</span>(n_bytes <span class="op" style="color: #5E5E5E;">/</span> (<span class="dv" style="color: #AD0000;">1024</span><span class="op" style="color: #5E5E5E;">**</span><span class="dv" style="color: #AD0000;">3</span>))<span class="sc" style="color: #5E5E5E;">:.2f}</span><span class="ss" style="color: #20794D;">GB'</span>)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>19.31GB</code></pre>
+</div>
+</div>
+</div>
+<div id="tabset-16-2" class="tab-pane" aria-labelledby="tabset-16-2-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb61" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb61-1">dataset_dir <span class="sc" style="color: #5E5E5E;">|&gt;</span></span>
+<span id="cb61-2">  <span class="fu" style="color: #4758AB;">list.files</span>(<span class="at" style="color: #657422;">full.names =</span> <span class="cn" style="color: #8f5902;">TRUE</span>) <span class="sc" style="color: #5E5E5E;">|&gt;</span></span>
+<span id="cb61-3">  <span class="fu" style="color: #4758AB;">file_size</span>() <span class="sc" style="color: #5E5E5E;">|&gt;</span></span>
+<span id="cb61-4">  <span class="fu" style="color: #4758AB;">sum</span>()</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>19.3G</code></pre>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<section id="summary" class="level2">
+<h2 class="anchored" data-anchor-id="summary">Summary</h2>
+<p>Using Apache Arrow to transcode data to Apache Parquet format makes a lot of sense and will save you time and boost your productivity in the future. To get started you can install the PyArrow library following the instructions found at <a href="https://arrow.apache.org/install/">arrow.apache.org/install</a>.</p>
+<p>Learn how a <a href="https://voltrondata.com/subscription/">Voltron Data Enterprise Support subscription</a> can help accelerate your success with Apache Arrow.</p>
+
+
+</section>
+
+<div id="quarto-appendix" class="default"><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
+  author = {Danielle Navarro and Tom Drabas, Weston Pace, Danielle
+    Navarro},
+  editor = {},
+  title = {Faster Data Processing with {Apache} {Arrow} and {Parquet}},
+  date = {2022-10-30},
+  url = {https://blog.djnavarro.net/posts/2022-10-30_transcoding-csv-to-parquet},
+  langid = {en}
+}
+</code></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2022" class="csl-entry quarto-appendix-citeas">
+Danielle Navarro, and Tom Drabas, Weston Pace, Danielle Navarro. 2022.
+<span>“Faster Data Processing with Apache Arrow and Parquet.”</span>
+October 30, 2022. <a href="https://blog.djnavarro.net/posts/2022-10-30_transcoding-csv-to-parquet">https://blog.djnavarro.net/posts/2022-10-30_transcoding-csv-to-parquet</a>.
+</div></div></section></div> ]]></description>
+  <category>Apache Arrow</category>
+  <category>Parquet</category>
+  <category>R</category>
+  <category>Python</category>
+  <guid>https://blog.djnavarro.net/posts/2022-10-30_transcoding-csv-to-parquet/index.html</guid>
+  <pubDate>Sat, 29 Oct 2022 13:00:00 GMT</pubDate>
+  <media:content url="https://blog.djnavarro.net/posts/2022-10-30_transcoding-csv-to-parquet/img/backpressure.png" medium="image" type="image/png" height="102" width="144"/>
+</item>
 <item>
   <title>Building an Arrow Flight server</title>
   <dc:creator>Danielle Navarro</dc:creator>
@@ -11104,932 +11784,6 @@ Britney.”</span> September 14, 2021. <a href="https://blog.djnavarro.net/tidy-
   <guid>https://blog.djnavarro.net/posts/2021-09-14_tidy-tuesday-billboard/index.html</guid>
   <pubDate>Mon, 13 Sep 2021 14:00:00 GMT</pubDate>
   <media:content url="https://blog.djnavarro.net/posts/2021-09-14_tidy-tuesday-billboard/britney.jpg" medium="image" type="image/jpeg"/>
-</item>
-<item>
-  <title>Art, jasmines, and the water colours</title>
-  <dc:creator>Danielle Navarro</dc:creator>
-  <link>https://blog.djnavarro.net/posts/2021-09-07_water-colours/index.html</link>
-  <description><![CDATA[ 
-
-
-
-
-<!--------------- setup ----------------->
-<!--------------- post ----------------->
-<section id="prelude" class="level2">
-<h2 class="anchored" data-anchor-id="prelude">Prelude</h2>
-<p>In recent weeks I’ve been posting generative art from the <a href="https://art.djnavarro.net/gallery/water-colours/">Water Colours</a> series on twitter. The series has been popular, prompting requests that I sell prints, mint NFTs, or write a tutorial showing how they are made. For personal reasons I didn’t want to commercialise this series. Instead, I chose to make the pieces freely available under a CC0 public domain licence and asked people to donate to a <a href="https://au.gofundme.com/f/data-science-art-to-support-a-womens-refuge">gofundme</a> I set up for a charitable organisation I care about (the <a href="https://www.lousplace.com.au/">Lou’s Place</a> women’s refuge here in Sydney). I’m not going to discuss the personal story behind this series, but it does matter. As I’ve mentioned <a href="../../posts/2021-07-08_generative-art-in-r/">previously</a>, the art I make is inherently tied to moods. It is emotional in nature. In hindsight it is easy enough to describe how the system is implemented but this perspective is misleading. Although a clean and unemotional description of the code is useful for explanatory purposes, the actual <em>process</em> of creating the system is deeply tied to my life, my history, and my subjective experience. Those details are inextricably bound to the system. A friend described it better than I ever could:</p>
-<blockquote class="blockquote">
-<p>The computer doesn’t make this art any more than a camera makes a photograph; art is always intimate (<a href="https://twitter.com/justanotheramy/status/1432916731794579460">Amy Patterson</a>)</p>
-</blockquote>
-<p>In this post I’ll describe the mechanistic processes involved in creating these pieces, but this is woefully inadequate as a description of the artistic process as a whole. The optical mechanics of a camera do not circumscribe the work of a skilled photographer. So it goes with generative art. The code describes the mechanics; it does not describe the art. There is a deeply personal story underneath these pieces (one that I won’t tell here), and I would no more mint an NFT from that story than I would sell a piece of my soul to a collector.</p>
-</section>
-<section id="the-water-colours-repository" class="level2 page-columns page-full">
-<h2 class="anchored" data-anchor-id="the-water-colours-repository">The water colours repository</h2>
-<section id="why-use-version-control-here" class="level3">
-<h3 class="anchored" data-anchor-id="why-use-version-control-here">Why use version control here?</h3>
-<p>When I started making generative art I didn’t think much about archiving my art or keeping it organised. I liked making pretty things, and that was as far as my thought process went. I didn’t place the code under version control, and I stored everything in my Dropbox folder. There’s nothing wrong with that: some things don’t belong on GitHub. During the development phase of any art project that’s still what I do, and I’m perfectly happy with it.</p>
-<p>Things become a little trickier when you want to share the art. My <a href="https://art.djnavarro.net">art website</a> is hosted on GitHub pages, and so my initial approach was to keep the art in the website repository. <em>Huuuuge mistake.</em> Sometimes the image files can be quite large and sometimes a series contains a large number of images. By the time I’d reached 40+ series, Hugo took a very long time to build the site (several minutes), and GitHub took even longer to deploy it (over half an hour).</p>
-<p>Eventually I decided it made more sense to have one repository per series. Each one uses the “series-” prefix to remind me it’s an art repo. I don’t use these repositories during development: they exist solely to snapshot the release. For example, the <a href="https://github.com/djnavarro/series-water-colours">series-water-colours</a> repository isn’t going to be updated regularly, it’s really just an archive combined with a “docs” folder that is used to host a minimal GitHub Pages site that makes the images public. It’s convenient for my purposes because my art website doesn’t have to host any of the images: all it does is hotlink to the images that are exposed via the series repo.</p>
-<p>It may seem surprising that I’ve used GitHub for this. Image files aren’t exactly well suited to version control, but it’s not like they’re going to be updated. Plus, there are a lot of advantages. I can explicitly include licencing information in the repository, I can release source code (when I want to), and I can include a readme file for anyone who wants to use it.</p>
-</section>
-<section id="the-manifest-file" class="level3 page-columns page-full">
-<h3 class="anchored" data-anchor-id="the-manifest-file">The manifest file</h3>
-<p>One nice feature of doing things this way is that it has encouraged me to include a <a href="%22https://djnavarro.net/series-water-colours/manifest.csv%22">manifest file</a>. Because the image files belong to a completely different repository to the website, I need a way to automatically inspect the image repository and construct the links I need (because I’m waaaaaay too lazy to add the links by hand). That’s the primary function of the manifest. The manifest.csv file is a plain csv file with one row per image, and one column for each piece of metadata I want to retain about the images. It might seem like organisational overkill to be this precise about the art, but I’m starting to realise that if I don’t have a proper system in place I’ll forget minor details like <em>“what the piece is called”</em> or <em>“when I made it”</em>. That seems bad :-)</p>
-<div class="cell" data-hash="index_cache/html/water-colour-manifest_12dd8f4f937e4ccdb55017b95da48001">
-
-</div>
-<p>I can use <code>readr::read_csv()</code> to download the manifest and do a little data wrangling to organise it into a format that is handy to me right now:</p>
-
-<div class="no-row-height column-margin column-container"><div class="">
-<p>The data wrangling code is <a href="https://github.com/djnavarro/quarto-blog/blob/master/posts/2021-09-07_water-colours/index.qmd#L71-L85">here</a></p>
-</div></div><div class="cell">
-<div class="sourceCode cell-code" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1">manifest</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code># A tibble: 20 × 9
-   series      sys_id img_id short_n…¹ format long_…² date       path_…³ path_…⁴
-   &lt;chr&gt;       &lt;chr&gt;  &lt;chr&gt;  &lt;chr&gt;     &lt;chr&gt;  &lt;chr&gt;   &lt;date&gt;     &lt;chr&gt;   &lt;chr&gt;  
- 1 watercolour sys02  img34  teacup-o… jpg    Ocean … 2021-07-31 https:… https:…
- 2 watercolour sys02  img31  incursio… jpg    Incurs… 2021-08-14 https:… https:…
- 3 watercolour sys02  img32  percolate jpg    Percol… 2021-08-21 https:… https:…
- 4 watercolour sys02  img37  gentle-d… jpg    Gentle… 2021-08-21 https:… https:…
- 5 watercolour sys02  img41  stormy-s… jpg    Stormy… 2021-08-22 https:… https:…
- 6 watercolour sys02  img42  turmeric  jpg    Turmer… 2021-08-24 https:… https:…
- 7 watercolour sys02  img43  torn-and… jpg    Torn a… 2021-08-24 https:… https:…
- 8 watercolour sys02  img47  inferno   jpg    Sevent… 2021-08-27 https:… https:…
- 9 watercolour sys02  img48  storm-ce… jpg    Storm … 2021-08-27 https:… https:…
-10 watercolour sys02  img49  tonal-ea… jpg    Tonal … 2021-08-29 https:… https:…
-11 watercolour sys02  img50  cold-fro… jpg    Cold F… 2021-08-29 https:… https:…
-12 watercolour sys02  img51  kintsugi… jpg    Kintsu… 2021-08-29 https:… https:…
-13 watercolour sys02  img53  departure jpg    Depart… 2021-08-29 https:… https:…
-14 watercolour sys02  img54  echo      jpg    Echo    2021-08-30 https:… https:…
-15 watercolour sys02  img57  portal    jpg    Portal  2021-08-31 https:… https:…
-16 watercolour sys02  img60  salt-sto… jpg    Gods o… 2021-08-31 https:… https:…
-17 watercolour sys02  img61  amanecer… jpg    El Últ… 2021-09-01 https:… https:…
-18 watercolour sys02  img65  plume     jpg    Plume   2021-09-02 https:… https:…
-19 watercolour sys02  img67  woodland… jpg    Woodla… 2021-09-02 https:… https:…
-20 watercolour sys02  img68  below-th… jpg    Below … 2021-09-03 https:… https:…
-# … with abbreviated variable names ¹​short_name, ²​long_name, ³​path_2000,
-#   ⁴​path_500</code></pre>
-</div>
-</div>
-</section>
-<section id="previewing-the-artwork" class="level3">
-<h3 class="anchored" data-anchor-id="previewing-the-artwork">Previewing the artwork</h3>
-<p>More to the point, the <code>manifest</code> data frame is nicely suited for use with the <a href="https://bs4cards.djnavarro.net/">bs4cards</a> package, so I can display some of the pieces in a neat and tidy thumbnail grid. Here are the first eight pieces from the series, arranged by date of creation:</p>
-<div class="cell" data-hash="index_cache/html/water-colour-cards_f92e1b6fa1710ddd3daea13365b68307">
-<div class="sourceCode cell-code" id="cb3" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1">manifest[<span class="dv" style="color: #AD0000;">1</span><span class="sc" style="color: #5E5E5E;">:</span><span class="dv" style="color: #AD0000;">8</span>, ] <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb3-2">  bs4cards<span class="sc" style="color: #5E5E5E;">::</span><span class="fu" style="color: #4758AB;">cards</span>(</span>
-<span id="cb3-3">    <span class="at" style="color: #657422;">image =</span> path_500,</span>
-<span id="cb3-4">    <span class="at" style="color: #657422;">link =</span> path_2000,</span>
-<span id="cb3-5">    <span class="at" style="color: #657422;">title =</span> long_name,</span>
-<span id="cb3-6">    <span class="at" style="color: #657422;">spacing =</span> <span class="dv" style="color: #AD0000;">3</span>,</span>
-<span id="cb3-7">    <span class="at" style="color: #657422;">width =</span> <span class="dv" style="color: #AD0000;">2</span></span>
-<span id="cb3-8">  )  </span></code></pre></div>
-<div class="cell-output-display">
-<div>
-<div class="row p-0 row-cols-1 row-cols-sm-2 row-cols-md-3 row-cols-lg-4" style="margin-left: -.4rem; margin-right: -.4rem; margin-top: 1rem; margin-bottom: 1rem; ">
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .4rem ; border-width: 0; border-radius: .6rem .6rem .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img34_teacup-ocean.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2021-09-07_water-colours/https:/djnavarro.net/series-water-colours/500/watercolour_sys02_img34_teacup-ocean.jpg" class="card-img-top" style="border-style:solid; border-color:inherits; border-width:1px 1px 0 1px; border-radius: .6rem .6rem 0 0 ;">
-</a>
-<div class="card-body justify-content-end m-0 p-0" style="visibility: visible; background-color: inherits; border-style:solid; border-color:inherits; border-width:1px; border-radius: 0 0 .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img34_teacup-ocean.jpg">
-<h5 class="card-title my-auto px-3 pt-3 pb-3 anchored">Ocean in a Teacup</h5>
-</a>
-</div>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .4rem ; border-width: 0; border-radius: .6rem .6rem .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img31_incursions.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2021-09-07_water-colours/https:/djnavarro.net/series-water-colours/500/watercolour_sys02_img31_incursions.jpg" class="card-img-top" style="border-style:solid; border-color:inherits; border-width:1px 1px 0 1px; border-radius: .6rem .6rem 0 0 ;">
-</a>
-<div class="card-body justify-content-end m-0 p-0" style="visibility: visible; background-color: inherits; border-style:solid; border-color:inherits; border-width:1px; border-radius: 0 0 .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img31_incursions.jpg">
-<h5 class="card-title my-auto px-3 pt-3 pb-3 anchored">Incursions</h5>
-</a>
-</div>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .4rem ; border-width: 0; border-radius: .6rem .6rem .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img32_percolate.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2021-09-07_water-colours/https:/djnavarro.net/series-water-colours/500/watercolour_sys02_img32_percolate.jpg" class="card-img-top" style="border-style:solid; border-color:inherits; border-width:1px 1px 0 1px; border-radius: .6rem .6rem 0 0 ;">
-</a>
-<div class="card-body justify-content-end m-0 p-0" style="visibility: visible; background-color: inherits; border-style:solid; border-color:inherits; border-width:1px; border-radius: 0 0 .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img32_percolate.jpg">
-<h5 class="card-title my-auto px-3 pt-3 pb-3 anchored">Percolate</h5>
-</a>
-</div>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .4rem ; border-width: 0; border-radius: .6rem .6rem .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img37_gentle-descent.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2021-09-07_water-colours/https:/djnavarro.net/series-water-colours/500/watercolour_sys02_img37_gentle-descent.jpg" class="card-img-top" style="border-style:solid; border-color:inherits; border-width:1px 1px 0 1px; border-radius: .6rem .6rem 0 0 ;">
-</a>
-<div class="card-body justify-content-end m-0 p-0" style="visibility: visible; background-color: inherits; border-style:solid; border-color:inherits; border-width:1px; border-radius: 0 0 .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img37_gentle-descent.jpg">
-<h5 class="card-title my-auto px-3 pt-3 pb-3 anchored">Gentle Descent</h5>
-</a>
-</div>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .4rem ; border-width: 0; border-radius: .6rem .6rem .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img41_stormy-seas.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2021-09-07_water-colours/https:/djnavarro.net/series-water-colours/500/watercolour_sys02_img41_stormy-seas.jpg" class="card-img-top" style="border-style:solid; border-color:inherits; border-width:1px 1px 0 1px; border-radius: .6rem .6rem 0 0 ;">
-</a>
-<div class="card-body justify-content-end m-0 p-0" style="visibility: visible; background-color: inherits; border-style:solid; border-color:inherits; border-width:1px; border-radius: 0 0 .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img41_stormy-seas.jpg">
-<h5 class="card-title my-auto px-3 pt-3 pb-3 anchored">Stormy Seas</h5>
-</a>
-</div>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .4rem ; border-width: 0; border-radius: .6rem .6rem .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img42_turmeric.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2021-09-07_water-colours/https:/djnavarro.net/series-water-colours/500/watercolour_sys02_img42_turmeric.jpg" class="card-img-top" style="border-style:solid; border-color:inherits; border-width:1px 1px 0 1px; border-radius: .6rem .6rem 0 0 ;">
-</a>
-<div class="card-body justify-content-end m-0 p-0" style="visibility: visible; background-color: inherits; border-style:solid; border-color:inherits; border-width:1px; border-radius: 0 0 .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img42_turmeric.jpg">
-<h5 class="card-title my-auto px-3 pt-3 pb-3 anchored">Turmeric Against Grey Tuesday</h5>
-</a>
-</div>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .4rem ; border-width: 0; border-radius: .6rem .6rem .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img43_torn-and-frayed.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2021-09-07_water-colours/https:/djnavarro.net/series-water-colours/500/watercolour_sys02_img43_torn-and-frayed.jpg" class="card-img-top" style="border-style:solid; border-color:inherits; border-width:1px 1px 0 1px; border-radius: .6rem .6rem 0 0 ;">
-</a>
-<div class="card-body justify-content-end m-0 p-0" style="visibility: visible; background-color: inherits; border-style:solid; border-color:inherits; border-width:1px; border-radius: 0 0 .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img43_torn-and-frayed.jpg">
-<h5 class="card-title my-auto px-3 pt-3 pb-3 anchored">Torn and Frayed</h5>
-</a>
-</div>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .4rem ; border-width: 0; border-radius: .6rem .6rem .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img47_inferno.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2021-09-07_water-colours/https:/djnavarro.net/series-water-colours/500/watercolour_sys02_img47_inferno.jpg" class="card-img-top" style="border-style:solid; border-color:inherits; border-width:1px 1px 0 1px; border-radius: .6rem .6rem 0 0 ;">
-</a>
-<div class="card-body justify-content-end m-0 p-0" style="visibility: visible; background-color: inherits; border-style:solid; border-color:inherits; border-width:1px; border-radius: 0 0 .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img47_inferno.jpg">
-<h5 class="card-title my-auto px-3 pt-3 pb-3 anchored">Seventh Circle</h5>
-</a>
-</div>
-</div>
-</div>
-</div>
-</div>
-</div>
-<p>Each thumbnail image links to a medium resolution (2000 x 2000 pixels) jpg version of the corresponding piece, if you’d like to see the images in a little more detail.</p>
-</section>
-</section>
-<section id="dependencies" class="level2 page-columns page-full">
-<h2 class="anchored" data-anchor-id="dependencies">Dependencies</h2>
-<p>In the remainder of this post I’ll walk you through the process of creating pieces “in the style of” the water colours series. If you really want to, you can take a look at the <a href="https://github.com/djnavarro/series-water-colours/blob/master/source/watercolours_02.R">actual source</a>, but it may not be very helpful: the code is little opaque, poorly structured, and delegates a lot of the work to the <a href="https://github.com/cmarcum/halftoner">halftoner</a> and <a href="https://jasmines.djnavarro.net/">jasmines</a> packages, neither of which is on CRAN. To make it a little easier on you, I’ll build a new system in this post that adopts the same core ideas.</p>
-<p>In this post I’ll assume you’re already familiar with data wrangling and visualisation with tidyverse tools. This is the subset of <a href="https://www.tidyverse.org/">tidyverse</a> packages that I have attached, and the code that follows relies on all these in some fashion:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb4" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><span class="fu" style="color: #4758AB;">library</span>(magrittr)</span>
-<span id="cb4-2"><span class="fu" style="color: #4758AB;">library</span>(readr)</span>
-<span id="cb4-3"><span class="fu" style="color: #4758AB;">library</span>(tidyr)</span>
-<span id="cb4-4"><span class="fu" style="color: #4758AB;">library</span>(tibble)</span>
-<span id="cb4-5"><span class="fu" style="color: #4758AB;">library</span>(stringr)</span>
-<span id="cb4-6"><span class="fu" style="color: #4758AB;">library</span>(ggplot2)</span>
-<span id="cb4-7"><span class="fu" style="color: #4758AB;">library</span>(purrr)</span>
-<span id="cb4-8"><span class="fu" style="color: #4758AB;">library</span>(dplyr)</span></code></pre></div>
-</div>
-
-<div class="no-row-height column-margin column-container"><div class="">
-<p>The R environment is specified formally in the <a href="https://github.com/djnavarro/quarto-blog/tree/master/posts/2021-09-07_water-colours/renv.lock">lockfile</a>. It’s a story for another day, but for reproducibility purposes I have a separate <a href="https://rstudio.github.io/renv/">renv configuration</a> for every post</p>
-</div></div><p>In addition to tidyverse and base R functions, I’ll use a few other packages as well. The <a href="https://docs.ropensci.org/magick/">magick</a>, <a href="https://github.com/rspatial/raster/">raster</a>, <a href="https://rprojroot.r-lib.org/">rprojroot</a>, <a href="https://fs.r-lib.org/">fs</a>, and <a href="https://ambient.data-imaginist.com/">ambient</a> packages are all used in making the art. Because functions from those packages may not be as familiar to everyone, I’ll namespace the calls to them in the same way I did with <code>bs4cards::cards()</code> previously. Hopefully that will make it easier to see which functions belong to one of those packages.</p>
-</section>
-<section id="art-from-image-processing" class="level2 page-columns page-full">
-<h2 class="anchored" data-anchor-id="art-from-image-processing">Art from image processing</h2>
-<section id="finding-the-image-file" class="level3 page-columns page-full">
-<h3 class="anchored" data-anchor-id="finding-the-image-file">Finding the image file</h3>
-<p>As in life, the place to start is knowing where you are.</p>
-<p>This post is part of my blog, and I’ll need to make use of an image file called <code>"jasmine.jpg"</code> stored alongside my R markdown. First, I can use <a href="https://rprojroot.r-lib.org/">rprojroot</a> to find out where my blog is stored. I’ll do that by searching for a <code>"_quarto.yml"</code> file:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb5" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1">blog <span class="ot" style="color: #003B4F;">&lt;-</span> rprojroot<span class="sc" style="color: #5E5E5E;">::</span><span class="fu" style="color: #4758AB;">find_root</span>(<span class="st" style="color: #20794D;">"_quarto.yml"</span>)</span>
-<span id="cb5-2">blog</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>[1] "/home/danielle/GitHub/sites/quarto-blog"</code></pre>
-</div>
-</div>
-<p>I suspect that most people reading this would be more familiar with the <a href="https://here.r-lib.org/">here</a> package that provides a simplified interface to rprojroot and will automatically detect the .Rproj or .here file associated with your project. In fact, because the <code>here::here()</code> function is so convenient, it’s usually my preferred method for solving this problem. Sometimes, however, the additional flexibility provided by rprojroot is very useful. Some of my projects are comprised of partially independent sub-projects, each with a distinct root directory. That happens sometimes when blogging: there are contexts in which you might want to consider “the blog” to be the project, but other contexts in which “the post” might be the project. If you’re not careful this can lead to chaos (e.g., RStudio projects nested inside other RStudio projects), and I’ve found rprojroot very helpful in avoiding ambiguity in these situations.</p>
-<p>Having chosen “the blog” as the root folder, the next step in orientation is to find the post folder. Because this is a <a href="https://rstudio.github.io/distill/">distill</a> blog, all my posts are stored in the <code>_posts</code> folder, and I’ve adopted a consistent <a href="https://slides.djnavarro.net/project-structure/">naming</a> <a href="https://speakerdeck.com/jennybc/how-to-name-files">convention</a> for organising the post folders. Every name begins with the post date in year-month-day format, followed by a human-readable “slug”:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb7" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1">post <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">paste</span>(params<span class="sc" style="color: #5E5E5E;">$</span>date, params<span class="sc" style="color: #5E5E5E;">$</span>slug, <span class="at" style="color: #657422;">sep =</span> <span class="st" style="color: #20794D;">"_"</span>)</span>
-<span id="cb7-2">post</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>[1] "2021-09-07_water-colours"</code></pre>
-</div>
-</div>
-<p>This allows me to construct the path to the image file:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb9" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1">file <span class="ot" style="color: #003B4F;">&lt;-</span> fs<span class="sc" style="color: #5E5E5E;">::</span><span class="fu" style="color: #4758AB;">path</span>(blog, <span class="st" style="color: #20794D;">"posts"</span>, post, <span class="st" style="color: #20794D;">"jasmine.jpg"</span>)</span>
-<span id="cb9-2">file</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>/home/danielle/GitHub/sites/quarto-blog/posts/2021-09-07_water-colours/jasmine.jpg</code></pre>
-</div>
-</div>
-<p>Here’s the image:</p>
-<div class="cell">
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2021-09-07_water-colours/jasmine.jpg" class="img-fluid" width="960"></p>
-</div>
-</div>
-
-<div class="no-row-height column-margin column-container"><div class="">
-<p>The photo has an emotional resonance to me: it dates back to 2011 and appeared on the cover of <a href="https://learningstatisticswithr.com">Learning Statistics with R</a>. Although 10 years separate the <em>Water Colours</em> series from the text and the photo, the two are linked by a shared connection to events from a decade ago</p>
-</div></div></section>
-<section id="importing-the-image" class="level3">
-<h3 class="anchored" data-anchor-id="importing-the-image">Importing the image</h3>
-<p>Our next step is to import the image into R at a suitable resolution. The original image size is 1000x600 pixels, which is a little more than we need. Here’s a simple <code>import_image()</code> function that does this:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb11" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb11-1">import_image <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>(path, width, height) {</span>
-<span id="cb11-2">  geometry <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">paste0</span>(width, <span class="st" style="color: #20794D;">"x"</span>, height) <span class="co" style="color: #5E5E5E;"># e.g., "100x60"</span></span>
-<span id="cb11-3">  path <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb11-4">    magick<span class="sc" style="color: #5E5E5E;">::</span><span class="fu" style="color: #4758AB;">image_read</span>() <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb11-5">    magick<span class="sc" style="color: #5E5E5E;">::</span><span class="fu" style="color: #4758AB;">image_scale</span>(geometry)</span>
-<span id="cb11-6">}</span></code></pre></div>
-</div>
-<p>Internally, the work is being done by the fabulous <a href="https://docs.ropensci.org/magick/">magick</a> package that provides bindings to the <a href="https://imagemagick.org/">ImageMagick</a> library. In truth, it’s the ImageMagick library that is doing most the work here. R doesn’t load the complete image, it lets ImageMagick take care of that. Generally that’s a good thing for performance reasons (you don’t want to load large images into memory if you can avoid it), but in this case we’re going to work with the raw image data inside R.</p>
-<p>This brings us to the next task…</p>
-</section>
-<section id="converting-the-image-to-data" class="level3 page-columns page-full">
-<h3 class="anchored" data-anchor-id="converting-the-image-to-data">Converting the image to data</h3>
-<p>Converting the image into a data structure we can use is a two step process. First, we create a matrix that represents the image in a format similar to the image itself. That’s the job of the <code>construct_matrix()</code> function below. It takes the <code>image</code> as input, and first coerces it to a raster object and then to a regular matrix: in the code below, the matrix is named <code>mat</code>, and the pixel on the i-th row and j-th column of the image is represented by the contents of <code>mat[i, j]</code>.</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb12" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb12-1">construct_matrix <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>(image) {</span>
-<span id="cb12-2">  </span>
-<span id="cb12-3">  <span class="co" style="color: #5E5E5E;"># read matrix</span></span>
-<span id="cb12-4">  mat <span class="ot" style="color: #003B4F;">&lt;-</span> image <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb12-5">    <span class="fu" style="color: #4758AB;">as.raster</span>() <span class="sc" style="color: #5E5E5E;">%&gt;%</span></span>
-<span id="cb12-6">    <span class="fu" style="color: #4758AB;">as.matrix</span>()</span>
-<span id="cb12-7">  </span>
-<span id="cb12-8">  <span class="co" style="color: #5E5E5E;"># use the row and column names to represent co-ordinates</span></span>
-<span id="cb12-9">  <span class="fu" style="color: #4758AB;">rownames</span>(mat) <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">paste0</span>(<span class="st" style="color: #20794D;">"y"</span>, <span class="fu" style="color: #4758AB;">nrow</span>(mat)<span class="sc" style="color: #5E5E5E;">:</span><span class="dv" style="color: #AD0000;">1</span>) <span class="co" style="color: #5E5E5E;"># &lt;- flip y</span></span>
-<span id="cb12-10">  <span class="fu" style="color: #4758AB;">colnames</span>(mat) <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">paste0</span>(<span class="st" style="color: #20794D;">"x"</span>, <span class="dv" style="color: #AD0000;">1</span><span class="sc" style="color: #5E5E5E;">:</span><span class="fu" style="color: #4758AB;">ncol</span>(mat))</span>
-<span id="cb12-11">  </span>
-<span id="cb12-12">  <span class="fu" style="color: #4758AB;">return</span>(mat)</span>
-<span id="cb12-13">}</span></code></pre></div>
-</div>
-<p>A little care is needed when interpreting the rows of this matrix. When we think about graphs, the values on y-axis increase as we move our eyes upwards from the bottom, so our mental model has the small numbers at the bottom and the big numbers at the top. But that’s not the only mental model in play here. When we read a matrix or a table we don’t <em>look</em> at it, we <em>read</em> it - and we read from top to bottom. A numbered list, for example, has the smallest numbers at the top, and the numbers get bigger as we read down the list. Both of those mental models are sensible, but it’s hard to switch between them.</p>
-<p>The tricky part here is that the raw image is encoded in “reading format”. It’s supposed to be read like a table or a list, so the indices increase as we read down the image. The image data returned by <code>construct_matrix()</code> is organised this format. However, when we draw pictures with ggplot2 later on, we’re going to need to switch to a “graph format” convention with the small numbers at the bottom. That’s the reason why the code above flips the order of the row names. Our next task will be to convert this (reading-formatted) matrix into a tidy tibble, and those row and column names will become become our (graph-formatted) x- and y-coordinates, so the row names need to be labelled in reverse order.</p>
-<p>To transform the image matrix into a tidy tibble, I’ve written a handy <code>construct_tibble()</code> function:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb13" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1">construct_tibble <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>(mat) {</span>
-<span id="cb13-2">  </span>
-<span id="cb13-3">  <span class="co" style="color: #5E5E5E;"># convert to tibble</span></span>
-<span id="cb13-4">  tbl <span class="ot" style="color: #003B4F;">&lt;-</span> mat <span class="sc" style="color: #5E5E5E;">%&gt;%</span></span>
-<span id="cb13-5">    <span class="fu" style="color: #4758AB;">as.data.frame</span>() <span class="sc" style="color: #5E5E5E;">%&gt;%</span></span>
-<span id="cb13-6">    <span class="fu" style="color: #4758AB;">rownames_to_column</span>(<span class="st" style="color: #20794D;">"y"</span>) <span class="sc" style="color: #5E5E5E;">%&gt;%</span></span>
-<span id="cb13-7">    <span class="fu" style="color: #4758AB;">as_tibble</span>() </span>
-<span id="cb13-8">  </span>
-<span id="cb13-9">  <span class="co" style="color: #5E5E5E;"># reshape</span></span>
-<span id="cb13-10">  tbl <span class="ot" style="color: #003B4F;">&lt;-</span> tbl <span class="sc" style="color: #5E5E5E;">%&gt;%</span></span>
-<span id="cb13-11">    <span class="fu" style="color: #4758AB;">pivot_longer</span>(</span>
-<span id="cb13-12">      <span class="at" style="color: #657422;">cols =</span> <span class="fu" style="color: #4758AB;">starts_with</span>(<span class="st" style="color: #20794D;">"x"</span>),</span>
-<span id="cb13-13">      <span class="at" style="color: #657422;">names_to =</span> <span class="st" style="color: #20794D;">"x"</span>,</span>
-<span id="cb13-14">      <span class="at" style="color: #657422;">values_to =</span> <span class="st" style="color: #20794D;">"shade"</span></span>
-<span id="cb13-15">    ) </span>
-<span id="cb13-16">  </span>
-<span id="cb13-17">  <span class="co" style="color: #5E5E5E;"># tidy</span></span>
-<span id="cb13-18">  tbl <span class="ot" style="color: #003B4F;">&lt;-</span> tbl <span class="sc" style="color: #5E5E5E;">%&gt;%</span></span>
-<span id="cb13-19">    <span class="fu" style="color: #4758AB;">arrange</span>(x, y) <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb13-20">    <span class="fu" style="color: #4758AB;">mutate</span>(</span>
-<span id="cb13-21">      <span class="at" style="color: #657422;">x =</span> x <span class="sc" style="color: #5E5E5E;">%&gt;%</span> <span class="fu" style="color: #4758AB;">str_remove_all</span>(<span class="st" style="color: #20794D;">"x"</span>) <span class="sc" style="color: #5E5E5E;">%&gt;%</span> <span class="fu" style="color: #4758AB;">as.numeric</span>(),</span>
-<span id="cb13-22">      <span class="at" style="color: #657422;">y =</span> y <span class="sc" style="color: #5E5E5E;">%&gt;%</span> <span class="fu" style="color: #4758AB;">str_remove_all</span>(<span class="st" style="color: #20794D;">"y"</span>) <span class="sc" style="color: #5E5E5E;">%&gt;%</span> <span class="fu" style="color: #4758AB;">as.numeric</span>(),</span>
-<span id="cb13-23">      <span class="at" style="color: #657422;">id =</span> <span class="fu" style="color: #4758AB;">row_number</span>()</span>
-<span id="cb13-24">    )</span>
-<span id="cb13-25">  </span>
-<span id="cb13-26">  <span class="fu" style="color: #4758AB;">return</span>(tbl)</span>
-<span id="cb13-27">}</span></code></pre></div>
-</div>
-<p>The code has the following strucure:</p>
-<ul>
-<li><p>The first part of this code coerces the matrix to a plain data frame, then uses <code>rownames_to_columns()</code> to extract the row names before coercing it to a tibble. This step is necessary because tibbles don’t have row names, and we need those row names: our end goal is to have a variable <code>y</code> to store those co-ordinate values.</p></li>
-<li><p>The second part of the code uses <code>pivot_longer()</code> to capture all the other variables (currently named <code>x1</code>, <code>x2</code>, etc) and pull them down into a single column that specifies the <code>x</code> co-ordinate. At this stage, the <code>tbl</code> tibble contains three variables: an <code>x</code> value, a <code>y</code> value, and a <code>shade</code> that contains the hex code for a colour.</p></li>
-<li><p>The last step is to tidy up the values. After <code>pivot_longer()</code> does its job, the <code>x</code> variable contains strings like <code>"x1"</code>, <code>"x2"</code>, etc, but we’d prefer them to be actual numbers like <code>1</code>, <code>2</code>, etc. The same is true for the <code>y</code> variable. To fix this, the last part of the code does a tiny bit of string manipulation using <code>str_remove_all()</code> to get rid of the unwanted prefixes, and then coerces the result to a number.</p></li>
-</ul>
-
-<div class="no-row-height column-margin column-container"><div class="">
-<p>The <code>names_prefix</code> argument to <code>pivot_longer()</code> can transform <code>x</code> without the third step, but I prefer the verbose form. I find it easier to read and it treats <code>x</code> and <code>y</code> the same</p>
-</div></div><p>Taken together, the <code>import_image()</code>, <code>construct_matrix()</code>, and <code>construct_tibble()</code> functions provide us with everything we need to pull the data from the image file and wrangle it into a format that ggplot2 is expecting:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb14" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb14-1">jas <span class="ot" style="color: #003B4F;">&lt;-</span> file <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb14-2">  <span class="fu" style="color: #4758AB;">import_image</span>(<span class="at" style="color: #657422;">width =</span> <span class="dv" style="color: #AD0000;">100</span>, <span class="at" style="color: #657422;">height =</span> <span class="dv" style="color: #AD0000;">60</span>) <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb14-3">  <span class="fu" style="color: #4758AB;">construct_matrix</span>() <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb14-4">  <span class="fu" style="color: #4758AB;">construct_tibble</span>()</span>
-<span id="cb14-5"></span>
-<span id="cb14-6">jas</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code># A tibble: 6,000 × 4
-       y     x shade        id
-   &lt;dbl&gt; &lt;dbl&gt; &lt;chr&gt;     &lt;int&gt;
- 1     1     1 #838c70ff     1
- 2    10     1 #3c3123ff     2
- 3    11     1 #503d3dff     3
- 4    12     1 #363126ff     4
- 5    13     1 #443a30ff     5
- 6    14     1 #8a6860ff     6
- 7    15     1 #665859ff     7
- 8    16     1 #5a5d51ff     8
- 9    17     1 #535c4cff     9
-10    18     1 #944b61ff    10
-# … with 5,990 more rows</code></pre>
-</div>
-</div>
-<p>A little unusually, the hex codes here are specified in RGBA format: the first two alphanumeric characters specify the hexadecimal code for the red level, the second two represent the green level (or “channel”), the third two are the blue channel, and the last two are the opacity level (the alpha channel). I’m going to ignore the alpha channel for this exercise though.</p>
-<p>There’s one last thing to point out before turning to the fun art part. Notice that <code>jas</code> also contains an <code>id</code> column (added by the third part of the <code>construct_tibble()</code> function). It’s generally good practice to have an <code>id</code> column that uniquely identifies each row, and will turn out to be useful later when we need to join this data set with other data sets that we’ll generate.</p>
-</section>
-<section id="art-from-data-visualisation" class="level3">
-<h3 class="anchored" data-anchor-id="art-from-data-visualisation">Art from data visualisation</h3>
-<p>Let the art begin!</p>
-<p>The first step is to define a helper function <code>ggplot_themed()</code> that provides a template that we’ll reuse in every plot. Mostly this involves preventing ggplot2 from doing things it wants to do. When we’re doing data visualisation it’s great that ggplot2 automatically provides things like “legends”, “axes”, and “scales” to map from data to visual aesthetics, but from an artistic perspective they’re just clutter. I don’t want to manually strip that out every time I make a plot, so it makes sense to have a function that gets rid of all those things:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb16" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb16-1">ggplot_themed <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>(data) {</span>
-<span id="cb16-2">  data <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb16-3">    <span class="fu" style="color: #4758AB;">ggplot</span>(<span class="fu" style="color: #4758AB;">aes</span>(x, y)) <span class="sc" style="color: #5E5E5E;">+</span></span>
-<span id="cb16-4">    <span class="fu" style="color: #4758AB;">coord_equal</span>() <span class="sc" style="color: #5E5E5E;">+</span> </span>
-<span id="cb16-5">    <span class="fu" style="color: #4758AB;">scale_size_identity</span>() <span class="sc" style="color: #5E5E5E;">+</span> </span>
-<span id="cb16-6">    <span class="fu" style="color: #4758AB;">scale_colour_identity</span>() <span class="sc" style="color: #5E5E5E;">+</span> </span>
-<span id="cb16-7">    <span class="fu" style="color: #4758AB;">scale_fill_identity</span>() <span class="sc" style="color: #5E5E5E;">+</span> </span>
-<span id="cb16-8">    <span class="fu" style="color: #4758AB;">theme_void</span>() </span>
-<span id="cb16-9">}</span></code></pre></div>
-</div>
-<p>This “template function” allows us to start with a clean slate, and it makes our subsequent coding task easier. The <code>x</code> and <code>y</code> aesthetics are already specified, ggplot2 won’t try to “interpret” our colours and sizes for us, and it won’t mess with the aspect ratio. In a sense, this function turns off the autopilot: we’re flying this thing manually…</p>
-<p>There are many ways to plot the <code>jas</code> data in ggplot2. The least imaginative possibility is <code>geom_tile()</code>, which produces a pixellated version of the jasmines photo:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb17" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb17-1">jas <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb17-2">  <span class="fu" style="color: #4758AB;">ggplot_themed</span>() <span class="sc" style="color: #5E5E5E;">+</span> </span>
-<span id="cb17-3">  <span class="fu" style="color: #4758AB;">geom_tile</span>(<span class="fu" style="color: #4758AB;">aes</span>(<span class="at" style="color: #657422;">fill =</span> shade)) </span></code></pre></div>
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2021-09-07_water-colours/index_files/figure-html/jasmine-raster-image-1.png" class="img-fluid" width="672"></p>
-</div>
-</div>
-<p>Of course, if you are like me you always forget to use the fill aesthetic. The muscle memory tells me to use the colour aesthetic, so I often end up drawing something where only the borders of the tiles are coloured:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb18" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1">jas <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb18-2">  <span class="fu" style="color: #4758AB;">ggplot_themed</span>() <span class="sc" style="color: #5E5E5E;">+</span> </span>
-<span id="cb18-3">  <span class="fu" style="color: #4758AB;">geom_tile</span>(<span class="fu" style="color: #4758AB;">aes</span>(<span class="at" style="color: #657422;">colour =</span> shade)) </span></code></pre></div>
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2021-09-07_water-colours/index_files/figure-html/jasmine-raster-variant-image-1.png" class="img-fluid" width="672"></p>
-</div>
-</div>
-<p>It’s surprisingly pretty, and a cute demonstration of how good the visual system is at reconstructing images from low-quality input: remarkably, the jasmines are still perceptible despite the fact that most of the plot area is black. I didn’t end up pursuing this (yet!) but I think there’s a lot of artistic potential here. It might be worth playing with at a later date. In that sense generative art is a lot like any other kind of art (or, for that matter, science). It is as much about exploration and discovery as it is about technical prowess.</p>
-<p>The path I did follow is based on <code>geom_point()</code>. Each pixel in the original image is plotted as a circular marker in the appropriate colour. Here’s the simplest version of this idea applied to the <code>jas</code> data:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb19" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb19-1">jas <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb19-2">  <span class="fu" style="color: #4758AB;">ggplot_themed</span>() <span class="sc" style="color: #5E5E5E;">+</span> </span>
-<span id="cb19-3">  <span class="fu" style="color: #4758AB;">geom_point</span>(<span class="fu" style="color: #4758AB;">aes</span>(<span class="at" style="color: #657422;">colour =</span> shade)) </span></code></pre></div>
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2021-09-07_water-colours/index_files/figure-html/jasmine-scatter-image-1.png" class="img-fluid" width="672"></p>
-</div>
-</div>
-<p>It’s simple, but I like it.</p>
-</section>
-<section id="extracting-the-colour-channels" class="level3">
-<h3 class="anchored" data-anchor-id="extracting-the-colour-channels">Extracting the colour channels</h3>
-<p>Up to this point we haven’t been manipulating the colours in any of the plots: the hex code in the <code>shade</code> variable is left intact. There’s no inherent reason we should limit ourselves to such boring visualisations. All we need to do is extract the different “colour channels” and start playing around.</p>
-<p>It’s not too difficult to do this: base R provides the <code>col2rgb()</code> function that separates the hex code into red, green, blue channels, and represents each channel with integers between 0 and 255. It also provides the <code>rgb2hsv()</code> function that converts this RGB format into <a href="https://en.wikipedia.org/wiki/HSL_and_HSV">hue, saturation, and value</a> format, represented as numeric values between 0 and 1.</p>
-<p>This technique is illustrated by the <code>extract_channels()</code> helper function shown below. It looks at the <code>shade</code> column in the data frame, and adds six new columns, one for each channel. I’m a sucker for variable names that are all the same length (often unwisely), and I’ve named them <code>red</code>, <code>grn</code>, <code>blu</code>, <code>hue</code>, <code>sat</code>, and <code>val</code>:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb20" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb20-1">extract_channels <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>(tbl) {</span>
-<span id="cb20-2">  rgb <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">with</span>(tbl, <span class="fu" style="color: #4758AB;">col2rgb</span>(shade))</span>
-<span id="cb20-3">  hsv <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">rgb2hsv</span>(rgb)</span>
-<span id="cb20-4">  tbl <span class="ot" style="color: #003B4F;">&lt;-</span> tbl <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb20-5">    <span class="fu" style="color: #4758AB;">mutate</span>(</span>
-<span id="cb20-6">      <span class="at" style="color: #657422;">red =</span> rgb[<span class="dv" style="color: #AD0000;">1</span>, ],</span>
-<span id="cb20-7">      <span class="at" style="color: #657422;">grn =</span> rgb[<span class="dv" style="color: #AD0000;">2</span>, ],</span>
-<span id="cb20-8">      <span class="at" style="color: #657422;">blu =</span> rgb[<span class="dv" style="color: #AD0000;">3</span>, ],</span>
-<span id="cb20-9">      <span class="at" style="color: #657422;">hue =</span> hsv[<span class="dv" style="color: #AD0000;">1</span>, ],</span>
-<span id="cb20-10">      <span class="at" style="color: #657422;">sat =</span> hsv[<span class="dv" style="color: #AD0000;">2</span>, ],</span>
-<span id="cb20-11">      <span class="at" style="color: #657422;">val =</span> hsv[<span class="dv" style="color: #AD0000;">3</span>, ]</span>
-<span id="cb20-12">    )</span>
-<span id="cb20-13">  <span class="fu" style="color: #4758AB;">return</span>(tbl)</span>
-<span id="cb20-14">}</span></code></pre></div>
-</div>
-<p>Here’s what that looks like applied to the <code>jas</code> data:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb21" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb21-1">jas <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">extract_channels</span>(jas)</span>
-<span id="cb21-2">jas</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code># A tibble: 6,000 × 10
-       y     x shade        id   red   grn   blu    hue   sat   val
-   &lt;dbl&gt; &lt;dbl&gt; &lt;chr&gt;     &lt;int&gt; &lt;int&gt; &lt;int&gt; &lt;int&gt;  &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;
- 1     1     1 #838c70ff     1   131   140   112 0.220  0.200 0.549
- 2    10     1 #3c3123ff     2    60    49    35 0.0933 0.417 0.235
- 3    11     1 #503d3dff     3    80    61    61 0      0.237 0.314
- 4    12     1 #363126ff     4    54    49    38 0.115  0.296 0.212
- 5    13     1 #443a30ff     5    68    58    48 0.0833 0.294 0.267
- 6    14     1 #8a6860ff     6   138   104    96 0.0317 0.304 0.541
- 7    15     1 #665859ff     7   102    88    89 0.988  0.137 0.4  
- 8    16     1 #5a5d51ff     8    90    93    81 0.208  0.129 0.365
- 9    17     1 #535c4cff     9    83    92    76 0.260  0.174 0.361
-10    18     1 #944b61ff    10   148    75    97 0.950  0.493 0.580
-# … with 5,990 more rows</code></pre>
-</div>
-</div>
-<p>A whole new world of artistic possibilities has just emerged!</p>
-</section>
-<section id="art-from-channel-manipulation" class="level3 page-columns page-full">
-<h3 class="anchored" data-anchor-id="art-from-channel-manipulation">Art from channel manipulation</h3>
-<p>One way to use this representation is in <a href="https://en.wikipedia.org/wiki/Halftone">halftone images</a>. If you have a printer that contains only black ink, you can approximate shades of grey by using the size of each dot to represent how dark that pixel should be:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb23" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb23-1">map_size <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>(x) {</span>
-<span id="cb23-2">  ambient<span class="sc" style="color: #5E5E5E;">::</span><span class="fu" style="color: #4758AB;">normalise</span>(<span class="dv" style="color: #AD0000;">1</span><span class="sc" style="color: #5E5E5E;">-</span>x, <span class="at" style="color: #657422;">to =</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="dv" style="color: #AD0000;">0</span>, <span class="dv" style="color: #AD0000;">2</span>))</span>
-<span id="cb23-3">}</span>
-<span id="cb23-4"></span>
-<span id="cb23-5">jas <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb23-6">  <span class="fu" style="color: #4758AB;">ggplot_themed</span>() <span class="sc" style="color: #5E5E5E;">+</span>  </span>
-<span id="cb23-7">  <span class="fu" style="color: #4758AB;">geom_point</span>(</span>
-<span id="cb23-8">    <span class="at" style="color: #657422;">mapping =</span> <span class="fu" style="color: #4758AB;">aes</span>(<span class="at" style="color: #657422;">size =</span> <span class="fu" style="color: #4758AB;">map_size</span>(val)),</span>
-<span id="cb23-9">    <span class="at" style="color: #657422;">colour =</span> <span class="st" style="color: #20794D;">"black"</span>, </span>
-<span id="cb23-10">    <span class="at" style="color: #657422;">show.legend =</span> <span class="cn" style="color: #8f5902;">FALSE</span></span>
-<span id="cb23-11">  )</span></code></pre></div>
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2021-09-07_water-colours/index_files/figure-html/jasmine-halftone-image-1.png" class="img-fluid" width="672"></p>
-</div>
-</div>
-
-<div class="no-row-height column-margin column-container"><div class="">
-<p>In this code the <code>ambient::normalise()</code> function is used to rescale the input to fall within a specified range. Usually ggplot2 handles this automatically, but as I mentioned, we’ve turned off the autopilot…</p>
-</div></div><p>For real world printers, this approach is very convenient because it allows us to construct any shade we like using only a few different colours of ink. In the halftone world shades of grey are merely blacks of different size, pinks are merely sizes of red (sort of), and so on.</p>
-<p>But we’re not using real printers, and in any case the image above is not a very good example of a halftone format: I’m crudely mapping <code>1-val</code> to the size aesthetic, and that’s not actually the right way to do this (if you want to see this done properly, look at the <a href="https://github.com/cmarcum/halftoner">halftoner</a> package). The image above is “inspired by” the halftone concept, not the real thing. I’m okay with that, and abandoning the idea of fidelity opens up new possibilities. For example, there’s nothing stopping us retaining the original hue and saturation, while using dot size to represent the intensity value. That allows us to produce “halftonesque” images like this:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb24" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb24-1">jas <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb24-2">  <span class="fu" style="color: #4758AB;">ggplot_themed</span>() <span class="sc" style="color: #5E5E5E;">+</span>  </span>
-<span id="cb24-3">  <span class="fu" style="color: #4758AB;">geom_point</span>(</span>
-<span id="cb24-4">    <span class="at" style="color: #657422;">mapping =</span> <span class="fu" style="color: #4758AB;">aes</span>(</span>
-<span id="cb24-5">      <span class="at" style="color: #657422;">colour =</span> <span class="fu" style="color: #4758AB;">hsv</span>(hue, sat, .<span class="dv" style="color: #AD0000;">5</span>), </span>
-<span id="cb24-6">      <span class="at" style="color: #657422;">size =</span> <span class="fu" style="color: #4758AB;">map_size</span>(val)</span>
-<span id="cb24-7">    ), </span>
-<span id="cb24-8">    <span class="at" style="color: #657422;">show.legend =</span> <span class="cn" style="color: #8f5902;">FALSE</span></span>
-<span id="cb24-9">  )</span></code></pre></div>
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2021-09-07_water-colours/index_files/figure-html/jasmine-halftonesque-image-1.png" class="img-fluid" width="672"></p>
-</div>
-</div>
-<p>In this code, the <code>hsv()</code> function takes the hue and saturation channels from the original image, but combines them with a constant intensity value: the output is a new colour specified as a hex code that ggplot2 can display in the output. Because we have stripped out the value channel, we can reuse the halftone trick. Much like a halftone image, the image above uses the size aesthetic to represent the intensity at the corresponding pixel.</p>
-</section>
-</section>
-<section id="intermission" class="level2">
-<h2 class="anchored" data-anchor-id="intermission">Intermission</h2>
-<p>Up to this point I’ve talked about image manipulation, and I hope you can see the artistic potential created when we pair image processing tools like magick with data visualisation tools like ggplot2. What I haven’t talked about is how to choose (or generate!) the images to manipulate, and I haven’t talked about how we might introduce a probabilistic component to the process. I’m not going to say much about how to choose images. The possibilities are endless. For this post I’ve used a photo I took in my garden many years ago, but the pieces in <em>Water Colours</em> series have a different origin: I dripped some food colouring into a glass of water and took some photos of the dye diffusing. Small sections were cropped out of these photos and often preprocessed in some fashion by changing the hue, saturation etc. These manipulated photos were then passed into a noise generation process, and the output produced images like this:</p>
-<div class="cell" data-hash="index_cache/html/water-colour-cards-2_7a2cc16f9f0ef094873102b67d6b41b8">
-<div class="cell-output-display">
-<div>
-<div class="row p-0 row-cols-1 row-cols-sm-2 row-cols-md-3 row-cols-lg-4" style="margin-left: -.4rem; margin-right: -.4rem; margin-top: 1rem; margin-bottom: 1rem; ">
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .4rem ; border-width: 0; border-radius: .6rem .6rem .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img48_storm-cell.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2021-09-07_water-colours/https:/djnavarro.net/series-water-colours/500/watercolour_sys02_img48_storm-cell.jpg" class="card-img-top" style="border-style:solid; border-color:inherits; border-width:1px 1px 0 1px; border-radius: .6rem .6rem 0 0 ;">
-</a>
-<div class="card-body justify-content-end m-0 p-0" style="visibility: visible; background-color: inherits; border-style:solid; border-color:inherits; border-width:1px; border-radius: 0 0 .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img48_storm-cell.jpg">
-<h5 class="card-title my-auto px-3 pt-3 pb-3 anchored">Storm Cell / Air Elemental</h5>
-</a>
-</div>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .4rem ; border-width: 0; border-radius: .6rem .6rem .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img49_tonal-earth.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2021-09-07_water-colours/https:/djnavarro.net/series-water-colours/500/watercolour_sys02_img49_tonal-earth.jpg" class="card-img-top" style="border-style:solid; border-color:inherits; border-width:1px 1px 0 1px; border-radius: .6rem .6rem 0 0 ;">
-</a>
-<div class="card-body justify-content-end m-0 p-0" style="visibility: visible; background-color: inherits; border-style:solid; border-color:inherits; border-width:1px; border-radius: 0 0 .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img49_tonal-earth.jpg">
-<h5 class="card-title my-auto px-3 pt-3 pb-3 anchored">Tonal Earth</h5>
-</a>
-</div>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .4rem ; border-width: 0; border-radius: .6rem .6rem .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img50_cold-front.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2021-09-07_water-colours/https:/djnavarro.net/series-water-colours/500/watercolour_sys02_img50_cold-front.jpg" class="card-img-top" style="border-style:solid; border-color:inherits; border-width:1px 1px 0 1px; border-radius: .6rem .6rem 0 0 ;">
-</a>
-<div class="card-body justify-content-end m-0 p-0" style="visibility: visible; background-color: inherits; border-style:solid; border-color:inherits; border-width:1px; border-radius: 0 0 .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img50_cold-front.jpg">
-<h5 class="card-title my-auto px-3 pt-3 pb-3 anchored">Cold Front</h5>
-</a>
-</div>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .4rem ; border-width: 0; border-radius: .6rem .6rem .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img51_kintsugi-dreams.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2021-09-07_water-colours/https:/djnavarro.net/series-water-colours/500/watercolour_sys02_img51_kintsugi-dreams.jpg" class="card-img-top" style="border-style:solid; border-color:inherits; border-width:1px 1px 0 1px; border-radius: .6rem .6rem 0 0 ;">
-</a>
-<div class="card-body justify-content-end m-0 p-0" style="visibility: visible; background-color: inherits; border-style:solid; border-color:inherits; border-width:1px; border-radius: 0 0 .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img51_kintsugi-dreams.jpg">
-<h5 class="card-title my-auto px-3 pt-3 pb-3 anchored">Kintsugi Dreams</h5>
-</a>
-</div>
-</div>
-</div>
-</div>
-</div>
-</div>
-</section>
-<section id="art-from-noise-generators" class="level2">
-<h2 class="anchored" data-anchor-id="art-from-noise-generators">Art from noise generators</h2>
-<section id="multidimensional-noise-generation" class="level3">
-<h3 class="anchored" data-anchor-id="multidimensional-noise-generation">Multidimensional noise generation</h3>
-<p>How can we generate interesting noise patterns in R? As usual, there are many different ways you can do this, but my favourite method is to use the <a href="https://ambient.data-imaginist.com/">ambient</a> package that provides bindings to the <a href="https://github.com/Auburn/FastNoiseLite">FastNoise</a> C++ library. A proper description of what you can do with ambient is beyond what I can accomplish here. There are a <em>lot</em> of things you can do with a tool like this, and I’ve explored only a small subset of the possibilities in my art. Rather than make a long post even longer, what I’ll do is link to a lovely essay on <a href="https://tylerxhobbs.com/essays/2020/flow-fields">flow fields</a> and encourage you to play around yourself.</p>
-<p>To give you a sense of what the possibilities are, I’ve written a <code>field()</code> function that uses the ambient package to generate noise. At its heart is <code>ambient::gen_simplex()</code>, a function that generates <a href="https://en.wikipedia.org/wiki/Simplex_noise">simplex noise</a> (examples <a href="https://ambient.data-imaginist.com/reference/noise_simplex.html">here</a>), a useful form of multidimensional noise that has applications in computer graphics. In the code below, the simplex noise is then modified by a <a href="https://ambient.data-imaginist.com/reference/billow.html">billow fractal</a> that makes it “lumpier”: that’s the job of <code>ambient::gen_billow()</code> and <code>ambient::fracture()</code>. This is then modified one last time by the <code>ambient::curl_noise()</code> function to avoid some undesirable properties of the flow fields created by simplex noise.</p>
-<p>In any case, here is the code. You’ll probably need to read through the ambient documentation to understand all the moving parts here, but for our purposes the main things to note are the arguments. The <code>points</code> argument takes a data frame or tibble that contains the <code>x</code> and <code>y</code> coordinates of a set of points (e.g., something like the <code>jas</code> data!). The <code>frequency</code> argument controls the overall “scale” of the noise: does it change quickly or slowly as you move across the image? The <code>octaves</code> argument controls the amount of fractal-ness (hush, I know that’s not a word) in the image. How many times do you apply the underlying transformation?</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb25" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb25-1">field <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>(points, <span class="at" style="color: #657422;">frequency =</span> .<span class="dv" style="color: #AD0000;">1</span>, <span class="at" style="color: #657422;">octaves =</span> <span class="dv" style="color: #AD0000;">1</span>) {</span>
-<span id="cb25-2">  ambient<span class="sc" style="color: #5E5E5E;">::</span><span class="fu" style="color: #4758AB;">curl_noise</span>(</span>
-<span id="cb25-3">    <span class="at" style="color: #657422;">generator =</span> ambient<span class="sc" style="color: #5E5E5E;">::</span>fracture,</span>
-<span id="cb25-4">    <span class="at" style="color: #657422;">fractal =</span> ambient<span class="sc" style="color: #5E5E5E;">::</span>billow,</span>
-<span id="cb25-5">    <span class="at" style="color: #657422;">noise =</span> ambient<span class="sc" style="color: #5E5E5E;">::</span>gen_simplex,</span>
-<span id="cb25-6">    <span class="at" style="color: #657422;">x =</span> points<span class="sc" style="color: #5E5E5E;">$</span>x,</span>
-<span id="cb25-7">    <span class="at" style="color: #657422;">y =</span> points<span class="sc" style="color: #5E5E5E;">$</span>y,</span>
-<span id="cb25-8">    <span class="at" style="color: #657422;">frequency =</span> frequency,</span>
-<span id="cb25-9">    <span class="at" style="color: #657422;">octaves =</span> octaves,</span>
-<span id="cb25-10">    <span class="at" style="color: #657422;">seed =</span> <span class="dv" style="color: #AD0000;">1</span></span>
-<span id="cb25-11">  )</span>
-<span id="cb25-12">}</span></code></pre></div>
-</div>
-<p>Interpreting the output of the <code>field()</code> function requires a little care. The result <em>isn’t</em> a new set of points. Rather, it is a collection of directional vectors that tell you “how fast” the x- and y-components are flowing at each of the locations specified in the <code>points</code> input. If we want to compute a new set of points (which is usually true), we need something like the <code>shift()</code> function below. It takes a set of <code>points</code> as input, computes the directional vectors at each of the locations, and then moves each point by a specified <code>amount</code>, using the flow vectors to work out how far to move and what direction to move. The result is a new data frame with the same columns and the same number of rows:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb26" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb26-1">shift <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>(points, amount, ...) {</span>
-<span id="cb26-2">  vectors <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">field</span>(points, ...)</span>
-<span id="cb26-3">  points <span class="ot" style="color: #003B4F;">&lt;-</span> points <span class="sc" style="color: #5E5E5E;">%&gt;%</span></span>
-<span id="cb26-4">    <span class="fu" style="color: #4758AB;">mutate</span>(</span>
-<span id="cb26-5">      <span class="at" style="color: #657422;">x =</span> x <span class="sc" style="color: #5E5E5E;">+</span> vectors<span class="sc" style="color: #5E5E5E;">$</span>x <span class="sc" style="color: #5E5E5E;">*</span> amount,</span>
-<span id="cb26-6">      <span class="at" style="color: #657422;">y =</span> y <span class="sc" style="color: #5E5E5E;">+</span> vectors<span class="sc" style="color: #5E5E5E;">$</span>y <span class="sc" style="color: #5E5E5E;">*</span> amount,</span>
-<span id="cb26-7">      <span class="at" style="color: #657422;">time =</span> time <span class="sc" style="color: #5E5E5E;">+</span> <span class="dv" style="color: #AD0000;">1</span>,</span>
-<span id="cb26-8">      <span class="at" style="color: #657422;">id =</span> id</span>
-<span id="cb26-9">    )</span>
-<span id="cb26-10">  <span class="fu" style="color: #4758AB;">return</span>(points)</span>
-<span id="cb26-11">}</span></code></pre></div>
-</div>
-<p>It’s worth noting that the <code>shift()</code> function assumes that <code>points</code> contains an <code>id</code> column as well as the <code>x</code> and <code>y</code> columns. This will be crucial later when we want to merge the output with the <code>jas</code> data. Because the positions of each point are changing, the <code>id</code> column will be the method we use to join the two data sets. It’s also worth noting that <code>shift()</code> keeps track of time for you. It assumes that the input data contains a <code>time</code> column, and the output data contains the same column with every value incremented by one. In other words, it keeps the <code>id</code> constant so we know which point is referred to by the row, but modifies its position in <code>time</code> and space (<code>x</code> and <code>y</code>). Neat.</p>
-</section>
-<section id="art-from-the-noise" class="level3">
-<h3 class="anchored" data-anchor-id="art-from-the-noise">Art from the noise</h3>
-<p>To illustrate how this all works, I’ll start by creating a regular 50x30 grid of points:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb27" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb27-1">points_time0 <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">expand_grid</span>(<span class="at" style="color: #657422;">x =</span> <span class="dv" style="color: #AD0000;">1</span><span class="sc" style="color: #5E5E5E;">:</span><span class="dv" style="color: #AD0000;">50</span>, <span class="at" style="color: #657422;">y =</span> <span class="dv" style="color: #AD0000;">1</span><span class="sc" style="color: #5E5E5E;">:</span><span class="dv" style="color: #AD0000;">30</span>) <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb27-2">  <span class="fu" style="color: #4758AB;">mutate</span>(<span class="at" style="color: #657422;">time =</span> <span class="dv" style="color: #AD0000;">0</span>, <span class="at" style="color: #657422;">id =</span> <span class="fu" style="color: #4758AB;">row_number</span>())</span>
-<span id="cb27-3"></span>
-<span id="cb27-4"><span class="fu" style="color: #4758AB;">ggplot_themed</span>(points_time0) <span class="sc" style="color: #5E5E5E;">+</span> </span>
-<span id="cb27-5">  <span class="fu" style="color: #4758AB;">geom_point</span>(<span class="at" style="color: #657422;">size =</span> .<span class="dv" style="color: #AD0000;">5</span>)</span></code></pre></div>
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2021-09-07_water-colours/index_files/figure-html/plain-grid-1.png" class="img-fluid" width="672"></p>
-</div>
-</div>
-<p>Next, I’ll apply the <code>shift()</code> function three times in succession, and bind the results into a single tibble that contains the the data at each point in time:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb28" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb28-1">points_time1 <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">shift</span>(points_time0, <span class="at" style="color: #657422;">amount =</span> <span class="dv" style="color: #AD0000;">1</span>)</span>
-<span id="cb28-2">points_time2 <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">shift</span>(points_time1, <span class="at" style="color: #657422;">amount =</span> <span class="dv" style="color: #AD0000;">1</span>)</span>
-<span id="cb28-3">points_time3 <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">shift</span>(points_time2, <span class="at" style="color: #657422;">amount =</span> <span class="dv" style="color: #AD0000;">1</span>)</span>
-<span id="cb28-4"></span>
-<span id="cb28-5">pts <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">bind_rows</span>(</span>
-<span id="cb28-6">  points_time0, </span>
-<span id="cb28-7">  points_time1, </span>
-<span id="cb28-8">  points_time2,</span>
-<span id="cb28-9">  points_time3</span>
-<span id="cb28-10">)</span></code></pre></div>
-</div>
-<p>Then I’ll quickly write a couple of boring wrapper functions that will control how the size and transparency of the markers changes as a function of time…</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb29" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb29-1">map_size <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>(x) {</span>
-<span id="cb29-2">  ambient<span class="sc" style="color: #5E5E5E;">::</span><span class="fu" style="color: #4758AB;">normalise</span>(x, <span class="at" style="color: #657422;">to =</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="dv" style="color: #AD0000;">0</span>, <span class="dv" style="color: #AD0000;">2</span>))</span>
-<span id="cb29-3">}</span>
-<span id="cb29-4">map_alpha <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>(x) {</span>
-<span id="cb29-5">  ambient<span class="sc" style="color: #5E5E5E;">::</span><span class="fu" style="color: #4758AB;">normalise</span>(<span class="sc" style="color: #5E5E5E;">-</span>x, <span class="at" style="color: #657422;">to =</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="dv" style="color: #AD0000;">0</span>, .<span class="dv" style="color: #AD0000;">5</span>))</span>
-<span id="cb29-6">}</span></code></pre></div>
-</div>
-<p>…and now we can create some art:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb30" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb30-1">pts <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb30-2">  <span class="fu" style="color: #4758AB;">ggplot_themed</span>() <span class="sc" style="color: #5E5E5E;">+</span>  </span>
-<span id="cb30-3">  <span class="fu" style="color: #4758AB;">geom_point</span>(</span>
-<span id="cb30-4">    <span class="at" style="color: #657422;">mapping =</span> <span class="fu" style="color: #4758AB;">aes</span>(</span>
-<span id="cb30-5">      <span class="at" style="color: #657422;">size =</span> <span class="fu" style="color: #4758AB;">map_size</span>(time), </span>
-<span id="cb30-6">      <span class="at" style="color: #657422;">alpha =</span> <span class="fu" style="color: #4758AB;">map_alpha</span>(time)</span>
-<span id="cb30-7">    ),</span>
-<span id="cb30-8">    <span class="at" style="color: #657422;">show.legend =</span> <span class="cn" style="color: #8f5902;">FALSE</span></span>
-<span id="cb30-9">  )</span></code></pre></div>
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2021-09-07_water-colours/index_files/figure-html/noise-stepped-image-1.png" class="img-fluid" width="672"></p>
-</div>
-</div>
-<p>So pretty!</p>
-</section>
-<section id="accumulating-art-with-purrr" class="level3">
-<h3 class="anchored" data-anchor-id="accumulating-art-with-purrr">Accumulating art with purrr</h3>
-<p>… but also so ugly. The code I used above is awfully inelegant: I’ve “iteratively” created a sequence of data frames by writing the same line of code several times. That’s almost never the right answer, especially when the code doesn’t know in advance how many times we want to <code>shift()</code> the points! To fix this I could write a loop (and contrary to folklore, there’s nothing wrong with loops in R so long as you’re careful to avoid unnecessary copying). However, I’ve become addicted to functional programming tools in the <a href="https://purrr.tidyverse.org/">purrr</a> package, so I’m going to use those rather than write a loop.</p>
-<p>To solve my problem I’m going to use the <code>purrr::accumulate()</code> function, which I personally feel is an <a href="https://adv-r.hadley.nz/functionals.html#accumulate">underappreciated gem</a> in the functional programming toolkit. It does <em>precisely</em> the thing we want to do here: it takes one object (e.g., <code>points</code>) as input together with a second quantity (e.g., an <code>amount</code>), and uses the user-supplied function (e.g., <code>shift()</code>) to produce a <em>new</em> object that can, once again, be passed to the user-supplied function (yielding new <code>points</code>). It continues with this process, taking the output of the last iteration of <code>shift()</code> and using it as input to the next iteration, until it runs out of <code>amount</code> values. It is very similar to the better-known <code>purrr::reduce()</code> function, except that it doesn’t throw away the intermediate values. The <code>reduce()</code> function is only interested in the destination; <code>accumulate()</code> is a whole journey.</p>
-<p>So let’s use it. The <code>iterate()</code> function below gives a convenient interface:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb31" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb31-1">iterate <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>(pts, time, step, ...) {</span>
-<span id="cb31-2">  <span class="fu" style="color: #4758AB;">bind_rows</span>(<span class="fu" style="color: #4758AB;">accumulate</span>(</span>
-<span id="cb31-3">    <span class="at" style="color: #657422;">.x =</span> <span class="fu" style="color: #4758AB;">rep</span>(step, time), </span>
-<span id="cb31-4">    <span class="at" style="color: #657422;">.f =</span> shift, </span>
-<span id="cb31-5">    <span class="at" style="color: #657422;">.init =</span> pts,</span>
-<span id="cb31-6">    ...</span>
-<span id="cb31-7">  ))</span>
-<span id="cb31-8">}</span></code></pre></div>
-</div>
-<p>Here’s the code to recreate the <code>pts</code> data from the previous section:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb32" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb32-1">pts <span class="ot" style="color: #003B4F;">&lt;-</span> points_time0 <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb32-2">  <span class="fu" style="color: #4758AB;">iterate</span>(<span class="at" style="color: #657422;">time =</span> <span class="dv" style="color: #AD0000;">3</span>, <span class="at" style="color: #657422;">step =</span> <span class="dv" style="color: #AD0000;">1</span>)</span></code></pre></div>
-</div>
-<p>It produces the same image, but the code is nicer!</p>
-<div class="cell">
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2021-09-07_water-colours/index_files/figure-html/noise-stepped-data-3-1.png" class="img-fluid" width="672"></p>
-</div>
-</div>
-</section>
-</section>
-<section id="assembling-the-parts" class="level2">
-<h2 class="anchored" data-anchor-id="assembling-the-parts">Assembling the parts</h2>
-<section id="adding-noise-to-jasmines-coordinates" class="level3">
-<h3 class="anchored" data-anchor-id="adding-noise-to-jasmines-coordinates">Adding noise to jasmines coordinates</h3>
-<p>The time has come to start assembling the pieces of the jigsaw puzzle, by applying the flow fields from the previous section to the data associated with the jasmines image. The first step in doing so is to write a small <code>extract_points()</code> function that will take a data frame (like <code>jas</code>) as input, extract the positional information (<code>x</code> and <code>y</code>) and the identifier column (<code>id</code>), and add a <code>time</code> column so that we can modify positions over time:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb33" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb33-1">extract_points <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>(data) {</span>
-<span id="cb33-2">  data <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb33-3">    <span class="fu" style="color: #4758AB;">select</span>(x, y, id) <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb33-4">    <span class="fu" style="color: #4758AB;">mutate</span>(<span class="at" style="color: #657422;">time =</span> <span class="dv" style="color: #AD0000;">0</span>)</span>
-<span id="cb33-5">}</span></code></pre></div>
-</div>
-<p>Here’s how we can use this. The code below extracts the positional information from <code>jas</code> and then use the <code>iterate()</code> function to iteratively shift those positions along the paths traced out by a flow field:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb34" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb34-1">pts <span class="ot" style="color: #003B4F;">&lt;-</span> jas <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb34-2">  <span class="fu" style="color: #4758AB;">extract_points</span>() <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb34-3">  <span class="fu" style="color: #4758AB;">iterate</span>(<span class="at" style="color: #657422;">time =</span> <span class="dv" style="color: #AD0000;">20</span>, <span class="at" style="color: #657422;">step =</span> .<span class="dv" style="color: #AD0000;">1</span>)</span></code></pre></div>
-</div>
-<p>The <code>pts</code> tibble doesn’t contain any of the colour information from <code>jas</code>, but it does have the “right kind” of positional information. It’s also rather pretty in its own right:</p>
-<div class="cell" data-hash="index_cache/html/accumulated-noise-image_5068ecca44ec2baf3d872898cb386644">
-<div class="sourceCode cell-code" id="cb35" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb35-1">map_size <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>(x) {</span>
-<span id="cb35-2">  ambient<span class="sc" style="color: #5E5E5E;">::</span><span class="fu" style="color: #4758AB;">normalise</span>(x<span class="sc" style="color: #5E5E5E;">^</span><span class="dv" style="color: #AD0000;">2</span>, <span class="at" style="color: #657422;">to =</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="dv" style="color: #AD0000;">0</span>, <span class="fl" style="color: #AD0000;">3.5</span>))</span>
-<span id="cb35-3">}</span>
-<span id="cb35-4"></span>
-<span id="cb35-5">pts <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb35-6">  <span class="fu" style="color: #4758AB;">ggplot_themed</span>() <span class="sc" style="color: #5E5E5E;">+</span>  </span>
-<span id="cb35-7">  <span class="fu" style="color: #4758AB;">geom_point</span>(</span>
-<span id="cb35-8">    <span class="at" style="color: #657422;">mapping =</span> <span class="fu" style="color: #4758AB;">aes</span>(<span class="at" style="color: #657422;">size =</span> <span class="fu" style="color: #4758AB;">map_size</span>(time)),</span>
-<span id="cb35-9">    <span class="at" style="color: #657422;">alpha =</span> .<span class="dv" style="color: #AD0000;">01</span>,</span>
-<span id="cb35-10">    <span class="at" style="color: #657422;">show.legend =</span> <span class="cn" style="color: #8f5902;">FALSE</span></span>
-<span id="cb35-11">  ) </span></code></pre></div>
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2021-09-07_water-colours/index_files/figure-html/accumulated-noise-image-1.png" class="img-fluid" width="672"></p>
-</div>
-</div>
-</section>
-<section id="joining-the-noise-with-jasmine-colours" class="level3">
-<h3 class="anchored" data-anchor-id="joining-the-noise-with-jasmine-colours">Joining the noise with jasmine colours</h3>
-<p>We can now take the pixels from the jasmines image and make them “flow” across the image. To do this, we’ll need to reintroduce the colour information. We can do this using <code>full_join()</code> from the dplyr package. I’ve written a small convenience function <code>restore_points()</code> that performs the join only after removing the original <code>x</code> and <code>y</code> coordinates from the <code>jas</code> data. The reason for this is that the <code>pts</code> data now contains the positional information we need, so we want the <code>x</code> and <code>y</code> values from that data set. That’s easy enough: we drop those coordinates with <code>select()</code> and then join the two tables using only the <code>id</code> column. See? I promised it would be useful!</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb36" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb36-1">restore_points <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>(jas, pts) {</span>
-<span id="cb36-2">  jas <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb36-3">    <span class="fu" style="color: #4758AB;">select</span>(<span class="sc" style="color: #5E5E5E;">-</span>x, <span class="sc" style="color: #5E5E5E;">-</span>y) <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb36-4">    <span class="fu" style="color: #4758AB;">full_join</span>(pts, <span class="at" style="color: #657422;">by =</span> <span class="st" style="color: #20794D;">"id"</span>) <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb36-5">    <span class="fu" style="color: #4758AB;">arrange</span>(time, id) </span>
-<span id="cb36-6">}</span></code></pre></div>
-</div>
-<p>The result is a tibble that looks like this:</p>
-<div class="cell" data-hash="index_cache/html/noisy-jasmine-data_585be5e9ea1d37592db14356f3f63db4">
-<div class="sourceCode cell-code" id="cb37" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb37-1">jas <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">restore_points</span>(jas, pts)</span>
-<span id="cb37-2">jas</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code># A tibble: 126,000 × 11
-   shade        id   red   grn   blu    hue   sat   val     x     y  time
-   &lt;chr&gt;     &lt;int&gt; &lt;int&gt; &lt;int&gt; &lt;int&gt;  &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;
- 1 #838c70ff     1   131   140   112 0.220  0.200 0.549     1     1     0
- 2 #3c3123ff     2    60    49    35 0.0933 0.417 0.235     1    10     0
- 3 #503d3dff     3    80    61    61 0      0.237 0.314     1    11     0
- 4 #363126ff     4    54    49    38 0.115  0.296 0.212     1    12     0
- 5 #443a30ff     5    68    58    48 0.0833 0.294 0.267     1    13     0
- 6 #8a6860ff     6   138   104    96 0.0317 0.304 0.541     1    14     0
- 7 #665859ff     7   102    88    89 0.988  0.137 0.4       1    15     0
- 8 #5a5d51ff     8    90    93    81 0.208  0.129 0.365     1    16     0
- 9 #535c4cff     9    83    92    76 0.260  0.174 0.361     1    17     0
-10 #944b61ff    10   148    75    97 0.950  0.493 0.580     1    18     0
-# … with 125,990 more rows</code></pre>
-</div>
-</div>
-<p>More importantly though, it produces images like this:</p>
-<div class="cell" data-hash="index_cache/html/noisy-jasmine-image_64d40cf5e07e088f0ad9214c0743206c">
-<div class="sourceCode cell-code" id="cb39" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb39-1">map_size <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>(x, y) {</span>
-<span id="cb39-2">  ambient<span class="sc" style="color: #5E5E5E;">::</span><span class="fu" style="color: #4758AB;">normalise</span>((<span class="dv" style="color: #AD0000;">1</span> <span class="sc" style="color: #5E5E5E;">-</span> x) <span class="sc" style="color: #5E5E5E;">*</span> y<span class="sc" style="color: #5E5E5E;">^</span><span class="dv" style="color: #AD0000;">2</span>, <span class="at" style="color: #657422;">to =</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="dv" style="color: #AD0000;">0</span>, <span class="dv" style="color: #AD0000;">5</span>))</span>
-<span id="cb39-3">}</span>
-<span id="cb39-4"></span>
-<span id="cb39-5">jas <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb39-6">  <span class="fu" style="color: #4758AB;">ggplot_themed</span>() <span class="sc" style="color: #5E5E5E;">+</span>  </span>
-<span id="cb39-7">  <span class="fu" style="color: #4758AB;">geom_point</span>(</span>
-<span id="cb39-8">    <span class="at" style="color: #657422;">mapping =</span> <span class="fu" style="color: #4758AB;">aes</span>(</span>
-<span id="cb39-9">      <span class="at" style="color: #657422;">colour =</span> <span class="fu" style="color: #4758AB;">hsv</span>(hue, sat, .<span class="dv" style="color: #AD0000;">5</span>), </span>
-<span id="cb39-10">      <span class="at" style="color: #657422;">size =</span> <span class="fu" style="color: #4758AB;">map_size</span>(val, time)</span>
-<span id="cb39-11">    ), </span>
-<span id="cb39-12">    <span class="at" style="color: #657422;">alpha =</span> .<span class="dv" style="color: #AD0000;">03</span>,</span>
-<span id="cb39-13">    <span class="at" style="color: #657422;">show.legend =</span> <span class="cn" style="color: #8f5902;">FALSE</span></span>
-<span id="cb39-14">  )</span></code></pre></div>
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2021-09-07_water-colours/index_files/figure-html/noisy-jasmine-image-1.png" class="img-fluid" width="672"></p>
-</div>
-</div>
-<p>When colouring the image, we’re using the same “halftonesque” trick from earlier. The colours vary only in hue and saturation. The intensity values are mapped to the size aesthetic, much like we did earlier, but this time around the size aesthetic is a function of two variables: it depends on <code>time</code> as well as <code>val</code>. The way I’ve set it up here is to have the points get larger as time increases, but there’s no reason we have to do it that way. There are endless ways in which you could combine the positional, temporal, and shading data to create interesting generative art. This is only one example.</p>
-</section>
-<section id="the-last-chapter" class="level3">
-<h3 class="anchored" data-anchor-id="the-last-chapter">The last chapter</h3>
-<p>At last we have the tools we need to create images in a style similar (though not identical) to those produced by the <em>Water Colours</em> system. We can import, reorganise, and separate the data:</p>
-<div class="cell" data-hash="index_cache/html/jasmine-detailed-read_945802ec42602753f52e3f11bf61241a">
-<div class="sourceCode cell-code" id="cb40" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb40-1">jas <span class="ot" style="color: #003B4F;">&lt;-</span> file <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb40-2">  <span class="fu" style="color: #4758AB;">import_image</span>(<span class="at" style="color: #657422;">width =</span> <span class="dv" style="color: #AD0000;">200</span>, <span class="at" style="color: #657422;">height =</span> <span class="dv" style="color: #AD0000;">120</span>) <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb40-3">  <span class="fu" style="color: #4758AB;">construct_matrix</span>() <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb40-4">  <span class="fu" style="color: #4758AB;">construct_tibble</span>() <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb40-5">  <span class="fu" style="color: #4758AB;">extract_channels</span>()</span></code></pre></div>
-</div>
-<p>We can define flow fields with different properties, move the pixels through the fields, and rejoin the modified positions with the colour information</p>
-<div class="cell" data-hash="index_cache/html/jasmine-detailed-data_923c83b865ab495cdae3d009b7a5dbd5">
-<div class="sourceCode cell-code" id="cb41" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb41-1">pts <span class="ot" style="color: #003B4F;">&lt;-</span> jas <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb41-2">  <span class="fu" style="color: #4758AB;">extract_points</span>() <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb41-3">  <span class="fu" style="color: #4758AB;">iterate</span>(</span>
-<span id="cb41-4">    <span class="at" style="color: #657422;">time =</span> <span class="dv" style="color: #AD0000;">40</span>, </span>
-<span id="cb41-5">    <span class="at" style="color: #657422;">step =</span> .<span class="dv" style="color: #AD0000;">2</span>, </span>
-<span id="cb41-6">    <span class="at" style="color: #657422;">octaves =</span> <span class="dv" style="color: #AD0000;">10</span>, </span>
-<span id="cb41-7">    <span class="at" style="color: #657422;">frequency =</span> .<span class="dv" style="color: #AD0000;">05</span></span>
-<span id="cb41-8">  )</span>
-<span id="cb41-9"></span>
-<span id="cb41-10">jas <span class="ot" style="color: #003B4F;">&lt;-</span> jas <span class="sc" style="color: #5E5E5E;">%&gt;%</span></span>
-<span id="cb41-11">  <span class="fu" style="color: #4758AB;">restore_points</span>(pts)</span>
-<span id="cb41-12"></span>
-<span id="cb41-13">jas</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code># A tibble: 984,000 × 11
-   shade        id   red   grn   blu    hue    sat   val     x     y  time
-   &lt;chr&gt;     &lt;int&gt; &lt;int&gt; &lt;int&gt; &lt;int&gt;  &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;
- 1 #9c8178ff     1   156   129   120 0.0417 0.231  0.612     1     1     0
- 2 #81b564ff     2   129   181   100 0.274  0.448  0.710     1    10     0
- 3 #8b7870ff     3   139   120   112 0.0494 0.194  0.545     1   100     0
- 4 #eedfdbff     4   238   223   219 0.0351 0.0798 0.933     1   101     0
- 5 #c29aa3ff     5   194   154   163 0.962  0.206  0.761     1   102     0
- 6 #d5e1c3ff     6   213   225   195 0.233  0.133  0.882     1   103     0
- 7 #bde8beff     7   189   232   190 0.337  0.185  0.910     1   104     0
- 8 #b3dfbcff     8   179   223   188 0.367  0.197  0.875     1   105     0
- 9 #b2dcbdff     9   178   220   189 0.377  0.191  0.863     1   106     0
-10 #b3d9bfff    10   179   217   191 0.386  0.175  0.851     1   107     0
-# … with 983,990 more rows</code></pre>
-</div>
-</div>
-<p>We can write customised helpers to guide how information is used:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb43" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb43-1">map_size <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>(x, y) {</span>
-<span id="cb43-2">  <span class="dv" style="color: #AD0000;">12</span> <span class="sc" style="color: #5E5E5E;">*</span> (<span class="dv" style="color: #AD0000;">1</span> <span class="sc" style="color: #5E5E5E;">-</span> x) <span class="sc" style="color: #5E5E5E;">*</span> (<span class="fu" style="color: #4758AB;">max</span>(y)<span class="sc" style="color: #5E5E5E;">^</span><span class="dv" style="color: #AD0000;">2</span> <span class="sc" style="color: #5E5E5E;">-</span> y<span class="sc" style="color: #5E5E5E;">^</span><span class="dv" style="color: #AD0000;">2</span>) <span class="sc" style="color: #5E5E5E;">/</span> y<span class="sc" style="color: #5E5E5E;">^</span><span class="dv" style="color: #AD0000;">2</span></span>
-<span id="cb43-3">}</span></code></pre></div>
-</div>
-<p>And we can render the images with ggplot2:</p>
-<div class="cell" data-hash="index_cache/html/jasmine-detailed-image_b631bfef230aa80e6ade5fd4a74ea900">
-<div class="sourceCode cell-code" id="cb44" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb44-1">pic <span class="ot" style="color: #003B4F;">&lt;-</span> jas <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb44-2">  <span class="fu" style="color: #4758AB;">ggplot_themed</span>() <span class="sc" style="color: #5E5E5E;">+</span>  </span>
-<span id="cb44-3">  <span class="fu" style="color: #4758AB;">geom_point</span>(</span>
-<span id="cb44-4">    <span class="at" style="color: #657422;">mapping =</span> <span class="fu" style="color: #4758AB;">aes</span>(</span>
-<span id="cb44-5">      <span class="at" style="color: #657422;">colour =</span> shade, </span>
-<span id="cb44-6">      <span class="at" style="color: #657422;">size =</span> <span class="fu" style="color: #4758AB;">map_size</span>(val, time)</span>
-<span id="cb44-7">    ), </span>
-<span id="cb44-8">    <span class="at" style="color: #657422;">alpha =</span> <span class="dv" style="color: #AD0000;">1</span>,</span>
-<span id="cb44-9">    <span class="at" style="color: #657422;">stroke =</span> <span class="dv" style="color: #AD0000;">0</span>,</span>
-<span id="cb44-10">    <span class="at" style="color: #657422;">show.legend =</span> <span class="cn" style="color: #8f5902;">FALSE</span></span>
-<span id="cb44-11">  ) </span>
-<span id="cb44-12"></span>
-<span id="cb44-13">pic</span></code></pre></div>
-<div class="cell-output cell-output-stderr">
-<pre><code>Warning: Removed 1 rows containing missing values (geom_point).</code></pre>
-</div>
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2021-09-07_water-colours/index_files/figure-html/jasmine-detailed-image-1.png" class="img-fluid" width="672"></p>
-</div>
-</div>
-<p>The colour bleeding over the edges here is to be expected. Some of the points created with <code>geom_point()</code> are quite large, and they extend some distance beyond the boundaries of the original jasmines photograph. The result doesn’t appeal to my artistic sensibilities, so I’ll adjust the scale limits in ggplot2 so that we don’t get that strange border:</p>
-<div class="cell" data-hash="index_cache/html/jasmine-cropped-image_59b5406d0b5e4e4916a266225d9ab60a">
-<div class="sourceCode cell-code" id="cb46" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb46-1">pic <span class="sc" style="color: #5E5E5E;">+</span></span>
-<span id="cb46-2">  <span class="fu" style="color: #4758AB;">scale_x_continuous</span>(<span class="at" style="color: #657422;">limits =</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="dv" style="color: #AD0000;">11</span>, <span class="dv" style="color: #AD0000;">190</span>), <span class="at" style="color: #657422;">expand =</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="dv" style="color: #AD0000;">0</span>, <span class="dv" style="color: #AD0000;">0</span>)) <span class="sc" style="color: #5E5E5E;">+</span></span>
-<span id="cb46-3">  <span class="fu" style="color: #4758AB;">scale_y_continuous</span>(<span class="at" style="color: #657422;">limits =</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="dv" style="color: #AD0000;">7</span>, <span class="dv" style="color: #AD0000;">114</span>), <span class="at" style="color: #657422;">expand =</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="dv" style="color: #AD0000;">0</span>, <span class="dv" style="color: #AD0000;">0</span>))</span></code></pre></div>
-<div class="cell-output cell-output-stderr">
-<pre><code>Warning: Removed 198656 rows containing missing values (geom_point).</code></pre>
-</div>
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2021-09-07_water-colours/index_files/figure-html/jasmine-cropped-image-1.png" class="img-fluid" width="672"></p>
-</div>
-</div>
-<p>The end result is something that has a qualitative similarity to the <em>Water Colours</em> pieces, but is also possessed of a style that is very much its own. This is as it should be. It may be true that “all art is theft” – as Picasso is often misquoted as saying – but a good artistic theft is no mere replication. It can also be growth, change, and reconstruction.</p>
-<p>A happy ending after all.</p>
-</section>
-</section>
-<section id="epilogue" class="level2">
-<h2 class="anchored" data-anchor-id="epilogue">Epilogue</h2>
-<blockquote class="blockquote">
-<p>I find it so amazing when people tell me that electronic music has no soul. You can’t blame the computer. If there’s no soul in the music, it’s because nobody put it there (<a href="https://www.azquotes.com/quote/564301">Björk</a>, via <a href="https://twitter.com/TimdeSousa/status/1432898952907554822">Tim de Sousa</a>)</p>
-</blockquote>
-<div class="cell" data-hash="index_cache/html/water-colour-cards-3_2324dbb0a7d769505e14765f12ca0eef">
-<div class="cell-output-display">
-<div>
-<div class="row p-0 row-cols-1 row-cols-sm-2 row-cols-md-3 row-cols-lg-4" style="margin-left: -.4rem; margin-right: -.4rem; margin-top: 1rem; margin-bottom: 1rem; ">
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .4rem ; border-width: 0; border-radius: .6rem .6rem .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img53_departure.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2021-09-07_water-colours/https:/djnavarro.net/series-water-colours/500/watercolour_sys02_img53_departure.jpg" class="card-img-top" style="border-style:solid; border-color:inherits; border-width:1px 1px 0 1px; border-radius: .6rem .6rem 0 0 ;">
-</a>
-<div class="card-body justify-content-end m-0 p-0" style="visibility: visible; background-color: inherits; border-style:solid; border-color:inherits; border-width:1px; border-radius: 0 0 .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img53_departure.jpg">
-<h5 class="card-title my-auto px-3 pt-3 pb-3 anchored">Departure</h5>
-</a>
-</div>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .4rem ; border-width: 0; border-radius: .6rem .6rem .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img54_echo.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2021-09-07_water-colours/https:/djnavarro.net/series-water-colours/500/watercolour_sys02_img54_echo.jpg" class="card-img-top" style="border-style:solid; border-color:inherits; border-width:1px 1px 0 1px; border-radius: .6rem .6rem 0 0 ;">
-</a>
-<div class="card-body justify-content-end m-0 p-0" style="visibility: visible; background-color: inherits; border-style:solid; border-color:inherits; border-width:1px; border-radius: 0 0 .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img54_echo.jpg">
-<h5 class="card-title my-auto px-3 pt-3 pb-3 anchored">Echo</h5>
-</a>
-</div>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .4rem ; border-width: 0; border-radius: .6rem .6rem .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img57_portal.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2021-09-07_water-colours/https:/djnavarro.net/series-water-colours/500/watercolour_sys02_img57_portal.jpg" class="card-img-top" style="border-style:solid; border-color:inherits; border-width:1px 1px 0 1px; border-radius: .6rem .6rem 0 0 ;">
-</a>
-<div class="card-body justify-content-end m-0 p-0" style="visibility: visible; background-color: inherits; border-style:solid; border-color:inherits; border-width:1px; border-radius: 0 0 .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img57_portal.jpg">
-<h5 class="card-title my-auto px-3 pt-3 pb-3 anchored">Portal</h5>
-</a>
-</div>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .4rem ; border-width: 0; border-radius: .6rem .6rem .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img60_salt-stone-storm.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2021-09-07_water-colours/https:/djnavarro.net/series-water-colours/500/watercolour_sys02_img60_salt-stone-storm.jpg" class="card-img-top" style="border-style:solid; border-color:inherits; border-width:1px 1px 0 1px; border-radius: .6rem .6rem 0 0 ;">
-</a>
-<div class="card-body justify-content-end m-0 p-0" style="visibility: visible; background-color: inherits; border-style:solid; border-color:inherits; border-width:1px; border-radius: 0 0 .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img60_salt-stone-storm.jpg">
-<h5 class="card-title my-auto px-3 pt-3 pb-3 anchored">Gods of Salt, Stone, and Storm</h5>
-</a>
-</div>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .4rem ; border-width: 0; border-radius: .6rem .6rem .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img61_amanecer-de-invierno.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2021-09-07_water-colours/https:/djnavarro.net/series-water-colours/500/watercolour_sys02_img61_amanecer-de-invierno.jpg" class="card-img-top" style="border-style:solid; border-color:inherits; border-width:1px 1px 0 1px; border-radius: .6rem .6rem 0 0 ;">
-</a>
-<div class="card-body justify-content-end m-0 p-0" style="visibility: visible; background-color: inherits; border-style:solid; border-color:inherits; border-width:1px; border-radius: 0 0 .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img61_amanecer-de-invierno.jpg">
-<h5 class="card-title my-auto px-3 pt-3 pb-3 anchored">El Último Amanecer de Invierno</h5>
-</a>
-</div>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .4rem ; border-width: 0; border-radius: .6rem .6rem .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img65_plume.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2021-09-07_water-colours/https:/djnavarro.net/series-water-colours/500/watercolour_sys02_img65_plume.jpg" class="card-img-top" style="border-style:solid; border-color:inherits; border-width:1px 1px 0 1px; border-radius: .6rem .6rem 0 0 ;">
-</a>
-<div class="card-body justify-content-end m-0 p-0" style="visibility: visible; background-color: inherits; border-style:solid; border-color:inherits; border-width:1px; border-radius: 0 0 .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img65_plume.jpg">
-<h5 class="card-title my-auto px-3 pt-3 pb-3 anchored">Plume</h5>
-</a>
-</div>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .4rem ; border-width: 0; border-radius: .6rem .6rem .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img67_woodland-spirits.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2021-09-07_water-colours/https:/djnavarro.net/series-water-colours/500/watercolour_sys02_img67_woodland-spirits.jpg" class="card-img-top" style="border-style:solid; border-color:inherits; border-width:1px 1px 0 1px; border-radius: .6rem .6rem 0 0 ;">
-</a>
-<div class="card-body justify-content-end m-0 p-0" style="visibility: visible; background-color: inherits; border-style:solid; border-color:inherits; border-width:1px; border-radius: 0 0 .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img67_woodland-spirits.jpg">
-<h5 class="card-title my-auto px-3 pt-3 pb-3 anchored">Woodland Spirits</h5>
-</a>
-</div>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .4rem ; border-width: 0; border-radius: .6rem .6rem .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img68_below-the-horizon.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2021-09-07_water-colours/https:/djnavarro.net/series-water-colours/500/watercolour_sys02_img68_below-the-horizon.jpg" class="card-img-top" style="border-style:solid; border-color:inherits; border-width:1px 1px 0 1px; border-radius: .6rem .6rem 0 0 ;">
-</a>
-<div class="card-body justify-content-end m-0 p-0" style="visibility: visible; background-color: inherits; border-style:solid; border-color:inherits; border-width:1px; border-radius: 0 0 .6rem .6rem ;">
-<a href="https://djnavarro.net/series-water-colours/2000/watercolour_sys02_img68_below-the-horizon.jpg">
-<h5 class="card-title my-auto px-3 pt-3 pb-3 anchored">Below the Horizon</h5>
-</a>
-</div>
-</div>
-</div>
-</div>
-</div>
-</div>
-<!--------------- appendices go here ----------------->
-<div class="cell">
-
-</div>
-
-
-</section>
-
-<div id="quarto-appendix" class="default"><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2021,
-  author = {Danielle Navarro},
-  editor = {},
-  title = {Art, Jasmines, and the Water Colours},
-  date = {2021-09-07},
-  url = {https://blog.djnavarro.net/water-colours},
-  langid = {en}
-}
-</code></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2021" class="csl-entry quarto-appendix-citeas">
-Danielle Navarro. 2021. <span>“Art, Jasmines, and the Water
-Colours.”</span> September 7, 2021. <a href="https://blog.djnavarro.net/water-colours">https://blog.djnavarro.net/water-colours</a>.
-</div></div></section></div> ]]></description>
-  <category>Art</category>
-  <category>R</category>
-  <guid>https://blog.djnavarro.net/posts/2021-09-07_water-colours/index.html</guid>
-  <pubDate>Mon, 06 Sep 2021 14:00:00 GMT</pubDate>
-  <media:content url="https://blog.djnavarro.net/posts/2021-09-07_water-colours/jasmine-recollected.png" medium="image" type="image/png" height="89" width="144"/>
 </item>
 </channel>
 </rss>
