@@ -1,0 +1,1027 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.1.149">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+<meta name="author" content="Tom Drabas, Weston Pace, Danielle Navarro">
+<meta name="dcterms.date" content="2022-10-30">
+<meta name="description" content="An illustration of the advantages of parquet files over CSV files in R and Python, using Apache Arrow to transform CSV data into the more efficient parquet format">
+
+<title>Notes from a data witch - Faster data processing with Apache Arrow and Parquet</title>
+<style>
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1.6em;
+  vertical-align: middle;
+}
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+    color: #aaaaaa;
+  }
+pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+code span.al { color: #ff0000; font-weight: bold; } /* Alert */
+code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } /* Annotation */
+code span.at { color: #7d9029; } /* Attribute */
+code span.bn { color: #40a070; } /* BaseN */
+code span.bu { color: #008000; } /* BuiltIn */
+code span.cf { color: #007020; font-weight: bold; } /* ControlFlow */
+code span.ch { color: #4070a0; } /* Char */
+code span.cn { color: #880000; } /* Constant */
+code span.co { color: #60a0b0; font-style: italic; } /* Comment */
+code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } /* CommentVar */
+code span.do { color: #ba2121; font-style: italic; } /* Documentation */
+code span.dt { color: #902000; } /* DataType */
+code span.dv { color: #40a070; } /* DecVal */
+code span.er { color: #ff0000; font-weight: bold; } /* Error */
+code span.ex { } /* Extension */
+code span.fl { color: #40a070; } /* Float */
+code span.fu { color: #06287e; } /* Function */
+code span.im { color: #008000; font-weight: bold; } /* Import */
+code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Information */
+code span.kw { color: #007020; font-weight: bold; } /* Keyword */
+code span.op { color: #666666; } /* Operator */
+code span.ot { color: #007020; } /* Other */
+code span.pp { color: #bc7a00; } /* Preprocessor */
+code span.sc { color: #4070a0; } /* SpecialChar */
+code span.ss { color: #bb6688; } /* SpecialString */
+code span.st { color: #4070a0; } /* String */
+code span.va { color: #19177c; } /* Variable */
+code span.vs { color: #4070a0; } /* VerbatimString */
+code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
+</style>
+
+
+<script src="../../site_libs/quarto-nav/quarto-nav.js"></script>
+<script src="../../site_libs/quarto-nav/headroom.min.js"></script>
+<script src="../../site_libs/clipboard/clipboard.min.js"></script>
+<script src="../../site_libs/quarto-search/autocomplete.umd.js"></script>
+<script src="../../site_libs/quarto-search/fuse.min.js"></script>
+<script src="../../site_libs/quarto-search/quarto-search.js"></script>
+<meta name="quarto:offset" content="../../">
+<script src="../../site_libs/quarto-html/quarto.js"></script>
+<script src="../../site_libs/quarto-html/popper.min.js"></script>
+<script src="../../site_libs/quarto-html/tippy.umd.min.js"></script>
+<script src="../../site_libs/quarto-html/anchor.min.js"></script>
+<link href="../../site_libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="../../site_libs/quarto-html/quarto-syntax-highlighting.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="../../site_libs/bootstrap/bootstrap.min.js"></script>
+<link href="../../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="../../site_libs/bootstrap/bootstrap.min.css" rel="stylesheet" id="quarto-bootstrap" data-mode="light">
+<script id="quarto-search-options" type="application/json">{
+  "location": "navbar",
+  "copy-button": false,
+  "collapse-after": 3,
+  "panel-placement": "end",
+  "type": "overlay",
+  "limit": 20,
+  "language": {
+    "search-no-results-text": "No results",
+    "search-matching-documents-text": "matching documents",
+    "search-copy-link-title": "Copy link to search",
+    "search-hide-matches-text": "Hide additional matches",
+    "search-more-match-text": "more match in this document",
+    "search-more-matches-text": "more matches in this document",
+    "search-clear-button-title": "Clear",
+    "search-detached-cancel-button-title": "Cancel",
+    "search-submit-button-title": "Submit"
+  }
+}</script>
+<style>
+    .quarto-title-block .quarto-title-banner {
+      background: #eeeeee;
+    }
+    </style>
+
+
+<link rel="stylesheet" href="../../styles.css">
+<meta property="og:title" content="Notes from a data witch - Faster data processing with Apache Arrow and Parquet">
+<meta property="og:description" content="An illustration of the advantages of parquet files over CSV files in R and Python, using Apache Arrow to transform CSV data into the more efficient parquet format">
+<meta property="og:site-name" content="Notes from a data witch">
+<meta name="twitter:title" content="Notes from a data witch - Faster data processing with Apache Arrow and Parquet">
+<meta name="twitter:description" content="An illustration of the advantages of parquet files over CSV files in R and Python, using Apache Arrow to transform CSV data into the more efficient parquet format">
+<meta name="twitter:creator" content="@djnavarro">
+<meta name="twitter:card" content="summary_large_image">
+</head>
+
+<body class="floating nav-fixed">
+
+<div id="quarto-search-results"></div>
+  <header id="quarto-header" class="headroom fixed-top">
+    <nav class="navbar navbar-expand-lg navbar-dark ">
+      <div class="navbar-container container-fluid">
+      <div class="navbar-brand-container">
+    <a class="navbar-brand" href="../../index.html">
+    <span class="navbar-title">Notes from a data witch</span>
+    </a>
+  </div>
+          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarCollapse" aria-controls="navbarCollapse" aria-expanded="false" aria-label="Toggle navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
+  <span class="navbar-toggler-icon"></span>
+</button>
+          <div class="collapse navbar-collapse" id="navbarCollapse">
+            <ul class="navbar-nav navbar-nav-scroll ms-auto">
+  <li class="nav-item">
+    <a class="nav-link" href="../../about.html">Danielle Navarro</a>
+  </li>  
+  <li class="nav-item compact">
+    <a class="nav-link" href="https://twitter.com/djnavarro"><i class="bi bi-twitter" role="img" aria-label="twitter">
+</i> 
+ </a>
+  </li>  
+  <li class="nav-item compact">
+    <a class="nav-link" href="https://github.com/djnavarro"><i class="bi bi-github" role="img" aria-label="github">
+</i> 
+ </a>
+  </li>  
+  <li class="nav-item compact">
+    <a class="nav-link" href="https://djnavarro.net"><i class="bi bi-person-circle" role="img" aria-label="website">
+</i> 
+ </a>
+  </li>  
+  <li class="nav-item compact">
+    <a class="nav-link" href="https://art.djnavarro.net"><i class="bi bi-palette-fill" role="img" aria-label="art">
+</i> 
+ </a>
+  </li>  
+</ul>
+              <div id="quarto-search" class="" title="Search"></div>
+          </div> <!-- /navcollapse -->
+      </div> <!-- /container-fluid -->
+    </nav>
+</header>
+<!-- content -->
+<header id="title-block-header" class="quarto-title-block default toc-left page-columns page-full">
+  <div class="quarto-title-banner page-columns page-full">
+    <div class="quarto-title column-body">
+      <h1 class="title">Faster data processing with Apache Arrow and Parquet</h1>
+                  <div>
+        <div class="description">
+          An illustration of the advantages of parquet files over CSV files in R and Python, using Apache Arrow to transform CSV data into the more efficient parquet format
+        </div>
+      </div>
+                          <div class="quarto-categories">
+                <div class="quarto-category">Apache Arrow</div>
+                <div class="quarto-category">Parquet</div>
+                <div class="quarto-category">R</div>
+                <div class="quarto-category">Python</div>
+              </div>
+                  </div>
+  </div>
+    
+  
+  <div class="quarto-title-meta">
+
+      <div>
+      <div class="quarto-title-meta-heading">Author</div>
+      <div class="quarto-title-meta-contents">
+               <p>Tom Drabas, Weston Pace, Danielle Navarro </p>
+            </div>
+    </div>
+      
+      <div>
+      <div class="quarto-title-meta-heading">Published</div>
+      <div class="quarto-title-meta-contents">
+        <p class="date">October 30, 2022</p>
+      </div>
+    </div>
+      
+    </div>
+    
+  
+  </header><div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-article page-navbar">
+<!-- sidebar -->
+  <nav id="quarto-sidebar" class="sidebar collapse sidebar-navigation floating overflow-auto">
+    <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">Table of contents</h2>
+   
+  <ul>
+  <li><a href="#apache-parquet" id="toc-apache-parquet" class="nav-link active" data-scroll-target="#apache-parquet">Apache Parquet</a></li>
+  <li><a href="#preliminaries" id="toc-preliminaries" class="nav-link" data-scroll-target="#preliminaries">Preliminaries</a></li>
+  <li><a href="#generate-a-large-random-data-set" id="toc-generate-a-large-random-data-set" class="nav-link" data-scroll-target="#generate-a-large-random-data-set">Generate a large random data set</a></li>
+  <li><a href="#transcoding-csv-to-parquet" id="toc-transcoding-csv-to-parquet" class="nav-link" data-scroll-target="#transcoding-csv-to-parquet">Transcoding CSV to Parquet</a>
+  <ul class="collapse">
+  <li><a href="#snappy-compression" id="toc-snappy-compression" class="nav-link" data-scroll-target="#snappy-compression">Snappy compression</a></li>
+  <li><a href="#gzip-compression" id="toc-gzip-compression" class="nav-link" data-scroll-target="#gzip-compression">GZip compression</a></li>
+  </ul></li>
+  <li><a href="#reading-parquet-files" id="toc-reading-parquet-files" class="nav-link" data-scroll-target="#reading-parquet-files">Reading Parquet Files</a></li>
+  <li><a href="#comparing-parquet-to-compressed-csv" id="toc-comparing-parquet-to-compressed-csv" class="nav-link" data-scroll-target="#comparing-parquet-to-compressed-csv">Comparing Parquet to Compressed CSV</a></li>
+  <li><a href="#transcoding-larger-than-memory-datasets" id="toc-transcoding-larger-than-memory-datasets" class="nav-link" data-scroll-target="#transcoding-larger-than-memory-datasets">Transcoding Larger-Than-Memory Datasets</a></li>
+  <li><a href="#summary" id="toc-summary" class="nav-link" data-scroll-target="#summary">Summary</a></li>
+  </ul>
+</nav>
+</nav>
+<!-- margin-sidebar -->
+    <div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
+    </div>
+<!-- main -->
+<main class="content quarto-banner-title-block page-columns page-full" id="quarto-document-content">
+
+
+
+
+<p><strong>Note:</strong> This post is an extended version of a post previously published on the Voltron Data blog</p>
+<p>Reading and writing data across different systems requires a file format that is understood by both. File formats like CSV or JSON are highly portable as they are text-based. However, they lack a schema definition thus requiring either the user to specify the schema upfront or the system to infer the data types of columns. Apache Parquet or ORC are column-oriented file formats that support compression and provide schema which makes reading the data much more efficient.</p>
+<p>In a recent post, <a href="https://voltrondata.com/news/creating-an-arrow-dataset/">François Michonneau</a> talks about creating an Arrow dataset and explores various file formats supported by the Arrow ecosystem and shows the efficiency of the parquet format for storing and reading the data. In this post, we’ll continue that thought and showcase how to seamlessly convert large CSV files to parquet so you can take advantage of the space and time benefits.</p>
+<section id="apache-parquet" class="level2">
+<h2 class="anchored" data-anchor-id="apache-parquet">Apache Parquet</h2>
+<p><a href="https://arrow.apache.org/">Apache Arrow</a> and <a href="https://parquet.apache.org/">Apache Parquet</a> go hand in hand. Apache Parquet is a columnar format and Parquet formatted files can be read into Arrow arrays and, vice versa, Arrow arrays written back to Parquet files. Apache Parquet format also carries metadata so each column read back will retain the proper data type. The same, unfortunately, cannot be said for CSV files.</p>
+<p>The best gift you can give yourself as a data scientist or engineer is to ditch CSVs and move to Parquet! Yes that does mean you will have to read those CSV files one more time, but once you transcode them to Parquet format you can step away and watch your data pipelines start flowing smoothly again!</p>
+<p>Here’s how.</p>
+</section>
+<section id="preliminaries" class="level2">
+<h2 class="anchored" data-anchor-id="preliminaries">Preliminaries</h2>
+<p>Our first step is to use the right tools: in Python we’ll begin with our imports, in R we’ll load some packages.</p>
+<div class="panel-tabset">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-1-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-1-1" role="tab" aria-controls="tabset-1-1" aria-selected="true">Python</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-1-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-1-2" role="tab" aria-controls="tabset-1-2" aria-selected="false">R</a></li></ul>
+<div class="tab-content">
+<div id="tabset-1-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-1-1-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb1"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> pyarrow <span class="im">as</span> pa</span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> pyarrow.csv <span class="im">as</span> csv</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> pyarrow.parquet <span class="im">as</span> pq</span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> pyarrow.dataset <span class="im">as</span> ds</span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> pandas <span class="im">as</span> pd</span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> numpy <span class="im">as</span> np</span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> statistics</span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> timeit</span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> glob</span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> os</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+<div id="tabset-1-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-1-2-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb2"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(dplyr)</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(arrow)</span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(bench)</span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(here)</span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(fs)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+</div>
+</div>
+<p>Let’s also create some helper variables to keep track of all the files we’re going to use as this post progresses. This step isn’t strictly needed but it will help keep our code tidy later.</p>
+<div class="panel-tabset">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-2-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-2-1" role="tab" aria-controls="tabset-2-1" aria-selected="true">Python</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-2-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-2-2" role="tab" aria-controls="tabset-2-2" aria-selected="false">R</a></li></ul>
+<div class="tab-content">
+<div id="tabset-2-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-2-1-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb3"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="co"># data directory</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>data_dir <span class="op">=</span> <span class="st">'pydata'</span></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> <span class="kw">not</span> os.path.isdir(data_dir):</span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>    os.mkdir(data_dir)</span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a><span class="co"># csv files</span></span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a>csv_file <span class="op">=</span> <span class="ss">f'</span><span class="sc">{</span>data_dir<span class="sc">}</span><span class="ss">/large_dataset.csv'</span></span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a>csv_file_huge <span class="op">=</span> <span class="ss">f'</span><span class="sc">{</span>data_dir<span class="sc">}</span><span class="ss">/huge_dataset.csv'</span></span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a><span class="co"># parquet files</span></span>
+<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a>parquet_file_snappy <span class="op">=</span> <span class="ss">f'</span><span class="sc">{</span>data_dir<span class="sc">}</span><span class="ss">/large_dataset_snappy.parquet'</span></span>
+<span id="cb3-12"><a href="#cb3-12" aria-hidden="true" tabindex="-1"></a>parquet_file_gzip <span class="op">=</span> <span class="ss">f'</span><span class="sc">{</span>data_dir<span class="sc">}</span><span class="ss">/large_dataset_gzip.parquet'</span></span>
+<span id="cb3-13"><a href="#cb3-13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-14"><a href="#cb3-14" aria-hidden="true" tabindex="-1"></a><span class="co"># folder for multi-file dataset</span></span>
+<span id="cb3-15"><a href="#cb3-15" aria-hidden="true" tabindex="-1"></a>dataset_dir <span class="op">=</span> <span class="ss">f'</span><span class="sc">{</span>data_dir<span class="sc">}</span><span class="ss">/huge_dataset'</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+<div id="tabset-2-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-2-2-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb4"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="co"># data directory</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>data_dir <span class="ot">&lt;-</span> <span class="st">"rdata"</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span>(<span class="sc">!</span><span class="fu">dir_exists</span>(data_dir)) {</span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">dir_create</span>(data_dir)</span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a><span class="co"># csv files</span></span>
+<span id="cb4-8"><a href="#cb4-8" aria-hidden="true" tabindex="-1"></a>csv_file <span class="ot">&lt;-</span> <span class="fu">path</span>(<span class="st">"rdata"</span>, <span class="st">"large_dataset.csv"</span>)</span>
+<span id="cb4-9"><a href="#cb4-9" aria-hidden="true" tabindex="-1"></a>csv_file_huge <span class="ot">&lt;-</span> <span class="fu">path</span>(<span class="st">"rdata"</span>, <span class="st">"huge_dataset.csv"</span>)</span>
+<span id="cb4-10"><a href="#cb4-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-11"><a href="#cb4-11" aria-hidden="true" tabindex="-1"></a><span class="co"># parquet files</span></span>
+<span id="cb4-12"><a href="#cb4-12" aria-hidden="true" tabindex="-1"></a>parquet_file_snappy <span class="ot">&lt;-</span> <span class="fu">path</span>(<span class="st">"rdata"</span>, <span class="st">"large_dataset_snappy.parquet"</span>)</span>
+<span id="cb4-13"><a href="#cb4-13" aria-hidden="true" tabindex="-1"></a>parquet_file_gzip <span class="ot">&lt;-</span> <span class="fu">path</span>(<span class="st">"rdata"</span>, <span class="st">"large_dataset_gzip.parquet"</span>)</span>
+<span id="cb4-14"><a href="#cb4-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-15"><a href="#cb4-15" aria-hidden="true" tabindex="-1"></a><span class="co"># folder for multi-file dataset</span></span>
+<span id="cb4-16"><a href="#cb4-16" aria-hidden="true" tabindex="-1"></a>dataset_dir <span class="ot">&lt;-</span> <span class="fu">path</span>(<span class="st">"rdata"</span>, <span class="st">"huge_dataset"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+</div>
+</div>
+<p>Helper function to report the median time taken to execute a function:</p>
+<div class="panel-tabset">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-3-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-3-1" role="tab" aria-controls="tabset-3-1" aria-selected="true">Python</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-3-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-3-2" role="tab" aria-controls="tabset-3-2" aria-selected="false">R</a></li></ul>
+<div class="tab-content">
+<div id="tabset-3-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-3-1-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb5"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> median_time(fun, repetitions <span class="op">=</span> <span class="dv">7</span>):</span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>  time <span class="op">=</span> timeit.repeat(fun, number <span class="op">=</span> <span class="dv">1</span>, repeat <span class="op">=</span> repetitions)</span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>  <span class="cf">return</span>(statistics.median(time))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+<div id="tabset-3-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-3-2-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb6"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a>median_time <span class="ot">&lt;-</span> <span class="cf">function</span>(fun, <span class="at">repetitions =</span> <span class="dv">7</span>) {</span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a>  benchmarks <span class="ot">&lt;-</span> <span class="fu">mark</span>(<span class="fu">fun</span>(), <span class="at">iterations =</span> repetitions, <span class="at">check =</span> <span class="cn">FALSE</span>)</span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">return</span>(benchmarks<span class="sc">$</span>median)</span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<section id="generate-a-large-random-data-set" class="level2">
+<h2 class="anchored" data-anchor-id="generate-a-large-random-data-set">Generate a large random data set</h2>
+<p>To demonstrate how it all works, we’ll need some data. For this post, what we’ll do is create a table that will occupy roughly 2GB in memory. If we have 45 columns of double precision numeric data in our table, how many rows should our table have?</p>
+<div class="panel-tabset">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-4-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-4-1" role="tab" aria-controls="tabset-4-1" aria-selected="true">Python</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-4-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-4-2" role="tab" aria-controls="tabset-4-2" aria-selected="false">R</a></li></ul>
+<div class="tab-content">
+<div id="tabset-4-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-4-1-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb7"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a>columns <span class="op">=</span> <span class="dv">45</span></span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>memory_size <span class="op">=</span> <span class="dv">2</span><span class="op">*</span><span class="dv">1024</span><span class="op">**</span><span class="dv">3</span></span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a>data_type <span class="op">=</span> np.dtype(<span class="st">'float64'</span>)</span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>rows <span class="op">=</span> memory_size <span class="op">/</span> columns <span class="op">/</span> data_type.itemsize</span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="ss">f'Size in memory: </span><span class="sc">{</span>memory_size <span class="op">/</span> (<span class="dv">1024</span><span class="op">**</span><span class="dv">3</span>)<span class="sc">}</span><span class="ss">GB'</span>)</span>
+<span id="cb7-7"><a href="#cb7-7" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="ss">f'Number of rows: </span><span class="sc">{</span><span class="bu">int</span>(rows)<span class="sc">:,}</span><span class="ss">'</span>)</span>
+<span id="cb7-8"><a href="#cb7-8" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="ss">f'Number of columns: </span><span class="sc">{</span>columns<span class="sc">}</span><span class="ss">'</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Size in memory: 2.0GB
+Number of rows: 5,965,232
+Number of columns: 45</code></pre>
+</div>
+</div>
+</div>
+<div id="tabset-4-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-4-2-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb9"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a>bytes_float <span class="ot">&lt;-</span> <span class="dv">8</span></span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a>bytes_total <span class="ot">&lt;-</span> <span class="dv">2</span> <span class="sc">*</span> <span class="dv">1024</span> <span class="sc">^</span> <span class="dv">3</span></span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a>n_columns <span class="ot">&lt;-</span> <span class="dv">45</span></span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a>n_rows <span class="ot">&lt;-</span> <span class="fu">round</span>(bytes_total <span class="sc">/</span> (n_columns <span class="sc">*</span> bytes_float)) </span>
+<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-6"><a href="#cb9-6" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"Size in memory:"</span>, <span class="fu">round</span>(bytes_total <span class="sc">/</span> (<span class="dv">1024</span> <span class="sc">^</span> <span class="dv">3</span>), <span class="at">digits =</span> <span class="dv">1</span>), <span class="st">"GB</span><span class="sc">\n</span><span class="st">"</span>)</span>
+<span id="cb9-7"><a href="#cb9-7" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"Number of rows:"</span>, n_rows, <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span>
+<span id="cb9-8"><a href="#cb9-8" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">"Number of columns:"</span>, n_columns, <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Size in memory: 2 GB
+Number of rows: 5965232 
+Number of columns: 45 </code></pre>
+</div>
+</div>
+</div>
+</div>
+</div>
+<p>We’ll need about 6 million rows. Armed with this knowledge let’s create a data set of the appropriate size and write the results to a CSV file:</p>
+<div class="panel-tabset">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-5-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-5-1" role="tab" aria-controls="tabset-5-1" aria-selected="true">Python</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-5-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-5-2" role="tab" aria-controls="tabset-5-2" aria-selected="false">R</a></li></ul>
+<div class="tab-content">
+<div id="tabset-5-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-5-1-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb11"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> <span class="kw">not</span> os.path.isfile(csv_file):</span>
+<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a>    dataset <span class="op">=</span> pa.table(</span>
+<span id="cb11-3"><a href="#cb11-3" aria-hidden="true" tabindex="-1"></a>        {</span>
+<span id="cb11-4"><a href="#cb11-4" aria-hidden="true" tabindex="-1"></a>            <span class="ss">f'col_</span><span class="sc">{</span>i<span class="sc">}</span><span class="ss">'</span>: np.random.randn(<span class="bu">int</span>(rows))</span>
+<span id="cb11-5"><a href="#cb11-5" aria-hidden="true" tabindex="-1"></a>            <span class="cf">for</span> i <span class="kw">in</span> <span class="bu">range</span>(columns)</span>
+<span id="cb11-6"><a href="#cb11-6" aria-hidden="true" tabindex="-1"></a>        }</span>
+<span id="cb11-7"><a href="#cb11-7" aria-hidden="true" tabindex="-1"></a>    )</span>
+<span id="cb11-8"><a href="#cb11-8" aria-hidden="true" tabindex="-1"></a>    options <span class="op">=</span> csv.WriteOptions(include_header<span class="op">=</span><span class="va">True</span>)</span>
+<span id="cb11-9"><a href="#cb11-9" aria-hidden="true" tabindex="-1"></a>    csv.write_csv(dataset, csv_file, options)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+<div id="tabset-5-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-5-2-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb12"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span>(<span class="sc">!</span><span class="fu">file_exists</span>(csv_file)) {</span>
+<span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">matrix</span>(</span>
+<span id="cb12-3"><a href="#cb12-3" aria-hidden="true" tabindex="-1"></a>    <span class="at">data =</span> <span class="fu">rnorm</span>(n_rows <span class="sc">*</span> n_columns),</span>
+<span id="cb12-4"><a href="#cb12-4" aria-hidden="true" tabindex="-1"></a>    <span class="at">nrow =</span> n_rows, </span>
+<span id="cb12-5"><a href="#cb12-5" aria-hidden="true" tabindex="-1"></a>    <span class="at">ncol =</span> n_columns</span>
+<span id="cb12-6"><a href="#cb12-6" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">|&gt;</span></span>
+<span id="cb12-7"><a href="#cb12-7" aria-hidden="true" tabindex="-1"></a>    <span class="fu">as.data.frame</span>() <span class="sc">|&gt;</span></span>
+<span id="cb12-8"><a href="#cb12-8" aria-hidden="true" tabindex="-1"></a>    <span class="fu">write_csv_arrow</span>(csv_file)</span>
+<span id="cb12-9"><a href="#cb12-9" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+</div>
+</div>
+<p>When stored in memory, this object – by design – is about 2GB in size. How large is it on disk as a CSV file?</p>
+<div class="panel-tabset">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-6-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-6-1" role="tab" aria-controls="tabset-6-1" aria-selected="true">Python</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-6-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-6-2" role="tab" aria-controls="tabset-6-2" aria-selected="false">R</a></li></ul>
+<div class="tab-content">
+<div id="tabset-6-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-6-1-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb13"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> file_size(<span class="bu">file</span>):</span>
+<span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a>    n_bytes <span class="op">=</span> os.path.getsize(<span class="bu">file</span>)</span>
+<span id="cb13-3"><a href="#cb13-3" aria-hidden="true" tabindex="-1"></a>    <span class="bu">print</span>(<span class="ss">f'</span><span class="sc">{</span>(n_bytes <span class="op">/</span> (<span class="dv">1024</span><span class="op">**</span><span class="dv">3</span>))<span class="sc">:.2f}</span><span class="ss">GB'</span>)</span>
+<span id="cb13-4"><a href="#cb13-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb13-5"><a href="#cb13-5" aria-hidden="true" tabindex="-1"></a>file_size(csv_file)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>4.91GB</code></pre>
+</div>
+</div>
+</div>
+<div id="tabset-6-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-6-2-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb15"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="fu">file_size</span>(csv_file)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>4.91G</code></pre>
+</div>
+</div>
+</div>
+</div>
+</div>
+<p>It’s almost 5GB: it’s more than doubled in size when we save to CSV. That’s not surprising because CSV isn’t designed to be efficient, but it’s not something any data scientist or engineer wants to see.</p>
+</section>
+<section id="transcoding-csv-to-parquet" class="level2">
+<h2 class="anchored" data-anchor-id="transcoding-csv-to-parquet">Transcoding CSV to Parquet</h2>
+<p>Apache Parquet format is a preferred way to store columnar data: it requires much less compute cycles and it supports compression, rendering much smaller file sizes. By default the compression used is snappy but we will also try GZip.</p>
+<section id="snappy-compression" class="level3">
+<h3 class="anchored" data-anchor-id="snappy-compression">Snappy compression</h3>
+<p>Let’s time how long it takes to transcode our CSV file to the parquet with Apache Arrow.</p>
+<div class="panel-tabset">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-7-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-7-1" role="tab" aria-controls="tabset-7-1" aria-selected="true">Python</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-7-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-7-2" role="tab" aria-controls="tabset-7-2" aria-selected="false">R</a></li></ul>
+<div class="tab-content">
+<div id="tabset-7-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-7-1-tab">
+<div class="cell" data-hash="index_cache/html/py-csv-to-parquet-snappy_25db444f9a10c3ee56d62f42d747a2db">
+<div class="sourceCode cell-code" id="cb17"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> transcode_snappy():</span>
+<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a>  arrow_table <span class="op">=</span> pa.csv.read_csv(csv_file)</span>
+<span id="cb17-3"><a href="#cb17-3" aria-hidden="true" tabindex="-1"></a>  pq.write_table(arrow_table, parquet_file_snappy)<span class="op">;</span></span>
+<span id="cb17-4"><a href="#cb17-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb17-5"><a href="#cb17-5" aria-hidden="true" tabindex="-1"></a>median_time(transcode_snappy)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>11.038464039000246</code></pre>
+</div>
+</div>
+</div>
+<div id="tabset-7-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-7-2-tab">
+<div class="cell" data-hash="index_cache/html/r-csv-to-parquet-snappy_50a01f2da78810446307bc333ef2c7db">
+<div class="sourceCode cell-code" id="cb19"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a>transcode_snappy <span class="ot">&lt;-</span> <span class="cf">function</span>() {</span>
+<span id="cb19-2"><a href="#cb19-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">read_csv_arrow</span>(csv_file) <span class="sc">|&gt;</span> <span class="fu">write_parquet</span>(parquet_file_snappy)</span>
+<span id="cb19-3"><a href="#cb19-3" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb19-4"><a href="#cb19-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb19-5"><a href="#cb19-5" aria-hidden="true" tabindex="-1"></a><span class="fu">median_time</span>(transcode_snappy)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] 11.3s</code></pre>
+</div>
+</div>
+</div>
+</div>
+</div>
+<p>So, end-to-end it takes maybe 8 to 10 seconds to read CSV and save it to a parquet file. The size of the file is less than half of what it used to be in CSV:</p>
+<div class="panel-tabset">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-8-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-8-1" role="tab" aria-controls="tabset-8-1" aria-selected="true">Python</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-8-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-8-2" role="tab" aria-controls="tabset-8-2" aria-selected="false">R</a></li></ul>
+<div class="tab-content">
+<div id="tabset-8-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-8-1-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb21"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb21-1"><a href="#cb21-1" aria-hidden="true" tabindex="-1"></a>file_size(parquet_file_snappy)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>2.01GB</code></pre>
+</div>
+</div>
+</div>
+<div id="tabset-8-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-8-2-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb23"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb23-1"><a href="#cb23-1" aria-hidden="true" tabindex="-1"></a><span class="fu">file_size</span>(parquet_file_snappy)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>2.01G</code></pre>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<section id="gzip-compression" class="level3">
+<h3 class="anchored" data-anchor-id="gzip-compression">GZip compression</h3>
+<p>Now let’s try with GZIP.</p>
+<div class="panel-tabset">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-9-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-9-1" role="tab" aria-controls="tabset-9-1" aria-selected="true">Python</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-9-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-9-2" role="tab" aria-controls="tabset-9-2" aria-selected="false">R</a></li></ul>
+<div class="tab-content">
+<div id="tabset-9-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-9-1-tab">
+<div class="cell" data-hash="index_cache/html/py-csv-to-parquet-gzip_dd8f2ce9e68edc08bc5d8a076c53ea8c">
+<div class="sourceCode cell-code" id="cb25"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb25-1"><a href="#cb25-1" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> transcode_gzip():</span>
+<span id="cb25-2"><a href="#cb25-2" aria-hidden="true" tabindex="-1"></a>  arrow_table <span class="op">=</span> pa.csv.read_csv(csv_file)</span>
+<span id="cb25-3"><a href="#cb25-3" aria-hidden="true" tabindex="-1"></a>  pq.write_table(arrow_table, parquet_file_gzip, compression<span class="op">=</span><span class="st">'gzip'</span>)<span class="op">;</span></span>
+<span id="cb25-4"><a href="#cb25-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb25-5"><a href="#cb25-5" aria-hidden="true" tabindex="-1"></a>median_time(transcode_gzip)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>94.39236859499943</code></pre>
+</div>
+</div>
+</div>
+<div id="tabset-9-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-9-2-tab">
+<div class="cell" data-hash="index_cache/html/r-csv-to-parquet-gzip_31541d11850343e9c6d526e66dafba42">
+<div class="sourceCode cell-code" id="cb27"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb27-1"><a href="#cb27-1" aria-hidden="true" tabindex="-1"></a>transcode_gzip <span class="ot">&lt;-</span> <span class="cf">function</span>() {</span>
+<span id="cb27-2"><a href="#cb27-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">read_csv_arrow</span>(csv_file) <span class="sc">|&gt;</span> </span>
+<span id="cb27-3"><a href="#cb27-3" aria-hidden="true" tabindex="-1"></a>    <span class="fu">write_parquet</span>(parquet_file_gzip, <span class="at">compression =</span> <span class="st">"gzip"</span>)</span>
+<span id="cb27-4"><a href="#cb27-4" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb27-5"><a href="#cb27-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb27-6"><a href="#cb27-6" aria-hidden="true" tabindex="-1"></a><span class="fu">median_time</span>(transcode_gzip)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] 1.5m</code></pre>
+</div>
+</div>
+</div>
+</div>
+</div>
+<p>Overall it takes about 10 times as long to complete the transcoding with gzip than it takes when using snappy, but you do get end up with a slightly more compressed file at the end. Is it worth the wait? You need to decide.</p>
+<div class="panel-tabset">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-10-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-10-1" role="tab" aria-controls="tabset-10-1" aria-selected="true">Python</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-10-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-10-2" role="tab" aria-controls="tabset-10-2" aria-selected="false">R</a></li></ul>
+<div class="tab-content">
+<div id="tabset-10-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-10-1-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb29"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb29-1"><a href="#cb29-1" aria-hidden="true" tabindex="-1"></a>file_size(parquet_file_gzip)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>1.93GB</code></pre>
+</div>
+</div>
+</div>
+<div id="tabset-10-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-10-2-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb31"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb31-1"><a href="#cb31-1" aria-hidden="true" tabindex="-1"></a><span class="fu">file_size</span>(parquet_file_gzip)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>1.93G</code></pre>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+</section>
+<section id="reading-parquet-files" class="level2">
+<h2 class="anchored" data-anchor-id="reading-parquet-files">Reading Parquet Files</h2>
+<p>Having transcoded our data set from CSV to Apache Parquet, let’s compare read times for the two file formats. We’ll look at the CSV files first. To make things simple we’ll read the data to an Arrow Table, but we would still see the same performance difference between CSV and Parquet if we read the data to a panda in Python or a data frame in R.</p>
+<div class="panel-tabset">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-11-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-11-1" role="tab" aria-controls="tabset-11-1" aria-selected="true">Python</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-11-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-11-2" role="tab" aria-controls="tabset-11-2" aria-selected="false">R</a></li></ul>
+<div class="tab-content">
+<div id="tabset-11-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-11-1-tab">
+<div class="cell" data-hash="index_cache/html/py-arrow-read-csv_760db68a8e08f45a535be1773974dcea">
+<div class="sourceCode cell-code" id="cb33"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb33-1"><a href="#cb33-1" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> read_csv_data():</span>
+<span id="cb33-2"><a href="#cb33-2" aria-hidden="true" tabindex="-1"></a>  csv.read_csv(csv_file)</span>
+<span id="cb33-3"><a href="#cb33-3" aria-hidden="true" tabindex="-1"></a>  </span>
+<span id="cb33-4"><a href="#cb33-4" aria-hidden="true" tabindex="-1"></a>median_time(read_csv_data)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>4.780269909999333</code></pre>
+</div>
+</div>
+</div>
+<div id="tabset-11-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-11-2-tab">
+<div class="cell" data-hash="index_cache/html/r-arrow-read-csv_8489e0cdc8882ee288810271a995ad9e">
+<div class="sourceCode cell-code" id="cb35"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb35-1"><a href="#cb35-1" aria-hidden="true" tabindex="-1"></a>read_csv_data <span class="ot">&lt;-</span> <span class="cf">function</span>() {</span>
+<span id="cb35-2"><a href="#cb35-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">read_csv_arrow</span>(csv_file, <span class="at">as_data_frame =</span> <span class="cn">FALSE</span>) </span>
+<span id="cb35-3"><a href="#cb35-3" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb35-4"><a href="#cb35-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb35-5"><a href="#cb35-5" aria-hidden="true" tabindex="-1"></a><span class="fu">median_time</span>(read_csv_data)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] 5.28s</code></pre>
+</div>
+</div>
+</div>
+</div>
+</div>
+<p>Now let’s try reading the Parquet files:</p>
+<div class="panel-tabset">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-12-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-12-1" role="tab" aria-controls="tabset-12-1" aria-selected="true">Python</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-12-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-12-2" role="tab" aria-controls="tabset-12-2" aria-selected="false">R</a></li></ul>
+<div class="tab-content">
+<div id="tabset-12-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-12-1-tab">
+<div class="cell" data-hash="index_cache/html/pyarrow-read-parquet_d75ee729ff5ca708530ccbb35885a32a">
+<div class="sourceCode cell-code" id="cb37"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb37-1"><a href="#cb37-1" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> read_parquet_arrow():</span>
+<span id="cb37-2"><a href="#cb37-2" aria-hidden="true" tabindex="-1"></a>  pq.read_table(parquet_file_snappy)</span>
+<span id="cb37-3"><a href="#cb37-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb37-4"><a href="#cb37-4" aria-hidden="true" tabindex="-1"></a>median_time(read_parquet_arrow)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>0.2946250789973419</code></pre>
+</div>
+</div>
+</div>
+<div id="tabset-12-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-12-2-tab">
+<div class="cell" data-hash="index_cache/html/table-read-parquet_751250e4e48099cb66c4ba4c59f09878">
+<div class="sourceCode cell-code" id="cb39"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb39-1"><a href="#cb39-1" aria-hidden="true" tabindex="-1"></a>read_parquet_arrow <span class="ot">&lt;-</span> <span class="cf">function</span>() {</span>
+<span id="cb39-2"><a href="#cb39-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">read_parquet</span>(parquet_file_snappy, <span class="at">as_data_frame =</span> <span class="cn">FALSE</span>)</span>
+<span id="cb39-3"><a href="#cb39-3" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb39-4"><a href="#cb39-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb39-5"><a href="#cb39-5" aria-hidden="true" tabindex="-1"></a><span class="fu">median_time</span>(read_parquet_arrow)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] 390ms</code></pre>
+</div>
+</div>
+</div>
+</div>
+</div>
+<p>About one third of a second. Not too bad!</p>
+
+<!--
+
+One takeaway lesson is to, if you really need to read CSV and then process the data using pandas, read the data with Arrow’s CSV reader and then convert the Arrow Table to pandas DataFrame.
+
+
+::: {.cell}
+
+```{.python .cell-code}
+def read_pandas_arrow():
+  pa.csv.read_csv(csv_file).to_pandas()
+
+timeit.timeit(read_pandas_arrow, number = 1)  
+```
+
+::: {.cell-output .cell-output-stdout}
+```
+6.670574838997709
+```
+:::
+:::
+
+
+Still slower than reading a parquet file but significantly faster than reading CSV with pandas.
+
+-->
+</section>
+<section id="comparing-parquet-to-compressed-csv" class="level2">
+<h2 class="anchored" data-anchor-id="comparing-parquet-to-compressed-csv">Comparing Parquet to Compressed CSV</h2>
+<p>At this point you might be wondering how Parquet files compare to compressed CSV. A common solution to the shortcomings of CSV files it to use <code>gzip</code> or similar utility to compress them. This can lead to substantially reduced file sizes. For example, the data set we’ve used in this blog post is about the same size when stored as a gzipped CSV file (2.4GB) as it is when stored as a snappy-compressed Parquet file (2.2GB). The reduced file size might lead to faster load times, but in a local setting these speed-ups are mostly a function of the file size: they don’t tell us much about how many CPU cycles reading these files consumes. On linux you can collect some performance statistics using the <code>perf</code> utility:</p>
+<!-- 
+for future reference, this is how you modify the perf_event_paranoid settings
+
+sudo sh -c 'echo kernel.perf_event_paranoid=1 > /etc/sysctl.d/local.conf 
+
+reset to 4 to be completely paranoid :-)
+-->
+<div class="panel-tabset">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-13-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-13-1" role="tab" aria-controls="tabset-13-1" aria-selected="true">Python</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-13-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-13-2" role="tab" aria-controls="tabset-13-2" aria-selected="false">R</a></li></ul>
+<div class="tab-content">
+<div id="tabset-13-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-13-1-tab">
+<p>Here are the performance statistics for reading the gzipped CSV file:</p>
+<div class="sourceCode" id="cb41"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb41-1"><a href="#cb41-1" aria-hidden="true" tabindex="-1"></a><span class="ex">perf</span> stat python <span class="at">-c</span> <span class="st">"from pyarrow import csv; csv.read_csv('pydata/large_dataset.csv.gz')"</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<pre><code> Performance counter stats for 'python -c from pyarrow import csv; csv.read_csv('pydata/large_dataset.csv.gz')':
+
+         45,946.29 msec task-clock                #    2.458 CPUs utilized          
+            97,475      context-switches          #    2.121 K/sec                  
+            37,060      cpu-migrations            #  806.594 /sec                   
+         2,379,661      page-faults               #   51.792 K/sec                  
+   163,823,235,007      cycles                    #    3.566 GHz                    
+   266,069,641,526      instructions              #    1.62  insn per cycle         
+    40,294,887,901      branches                  #  877.000 M/sec                  
+     1,787,412,162      branch-misses             #    4.44% of all branches        
+   603,296,698,280      slots                     #   13.130 G/sec                  
+   136,118,412,337      topdown-retiring          #     19.2% retiring              
+   468,702,274,904      topdown-bad-spec          #     66.3% bad speculation       
+    67,807,557,217      topdown-fe-bound          #      9.6% frontend bound        
+    34,659,537,044      topdown-be-bound          #      4.9% backend bound         
+
+      18.692289542 seconds time elapsed
+
+      42.868337000 seconds user
+       6.071931000 seconds sys</code></pre>
+<p>To compare, this is what we get when reading the snappy-compressed parquet file:</p>
+<div class="sourceCode" id="cb43"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb43-1"><a href="#cb43-1" aria-hidden="true" tabindex="-1"></a><span class="ex">perf</span> stat python <span class="at">-c</span> <span class="st">"from pyarrow import parquet; parquet.read_table('pydata/large_dataset_snappy.parquet')"</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<pre><code> Performance counter stats for 'python -c from pyarrow import parquet; parquet.read_table('pydata/large_dataset_snappy.parquet')':
+
+          4,052.57 msec task-clock                #    2.507 CPUs utilized          
+             8,212      context-switches          #    2.026 K/sec                  
+             2,898      cpu-migrations            #  715.102 /sec                   
+         1,105,237      page-faults               #  272.725 K/sec                  
+    12,740,967,348      cycles                    #    3.144 GHz                    
+    11,629,653,540      instructions              #    0.91  insn per cycle         
+     1,953,615,539      branches                  #  482.069 M/sec                  
+        15,002,905      branch-misses             #    0.77% of all branches        
+    38,990,127,780      slots                     #    9.621 G/sec                  
+    11,304,974,170      topdown-retiring          #     26.6% retiring              
+    13,387,988,026      topdown-bad-spec          #     31.5% bad speculation       
+     7,239,172,422      topdown-fe-bound          #     17.0% frontend bound        
+    10,599,009,432      topdown-be-bound          #     24.9% backend bound         
+
+       1.616350503 seconds time elapsed
+
+       1.370856000 seconds user
+       2.709456000 seconds sys
+</code></pre>
+<p>Reading the parquet file consumes 12.7 billion CPU cycles; for the gzipped CSV the figure is 163.8 billion.</p>
+</div>
+<div id="tabset-13-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-13-2-tab">
+<p>Here are the performance statistics for reading the gzipped CSV file:</p>
+<div class="sourceCode" id="cb45"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb45-1"><a href="#cb45-1" aria-hidden="true" tabindex="-1"></a><span class="ex">perf</span> stat Rscript <span class="at">-e</span> <span class="st">"arrow::read_csv_arrow('rdata/large_dataset.csv.gz', as_data_frame = FALSE)"</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<pre><code> Performance counter stats for 'Rscript -e arrow::read_csv_arrow('rdata/large_dataset.csv.gz', as_data_frame = FALSE)':
+
+         49,814.86 msec task-clock                #    2.343 CPUs utilized          
+           104,662      context-switches          #    2.101 K/sec                  
+            39,809      cpu-migrations            #  799.139 /sec                   
+         2,444,561      page-faults               #   49.073 K/sec                  
+   176,418,525,767      cycles                    #    3.541 GHz                    
+   277,797,226,186      instructions              #    1.57  insn per cycle         
+    43,508,214,462      branches                  #  873.398 M/sec                  
+     1,777,773,657      branch-misses             #    4.09% of all branches        
+   656,019,283,120      slots                     #   13.169 G/sec                  
+   128,143,770,282      topdown-retiring          #     16.2% retiring              
+   534,939,317,766      topdown-bad-spec          #     67.8% bad speculation       
+    65,978,499,316      topdown-fe-bound          #      8.4% frontend bound        
+    60,111,173,500      topdown-be-bound          #      7.6% backend bound         
+
+      21.263720897 seconds time elapsed
+
+      47.243353000 seconds user
+       5.763587000 seconds sys</code></pre>
+<p>To compare, this is what we get when reading the snappy-compressed parquet file:</p>
+<div class="sourceCode" id="cb47"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb47-1"><a href="#cb47-1" aria-hidden="true" tabindex="-1"></a><span class="ex">perf</span> stat Rscript <span class="at">-e</span> <span class="st">"arrow::read_parquet('rdata/large_dataset_snappy.parquet', as_data_frame = FALSE)"</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<pre><code> Performance counter stats for 'Rscript -e arrow::read_parquet('rdata/large_dataset_snappy.parquet', as_data_frame = FALSE)':
+
+          2,675.35 msec task-clock                #    3.220 CPUs utilized          
+               535      context-switches          #  199.974 /sec                   
+                38      cpu-migrations            #   14.204 /sec                   
+           628,615      page-faults               #  234.966 K/sec                  
+     9,932,298,420      cycles                    #    3.713 GHz                    
+    11,800,309,617      instructions              #    1.19  insn per cycle         
+     2,155,219,064      branches                  #  805.585 M/sec                  
+        12,280,294      branch-misses             #    0.57% of all branches        
+    30,850,755,460      slots                     #   11.532 G/sec                  
+    11,784,389,574      topdown-retiring          #     36.8% retiring              
+     4,243,149,218      topdown-bad-spec          #     13.2% bad speculation       
+     6,247,234,332      topdown-fe-bound          #     19.5% frontend bound        
+     9,768,481,508      topdown-be-bound          #     30.5% backend bound         
+
+       0.830735747 seconds time elapsed
+
+       1.609327000 seconds user
+       1.073598000 seconds sys
+</code></pre>
+<p>Reading the parquet file consumes 9.9 billion CPU cycles; for the gzipped CSV the figure is 176.4 billion.</p>
+</div>
+</div>
+</div>
+<p>These results are of course specific to the machine we used for the tests – a 2022 Dell XPS 13 laptop running Ubuntu 20.04 – but so are all the other numbers reported here. The fine details are less important than the big picture result:</p>
+<p>Even when a compressed CSV file is similar in size to a Parquet file, it will consume far more time and system resources to read. Any time that you have to pay for time or CPU cycles, deploying a solution using Parquet files is likely to be much more cost-effective than using compressed CSV data.</p>
+<!-- A savvy user, who may want to store and use that data in the cloud, might want to test the I/O bandwidth because of the cloud latencies. Thus, reading these two files on a desktop machine might as well show that reading a compressed CSV is faster as the file size is smaller: we don’t need to read as many bytes as with parquet. However, on a system that is distributed (like, e.g. S3), reads are frequently done in parallel, resulting in a much higher bandwidth even with the penalty of having a more excessive latency compared to a local setting.  -->
+</section>
+<section id="transcoding-larger-than-memory-datasets" class="level2 page-columns page-full">
+<h2 class="anchored" data-anchor-id="transcoding-larger-than-memory-datasets">Transcoding Larger-Than-Memory Datasets</h2>
+<p>In all our examples so, the data set has been small enough that the CSV file could fit easily into the memory of a modern computer with 8GB of RAM. Plenty of times, however, you might find yourself with a data set that is much larger than the RAM available. This makes transcoding a little trickier, but Apache Arrow can help with this.</p>
+<p>First, with a simple bash script, we can create a huge data set by concatenating eight copies of our <code>large_dataset.csv</code> together, creating a data file that is roughly 40GB on disk. Our bash script might look like this:</p>
+<div class="cell">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>make-huge-csv.sh</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb49"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb49-1"><a href="#cb49-1" aria-hidden="true" tabindex="-1"></a><span class="co">#!/bin/bash </span></span>
+<span id="cb49-2"><a href="#cb49-2" aria-hidden="true" tabindex="-1"></a><span class="va">large_csv</span><span class="op">=</span><span class="st">"</span><span class="va">${1}</span><span class="st">/large_dataset.csv"</span></span>
+<span id="cb49-3"><a href="#cb49-3" aria-hidden="true" tabindex="-1"></a><span class="va">huge_csv</span><span class="op">=</span><span class="st">"</span><span class="va">${1}</span><span class="st">/huge_dataset.csv"</span> </span>
+<span id="cb49-4"><a href="#cb49-4" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> i <span class="kw">in</span> <span class="dt">{</span><span class="dv">0</span><span class="dt">..</span><span class="dv">7</span><span class="dt">}</span></span>
+<span id="cb49-5"><a href="#cb49-5" aria-hidden="true" tabindex="-1"></a>  <span class="cf">do</span></span>
+<span id="cb49-6"><a href="#cb49-6" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> <span class="kw">[[</span> <span class="va">$i</span> <span class="ot">-eq</span> 0 <span class="kw">]]</span> <span class="kw">;</span> <span class="cf">then</span></span>
+<span id="cb49-7"><a href="#cb49-7" aria-hidden="true" tabindex="-1"></a>      <span class="fu">head</span> <span class="at">-1</span> <span class="va">$large_csv</span> <span class="op">&gt;</span> <span class="va">$huge_csv</span></span>
+<span id="cb49-8"><a href="#cb49-8" aria-hidden="true" tabindex="-1"></a>    <span class="cf">fi</span></span>
+<span id="cb49-9"><a href="#cb49-9" aria-hidden="true" tabindex="-1"></a>    <span class="fu">tail</span> <span class="at">-n</span> +2 <span class="va">$large_csv</span> <span class="op">&gt;&gt;</span> <span class="va">$huge_csv</span></span>
+<span id="cb49-10"><a href="#cb49-10" aria-hidden="true" tabindex="-1"></a>  <span class="cf">done</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+<p>At the terminal we’d use a command like one of thee two, depending on whether we are looking in the R data folder or the Python data folder:</p>
+<div class="sourceCode" id="cb50"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb50-1"><a href="#cb50-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./make-huge-csv.sh</span> <span class="st">"../pydata"</span>  <span class="co"># Python</span></span>
+<span id="cb50-2"><a href="#cb50-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./make-huge-csv.sh</span> <span class="st">"../rdata"</span>   <span class="co"># R</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>Having run this script, let’s check the size of the huge CSV file we have created:</p>
+<div class="panel-tabset">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-14-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-14-1" role="tab" aria-controls="tabset-14-1" aria-selected="true">Python</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-14-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-14-2" role="tab" aria-controls="tabset-14-2" aria-selected="false">R</a></li></ul>
+<div class="tab-content">
+<div id="tabset-14-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-14-1-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb51"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb51-1"><a href="#cb51-1" aria-hidden="true" tabindex="-1"></a>file_size(csv_file_huge)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>39.26GB</code></pre>
+</div>
+</div>
+</div>
+<div id="tabset-14-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-14-2-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb53"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb53-1"><a href="#cb53-1" aria-hidden="true" tabindex="-1"></a><span class="fu">file_size</span>(csv_file_huge)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>39.3G</code></pre>
+</div>
+</div>
+</div>
+</div>
+</div>
+<p>That’s close to 40GB. This won’t fit in RAM for a typical machine. However, using Arrow’s dataset interface we can use the “backpressure” functionality to slow down the read of a CSV file as we write out its parquet counterpart. The backpressure feature simply prevents the system from running out-of-memory when reading the data: when Arrow’s writer cannot keep up with the amount of incoming bytes from the reader it sends a backpressure message to the reader to slow down the reading.</p>
+<p>It shows well on this graph.</p>
+<div class="column-screen-inset">
+<p><img src="./img/backpressure.png" class="img-fluid"></p>
+</div>
+<p>Initially, there’s plenty of RAM available so reading and writing rates are high. However, once the disk cache gets full Arrow slows down, maintaining a relatively stable amount of occupied memory until it is done reading the file. At this point, Arrow will start releasing the memory and the writing rate will peak up a bit until done.</p>
+<p>The backpressure feature has been automatically available in Arrow since version 6.0.0 and is used automatically when using the dataset API. Let’s put it to work:</p>
+<div class="panel-tabset">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-15-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-15-1" role="tab" aria-controls="tabset-15-1" aria-selected="true">Python</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-15-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-15-2" role="tab" aria-controls="tabset-15-2" aria-selected="false">R</a></li></ul>
+<div class="tab-content">
+<div id="tabset-15-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-15-1-tab">
+<div class="cell" data-hash="index_cache/html/py-write-dataset_9aa7f8666213f30b52a194206bc083c3">
+<div class="sourceCode cell-code" id="cb55"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb55-1"><a href="#cb55-1" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> transcode_huge_csv():</span>
+<span id="cb55-2"><a href="#cb55-2" aria-hidden="true" tabindex="-1"></a>  dataset <span class="op">=</span> ds.dataset(csv_file_huge, <span class="bu">format</span><span class="op">=</span><span class="st">'csv'</span>)</span>
+<span id="cb55-3"><a href="#cb55-3" aria-hidden="true" tabindex="-1"></a>  ds.write_dataset(dataset, dataset_dir, <span class="bu">format</span><span class="op">=</span><span class="st">'parquet'</span>)</span>
+<span id="cb55-4"><a href="#cb55-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb55-5"><a href="#cb55-5" aria-hidden="true" tabindex="-1"></a>median_time(transcode_huge_csv, repetitions <span class="op">=</span> <span class="dv">1</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>184.2342482189997</code></pre>
+</div>
+</div>
+</div>
+<div id="tabset-15-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-15-2-tab">
+<div class="cell" data-hash="index_cache/html/r-write-dataset_1bc5a55a562fc7715ac4630d4dbd46a1">
+<div class="sourceCode cell-code" id="cb57"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb57-1"><a href="#cb57-1" aria-hidden="true" tabindex="-1"></a>transcode_huge_csv <span class="ot">&lt;-</span> <span class="cf">function</span>() {</span>
+<span id="cb57-2"><a href="#cb57-2" aria-hidden="true" tabindex="-1"></a>  csv_file_huge <span class="sc">|&gt;</span></span>
+<span id="cb57-3"><a href="#cb57-3" aria-hidden="true" tabindex="-1"></a>    <span class="fu">open_dataset</span>(<span class="at">format =</span> <span class="st">"csv"</span>) <span class="sc">|&gt;</span></span>
+<span id="cb57-4"><a href="#cb57-4" aria-hidden="true" tabindex="-1"></a>    <span class="fu">write_dataset</span>(<span class="at">path =</span> dataset_dir)</span>
+<span id="cb57-5"><a href="#cb57-5" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb57-6"><a href="#cb57-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb57-7"><a href="#cb57-7" aria-hidden="true" tabindex="-1"></a><span class="fu">median_time</span>(transcode_huge_csv, <span class="at">repetitions =</span> <span class="dv">1</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] 3.16m</code></pre>
+</div>
+</div>
+</div>
+</div>
+</div>
+<p>This time around we only ran each test once because it’s a little time consuming, but it’s enough to give you a pretty good sense of how long it takes to read and convert a 40GB CSV file to parquet format on a laptop: about 2-3 minutes.</p>
+<p>What about the file size? As you can see from the results below, if we use snappy compression the file size for the parquet encoded data is roughly half:</p>
+<div class="panel-tabset">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-16-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-16-1" role="tab" aria-controls="tabset-16-1" aria-selected="true">Python</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-16-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-16-2" role="tab" aria-controls="tabset-16-2" aria-selected="false">R</a></li></ul>
+<div class="tab-content">
+<div id="tabset-16-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-16-1-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb59"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb59-1"><a href="#cb59-1" aria-hidden="true" tabindex="-1"></a>n_bytes <span class="op">=</span> <span class="dv">0</span></span>
+<span id="cb59-2"><a href="#cb59-2" aria-hidden="true" tabindex="-1"></a>filenames <span class="op">=</span> glob.glob(<span class="ss">f'</span><span class="sc">{</span>dataset_dir<span class="sc">}</span><span class="ss">/*'</span>) </span>
+<span id="cb59-3"><a href="#cb59-3" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> fn <span class="kw">in</span> filenames:</span>
+<span id="cb59-4"><a href="#cb59-4" aria-hidden="true" tabindex="-1"></a>  n_bytes <span class="op">+=</span> os.path.getsize(fn)</span>
+<span id="cb59-5"><a href="#cb59-5" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="ss">f'</span><span class="sc">{</span>(n_bytes <span class="op">/</span> (<span class="dv">1024</span><span class="op">**</span><span class="dv">3</span>))<span class="sc">:.2f}</span><span class="ss">GB'</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>19.31GB</code></pre>
+</div>
+</div>
+</div>
+<div id="tabset-16-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-16-2-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb61"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb61-1"><a href="#cb61-1" aria-hidden="true" tabindex="-1"></a>dataset_dir <span class="sc">|&gt;</span></span>
+<span id="cb61-2"><a href="#cb61-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">list.files</span>(<span class="at">full.names =</span> <span class="cn">TRUE</span>) <span class="sc">|&gt;</span></span>
+<span id="cb61-3"><a href="#cb61-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">file_size</span>() <span class="sc">|&gt;</span></span>
+<span id="cb61-4"><a href="#cb61-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">sum</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>19.3G</code></pre>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<section id="summary" class="level2">
+<h2 class="anchored" data-anchor-id="summary">Summary</h2>
+<p>Using Apache Arrow to transcode data to Apache Parquet format makes a lot of sense and will save you time and boost your productivity in the future. To get started you can install the PyArrow library following the instructions found at <a href="https://arrow.apache.org/install/">arrow.apache.org/install</a>.</p>
+<p>Learn how a <a href="https://voltrondata.com/subscription/">Voltron Data Enterprise Support subscription</a> can help accelerate your success with Apache Arrow.</p>
+
+
+</section>
+
+<div id="quarto-appendix" class="default"><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
+  author = {Danielle Navarro and Tom Drabas, Weston Pace, Danielle
+    Navarro},
+  editor = {},
+  title = {Faster Data Processing with {Apache} {Arrow} and {Parquet}},
+  date = {2022-10-30},
+  url = {https://blog.djnavarro.net/posts/2022-10-30_transcoding-csv-to-parquet},
+  langid = {en}
+}
+</code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2022" class="csl-entry quarto-appendix-citeas" role="doc-biblioentry">
+Danielle Navarro, and Tom Drabas, Weston Pace, Danielle Navarro. 2022.
+<span>“Faster Data Processing with Apache Arrow and Parquet.”</span>
+October 30, 2022. <a href="https://blog.djnavarro.net/posts/2022-10-30_transcoding-csv-to-parquet">https://blog.djnavarro.net/posts/2022-10-30_transcoding-csv-to-parquet</a>.
+</div></div></section></div></main> <!-- /main -->
+<!-- plausible -->
+<script async="" defer="" data-domain="blog.djnavarro.net" src="https://plausible.io/js/plausible.js"></script>
+<script id="quarto-html-after-body" type="application/javascript">
+window.document.addEventListener("DOMContentLoaded", function (event) {
+  const toggleBodyColorMode = (bsSheetEl) => {
+    const mode = bsSheetEl.getAttribute("data-mode");
+    const bodyEl = window.document.querySelector("body");
+    if (mode === "dark") {
+      bodyEl.classList.add("quarto-dark");
+      bodyEl.classList.remove("quarto-light");
+    } else {
+      bodyEl.classList.add("quarto-light");
+      bodyEl.classList.remove("quarto-dark");
+    }
+  }
+  const toggleBodyColorPrimary = () => {
+    const bsSheetEl = window.document.querySelector("link#quarto-bootstrap");
+    if (bsSheetEl) {
+      toggleBodyColorMode(bsSheetEl);
+    }
+  }
+  toggleBodyColorPrimary();  
+  const icon = "";
+  const anchorJS = new window.AnchorJS();
+  anchorJS.options = {
+    placement: 'right',
+    icon: icon
+  };
+  anchorJS.add('.anchored');
+  const clipboard = new window.ClipboardJS('.code-copy-button', {
+    target: function(trigger) {
+      return trigger.previousElementSibling;
+    }
+  });
+  clipboard.on('success', function(e) {
+    // button target
+    const button = e.trigger;
+    // don't keep focus
+    button.blur();
+    // flash "checked"
+    button.classList.add('code-copy-button-checked');
+    var currentTitle = button.getAttribute("title");
+    button.setAttribute("title", "Copied!");
+    setTimeout(function() {
+      button.setAttribute("title", currentTitle);
+      button.classList.remove('code-copy-button-checked');
+    }, 1000);
+    // clear code selection
+    e.clearSelection();
+  });
+  function tippyHover(el, contentFn) {
+    const config = {
+      allowHTML: true,
+      content: contentFn,
+      maxWidth: 500,
+      delay: 100,
+      arrow: false,
+      appendTo: function(el) {
+          return el.parentElement;
+      },
+      interactive: true,
+      interactiveBorder: 10,
+      theme: 'quarto',
+      placement: 'bottom-start'
+    };
+    window.tippy(el, config); 
+  }
+  const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+  for (var i=0; i<noterefs.length; i++) {
+    const ref = noterefs[i];
+    tippyHover(ref, function() {
+      // use id or data attribute instead here
+      let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+      try { href = new URL(href).hash; } catch {}
+      const id = href.replace(/^#\/?/, "");
+      const note = window.document.getElementById(id);
+      return note.innerHTML;
+    });
+  }
+  var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+  for (var i=0; i<bibliorefs.length; i++) {
+    const ref = bibliorefs[i];
+    const cites = ref.parentNode.getAttribute('data-cites').split(' ');
+    tippyHover(ref, function() {
+      var popup = window.document.createElement('div');
+      cites.forEach(function(cite) {
+        var citeDiv = window.document.createElement('div');
+        citeDiv.classList.add('hanging-indent');
+        citeDiv.classList.add('csl-entry');
+        var biblioDiv = window.document.getElementById('ref-' + cite);
+        if (biblioDiv) {
+          citeDiv.innerHTML = biblioDiv.innerHTML;
+        }
+        popup.appendChild(citeDiv);
+      });
+      return popup.innerHTML;
+    });
+  }
+});
+</script>
+</div> <!-- /content -->
+
+
+
+</body></html>
