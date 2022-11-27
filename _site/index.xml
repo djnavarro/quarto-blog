@@ -27,16 +27,20 @@
 
 <!--------------- my typical setup ----------------->
 <!--------------- post begins here ----------------->
+<p>Hello again lovely people. I am, once again, blogging about Apache Arrow and I’m not even sorry. Oh well.</p>
+<p>In an earlier post I wrote about <a href="../../posts/2022-05-25_arrays-and-tables-in-arrow/index.html">Tables and other in-memory data structures</a> that Arrow uses to represent data objects. That meant the bulk of the post was focused on Record Batch and Table objects and the constituent objects used to define columns in one of these things (Arrays and Chunked Arrays).</p>
+<p>What I didn’t <em>really</em> talk about in that post was Datasets, which are used to represent data (typically larger-than-memory data) that are stored on-disk rather than in-memory. Okay, fine, yeah. Technically I did include a <a href="../../posts/2022-05-25_arrays-and-tables-in-arrow/index.html#datasets">section on Datasets</a> at the end of the post, but I was a bit evasive. I gave an example showing how to use Datasets, but I really didn’t talk much about what they are.</p>
+<p>I had a very good reason for this, dear reader, and that reason is this: when I wrote that post I had no f**king idea whatsoever how Datasets worked. I knew how to use them, but if you’d asked me questions about how the magic works I couldn’t have told you.<sup>1</sup></p>
+<p>Since that time I’ve learned a few things, and because I’m an annoying person I’m going to tell you about them.<sup>2</sup></p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><span class="fu" style="color: #4758AB;">library</span>(arrow, <span class="at" style="color: #657422;">warn.conflicts =</span> <span class="cn" style="color: #8f5902;">FALSE</span>)</span>
 <span id="cb1-2"><span class="fu" style="color: #4758AB;">library</span>(dplyr, <span class="at" style="color: #657422;">warn.conflicts =</span> <span class="cn" style="color: #8f5902;">FALSE</span>)</span></code></pre></div>
 </div>
-<p>In an earlier post I wrote about <a href="../../posts/2022-05-25_arrays-and-tables-in-arrow/index.html">Arrays and Tables in Apache Arrow</a>. The focus of that post was on the in-memory data structures that Arrow uses to store tabular data. That meant the bulk of the post was focused on Record Batch and Table objects, as well as their constituent parts, Arrays and Chunked Arrays. It didn’t really talk about Datasets. Okay yeah there was a <a href="../../posts/2022-05-25_arrays-and-tables-in-arrow/index.html#datasets">section on Datasets</a> at the end of the post, but I was a bit evasive. I gave an example showing how to use Datasets, but I really didn’t talk much about what they are.</p>
-<p>Okay fine, well, I forgive myself. A single blog post can’t solve all the world’s problems. However, I’m in the process of updating some of the Arrow R documentation at the moment and at this point I kind of do need to talk a bit more about the structure of Dataset objects.</p>
-<p>This post is a bit of a sneak preview into where I’m headed with that.</p>
-<section id="record-batches-and-tables" class="level2">
-<h2 class="anchored" data-anchor-id="record-batches-and-tables">Record Batches and Tables</h2>
-<p>Let’s start with Record Batches. A Record Batch is tabular data structure comprised of named Arrays, and an accompanying Schema that specifies the name and data type associated with each Array. We can create one manually using <code>record_batch()</code></p>
+<p><br></p>
+<section id="quick-recap-record-batches-and-tables" class="level2">
+<h2 class="anchored" data-anchor-id="quick-recap-record-batches-and-tables">Quick recap: Record Batches and Tables</h2>
+<p>At this point I’ve written <a href="https://blog.djnavarro.net/category/apache-arrow">quite a few posts about Arrow</a>, and it’s not necessarily a good idea for me to assume that you’ve had the misfortune to read them. So here’s a quick recap of some of the key Arrow data structures that I’ve talked about in other posts…</p>
+<p>Let’s start with Record Batches. A Record Batch is tabular data structure comprised of named Arrays,<sup>3</sup> and an accompanying Schema<sup>4</sup> that specifies the name and data type associated with each Array. We can create one manually using <code>record_batch()</code></p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb2" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1">rb <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">record_batch</span>(</span>
 <span id="cb2-2">  <span class="at" style="color: #657422;">strs =</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="st" style="color: #20794D;">"hello"</span>, <span class="st" style="color: #20794D;">"amazing"</span>, <span class="st" style="color: #20794D;">"and"</span>, <span class="st" style="color: #20794D;">"cruel"</span>, <span class="st" style="color: #20794D;">"world"</span>), </span>
@@ -64,8 +68,8 @@ $ ints  &lt;int32&gt; 1, NA, 2</code></pre>
 </div>
 <p>The structure of a Record Batch is shown below:</p>
 <p><img src="https://blog.djnavarro.net/posts/2022-11-20_unpacking-arrow-datasets/img/record_batch.png" class="img-fluid"></p>
-<p>Record Batches are a fundamental unit for data interchange in Arrow, but are not typically used for data analysis. The reason for this is that the constituent Arrays that store columns in a Record Batch are immutable: they cannot be modified or extended without creating a new object. When data arrive sequentially Record Batches can be inconvenient, because you can’t concatenate them. For that reason Tables are usually more practical.</p>
-<p>So let’s turn to Tables next. From the user perspective a Table is very similar to a Record Batch but the constituent parts are Chunked Arrays. Chunked Arrays are flexible wrappers enclosing one or more Arrays. This makes it possible to concatenate tables:</p>
+<p>Record Batches are a fundamental unit for data interchange in Arrow, but are not typically used for data analysis. The reason for this is that the constituent Arrays that store columns in a Record Batch are immutable: they cannot be modified or extended without creating a new object.<sup>5</sup> When data arrive sequentially Record Batches can be inconvenient, because you can’t concatenate them. For that reason Tables are usually more practical…</p>
+<p>So let’s turn to Tables next. From the user perspective a Table is very similar to a Record Batch but the constituent parts are Chunked Arrays. Chunked Arrays are flexible wrappers enclosing one or more Arrays.<sup>6</sup> This makes it possible to concatenate tables:</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb6" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1">df1 <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">arrow_table</span>(rb)</span>
 <span id="cb6-2">df2 <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">arrow_table</span>(</span>
@@ -83,12 +87,14 @@ $ ints  &lt;int32&gt; 1, NA, 2, 4, 8, 5, 0, 0
 $ dbls &lt;double&gt; 1.1, 3.2, 0.2, NA, 11.0, 7.1, -0.1, 2.0</code></pre>
 </div>
 </div>
-<p><img src="https://blog.djnavarro.net/posts/2022-11-20_unpacking-arrow-datasets/img/table.png" class="img-fluid"> Okay, what about Datasets? Ah well… that’s the one I haven’t quite worked out. Hence the purpose of this post.</p>
+<p><img src="https://blog.djnavarro.net/posts/2022-11-20_unpacking-arrow-datasets/img/table.png" class="img-fluid"> Okay, what about Datasets? Ah well… that’s the one I hadn’t quite worked out until quite recently. Hence the purpose of this post.</p>
+<p><br></p>
 </section>
 <section id="so-datasets" class="level2">
 <h2 class="anchored" data-anchor-id="so-datasets">So… Datasets?</h2>
 <p>Like Record Batch and Table objects, a Dataset is used to represent tabular data. At an abstract level, a Dataset can be viewed as an object comprised of rows and columns, and just like Record Batches and Tables, it contains an explicit Schema that specifies the name and data type associated with each column.</p>
 <p>However, where Tables and Record Batches are data explicitly represented in-memory, a Dataset is not. Instead, a Dataset is an abstraction that refers to data stored on-disk in one or more files. Values stored in the data files are loaded into memory as a batched process. Loading takes place only as needed, and only when a query is executed against the data. In this respect Arrow Datasets are a very different kind of object to Arrow Tables, but the dplyr commands used to analyze them are essentially identical. In this section we’ll talk about how Datasets are structured.</p>
+<p><br></p>
 </section>
 <section id="what-does-a-dataset-look-like-on-disk" class="level2">
 <h2 class="anchored" data-anchor-id="what-does-a-dataset-look-like-on-disk">What does a Dataset look like on-disk?</h2>
@@ -139,7 +145,7 @@ $ dbls &lt;double&gt; 1.1, 3.2, 0.2, NA, 11.0, 7.1, -0.1, 2.0</code></pre>
 <pre><code>FileSystemDataset with 3 Parquet files
 15 rows x 3 columns
 $ id      &lt;int32&gt; 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
-$ value  &lt;double&gt; -0.556027522, -1.758554265, 0.410460388, -0.003738788, 0.65694…
+$ value  &lt;double&gt; 0.55549839, -1.36625808, 0.44427432, -1.11435957, -0.54390056,…
 $ subset &lt;string&gt; "a", "a", "a", "a", "a", "b", "b", "b", "b", "b", "c", "c", "c…
 Call `print()` for full schema details</code></pre>
 </div>
@@ -152,6 +158,7 @@ Call `print()` for full schema details</code></pre>
 <span id="cb16-3">  <span class="fu" style="color: #4758AB;">write_dataset</span>(<span class="st" style="color: #20794D;">"mini-dataset"</span>)</span></code></pre></div>
 </div>
 <p>In fact, even if <code>ds</code> happens to refer to a data source that is larger than memory, this command should still work because the Dataset functionality is written to ensure that during a pipeline such as this the data is loaded piecewise in order to avoid exhausting memory.</p>
+<p><br></p>
 </section>
 <section id="what-is-stored-in-memory-by-the-dataset-object" class="level2">
 <h2 class="anchored" data-anchor-id="what-is-stored-in-memory-by-the-dataset-object">What is stored in-memory by the Dataset object?</h2>
@@ -197,6 +204,7 @@ See $metadata for additional Schema metadata</code></pre>
 </div>
 </div>
 <p>This scanning process is multi-threaded by default, but if necessary threading can be disabled by setting <code>use_threads = FALSE</code> when calling <code>Scanner$create()</code>.</p>
+<p><br></p>
 </section>
 <section id="how-does-a-dataset-query-work" class="level2">
 <h2 class="anchored" data-anchor-id="how-does-a-dataset-query-work">How does a Dataset query work?</h2>
@@ -209,13 +217,13 @@ See $metadata for additional Schema metadata</code></pre>
 <span id="cb24-5">  <span class="fu" style="color: #4758AB;">collect</span>()</span></code></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>  id subset new_value
-1  6      b       187
-2  7      b        26
-3 11      c        37
-4 13      c        69
-5 15      c       120
-6  3      a        41
-7  5      a        66</code></pre>
+1  1      a        56
+2  3      a        44
+3  8      b         9
+4 11      c        39
+5 12      c       194
+6 13      c        87
+7 14      c         9</code></pre>
 </div>
 </div>
 <p>We can replicate this using the low-level Dataset interface by creating a new scan by specifying the <code>filter</code> and <code>projection</code> arguments to <code>Scanner$create()</code>. To use these arguments you need to know a little about Arrow Expressions, for which you may find it helpful to read the help documentation in <code>help("Expression", package = "arrow")</code>.</p>
@@ -238,19 +246,19 @@ See $metadata for additional Schema metadata</code></pre>
 <div class="cell-output cell-output-stdout">
 <pre><code>[[1]]
   id subset new_value
-1  3      a        41
-2  5      a        66
+1  1      a        56
+2  3      a        44
 
 [[2]]
   id subset new_value
-1  6      b       187
-2  7      b        26
+1  8      b         9
 
 [[3]]
   id subset new_value
-1 11      c        37
-2 13      c        69
-3 15      c       120</code></pre>
+1 11      c        39
+2 12      c       194
+3 13      c        87
+4 14      c         9</code></pre>
 </div>
 </div>
 <p>If we return to the dplyr query we made earlier, and use <code>compute()</code> to return a Table rather use <code>collect()</code> to return a data frame, we can see the evidence of this process at work. The Table object is created by concatenating the three Record Batches produced when the query executes against three data files, and as a consequence of this the Chunked Array that defines a column of the Table mirrors the partitioning structure present in the data files:</p>
@@ -267,17 +275,17 @@ See $metadata for additional Schema metadata</code></pre>
 &lt;string&gt;
 [
   [
-    "b",
-    "b"
-  ],
-  [
     "a",
     "a"
   ],
   [
     "c",
     "c",
+    "c",
     "c"
+  ],
+  [
+    "b"
   ]
 ]</code></pre>
 </div>
@@ -287,7 +295,18 @@ See $metadata for additional Schema metadata</code></pre>
 
 </section>
 
-<div id="quarto-appendix" class="default"><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
+
+<div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
+
+<ol>
+<li id="fn1"><p>Unbelievably, there are people out there who will start talking about predicate pushdown and not even give a girl a heads up? Rude. You don’t see me starting conversations at the pub about metric axiom violations in human similarity judgment do you? Well, okay, you might. But that’s not the point!↩︎</p></li>
+<li id="fn2"><p>Okay, <em>now</em> I’m a bit sorry.↩︎</p></li>
+<li id="fn3"><p>For the purposes of this post we are going to pretend that Arrays behave like R vectors, which… they sort of do as long as you don’t try to push at the analogy too hard.↩︎</p></li>
+<li id="fn4"><p>The Schema is the way Arrow formalises the metadata for rectangular data structures. I’m not going to dive into the details here: it’s enough for our purposes to recognise that it’s basically a list of variable names and their data types.↩︎</p></li>
+<li id="fn5"><p>I mean, this is where you start asking all sort of questions about what objects are mutable in R anyway, since we’re almost never doing modify-in-place operations. But whatever. This is not the post for that, and if you try to make me talk about that here I will cry.↩︎</p></li>
+<li id="fn6"><p>Again, let’s just pretend that a Chunked Array behaves just like an R vector, except for the fact that it has these weird stitches from where we’ve sewn the individual Arrays together. It’s all a bit vivisectionist in nature, sure, but this is the mechanism that allows Chunked Arrays to behave more like R vectors than simple Arrays do. Dr Frankenstein may not have been entirely wrong on all counts, I guess.↩︎</p></li>
+</ol>
+</section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
   author = {Danielle Navarro},
   editor = {},
   title = {Unpacking the {Arrow} on-Disk {Dataset} {API}},

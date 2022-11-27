@@ -16,21 +16,28 @@ long_slug <- "2022-11-20_unpacking-arrow-datasets"
 
 <!--------------- post begins here ----------------->
 
+Hello again lovely people. I am, once again, blogging about Apache Arrow and I'm not even sorry. Oh well. 
+
+In an earlier post I wrote about [Tables and other in-memory data structures](/posts/2022-05-25_arrays-and-tables-in-arrow/index.html) that Arrow uses to represent data objects. That meant the bulk of the post was focused on Record Batch and Table objects and the constituent objects used to define columns in one of these things (Arrays and Chunked Arrays).
+
+What I didn't *really* talk about in that post was Datasets, which are used to represent data (typically larger-than-memory data) that are stored on-disk rather than in-memory. Okay, fine, yeah. Technically I did include a [section on Datasets](/posts/2022-05-25_arrays-and-tables-in-arrow/index.html#datasets) at the end of the post, but I was a bit evasive. I gave an example showing how to use Datasets, but I really didn't talk much about what they are. 
+
+I had a very good reason for this, dear reader, and that reason is this: when I wrote that post I had no f**king idea whatsoever how Datasets worked. I knew how to use them, but if you'd asked me questions about how the magic works I couldn't have told you.^[Unbelievably, there are people out there who will start talking about predicate pushdown and not even give a girl a heads up? Rude. You don't see me starting conversations at the pub about metric axiom violations in human similarity judgment do you? Well, okay, you might. But that's not the point!]
+
+Since that time I've learned a few things, and because I'm an annoying person I'm going to tell you about them.^[Okay, *now* I'm a bit sorry.]
+
 ```{r}
 library(arrow, warn.conflicts = FALSE)
 library(dplyr, warn.conflicts = FALSE)
 ```
 
+<br>
 
-In an earlier post I wrote about [Arrays and Tables in Apache Arrow](/posts/2022-05-25_arrays-and-tables-in-arrow/index.html). The focus of that post was on the in-memory data structures that Arrow uses to store tabular data. That meant the bulk of the post was focused on Record Batch and Table objects, as well as their constituent parts, Arrays and Chunked Arrays. It didn't really talk about Datasets. Okay yeah there was a [section on Datasets](/posts/2022-05-25_arrays-and-tables-in-arrow/index.html#datasets) at the end of the post, but I was a bit evasive. I gave an example showing how to use Datasets, but I really didn't talk much about what they are. 
+## Quick recap: Record Batches and Tables
 
-Okay fine, well, I forgive myself. A single blog post can't solve all the world's problems. However, I'm in the process of updating some of the Arrow R documentation at the moment and at this point I kind of do need to talk a bit more about the structure of Dataset objects.
+At this point I've written [quite a few posts about Arrow](https://blog.djnavarro.net/category/apache-arrow), and it's not necessarily a good idea for me to assume that you've had the misfortune to read them. So here's a quick recap of some of the key Arrow data structures that I've talked about in other posts...
 
-This post is a bit of a sneak preview into where I'm headed with that. 
-
-## Record Batches and Tables
-
-Let's start with Record Batches. A Record Batch is tabular data structure comprised of named Arrays, and an accompanying Schema that specifies the name and data type associated with each Array. We can create one manually using `record_batch()`
+Let's start with Record Batches. A Record Batch is tabular data structure comprised of named Arrays,^[For the purposes of this post we are going to pretend that Arrays behave like R vectors, which... they sort of do as long as you don't try to push at the analogy too hard.] and an accompanying Schema^[The Schema is the way Arrow formalises the metadata for rectangular data structures. I'm not going to dive into the details here: it's enough for our purposes to recognise that it's basically a list of variable names and their data types.] that specifies the name and data type associated with each Array. We can create one manually using `record_batch()`
 
 ```{r}
 rb <- record_batch(
@@ -51,9 +58,9 @@ The structure of a Record Batch is shown below:
 
 ![](./img/record_batch.png)
 
-Record Batches are a fundamental unit for data interchange in Arrow, but are not typically used for data analysis. The reason for this is that the constituent Arrays that store columns in a Record Batch are immutable: they cannot be modified or extended without creating a new object. When data arrive sequentially Record Batches can be inconvenient, because you can't concatenate them. For that reason Tables are usually more practical.
+Record Batches are a fundamental unit for data interchange in Arrow, but are not typically used for data analysis. The reason for this is that the constituent Arrays that store columns in a Record Batch are immutable: they cannot be modified or extended without creating a new object.^[I mean, this is where you start asking all sort of questions about what objects are mutable in R anyway, since we're almost never doing modify-in-place operations. But whatever. This is not the post for that, and if you try to make me talk about that here I will cry.] When data arrive sequentially Record Batches can be inconvenient, because you can't concatenate them. For that reason Tables are usually more practical...
 
-So let's turn to Tables next. From the user perspective a Table is very similar to a Record Batch but the constituent parts are Chunked Arrays. Chunked Arrays are flexible wrappers enclosing one or more Arrays. This makes it possible to concatenate tables: 
+So let's turn to Tables next. From the user perspective a Table is very similar to a Record Batch but the constituent parts are Chunked Arrays. Chunked Arrays are flexible wrappers enclosing one or more Arrays.^[Again, let's just pretend that a Chunked Array behaves just like an R vector, except for the fact that it has these weird stitches from where we've sewn the individual Arrays together. It's all a bit vivisectionist in nature, sure, but this is the mechanism that allows Chunked Arrays to behave more like R vectors than simple Arrays do. Dr Frankenstein may not have been entirely wrong on all counts, I guess.] This makes it possible to concatenate tables: 
 
 ```{r}
 df1 <- arrow_table(rb)
@@ -69,7 +76,9 @@ glimpse(df)
 
 
 ![](./img/table.png)
-Okay, what about Datasets? Ah well... that's the one I haven't quite worked out. Hence the purpose of this post.
+Okay, what about Datasets? Ah well... that's the one I hadn't quite worked out until quite recently. Hence the purpose of this post.
+
+<br>
 
 
 ## So... Datasets?
@@ -78,6 +87,9 @@ Okay, what about Datasets? Ah well... that's the one I haven't quite worked out.
 Like Record Batch and Table objects, a Dataset is used to represent tabular data. At an abstract level, a Dataset can be viewed as an object comprised of rows and columns, and just like Record Batches and Tables, it contains an explicit Schema that specifies the name and data type associated with each column.
 
 However, where Tables and Record Batches are data explicitly represented in-memory, a Dataset is not. Instead, a Dataset is an abstraction that refers to data stored on-disk in one or more files. Values stored in the data files are loaded into memory as a batched process. Loading takes place only as needed, and only when a query is executed against the data. In this respect Arrow Datasets are a very different kind of object to Arrow Tables, but the dplyr commands used to analyze them are essentially identical. In this section we'll talk about how Datasets are structured. 
+
+
+<br>
 
 ## What does a Dataset look like on-disk?
 
@@ -156,6 +168,8 @@ ds |>
 
 In fact, even if `ds` happens to refer to a data source that is larger than memory, this command should still work because the Dataset functionality is written to ensure that during a pipeline such as this the data is loaded piecewise in order to avoid exhausting memory. 
 
+<br>
+
 ## What is stored in-memory by the Dataset object?
 
 In the previous section we examined the on-disk structure of a Dataset. We now turn to the in-memory structure of the Dataset object itself (i.e., `ds` in the previous example). When the Dataset object is created, arrow searches the dataset folder looking for appropriate files, but does not load the contents of those files. Paths to these files are stored in an active binding `ds$files`:
@@ -189,6 +203,9 @@ scan$ToTable()
 ```
 
 This scanning process is multi-threaded by default, but if necessary threading can be disabled by setting `use_threads = FALSE` when calling `Scanner$create()`.
+
+
+<br>
 
 ## How does a Dataset query work?
 
