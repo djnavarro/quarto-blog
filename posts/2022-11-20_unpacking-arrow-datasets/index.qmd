@@ -133,7 +133,7 @@ df_b <- data.frame(id = 6:10, value = rnorm(5), subset = "b")
 df_c <- data.frame(id = 11:15, value = rnorm(5), subset = "c")
 ```
 
-Our intention is that each of the data frames should be stored in a separate data file. As you can see, this is a quite structured partitioning: all data where `subset = "a"` belong to one file, all data where `subset = "b"` belong to another file, and all data where `subset = "c"` belong to the third file. 
+Our intention is that each of the data frames should be stored in a separate data file. As you can see, this is a quite structured partitioning: all data where `subset = "a"` belong to one file, all data where `subset = "b"` belong to another file, and all data where `subset = "c"` belong to the third file.^[It's probably worth doing a tiny bit of foreshadowing here: there's really no sense in which the files are "ordered", right? So, logically it follows there's no sense in which the Dataset as a whole has a total ordering of rows either, right? That's worth keeping in mind because results don't always come back in the same order unless you explicitly sort them. I'll talk about this a little more later.] 
 
 The first step is to define and create a folder that will hold all the files:
 
@@ -200,7 +200,7 @@ ds |>
   write_dataset("mini-dataset")
 ```
 
-As an aside, even if `ds` happens to refer to an on-disk Dataset that is larger than memory, and you're just wanting to rewrite it with a different file structure, this pipeline should still work without any risk of an out-of-memory error. This is thanks to the Dataset backpressure functionality^[As usual there is esoteric knowledge buried in the C++ documentation, in this case describing [backpresure control](https://arrow.apache.org/docs/cpp/api/compute.html#_CPPv4N5arrow7compute19BackpressureControlE). It's probably ancient forbidden lore and Dumbledore is going to turn me into a hobbit or something but whatever.] in which the reader will back off and slow down if the writer has fallen too far behind and the memory cache is filling up. Or something like that. Look, I almost managed to make myself care about the details, okay? 
+As an aside, even if `ds` happens to refer to an on-disk Dataset that is larger than memory, and you're just wanting to rewrite it with a different file structure, this pipeline should still work without any risk of an out-of-memory error. This is thanks to the Dataset backpressure functionality^[As usual there is esoteric knowledge buried in the C++ documentation, in this case describing [backpressure control](https://arrow.apache.org/docs/cpp/api/compute.html#_CPPv4N5arrow7compute19BackpressureControlE). It's probably ancient forbidden lore and Dumbledore is going to turn me into a hobbit or something but whatever.] in which the reader will back off and slow down if the writer has fallen too far behind and the memory cache is filling up. Or something like that. Look, I almost managed to make myself care about the details, okay? 
 
 <br>
 
@@ -297,7 +297,9 @@ We can dig a little deeper though. To get a better sense of what happens when th
 scan$ScanBatches() |> lapply(as.data.frame)
 ```
 
-This version of the result helps you see each part of the Dataset at work in the query. Under the hood, Arrow keeps track of memory usage and doesn't try to read too many files at once. It will also make use of whatever information it has about the file contents to avoid reading files that it doesn't have to read: if I filter on `subset != "a"` then the Scanner will ensure that the files in the corresponding folder are never even read.^[For files formats like Parquet that include metadata for row groups and organise data column-wise, there are additional optimisations ensuring that you don't have to read the whole file.] 
+This version of the result helps you see each part of the Dataset at work in the query. When you pass a query to a Dataset, each file is processed in a separate thread^[Okay fine, yes you can set `use_threads = FALSE` like I said above to disable this, hush.] and Record Batches will be added as they are returned. The key point here is that Datasets have no notion of row order: if you want the results returned in a particular order you must sort them explicitly. 
+
+A second point to make about the the scanning process is that under the hood, Arrow keeps track of memory usage and doesn't try to read too many files at once. It will also make use of whatever information it has about the file contents to avoid reading files that it doesn't have to read: if I filter on `subset != "a"` then the Scanner will ensure that the files in the corresponding folder are never even read.^[For files formats like Parquet that include metadata for row groups and organise data column-wise, there are additional optimisations ensuring that you don't have to read the whole file.] 
 
 Okay, so now let's go back to the dplyr query we made earlier, but use `compute()` to return a Table rather use `collect()` to return a data frame.
 
