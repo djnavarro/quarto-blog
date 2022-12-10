@@ -1,11 +1,11 @@
-task_queue <- R6::R6Class(
-  classname = "task_queue",
+TaskQueue <- R6::R6Class(
+  classname = "TaskQueue",
 
   # Our public methods will all be thin wrappers: we're only using the public
   # methods for the user-facing API. No computation is done here
   public = list(
     initialize = function(workers = 4L) {
-      private$initialize_task_queue(workers)
+      private$initialize_queue(workers)
       invisible(self)
     },
     push = function(fun, args = list(), id = NULL) {
@@ -15,14 +15,9 @@ task_queue <- R6::R6Class(
       private$pop_task_from_queue(timeout)
     },
     poll = function(timeout = 0) {
-      private$poll_worker(timeout)
-    }
-  ),
-
-  # The tasks field is an active binding because it needs to update whenever
-  # the state of the tasks queue changes (stored in private$tasks)
-  active = list(
-    tasks = function() {
+      private$poll_workers(timeout)
+    },
+    list_tasks = function() {
       private$tasks
     }
   ),
@@ -34,7 +29,7 @@ task_queue <- R6::R6Class(
     # important metadata that we need. The row order matters. It reflects
     # priority order: tasks at the top are assigned to workers first, and are
     # handled in strict sequential order when workers become available
-    tasks = private$tasks <- tibble::tibble(
+    tasks = tibble::tibble(
       id = character(),
       idle = logical(),
       state = character(),
@@ -113,13 +108,13 @@ task_queue <- R6::R6Class(
     },
 
     # Convenience function converting units to milliseconds
-    as_ms <- function(x) {
+    as_ms = function(x) {
       if (x==Inf) -1 else as.integer(as.double(x, "secs") * 1000)
     },
 
     # Poll the running workers once with processx::poll(), and call
     # the scheduler
-    poll_once <- function() {
+    poll_once = function(timeout) {
 
       # Find the tasks that have workers assigned, and were known to be
       # still running at the time of the last poll
@@ -132,7 +127,10 @@ task_queue <- R6::R6Class(
       )
 
       # Now poll each of those processes to determine their current state
-      pr <- processx::poll(processes = connections, ms = as_ms(timeout))
+      pr <- processx::poll(
+        processes = connections,
+        ms = private$as_ms(timeout)
+      )
 
       # Use the poll results to update the listings on the task queue and
       # call the scheduler to reassign workers (the scheduler will return
@@ -143,55 +141,68 @@ task_queue <- R6::R6Class(
       # Return vector of ids for tasks in the "done" state
       tasks_done <- private$tasks$id[private$tasks$state == "done"]
       tasks_done
-    }
+    },
 
-    # Poll the running workers at least once (but possibly more than once),
+    # Poll the running workers at least once, possibly more than once,
     # until timeout occurs or until a worker in the "done" state is detected
     poll_workers = function(timeout) {
       limit <- Sys.time() + timeout
       repeat{
-        tasks_done <- poll_once()
+        tasks_done <- private$poll_once(timeout)
         if (is.finite(timeout)) timeout <- limit - Sys.time()
         if (length(tasks_done) || timeout < 0) break;
       }
       tasks_done
     },
 
-    # scheduling function
+    # Convenience function to launch the job registered in the i-th row
+    # of the task queue. It assumes the worker is correctly assigned already.
+    # The only check it does is to see if this is a real job: the "idle" tasks
+    # do nothing when start_task() is called
+    start_task = function(i) {
+      if (!private$tasks$idle[i]) {
+        private$tasks$worker[[i]]$call(
+          func = private$tasks$fun[[i]],
+          args = private$tasks$args[[i]]
+        )
+      }
+    },
+
+    # Scheduler: find completed tasks, read results, start next tasks
     schedule = function() {
 
-      # find worker R sessions that have finished (return early if none have)
+      # Find the ready worker R sessions: those that have finished their task.
+      # (Return early if no workers are ready)
       ready <- which(private$tasks$state == "ready")
       if (!length(ready)) return()
+      workers <- private$tasks$worker[ready]
 
-      # for finished tasks, read out the results into private$tasks
-      ready_workers <- private$tasks$worker[ready]
-      private$tasks$result[ready] <- lapply(
-        ready_workers,
-        function(x) x$read()
-      )
-
-      #
+      # For ready workers, read the results of completed tasks into
+      # private$tasks, remove the worker from that task, and update the
+      # status of that task: "waiting" if it's one of the dummy tasks used
+      # to denote idle workers, "done" if it's a real task that has completed
+      private$tasks$result[ready] <- lapply(workers, function(x) x$read())
       private$tasks$worker[ready] <- replicate(length(ready), NULL)
-      private$tasks$state[ready] <-
-        ifelse(private$tasks$idle[ready], "waiting", "done")
-
-      waiting_tasks <- which(private$tasks$state == "waiting")[1:length(ready)]
-
-      private$tasks$worker[waiting_tasks] <- ready_workers
-
-      private$tasks$state[waiting_tasks] <- ifelse(
-        test = private$tasks$idle[waiting_tasks],
-        yes = "ready",
-        no = "running"
+      private$tasks$state[ready] <- ifelse(
+        test = private$tasks$idle[ready],
+        yes = "waiting",
+        no = "done"
       )
-      lapply(waiting_tasks, function(i) {
-        if (! private$tasks$idle[i]) {
-          private$tasks$worker[[i]]$call(private$tasks$fun[[i]],
-                                         private$tasks$args[[i]])
-        }
-      })
-    }
 
+      # Now assign the workers to the top N tasks that are still in the
+      # "waiting" state (either real tasks or idle state dummy tasks), and
+      # start the corresponding tasks
+      waiting <- which(private$tasks$state == "waiting")[1:length(ready)]
+      private$tasks$worker[waiting] <- workers
+      private$tasks$state[waiting] <- ifelse(
+        test = private$tasks$idle[waiting],
+        yes = "ready",  # idle workers remain "ready" after assignment
+        no = "running"  # active workers are "running" after assignment
+      )
+      lapply(waiting, private$start_task)
+    }
   )
 )
+
+
+
