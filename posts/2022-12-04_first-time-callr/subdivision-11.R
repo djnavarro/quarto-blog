@@ -2,29 +2,17 @@
 subdivision <- function(seed) {
 
   library(ggplot2)
-  library(tibble)
-  library(purrr)
-  library(dplyr)
-  library(ggfx)
+  on.exit(gc())
 
-  sample_canva2 <- function(seed = NULL, n = 4) {
+  set.seed(seed)
+  ncol <- 1000
+  nrow <- 1000
+  nsplits <- 100
+
+  sample_canva <- function(seed = NULL, n = 4) {
     if(!is.null(seed)) set.seed(seed)
     sample(ggthemes::canva_palettes, 1)[[1]] |>
       (\(x) colorRampPalette(x)(n))()
-  }
-
-  sample_canva3 <- function(seed = NULL, n = 4) {
-    if(!is.null(seed)) set.seed(seed)
-    max_pal <- max(colorir::colores$palette_index)
-    pal_ind <- sample(max_pal, 1)
-    shades <- colorir::colores$colour[colorir::colores$palette_index == pal_ind]
-    shades |>
-      (\(x) colorRampPalette(x)(n))()
-  }
-
-  sample_canva <- function(seed = NULL, n = 4) {
-    if(runif(1) < .5) return(sample_canva2(seed, n))
-    return(sample_canva3(seed, n))
   }
 
   choose_rectangle <- function(blocks) {
@@ -36,7 +24,7 @@ subdivision <- function(seed) {
   }
 
   create_rectangles <- function(left, right, bottom, top, value) {
-    tibble(
+    tibble::tibble(
       left = left,
       right = right,
       bottom = bottom,
@@ -78,24 +66,11 @@ subdivision <- function(seed) {
   split_block <- function(blocks, value) {
     old <- choose_rectangle(blocks)
     new <- split_rectangle(blocks[old, ], value)
-    bind_rows(blocks[-old, ], new)
+    dplyr::bind_rows(blocks[-old, ], new)
   }
 
-  subdivision <- function(ncol = 1000,
-                          nrow = 1000,
-                          nsplits = 50,
-                          seed = NULL) {
-
-    if(!is.null(seed)) set.seed(seed)
-    blocks <- create_rectangles(
-      left = 1,
-      right = ncol,
-      bottom = 1,
-      top = nrow,
-      value = 0
-    )
-    reduce(1:nsplits, split_block, .init = blocks)
-  }
+  blocks <- create_rectangles(1, ncol, 1, nrow, value = 0)
+  div <- purrr::reduce(1:nsplits, split_block, .init = blocks)
 
   polygon_layer <- function(x, y, fill = "white", alpha = .5) {
     df <- data.frame(x = x, y = y)
@@ -103,96 +78,36 @@ subdivision <- function(seed) {
                  alpha = alpha, inherit.aes = FALSE)
   }
 
-  develop <- function(div, seed = NULL, linewidth = 3) {
+  x_hex <- cos(seq(0, 2*pi, length.out = 7))
+  y_hex <- sin(seq(0, 2*pi, length.out = 7))
 
-    if(!is.null(seed)) set.seed(seed)
+  poly <- purrr::map(seq_len(20), function(x) {
+    radius <- rbeta(1, 1, 4)
+    polygon_layer(
+      x = (x_hex * radius + runif(1, min = -.3, max = 1.3)) * ncol,
+      y = (y_hex * radius + runif(1, min = -.3, max = 1.3)) * nrow
+    )
+  })
 
-    ncol <- 1000
-    nrow <- 1000
-    poly <- list()
-    base_x <- cos(seq(0, 2*pi, length.out = 7))
-    base_y <- sin(seq(0, 2*pi, length.out = 7))
+  shades <- sample_canva(seed)
+  as_group_l <- purrr::lift_dl(ggfx::as_group)
 
-    for(i in 1:24) {
-
-      radius <- rbeta(1, 1, 4)
-      x_shift <- runif(1, min = -.3, max = 1.3)
-      y_shift <- runif(1, min = -.3, max = 1.3)
-
-      #ind <- sample(1:3, 1, prob = c(.6, .2, .2))
-      #xval <- base_x * cos(rot[ind]) - base_y * sin(rot[ind])
-      #yval <- base_x * sin(rot[ind]) + base_y * sin(rot[ind])
-
-      xval <- base_x * radius + x_shift
-      yval <- base_y * radius + y_shift
-
-      poly[[i]] <- polygon_layer(x = xval * ncol, y = yval * nrow)
-    }
-
-    shades <- sample_canva(seed)
-    clip <- 50
-
-    div |>
-      ggplot(aes(
-        xmin = left,
-        xmax = right,
-        ymin = bottom,
-        ymax = top,
-        fill = value
-      )) +
-      as_group(
-        poly[[1]], poly[[2]], poly[[3]], poly[[4]],
-        poly[[5]], poly[[6]], poly[[7]], poly[[8]],
-        poly[[9]], poly[[10]], poly[[11]], poly[[12]],
-        poly[[13]], poly[[14]], poly[[15]], poly[[16]],
-        poly[[17]], poly[[18]], poly[[19]], poly[[20]],
-        #      poly[[21]], poly[[22]], poly[[23]], poly[[24]],
-        id = "polygons"
-      ) +
-      as_reference(
-        "polygons",
-        id = "displacement_map"
-      ) +
-      with_displacement(
-        geom_rect(
-          colour = shades[1],
-          linewidth = linewidth,
-          show.legend = FALSE
-        ),
-        x_map = ch_alpha("displacement_map"),
-        y_map = ch_alpha("displacement_map"),
-        x_scale = 120,
-        y_scale = -120
-      ) +
-      scale_fill_gradientn(
-        colours = shades
-      ) +
-      coord_equal(
-        xlim = c(clip, ncol-clip),
-        ylim = c(clip, nrow-clip)
-      ) +
-      theme_void() +
-      theme(panel.background = element_rect(
-        fill = shades[1], colour = shades[1]
-      ))
-  }
-
-  write_subdivision <- function(seed) {
-    fname <- paste0("subdivision_11_", seed, ".png")
-    post <- file.path("posts", "2022-12-04_first-time-callr")
-    cat("generating", fname, "\n")
-    subdivision(seed = seed, nsplits = 100) |>
-      develop(linewidth = 0, seed = seed) |>
-      ggsave(
-        filename = here::here(post, "output", fname),
-        plot = _,
-        #bg = "white",
-        dpi = 300,
-        width = 2000/300,
-        height = 2000/300
-      )
-    gc() # clear any magick resources
-  }
-
-  write_subdivision(seed)
+  div |>
+    ggplot(aes(xmin = left, xmax = right, ymin = bottom, ymax = top, fill = value)) +
+    as_group_l(c(poly, id = "polygons")) +
+    ggfx::as_reference("polygons", id = "displace") +
+    ggfx::with_displacement(
+      geom_rect(colour = shades[1], linewidth = 0, show.legend = FALSE),
+      x_map = ggfx::ch_alpha("displace"),
+      y_map = ggfx::ch_alpha("displace"),
+      x_scale = 120,
+      y_scale = -120
+    ) +
+    scale_fill_gradientn(colours = shades) +
+    coord_equal(
+      xlim = c(50, ncol - 50),
+      ylim = c(50, nrow - 50)
+    ) +
+    theme_void() +
+    theme(panel.background = element_rect(fill = shades[1], colour = shades[1]))
 }
