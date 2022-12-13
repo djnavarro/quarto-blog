@@ -17,8 +17,11 @@ TaskQueue <- R6::R6Class(
     poll = function(timeout = 0) {
       private$poll_workers(timeout)
     },
-    list_tasks = function() {
+    get_tasks = function() {
       private$tasks
+    },
+    run = function() {
+      private$execute_queue()
     }
   ),
 
@@ -155,6 +158,29 @@ TaskQueue <- R6::R6Class(
       tasks_done
     },
 
+    # Run all jobs loaded onto the queue (in fifo order)
+    execute_queue = function() {
+      spinner <- cli::make_spinner(
+        which = "dots2",
+        template = "{spin} Queue"
+      )
+      repeat{
+        n_waiting <- sum(!private$tasks$idle & private$tasks$state == "waiting")
+        n_running <- sum(!private$tasks$idle & private$tasks$state == "running")
+        n_done <- sum(private$tasks$state == "done")
+
+        private$poll_workers(timeout = 0)
+        msg <- paste("{spin} Queue progress:", n_waiting, "tasks waiting", "\u1405",
+                     n_running, "tasks running", "\u1405", n_done, "tasks done")
+        spinner$spin(msg)
+        if(n_waiting == 0 & n_running == 0) break
+        Sys.sleep(.05)
+      }
+      spinner$finish()
+      cli::cli_alert_success("Queue complete: {n_done} tasks done")
+      return(invisible(private$tasks))
+    },
+
     # Convenience function to launch the job registered in the i-th row
     # of the task queue. It assumes the worker is correctly assigned already.
     # The only check it does is to see if this is a real job: the "idle" tasks
@@ -203,6 +229,7 @@ TaskQueue <- R6::R6Class(
     }
   )
 )
+
 
 
 
