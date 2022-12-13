@@ -1,3 +1,5 @@
+# adapted from: https://www.tidyverse.org/blog/2019/09/callr-task-q/
+
 TaskQueue <- R6::R6Class(
   classname = "TaskQueue",
 
