@@ -4,15 +4,22 @@ Task <- R6::R6Class(
   classname = "Task",
   public = list(
     initialize = function(fun, args = list(), id = NULL) {
-      self$fun = fun
-      self$args = args
-      self$id = id
+      self$fun <- fun
+      self$args <- args
+      self$task_id <- id
+      self$state <- "waiting"
+      self$time_created <- Sys.time()
     },
     fun = NULL,
     args = NULL,
     results = NULL,
-    id = NULL,
-    state = "waiting"
+    task_id = NULL,
+    worker_id = NULL,
+    state = NULL,
+    time_created = NULL,
+    time_started = NULL,
+    time_finished = NULL,
+    time_elapsed = NULL
   )
 )
 
@@ -31,6 +38,8 @@ Worker <- R6::R6Class(
       if(!is.null(self$task) && self$task$state == "waiting") {
         self$session$call(self$task$fun, self$task$args)
         self$task$state <- "running"
+        self$task$worker_id <- self$id
+        self$task$time_started <- Sys.time()
       }
     },
     try_assign = function(task) {
@@ -44,6 +53,8 @@ Worker <- R6::R6Class(
         if(self$session$poll_process(timeout) == "ready") {
           self$task$results <- self$session$read()
           self$task$state <- "done"
+          self$task$time_finished <- Sys.time()
+          self$task$time_elapsed <- self$task$time_finished - self$task$time_started
           self$task <- NULL
         }
       }
@@ -54,14 +65,30 @@ Worker <- R6::R6Class(
   )
 )
 
+WorkerPool <- R6::R6Class(
+  classname = "WorkerPool",
+  public = list(
+    initialize = function(workers = 4L) {
+      for(i in seq_len(workers)) self$pool[[i]] <- Worker$new()
+    },
+    pool = list()
+  )
+)
+
 Queue <- R6::R6Class(
   classname = "Queue",
   public = list(
-    workers = list(),
+    workers = NULL,
     tasks = list(),
     actions = list(),
     initialize = function(workers = 4) {
-      for(i in seq_len(workers)) self$workers[[i]] <- Worker$new()
+      if(inherits(workers, "WorkerPool")) {
+        self$workers <- workers
+      } else {
+        self$workers <- WorkerPool$new(workers)
+      }
+
+
     },
     push = function(fun, args = list(), id = NULL) {
       if(is.null(id)) id <- private$get_next_id()
@@ -86,14 +113,14 @@ Queue <- R6::R6Class(
     },
 
     schedule = function() {
-      lapply(self$workers, function(x) x$try_finish())
-      unassigned <- which(vapply(self$workers, function(x) is.null(x$task), logical(1)))
+      lapply(self$workers$pool, function(x) x$try_finish())
+      unassigned <- which(vapply(self$workers$pool, function(x) is.null(x$task), logical(1)))
       waiting <- which(vapply(self$tasks, function(x) x$state == "waiting", logical(1)))
       n <- min(length(unassigned), length(waiting))
       for(i in seq_len(n)) {
-        self$workers[unassigned][[i]]$try_assign(self$tasks[waiting][[i]])
+        self$workers$pool[unassigned][[i]]$try_assign(self$tasks[waiting][[i]])
       }
-      lapply(self$workers, function(x) x$try_start())
+      lapply(self$workers$pool, function(x) x$try_start())
     },
 
     # Run all jobs loaded onto the queue as a batch
