@@ -8,12 +8,12 @@ source(file.path(post_dir, "subdivision.R"))
 queue <- Queue$new(workers = 6)
 
 # load 30 art jobs onto queue
-for(seed in 201:250) {
+for(seed in 201:210) {
   queue$push(subdivision, args = list(seed))
 }
 
 # multi-threaded execution
-queue$run()
+queue$run(verbose = TRUE)
 
 # forces a crash in n seconds
 #crashn <- function(n = 5) {Sys.sleep(n); .Call("abort")}
