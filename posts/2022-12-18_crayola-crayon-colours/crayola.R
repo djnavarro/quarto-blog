@@ -28,9 +28,7 @@ tbl <- raw |>
 # when we fill the real colours in but dropping other columns
 crayola <- tbl |>
   janitor::clean_names() |>
-  dplyr::select(
-    color,
-    name,
+  dplyr::rename(
     listed = hexadecimal_in_their_website_depiction_b,
     years = years_in_production_2
   )
@@ -61,7 +59,6 @@ background <- cells[ind] |>
 crayola$color <- background
 
 crayola <- crayola |>
-  dplyr::select(color, name, years) |>
 
   # clean up the years column
   dplyr::mutate(
@@ -112,7 +109,7 @@ crayola <- crayola |>
   )
 
 # transformer function to map each year in an interval to a row in a tibble
-unpack_row <- function(id, color, name, interval, year_started, year_ended) {
+unpack_row <- function(id, color, name, interval, year_started, year_ended, ...) {
   # https://en.wikipedia.org/wiki/CIELUV
   HSV <- coords(as(hex2RGB(color), "HSV"))
   LUV <- coords(as(hex2RGB(color), "LUV"))
@@ -122,11 +119,12 @@ unpack_row <- function(id, color, name, interval, year_started, year_ended) {
     hue = HSV[1, "H"],
     sat = HSV[1, "S"],
     val = HSV[1, "V"],
-    lightness = LUV[1, "L"],
-    chroma_u = LUV[1, "U"],
-    chroma_v = LUV[1, "V"],
+    L = LUV[1, "L"],
+    U = LUV[1, "U"],
+    V = LUV[1, "V"],
     name = name,
-    year = year_started:year_ended
+    year = year_started:year_ended,
+    ...
   )
 }
 
@@ -144,8 +142,9 @@ readr::write_csv(crayola, fs::path(folder, "crayola.csv"))
 # plot specification in ggplot2
 pic <- crayola |>
   dplyr::mutate(
-    ord = chroma_u/2 + hue, # omg such a hack
-    color = forcats::fct_reorder(color, ord)) |>
+    # https://en.wikipedia.org/wiki/CIELUV#Cylindrical_representation_(CIELCh)
+    hue_like = atan2(V, U),
+    color = forcats::fct_reorder(color, hue_like)) |>
   ggplot(aes(
     x = year,
     group = color,
@@ -168,7 +167,7 @@ ggsave(
   filename = fs::path(folder, "crayola.png"),
   device = ragg::agg_png,
   plot = pic,
-  width = 6000,
-  height = 6000,
+  width = 2000,
+  height = 2000,
   units = "px"
 )

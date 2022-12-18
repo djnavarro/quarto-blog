@@ -1,9 +1,15 @@
 ---
 title: "Crayola crayon colours"
+author:
+  - name: Danielle Navarro
+    url: https://djnavarro.net
+    affiliation: A bejorted horse? In this economy?!
+    affiliation-url: https://jorts.horse
+    orcid: 0000-0001-7648-6578
 description: "Am I bored in the house? Yes. And am I also in the house bored? Also yes. But do I have the rvest installed and a stubborn desire not to allow the horrors of 'data encoded in the CSS style' to defeat me? Oh my yes"
 date: "2022-12-18"
 categories: [R, rvest]
-image: "crayola_smol.png"
+image: "crayola.png"
 ---
 
 <!--------------- my typical setup ----------------->
@@ -16,17 +22,229 @@ long_slug <- "2022-11-38_crayla-crayon-colours"
 
 <!--------------- post begins here ----------------->
 
-What am I doing? Why am I here? S
+What am I doing? Why am I here? Oh that's right. So I was having coffee this morning reading the nerd news on mastodon as a girl likes to do and this [this post](https://mas.to/@kims/109525496705672156) by Kim Scheinberg caught my attention. The image comes from [this blog post](http://www.datapointed.net/2010/01/crayola-crayon-color-chart/) by Stephen Von Worley (he has a [follow up](http://www.datapointed.net/2010/10/crayola-color-chart-rainbow-style/) too). 
+
+Interesting. The data come from the wikipedia [list of Crayola crayon colours](https://en.wikipedia.org/wiki/List_of_Crayola_crayon_colors), and as it happens I know how to pull data from wikipedia tables into R without too much pain courtesy of [this post](https://ivelasq.rbind.io/blog/politely-scraping/) by Isabella Velásquez. After a reading a little about the [history of Crayola crayons](https://en.wikipedia.org/wiki/History_of_Crayola_crayons) I realise I am of course about to waste half a day on this...
+
+## It's the prelude, baby
+
+Politely scrape the tables from the wikipedia page:
+
+```{r polite_scrape}
+url <- "https://en.wikipedia.org/wiki/List_of_Crayola_crayon_colors"
+raw <- url |>
+  polite::bow() |>
+  polite::scrape() |>
+  rvest::html_nodes("table.wikitable")
+```
+
+The first table on the wikipedia page is the listing of the Crayola standard colours, so let's pluck the first first table from our raw list and convert it to a data frame. 
+
+```{r raw_1}
+raw[[1]]
+```
+
+At this point we can visually inspect to see if it looks right. It mostly does but... uh... the colors haven't appeared, only those that had a listing on the web:
+
+```{r standard-colours}
+crayola <- raw |>
+  purrr::pluck(1) |>
+  rvest::html_table()
+
+crayola
+```
+
+## Act I: It's like a hanky code
+
+Look, that's not a big deal right? Not having any colours for a post about colours? Let's set that aside and focus on the important things. Clean names:
+
+```{r tidy-names}
+crayola <- crayola |>
+  janitor::clean_names() |>
+  dplyr::rename(
+    listed = hexadecimal_in_their_website_depiction_b,
+    years = years_in_production_2
+  )
+
+crayola
+```
+
+So. What's that maxim about never using background colour to express substantive data in a table? We've run afoul of that. Let's take a look at the elements of our html table that are *supposed* to contain the data: 
+
+```{r cell-nodes}
+cells <- raw[[1]] |> rvest::html_elements("td")
+cells
+```
+
+You can see the problem looking at the 1st and 10th line of the output here. The piece of information we need is embedded in the bloody css style attribute, and *only* in the style attribute. Sigh.
+
+There's probably a better solution but my solution was to realize that I can match each colour in my `crayola` table to the node `cells` using the text information, because the colour names have been correctly included. Noticing that, it's a lot easier because the cells that have the information I want are always to the left of (i.e., before) the one containing the name. So I extract the cell text:
+
+```{r cell-node-text}
+cell_text <- cells |>
+  rvest::html_text() |>
+  stringr::str_remove_all("\n$")
+```
+
+Then I do the world's hackiest matching operation to find the nodes in the raw table that contain my missing colour data...
+
+```{r match-tables}
+ind <- which(cell_text %in% crayola$name) - 1
+```
+
+I use rvest to extract the style attribute, then stringr to pull the hex
+
+```{r extract-hex}
+background <- cells[ind] |>
+  rvest::html_attr("style") |>
+  stringr::str_extract("#[0-9ABCDEF]{6}")
+
+background
+```
+
+Yay, those look like hex colours. Most importantly I've taken steps to ensure they've been extracted in the correct order so it's easy to insert them where they should have been in the first place:
+
+```{r reinsert-colour}
+crayola$color <- background
+crayola
+```
+
+Finally.
+
+## Act II: One hundred years of tidyr
 
 
-:::{.column-screen}
-![](crayola.png)
-:::
+```{r}
+crayola <- crayola |>
+
+  # clean up the years column
+  dplyr::mutate(
+    years = years |>
+      stringr::str_remove_all(" ") |>
+      stringr::str_remove_all("\\[.\\]") |>
+      stringr::str_remove_all("circa") |>
+      stringr::str_replace_all("present", "2022") |>
+      stringr::str_replace_all("2021,2022", "2021-2022"),
+  ) |>
+
+  # some colours appear in two contiguous intervals separated by
+  # commas: split those into separate columns first...
+  tidyr::separate(
+    col = years,
+    into = c("years_1", "years_2"),
+    sep = ",",
+    fill = "right"
+  ) |>
+
+  # ...pivot longer so that each contiguous interval is a row
+  tidyr::pivot_longer(
+    cols = starts_with("years_"),
+    names_prefix = "years_",
+    names_to = "interval",
+    values_to = "years"
+  ) |>
+
+  # drop empty rows for all those colours that didn't have a second
+  # contiguous interval
+  dplyr::filter(!is.na(years)) |>
+
+  # now split the "1935-1992" interval into two columns
+  tidyr::separate(
+    col = years,
+    into = c("year_started", "year_ended"),
+    fill = "right"
+  ) |>
+
+  # if only a single year was given use it for the year end and the year start,
+  # and coerce strings to integers as appropriate
+  dplyr::mutate(
+    id = dplyr::row_number(),
+    year_ended = dplyr::if_else(is.na(year_ended), year_started, year_ended),
+    interval = as.integer(interval),
+    year_started = as.integer(year_started),
+    year_ended = as.integer(year_ended)
+  )
+
+crayola
+```
+
+## Act III: I said pet, I said LUV, I said pet...
+
+Transformer function to map each year in an interval to a row in a tibble
+
+```{r unpack-rows}
+unpack_row <- function(id, color, name, interval, year_started, year_ended, ...) {
+  # https://en.wikipedia.org/wiki/CIELUV
+  HSV <- colorspace::coords(as(colorspace::hex2RGB(color), "HSV"))
+  LUV <- colorspace::coords(as(colorspace::hex2RGB(color), "LUV"))
+  tibble::tibble(
+    id = id,
+    color = color,
+    hue = HSV[1, "H"],
+    sat = HSV[1, "S"],
+    val = HSV[1, "V"],
+    L = LUV[1, "L"],
+    U = LUV[1, "U"],
+    V = LUV[1, "V"],
+    name = name,
+    year = year_started:year_ended,
+    ...
+  )
+}
+```
+
+Apply it to each row to end up with a tidy tibble
+
+```{r purrr-map}
+crayola <- crayola |>
+  dplyr::group_by(id) |>
+  purrr::pmap_dfr(unpack_row) |>
+  dplyr::arrange(year, color) |>
+  dplyr::mutate(id = dplyr::row_number())
+```
 
 
-## What was the point?
+## The intermission is late, so what?
 
-Does any of this matter? Well. That depends, I suppose. If you're looking to analyse a Dataset using R, you don't really need to know much of this. Frankly you probably don't need to know any of it. But also there's something uncomfortable about using tools when you don't quite know what they're doing. It makes me happier when I know just a little bit more than I actually need to know. More importantly, it matters in the sense that it *works*. Using Datasets leads to shockingly fast performance on data that would not normally be amenable to analysis with R. Which... yeah, that does matter quite a bit!
+Never trust a website to last longer than an man on a Friday night so I'd better save the data
+
+```{r write-csv}
+folder <- here::here("posts", "2022-12-18_crayola-crayon-colours")
+readr::write_csv(crayola, fs::path(folder, "crayola.csv"))
+```
+
+## Act IV: Even Chekhov doesn't expect this to go off
+
+```{r first-plot}
+#| column: body-outset
+#| fig-width: 12
+#| fig-height: 12
+library(ggplot2)
+crayola |>
+  dplyr::mutate(
+    # https://en.wikipedia.org/wiki/CIELUV#Cylindrical_representation_(CIELCh)
+    hue_like = atan2(V, U),
+    color = forcats::fct_reorder(color, hue_like)) |>
+  ggplot(aes(
+    x = year,
+    group = color,
+    fill = color
+  )) +
+  geom_bar(
+    position = "fill",
+    linetype = "blank",
+    width = 1,
+    show.legend = FALSE
+  ) +
+  theme_void() +
+  scale_fill_identity() +
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  NULL
+```
+
+
+
 
 <!--------------- appendices go here ----------------->
 
