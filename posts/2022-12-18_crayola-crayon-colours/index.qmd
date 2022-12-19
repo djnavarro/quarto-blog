@@ -25,13 +25,15 @@ options(width = narrow)
 
 <!--------------- post begins here ----------------->
 
-What am I doing? Why am I here? Oh that's right. So I was having coffee this morning reading the nerd news on mastodon as a girl likes to do and this [this post](https://mas.to/@kims/109525496705672156) by Kim Scheinberg caught my attention. The image comes from [this blog post](http://www.datapointed.net/2010/01/crayola-crayon-color-chart/) by Stephen Von Worley (he has a [follow up](http://www.datapointed.net/2010/10/crayola-color-chart-rainbow-style/) too). 
+What am I doing? Why am I here? Oh that's right. So I was having coffee this morning reading the nerd news on mastodon as a girl likes to do and this [this very cool post about crayon colours](https://mas.to/@kims/109525496705672156) by Kim Scheinberg caught my attention. 
 
-Interesting. The data come from the wikipedia [list of Crayola crayon colours](https://en.wikipedia.org/wiki/List_of_Crayola_crayon_colors), and as it happens I know how to pull data from wikipedia tables into R without too much pain courtesy of [this post](https://ivelasq.rbind.io/blog/politely-scraping/) by Isabella Velásquez. After a reading a little about the [history of Crayola crayons](https://en.wikipedia.org/wiki/History_of_Crayola_crayons) I realise I am of course about to waste half a day on this...
+![](crayola_toot.jpg){fig-align="center" width="75%"}
 
-## It's the prelude, baby
+The image comes from [this blog post](http://www.datapointed.net/2010/01/crayola-crayon-color-chart/) by Stephen Von Worley -- he has a [follow up](http://www.datapointed.net/2010/10/crayola-color-chart-rainbow-style/) too. Interesting. I realise I am of course about to waste half a day on this...
 
-Politely scrape the tables from the wikipedia page:
+## It's the prologue, baby
+
+Having read the blog posts by Von Worley I worked out that the source of the data is the Wikipedia [list of Crayola crayon colours](https://en.wikipedia.org/wiki/List_of_Crayola_crayon_colors), and as it happens I know how to pull data from Wikipedia tables into R. Thanks to [this amazing post](https://ivelasq.rbind.io/blog/politely-scraping/) by Isabella Velásquez, I'd learned all about using the [polite](https://dmi3kno.github.io/polite/) package to make sure that my webscraping is appropriate and respectful, and using the [rvest](https://rvest.tidyverse.org/) package to do the actual scraping. What I had assumed, is that reading the table into R was going to be a simple matter of writing some code like this...
 
 ```{r polite_scrape}
 url <- "https://en.wikipedia.org/wiki/List_of_Crayola_crayon_colors"
@@ -41,19 +43,21 @@ raw <- url |>
   rvest::html_nodes("table.wikitable")
 ```
 
-The first table on the wikipedia page is the listing of the Crayola standard colours, so let's pluck the first first table from our raw list and convert it to a data frame. 
+This scrapes all the tables from the page, but I only want the first one. That's the big table with the listing of Crayola's standard colours. The table itself looks a little like this:
 
 ```{r raw_1}
 raw[[1]]
 ```
 
-At this point we can visually inspect to see if it looks right. It mostly does but... uh... the colors haven't appeared, only those that had a listing on the web:
+I don't want to parse the html myself, but the hope is that I can use something like the `html_table()` function to extract the table and return a data frame. Okay, let's give it a go...
 
 ```{r standard-colours}
 crayola <- raw |>
   purrr::pluck(1) |>
   rvest::html_table()
 ```
+
+Well it hasn't thrown an error, but when I look at the `crayola` data frame...
 
 `r options(width = wide)`
 
@@ -64,10 +68,11 @@ crayola
 
 `r options(width = narrow)`
 
+... I encounter a rather awkward problem. The `colour` field, which renders on the Wikipedia page as a pretty block of colour showing what the crayon colour looks like, is empty. Sure, I do have text containing hex codes for some of the crayons, but the missing data isn't missing at random. Old crayon colours are the ones systematically missing an official hex code. Okay, so I really would like to have some data in my `colour` column.
 
 ## Act I: I think it works like the hanky code
 
-Look, that's not a big deal right? Not having any colours for a post about colours? Let's set that aside and focus on the important things. Clean names:
+Look, that's not a big deal right? Not having any colours for a post about colours? I guess the post will be short. Eh. Let's set that aside and focus on the important things. Those column names need a little cleaning: 
 
 ```{r tidy-names}
 crayola <- crayola |>
@@ -78,6 +83,8 @@ crayola <- crayola |>
   )
 ```
 
+Much nicer:
+
 `r options(width = wide)`
 
 ```{r}
@@ -87,14 +94,14 @@ crayola
 
 `r options(width = narrow)`
 
-So. What's that maxim about never using background colour to express substantive data in a table? We've run afoul of that. Let's take a look at the elements of the html table and see if we can work out where things went wrong...
+Now where was I? What's that maxim about never using background colour to encode substantive data in a table? I seem to have run afoul of that. Let's take a look at the elements of the html table and see if I can work out where things went wrong...
 
 ```{r cell-nodes}
 cells <- raw[[1]] |> rvest::html_elements("td")
 cells
 ```
 
-Okay yeah. You can see the problem looking at the 1st and 10th line of the output here. The piece of information we need is embedded in the css style attribute, and it's *only* in the style metadata attribute. There's no data in the actual "td" element for `html_table()` to capture. We're going to have to fix that ourselves. Sigh.
+Okay yeah. You can see the problem looking at the 1st and 10th line of the output here. The piece of information we need is embedded in the css style attribute, and it's *only* in the style metadata attribute. There's no data in the actual "td" element for `html_table()` to capture. I'm going to have to fix that myself I guess. Sigh.
 
 The first part of my process was to find the relevant subset of cells. There's probably a better way to do it, but my approach was based on noting that (a) it's really easy to find the cells containing the colour names ("Red", "Maroon", etc), and (b) the cell to the left of it is always the one that has the background colour that I'm looking for. So, my first step was to manually pull out the text in each cell. That's easy to do with rvest thanks to the `html_text()` function, and just to make my life a little easier I used stringr to remove all the `\n` characters at the end of each cell:
 
@@ -322,12 +329,22 @@ crayola
 
 ## Act III: I said pet, I said LUV, I said pet...
 
-Transformer function to map each year in an interval to a row in a tibble
+Okay I have one last thing to do before I'm done with the data wrangling. Having hex strings associated with each crayon colour is nice and is exactly what I need for plotting, but you can't construct a nice ordering of colours since colour space is three dimensional, more or less. I'm trying my very best to forget everything I ever learned about the psychophysics of human colour perception, but even so I'm not silly enough to try to work with raw RGB values. Instead I'll use the [colorspace](http://colorspace.r-forge.r-project.org/) package to convert extract hue/saturation/value coordinates, as well as my slightly-preferred method, [CIELUV color coordinates](https://en.wikipedia.org/wiki/CIELUV):
 
 ```{r transform-colours}
 HSV <- colorspace::coords(as(colorspace::hex2RGB(crayola$color), "HSV"))
 LUV <- colorspace::coords(as(colorspace::hex2RGB(crayola$color), "LUV"))
+```
 
+Each of these commands returns a matrix with three columns and the same number of rows as the `crayola` data frame. The first few rows of the `HSV` matrix look like this:
+
+```{r preview}
+HSV[1:10,]
+```
+
+So now I can store all six coordinates in the `crayola` dataframe, along with the LUV-space version of "hue" which I compute in the last line here:
+
+```{r transform-colours-2}
 crayola <- crayola |>
   dplyr::mutate(
     hue = HSV[, "H"],
@@ -339,6 +356,8 @@ crayola <- crayola |>
     hue2 = atan2(V, U)
   )
 ```
+
+The Wikipedia page on CIELUV has a little more information on this, but really the thing that matters is that the `hue2` column is the variable I'm going to use to arrange the crayon colours when plotting them later. And so the moment arrives that, at long last, I have the data...
 
 `r options(width = wide)`
 
@@ -365,62 +384,72 @@ readr::write_csv(crayola, fs::path(folder, "crayola.csv"))
 
 ## Act IV: Not even Chekhov expects it to go off
 
+The final act of our little drama has arrived. Time to make a plot. The impression I get from reading the original blog posts by Stephen Von Worley is that the intention was never to look at the *number* of crayon colours in the Crayola standard set over time, but rather to explore the composition of those colours. Has the pattern of colours remained stable over time or has it shifted in hue? But I have the data now so I miight as well take a look. Here's a stacked bar chart showing the number of distinct crayon colours in the Crayola standard set every year from 1903 to 2022. It has grown over time but the growth looks linear, not exponential:
+
 ```{r first-plot}
-#| column: body-outset
-#| fig-width: 12
-#| fig-height: 12
 library(ggplot2)
-base <- ggplot(
-  mapping = aes(
+base <- crayola |> 
+  dplyr::mutate(
+    color = forcats::fct_reorder(color, hue2)
+  ) |> 
+  ggplot(aes(
     x = year,
     group = color,
     fill = color
   )) +
-  theme_void() +
   scale_fill_identity() +
-  scale_x_continuous(expand = c(0, 0)) +
-  scale_y_continuous(expand = c(0, 0)) +
   NULL
 
-base + 
-  geom_bar(
-    data =  crayola |> 
-      dplyr::mutate(color = forcats::fct_reorder(color, hue2)),
-    position = "fill",
-    linetype = "blank",
-    width = 1,
-    show.legend = FALSE
-  ) 
+base + geom_bar(show.legend = FALSE) 
 ```
 
-Okay so that doesn't quite look like the image I saw earlier. Have I done it wrong? Maybe not. The impression I get from reading the original blog posts is that the intention was never to look at the number of crayon colours in the Crayola standard set over time. Yes, the number of colours has grown over time, which is easy to see if we drop the `position = "fill"` argument, but the growth isn't exponential:
+But let's be honest, shall we? No-one at all (least of all me) is interested in determining whether the rate of growth of Crayola crayon colours in the standard set is exponential or linear. It's just fun. The real reason we all love the Crayola post was that the image was so terribly pretty, so let's start making something pretty, yes? 
+
+We can start getting something a little closer to the original if we set `position = "fill"`, and I'm going to use `theme_void()` because honestly it's just prettier without the words and numbers getting in the way...
 
 ```{r}
-#| column: body-outset
-#| fig-width: 12
-#| fig-height: 12
+#| fig-width: 8
+#| fig-height: 8
+#| fig-align: center
 base + 
+  theme_void() +
   geom_bar(
-    data =  crayola |> 
-      dplyr::mutate(color = forcats::fct_reorder(color, hue2)),
+    position = "fill",
     linetype = "blank",
     width = 1,
     show.legend = FALSE
   ) 
 ```
 
-I think the intended scope of the original posts was to look at those crayon colours that belong to the 64-crayon box. If I filter the data
+It's pretty, but it's noticeably different from the original one. In my version, there are 39 separate colours depicted on the left hand side, whereas the version that was going around on mastodon (and appears in the original blog posts) has only 8. Out of paranoia, I decided to check the counts in my data...
 
-Try that again with using just the x64 colours
+```{r}
+crayola |> 
+  dplyr::count(year) |>
+  dplyr::filter(year %in% seq(1903, 2003, by = 10))
+```
+
+...which does seem consistent with what the [history of Crayola crayons](https://en.wikipedia.org/wiki/History_of_Crayola_crayons) wikipedia article has to say on the topic too: 
+
+> Early Crayola advertising mentions thirty different colors, although there is no official list; in fact thirty-eight different crayons are known from Crayola boxes of this period. The largest labeled assortment was box No. 51, titled Crayola Young Artists' Drawing Crayons, which included twenty-eight different crayons. Other colors were found in different boxes, including the "Rubens" No. 500, a twenty-four crayon assortment.
+
+Okay, so if I haven't made a mistake, what is going on? It turns out that although Steven Von Worley's blog post still manages to point to the "same" Wikipedia page 12 years later, the contents of the page have changed considerably. The original post was published January 15th 2010. Conveniently the wayback machine has a [snapshot of that page](http://web.archive.org/web/20100209002742/https://en.wikipedia.org/wiki/List_of_Crayola_crayon_colors) from only a few weeks later, on February 9th. I have a very different version of the Crayola colours data than Steven's friend Velociraptor had. 
+
+There are 133 colours listed in the 2010 version, and it's missing all the colours that had gone out of production earlier than 1990. "English Vermillion", for example, was in production from 1903 to 1935. It appears in the 2022 version of the Wikipedia data (and so it's represented in my plots above), but it was omitted in the 2010 version of the Wikipedia data and so doesn't appear in the version of the image that went around on Mastodon yesterday. 
+
+Hm. So what happens to my data if I crudely simulate a censoring process a little bit like the one that applied to the 2010 version of the Wikipedia page? Let's simply ignore all crayon colours that were out of production earlier than 1990, shall we?
 
 ```{r second-plot}
-#| column: body-outset
-#| fig-width: 12
-#| fig-height: 12
+#| fig-width: 8
+#| fig-height: 8
+#| fig-align: center
 base + 
+  theme_void() +
   geom_bar(
     data =  crayola |> 
-      dplyr::filter(x64_box == "Yes") |>
+      dplyr::group_by(name) |>
+      dplyr::filter(max(year) > 1990) |>
+      dplyr::ungroup() |>
       dplyr::mutate(color = forcats::fct_reorder(color, hue2)),
     position = "fill",
     linetype = "blank",
@@ -429,7 +458,9 @@ base +
   ) 
 ```
 
-Okay but have you considered...
+Still not exactly equivalent, but it's closer.
+
+More to the point however, I think we all have to admit that this is really the kind of data set that desperately needs to be plotted with the aid of `coord_polar()`, no?
 
 ```{r third-plot}
 #| column: screen-inset
@@ -437,10 +468,9 @@ Okay but have you considered...
 #| fig-height: 12
 #| fig-align: center
 base + 
+  theme_void() +
   coord_polar(theta = "y") + 
   geom_bar(
-    data =  crayola |> 
-      dplyr::mutate(color = forcats::fct_reorder(color, hue2)),
     position = "fill",
     linetype = "blank",
     width = 1,
@@ -448,7 +478,7 @@ base +
   ) 
 ```
 
-Or even...
+I mean...
 
 ```{r fourth-plot}
 #| column: screen-inset
@@ -456,16 +486,16 @@ Or even...
 #| fig-height: 12
 #| fig-align: center
 base + 
+  theme_void() +
   coord_polar(theta = "y") + 
   geom_bar(
-    data =  crayola |> 
-      dplyr::mutate(color = forcats::fct_reorder(color, hue2)),
     linetype = "blank",
     width = 1,
     show.legend = FALSE
   ) 
 ```
 
+So pretty!
 
 <!--------------- appendices go here ----------------->
 
