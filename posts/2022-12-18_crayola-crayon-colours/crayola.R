@@ -67,6 +67,7 @@ crayola <- crayola |>
       stringr::str_remove_all("\\[.\\]") |>
       stringr::str_remove_all("circa") |>
       stringr::str_replace_all("present", "2022") |>
+      stringr::str_replace_all("^1958$", "1958-1958") |>
       stringr::str_replace_all("2021,2022", "2021-2022"),
   ) |>
 
@@ -101,39 +102,45 @@ crayola <- crayola |>
   # if only a single year was given use it for the year end and the year start,
   # and coerce strings to integers as appropriate
   dplyr::mutate(
-    id = dplyr::row_number(),
     year_ended = dplyr::if_else(is.na(year_ended), year_started, year_ended),
     interval = as.integer(interval),
     year_started = as.integer(year_started),
     year_ended = as.integer(year_ended)
   )
 
-# transformer function to map each year in an interval to a row in a tibble
-unpack_row <- function(id, color, name, interval, year_started, year_ended, ...) {
-  # https://en.wikipedia.org/wiki/CIELUV
-  HSV <- coords(as(hex2RGB(color), "HSV"))
-  LUV <- coords(as(hex2RGB(color), "LUV"))
+# transformer function for purrr
+unpack_row <- function(color, name, year_started, year_ended, ...) {
   tibble::tibble(
-    id = id,
-    color = color,
-    hue = HSV[1, "H"],
-    sat = HSV[1, "S"],
-    val = HSV[1, "V"],
-    L = LUV[1, "L"],
-    U = LUV[1, "U"],
-    V = LUV[1, "V"],
     name = name,
+    color = color,
     year = year_started:year_ended,
     ...
   )
 }
 
-# apply it to each row to end up with a tidy tibble
+# use the transformer to unpack years, arrange the rows,  an id column
 crayola <- crayola |>
-  dplyr::group_by(id) |>
   purrr::pmap_dfr(unpack_row) |>
   dplyr::arrange(year, color) |>
   dplyr::mutate(id = dplyr::row_number())
+
+
+
+# https://en.wikipedia.org/wiki/CIELUV
+# https://en.wikipedia.org/wiki/CIELUV#Cylindrical_representation_(CIELCh)
+HSV <- colorspace::coords(as(colorspace::hex2RGB(crayola$color), "HSV"))
+LUV <- colorspace::coords(as(colorspace::hex2RGB(crayola$color), "LUV"))
+
+crayola <- crayola |>
+  dplyr::mutate(
+    hue = HSV[, "H"],
+    sat = HSV[, "S"],
+    val = HSV[, "V"],
+    L = LUV[, "L"],
+    U = LUV[, "U"],
+    V = LUV[, "V"],
+    hue2 = atan2(V, U)
+  )
 
 # write a csv just in case
 folder <- here::here("posts", "2022-12-18_crayola-crayon-colours")
@@ -141,10 +148,7 @@ readr::write_csv(crayola, fs::path(folder, "crayola.csv"))
 
 # plot specification in ggplot2
 pic <- crayola |>
-  dplyr::mutate(
-    # https://en.wikipedia.org/wiki/CIELUV#Cylindrical_representation_(CIELCh)
-    hue_like = atan2(V, U),
-    color = forcats::fct_reorder(color, hue_like)) |>
+  dplyr::mutate(color = forcats::fct_reorder(color, hue2)) |>
   ggplot(aes(
     x = year,
     group = color,

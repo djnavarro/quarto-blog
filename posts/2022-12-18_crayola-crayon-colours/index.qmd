@@ -3,10 +3,10 @@ title: "Crayola crayon colours"
 author:
   - name: Danielle Navarro
     url: https://djnavarro.net
-    affiliation: A bejorted horse? In this economy?!
-    affiliation-url: https://jorts.horse
+    affiliation: I'm on smoko
+    affiliation-url: https://www.youtube.com/watch?v=j58V2vC9EPc
     orcid: 0000-0001-7648-6578
-description: "Am I bored in the house? Yes. And am I also in the house bored? Also yes. But do I have the rvest installed and a stubborn desire not to allow the horrors of 'data encoded in the CSS style' to defeat me? Oh my yes"
+description: "Am I bored in the house? Yes. And am I in the house bored? Also yes. But do I have rvest and a stubborn desire not to allow the horrors of 'data encoded in the CSS style' to defeat me? Oh my yes"
 date: "2022-12-18"
 categories: [R, rvest]
 image: "crayola.png"
@@ -17,6 +17,9 @@ image: "crayola.png"
 ```{r setup, include=FALSE}
 long_slug <- "2022-11-38_crayla-crayon-colours"
 #renv::use(lockfile = "renv.lock")
+wide <- 136
+narrow <- 76
+options(width = narrow)
 ```
 
 
@@ -50,11 +53,19 @@ At this point we can visually inspect to see if it looks right. It mostly does b
 crayola <- raw |>
   purrr::pluck(1) |>
   rvest::html_table()
+```
 
+`r options(width = wide)`
+
+```{r}
+#| column: page
 crayola
 ```
 
-## Act I: It's like a hanky code
+`r options(width = narrow)`
+
+
+## Act I: I think it works like the hanky code
 
 Look, that's not a big deal right? Not having any colours for a post about colours? Let's set that aside and focus on the important things. Clean names:
 
@@ -65,20 +76,27 @@ crayola <- crayola |>
     listed = hexadecimal_in_their_website_depiction_b,
     years = years_in_production_2
   )
+```
 
+`r options(width = wide)`
+
+```{r}
+#| column: page
 crayola
 ```
 
-So. What's that maxim about never using background colour to express substantive data in a table? We've run afoul of that. Let's take a look at the elements of our html table that are *supposed* to contain the data: 
+`r options(width = narrow)`
+
+So. What's that maxim about never using background colour to express substantive data in a table? We've run afoul of that. Let's take a look at the elements of the html table and see if we can work out where things went wrong...
 
 ```{r cell-nodes}
 cells <- raw[[1]] |> rvest::html_elements("td")
 cells
 ```
 
-You can see the problem looking at the 1st and 10th line of the output here. The piece of information we need is embedded in the bloody css style attribute, and *only* in the style attribute. Sigh.
+Okay yeah. You can see the problem looking at the 1st and 10th line of the output here. The piece of information we need is embedded in the css style attribute, and it's *only* in the style metadata attribute. There's no data in the actual "td" element for `html_table()` to capture. We're going to have to fix that ourselves. Sigh.
 
-There's probably a better solution but my solution was to realize that I can match each colour in my `crayola` table to the node `cells` using the text information, because the colour names have been correctly included. Noticing that, it's a lot easier because the cells that have the information I want are always to the left of (i.e., before) the one containing the name. So I extract the cell text:
+The first part of my process was to find the relevant subset of cells. There's probably a better way to do it, but my approach was based on noting that (a) it's really easy to find the cells containing the colour names ("Red", "Maroon", etc), and (b) the cell to the left of it is always the one that has the background colour that I'm looking for. So, my first step was to manually pull out the text in each cell. That's easy to do with rvest thanks to the `html_text()` function, and just to make my life a little easier I used stringr to remove all the `\n` characters at the end of each cell:
 
 ```{r cell-node-text}
 cell_text <- cells |>
@@ -86,164 +104,367 @@ cell_text <- cells |>
   stringr::str_remove_all("\n$")
 ```
 
-Then I do the world's hackiest matching operation to find the nodes in the raw table that contain my missing colour data...
+And here's the text in the first 20 cells:
+
+```{r view-cell-text}
+cell_text[1:20]
+```
+
+So when I now match this text against the colour names stored in `crayola$name`, I'll detect "Red" in cell 2, "Maroon" in cell 11, and so on. If I subtract 1 from each of these values, I now have the indices of the table cells that contain the style information I need.
 
 ```{r match-tables}
 ind <- which(cell_text %in% crayola$name) - 1
 ```
 
-I use rvest to extract the style attribute, then stringr to pull the hex
+Here's what those cells look like:
+
+```{r styled-cells}
+cells[ind]
+```
+
+That's much nicer. Now I have something with a consistent format that I can process without too much pain. The rvest package has a `html_attr()` function which I can use to pull out the contents of the style attribute as a string. So, after spending a few minutes trying to remember how regular expressions work, I used `str_extract()` to pull out the hexadecimal codes like this:
 
 ```{r extract-hex}
 background <- cells[ind] |>
   rvest::html_attr("style") |>
   stringr::str_extract("#[0-9ABCDEF]{6}")
+```
 
+Let's take a look:
+
+`r options(width = wide)`
+
+```{r extract-hex2}
+#| column: page
 background
 ```
 
-Yay, those look like hex colours. Most importantly I've taken steps to ensure they've been extracted in the correct order so it's easy to insert them where they should have been in the first place:
+`r options(width = narrow)`
+
+Yay, those look like hex colours. Better yet, because I've been careful to ensure that I've matched everything to the correct colours and in the correct order, I can insert them into the `crayola` tibble where they should have been in the first place:
+
+```{r, include=FALSE}
+options(width = wide)
+```
 
 ```{r reinsert-colour}
+#| column: page
 crayola$color <- background
 crayola
 ```
 
-Finally.
+```{r, include=FALSE}
+options(width = narrow)
+```
+
+
+Finally!
 
 ## Act II: One hundred years of tidyr
 
+If life were at all fair my data wrangling woes would now be over, but of course they are not. If I'm going to analyse the Crayola data by year it will be useful to me if the `year` column has nicely formatted data, and of course it does not:
 
-```{r}
+```{r, include=FALSE}
+options(width = wide)
+```
+
+```{r show-crayola-years-1}
+#| column: page
+crayola$years
+```
+
+```{r, include=FALSE}
+options(width = narrow)
+```
+
+
+There are several problems I'm going to need to solve to get this into a regular form:
+
+- The "circa" text will have to be removed
+- White spaces will need to be removed
+- Footnote text will need to be removed
+- The word "present" will have to be replaced by "2022"
+- The single year "1958" will need to be replaced by an interval "1958-1958"
+- The comma separated list "2021,2022" will need to be an interval "2021-2022"
+
+Here's a little bit of stringr code that does that:
+
+```{r regularise-years}
 crayola <- crayola |>
-
-  # clean up the years column
   dplyr::mutate(
     years = years |>
       stringr::str_remove_all(" ") |>
       stringr::str_remove_all("\\[.\\]") |>
       stringr::str_remove_all("circa") |>
       stringr::str_replace_all("present", "2022") |>
+      stringr::str_replace_all("^1958$", "1958-1958") |>
       stringr::str_replace_all("2021,2022", "2021-2022"),
-  ) |>
+  ) 
+```
 
-  # some colours appear in two contiguous intervals separated by
-  # commas: split those into separate columns first...
+The `years` column now has a regular form. Each entry is either a contiguous interval like "1903-2022", or a comma separated list of two such intervals like "1903–1910,1930–1990":
+
+```{r, include=FALSE}
+options(width = wide)
+```
+
+```{r show-crayola-years-2}
+#| column: page
+crayola$years
+```
+
+```{r, include=FALSE}
+options(width = narrow)
+```
+
+That's better because the data format is now consistent, but it's not tidy. In the long run, what I really want is a nice tidy tibble: each row should correspond to a single observation. If "Red" was a colour in 1935, then there should be a row in my table for which `name = "Red"` and `year = 1935`. That's not quite what I have here, so I have more data wrangling to do.
+
+The first thing I'm going to do is use `tidyr::separate()` to split the `years` variable into two variables, `years_1` and `years_2`. The `years_1` variable will contain the first time interval for which a particular crayon colour was in production, and the `years_2` variable will contain the second interval in which it was in production. For almost all colours, `years_2` will be `NA`. It's only those special cases like `"1903–1910,1930–1990"` that will have values in both. 
+
+Then, because I don't really see a need to have two variables that both represent a period of time, I'll use `tidyr::pivot_longer()` to give myself a data set in which there is one row for every continuous time interval:
+
+```{r}
+crayola <- crayola |>
   tidyr::separate(
     col = years,
     into = c("years_1", "years_2"),
     sep = ",",
     fill = "right"
   ) |>
-
-  # ...pivot longer so that each contiguous interval is a row
   tidyr::pivot_longer(
     cols = starts_with("years_"),
     names_prefix = "years_",
     names_to = "interval",
     values_to = "years"
   ) |>
+  dplyr::filter(!is.na(years))
+```
 
-  # drop empty rows for all those colours that didn't have a second
-  # contiguous interval
-  dplyr::filter(!is.na(years)) |>
+To give you a sense of what the data looks like in this form, I'll pull out the rows corresponding to two different crayon colours, "Maroon" and "Violet-Blue":
 
-  # now split the "1935-1992" interval into two columns
+```{r, include=FALSE}
+options(width = wide)
+```
+
+```{r}
+#| column: page
+crayola |>
+  dplyr::filter(name == "Maroon" | name == "Violet-Blue")
+```
+
+```{r, include=FALSE}
+options(width = narrow)
+```
+
+The "Maroon" crayon has been in production continuously since 1949, so there is only one row in the table for that one. The "Violet-Blue" crayon was in production 
+
+
+
+```{r}
+crayola <- crayola |>
   tidyr::separate(
     col = years,
-    into = c("year_started", "year_ended"),
-    fill = "right"
+    into = c("year_started", "year_ended")
   ) |>
-
-  # if only a single year was given use it for the year end and the year start,
-  # and coerce strings to integers as appropriate
   dplyr::mutate(
-    id = dplyr::row_number(),
-    year_ended = dplyr::if_else(is.na(year_ended), year_started, year_ended),
     interval = as.integer(interval),
     year_started = as.integer(year_started),
     year_ended = as.integer(year_ended)
   )
+```
 
+
+`r options(width = wide)`
+
+```{r}
+#| column: page
 crayola
 ```
 
-## Act III: I said pet, I said LUV, I said pet...
+`r options(width = narrow)`
 
-Transformer function to map each year in an interval to a row in a tibble
+We're getting close. At this point the last bit of work I have to do to fix the year data is unpack it. Instead of representing the data for Maroon crayons with one row with a `year_started` value of 1949 and `year_ended` value of 2022, I want to have a single column called `year`, and the data should contain one row for every year in which Maroon was in production. Somewhere in the back of my head there is the thought that there must be an easy way to do this with tidyr, but my ingenuity failed me this time and I fell back on my usual solution... `purrr::pmap_dfr()`.
+
+It's a two-step process. Step one: write a little function that expects to receive the values stored in one row of the existing data frame, and returns a new data frame in the format I want. In this case, I want a tibble that has one row for each `year` in range starting `year_started` and ending `year_ended`, but otherwise has the same structure as the existing data. The `unpack_row()` function below does that:
 
 ```{r unpack-rows}
-unpack_row <- function(id, color, name, interval, year_started, year_ended, ...) {
-  # https://en.wikipedia.org/wiki/CIELUV
-  HSV <- colorspace::coords(as(colorspace::hex2RGB(color), "HSV"))
-  LUV <- colorspace::coords(as(colorspace::hex2RGB(color), "LUV"))
+unpack_row <- function(color, name, year_started, year_ended, ...) {
   tibble::tibble(
-    id = id,
-    color = color,
-    hue = HSV[1, "H"],
-    sat = HSV[1, "S"],
-    val = HSV[1, "V"],
-    L = LUV[1, "L"],
-    U = LUV[1, "U"],
-    V = LUV[1, "V"],
     name = name,
+    color = color,
     year = year_started:year_ended,
     ...
   )
 }
 ```
 
-Apply it to each row to end up with a tidy tibble
+So now I'll do the unpacking with `purrr::pmap_dfr()`, sort the rows into a nice order using `dplyr::arrange()`, and add an `id` column to ensure that every row in the table has a unique identifier:
 
-```{r purrr-map}
+```{r do-unpack}
 crayola <- crayola |>
-  dplyr::group_by(id) |>
   purrr::pmap_dfr(unpack_row) |>
   dplyr::arrange(year, color) |>
   dplyr::mutate(id = dplyr::row_number())
 ```
 
+Voilà!
+
+`r options(width = wide)`
+
+```{r}
+#| column: page
+crayola
+```
+
+`r options(width = narrow)`
+
+
+
+## Act III: I said pet, I said LUV, I said pet...
+
+Transformer function to map each year in an interval to a row in a tibble
+
+```{r transform-colours}
+HSV <- colorspace::coords(as(colorspace::hex2RGB(crayola$color), "HSV"))
+LUV <- colorspace::coords(as(colorspace::hex2RGB(crayola$color), "LUV"))
+
+crayola <- crayola |>
+  dplyr::mutate(
+    hue = HSV[, "H"],
+    sat = HSV[, "S"],
+    val = HSV[, "V"],
+    L = LUV[, "L"],
+    U = LUV[, "U"],
+    V = LUV[, "V"],
+    hue2 = atan2(V, U)
+  )
+```
+
+`r options(width = wide)`
+
+```{r}
+#| column: page
+crayola
+```
+
+`r options(width = narrow)`
+
 
 ## The intermission is late, so what?
 
-Never trust a website to last longer than an man on a Friday night so I'd better save the data
+As a rule I make it a habit to assume that, while the internet never forgets anything at all in the general sense, it doesn't remember anything *specific* for any interval longer than I'd trust a man not to have conveniently lost my phone number. Moreover, while I also make it a habit not to care greatly about the archival properties of What Went Down In The Stalls At The Duke On Friday, I'm slightly more invested in, um ... crayons, I guess. Or data science practices in R. Whatever. 
+
+My point here is that the table on wikipedia isn't an archival source so there's no guarantee that anything I've done up to this point is reproducible unless I do a bit of extra work myself and save a copy of the data...
 
 ```{r write-csv}
+#| eval: false
 folder <- here::here("posts", "2022-12-18_crayola-crayon-colours")
 readr::write_csv(crayola, fs::path(folder, "crayola.csv"))
 ```
 
-## Act IV: Even Chekhov doesn't expect this to go off
+
+## Act IV: Not even Chekhov expects it to go off
 
 ```{r first-plot}
 #| column: body-outset
 #| fig-width: 12
 #| fig-height: 12
 library(ggplot2)
-crayola |>
-  dplyr::mutate(
-    # https://en.wikipedia.org/wiki/CIELUV#Cylindrical_representation_(CIELCh)
-    hue_like = atan2(V, U),
-    color = forcats::fct_reorder(color, hue_like)) |>
-  ggplot(aes(
+base <- ggplot(
+  mapping = aes(
     x = year,
     group = color,
     fill = color
   )) +
-  geom_bar(
-    position = "fill",
-    linetype = "blank",
-    width = 1,
-    show.legend = FALSE
-  ) +
   theme_void() +
   scale_fill_identity() +
   scale_x_continuous(expand = c(0, 0)) +
   scale_y_continuous(expand = c(0, 0)) +
   NULL
+
+base + 
+  geom_bar(
+    data =  crayola |> 
+      dplyr::mutate(color = forcats::fct_reorder(color, hue2)),
+    position = "fill",
+    linetype = "blank",
+    width = 1,
+    show.legend = FALSE
+  ) 
 ```
 
+Okay so that doesn't quite look like the image I saw earlier. Have I done it wrong? Maybe not. The impression I get from reading the original blog posts is that the intention was never to look at the number of crayon colours in the Crayola standard set over time. Yes, the number of colours has grown over time, which is easy to see if we drop the `position = "fill"` argument, but the growth isn't exponential:
 
+```{r}
+#| column: body-outset
+#| fig-width: 12
+#| fig-height: 12
+base + 
+  geom_bar(
+    data =  crayola |> 
+      dplyr::mutate(color = forcats::fct_reorder(color, hue2)),
+    linetype = "blank",
+    width = 1,
+    show.legend = FALSE
+  ) 
+```
+
+I think the intended scope of the original posts was to look at those crayon colours that belong to the 64-crayon box. If I filter the data
+
+Try that again with using just the x64 colours
+
+```{r second-plot}
+#| column: body-outset
+#| fig-width: 12
+#| fig-height: 12
+base + 
+  geom_bar(
+    data =  crayola |> 
+      dplyr::filter(x64_box == "Yes") |>
+      dplyr::mutate(color = forcats::fct_reorder(color, hue2)),
+    position = "fill",
+    linetype = "blank",
+    width = 1,
+    show.legend = FALSE
+  ) 
+```
+
+Okay but have you considered...
+
+```{r third-plot}
+#| column: screen-inset
+#| fig-width: 12
+#| fig-height: 12
+#| fig-align: center
+base + 
+  coord_polar(theta = "y") + 
+  geom_bar(
+    data =  crayola |> 
+      dplyr::mutate(color = forcats::fct_reorder(color, hue2)),
+    position = "fill",
+    linetype = "blank",
+    width = 1,
+    show.legend = FALSE
+  ) 
+```
+
+Or even...
+
+```{r fourth-plot}
+#| column: screen-inset
+#| fig-width: 12
+#| fig-height: 12
+#| fig-align: center
+base + 
+  coord_polar(theta = "y") + 
+  geom_bar(
+    data =  crayola |> 
+      dplyr::mutate(color = forcats::fct_reorder(color, hue2)),
+    linetype = "blank",
+    width = 1,
+    show.legend = FALSE
+  ) 
+```
 
 
 <!--------------- appendices go here ----------------->
