@@ -8,7 +8,7 @@ author:
     orcid: 0000-0001-7648-6578
 description: "Am I bored in the house? Yes. And am I in the house bored? Also yes. But do I have rvest and a stubborn desire not to allow the horrors of 'data encoded in the CSS style' to defeat me? Oh my yes"
 date: "2022-12-18"
-categories: [R, rvest]
+categories: [R]
 image: "crayola.png"
 ---
 
@@ -43,7 +43,7 @@ raw <- url |>
   rvest::html_nodes("table.wikitable")
 ```
 
-This scrapes all the tables from the page, but I only want the first one. That's the big table with the listing of Crayola's standard colours. The table itself looks a little like this:
+This scrapes all the tables from the page, but I only want the first one. That's the big table with the listing of Crayolas standard colours. The table itself looks a little like this:
 
 ```{r raw_1}
 raw[[1]]
@@ -52,9 +52,7 @@ raw[[1]]
 I don't want to parse the html myself, but the hope is that I can use something like the `html_table()` function to extract the table and return a data frame. Okay, let's give it a go...
 
 ```{r standard-colours}
-crayola <- raw |>
-  purrr::pluck(1) |>
-  rvest::html_table()
+crayola <- raw[[1]] |> rvest::html_table()
 ```
 
 Well it hasn't thrown an error, but when I look at the `crayola` data frame...
@@ -72,7 +70,7 @@ crayola
 
 ## Act I: I think it works like the hanky code
 
-Look, that's not a big deal right? Not having any colours for a post about colours? I guess the post will be short. Eh. Let's set that aside and focus on the important things. Those column names need a little cleaning: 
+Look, that's not a big deal right? Not having any colours for a post about colours? I guess the post will be short. Eh. Let's set that aside and focus on the important things. Those column names need a little cleaning, so I'll do the thing I always do and break out [janitor](https://sfirke.github.io/janitor/) and [dplyr](https://dplyr.tidyverse.org/): 
 
 ```{r tidy-names}
 crayola <- crayola |>
@@ -103,7 +101,7 @@ cells
 
 Okay yeah. You can see the problem looking at the 1st and 10th line of the output here. The piece of information we need is embedded in the css style attribute, and it's *only* in the style metadata attribute. There's no data in the actual "td" element for `html_table()` to capture. I'm going to have to fix that myself I guess. Sigh.
 
-The first part of my process was to find the relevant subset of cells. There's probably a better way to do it, but my approach was based on noting that (a) it's really easy to find the cells containing the colour names ("Red", "Maroon", etc), and (b) the cell to the left of it is always the one that has the background colour that I'm looking for. So, my first step was to manually pull out the text in each cell. That's easy to do with rvest thanks to the `html_text()` function, and just to make my life a little easier I used stringr to remove all the `\n` characters at the end of each cell:
+The first part of my process was to find the relevant subset of cells. There's probably a better way to do it, but my approach was based on noting that (a) it's really easy to find the cells containing the colour names ("Red", "Maroon", etc), and (b) the cell to the left of it is always the one that has the background colour that I'm looking for. So, my first step was to manually pull out the text in each cell. That's easy to do with rvest thanks to the `html_text()` function, and just to make my life a little easier I used [stringr](https://stringr.tidyverse.org/) to remove all the `\n` characters at the end of each cell:
 
 ```{r cell-node-text}
 cell_text <- cells |>
@@ -209,7 +207,7 @@ crayola <- crayola |>
   ) 
 ```
 
-The `years` column now has a regular form. Each entry is either a contiguous interval like "1903-2022", or a comma separated list of two such intervals like "1903–1910,1930–1990":
+The `years` column now has a regular form. Each entry is either a contiguous interval like `"1903-2022"`, or a comma separated list of two such intervals like `"1903–1910,1930–1990"`:
 
 ```{r, include=FALSE}
 options(width = wide)
@@ -224,7 +222,7 @@ crayola$years
 options(width = narrow)
 ```
 
-That's better because the data format is now consistent, but it's not tidy. In the long run, what I really want is a nice tidy tibble: each row should correspond to a single observation. If "Red" was a colour in 1935, then there should be a row in my table for which `name = "Red"` and `year = 1935`. That's not quite what I have here, so I have more data wrangling to do.
+That's better because the data format is now consistent, but it's not tidy. In the long run, what I really want is a nice tidy tibble: each row should correspond to a single observation. If "Red" was a colour in 1935, then there should be a row in my table for which `name = "Red"` and `year = 1935`. That's not quite what I have here, so I have more data wrangling to do and this time [tidyr](https://tidyr.tidyverse.org/) will be my best friend.
 
 The first thing I'm going to do is use `tidyr::separate()` to split the `years` variable into two variables, `years_1` and `years_2`. The `years_1` variable will contain the first time interval for which a particular crayon colour was in production, and the `years_2` variable will contain the second interval in which it was in production. For almost all colours, `years_2` will be `NA`. It's only those special cases like `"1903–1910,1930–1990"` that will have values in both. 
 
@@ -263,9 +261,7 @@ crayola |>
 options(width = narrow)
 ```
 
-The "Maroon" crayon has been in production continuously since 1949, so there is only one row in the table for that one. The "Violet-Blue" crayon was in production 
-
-
+The "Maroon" crayon has been in production continuously since 1949, so there is only one row in the table for that one. The "Violet-Blue" crayon was in production from 1903 to 1910, and again from 1930 to 1990. These two production periods are each represented as a row. 
 
 ```{r}
 crayola <- crayola |>
@@ -290,7 +286,7 @@ crayola
 
 `r options(width = narrow)`
 
-We're getting close. At this point the last bit of work I have to do to fix the year data is unpack it. Instead of representing the data for Maroon crayons with one row with a `year_started` value of 1949 and `year_ended` value of 2022, I want to have a single column called `year`, and the data should contain one row for every year in which Maroon was in production. Somewhere in the back of my head there is the thought that there must be an easy way to do this with tidyr, but my ingenuity failed me this time and I fell back on my usual solution... `purrr::pmap_dfr()`.
+We're getting close. At this point the last bit of work I have to do to fix the year data is unpack it. Instead of representing the data for Maroon crayons with one row with a `year_started` value of 1949 and `year_ended` value of 2022, I want to have a single column called `year`, and the data should contain one row for every year in which Maroon was in production. Somewhere in the back of my head there is the thought that there must be an easy way to do this with tidyr, but my ingenuity failed me this time and I fell back on my usual solution... [purrr](https://purrr.tidyverse.org/).
 
 It's a two-step process. Step one: write a little function that expects to receive the values stored in one row of the existing data frame, and returns a new data frame in the format I want. In this case, I want a tibble that has one row for each `year` in range starting `year_started` and ending `year_ended`, but otherwise has the same structure as the existing data. The `unpack_row()` function below does that:
 
@@ -381,10 +377,13 @@ folder <- here::here("posts", "2022-12-18_crayola-crayon-colours")
 readr::write_csv(crayola, fs::path(folder, "crayola.csv"))
 ```
 
+As a convenient side benefit, you can download a copy of [the crayola colours](https://github.com/djnavarro/quarto-blog/blob/main/posts/2022-12-18_crayola-crayon-colours/crayola.csv) data as a csv file from github should you feel so inclined. There's even a script containing most of the [code for this post](https://github.com/djnavarro/quarto-blog/blob/main/posts/2022-12-18_crayola-crayon-colours/crayola.R) too :-) 
 
 ## Act IV: Not even Chekhov expects it to go off
 
-The final act of our little drama has arrived. Time to make a plot. The impression I get from reading the original blog posts by Stephen Von Worley is that the intention was never to look at the *number* of crayon colours in the Crayola standard set over time, but rather to explore the composition of those colours. Has the pattern of colours remained stable over time or has it shifted in hue? But I have the data now so I miight as well take a look. Here's a stacked bar chart showing the number of distinct crayon colours in the Crayola standard set every year from 1903 to 2022. It has grown over time but the growth looks linear, not exponential:
+In any case, the final act of our little drama has arrived at last. Time to make a plot. The drums roll and the audience holds their breath in antici-- 
+
+Oh let's just get on with it and load [ggplot2](https://ggplot2.tidyverse.org/) already. Here's a stacked bar chart showing the number of distinct crayon colours in the Crayola standard set every year from 1903 to 2022. It has grown over time but the growth looks linear, not exponential:
 
 ```{r first-plot}
 library(ggplot2)
