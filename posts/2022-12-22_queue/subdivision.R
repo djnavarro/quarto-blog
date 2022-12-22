@@ -126,7 +126,7 @@ subdivision <- function(seed) {
     theme(panel.background = element_rect(fill = shades[1], colour = shades[1]))
 
   # file path
-  output_dir <- here::here("posts", "2022-12-04_first-time-callr", "output")
+  output_dir <- here::here("posts", "2022-12-22_queue", "output")
   output_file <- paste0("subdivision_", seed, ".png")
 
   # render image
