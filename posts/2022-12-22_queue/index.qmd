@@ -18,6 +18,9 @@ image: ""
 set.seed(8)
 long_slug <- "2022-12-22_queue"
 #renv::use(lockfile = "renv.lock")
+wide <- 136
+narrow <- 76
+options(width = narrow)
 ```
 
 
@@ -33,20 +36,148 @@ That's been said now. Good. We can put aside all pretension.
 
 ## What does it do, and why?
 
-Let's say I have a little art function called `subdivision()`
+Let's say I have a generative art function called `donut()`, based loosely on a [teaching example from my art from code workshop](https://art-from-code.netlify.app/day-1/session-1/#composition). The `donut()` function takes an input `seed`, creates a piece of generative art using ggplot2, and writes the output to an image file. This process takes several seconds to complete on my laptop:
 
 ```{r source-subdivision}
 #| include: false
-source("subdivision.R")
+source("donut.R")
 ```
+
+```{r my-first-donut}
+#| cache: true
+library(tictoc)
+tic()
+donut(seed = 100)
+toc()
+```
+
+Here's the piece, by the way:
+
+![](donut_100.png)
+
+That's nice and I do like this piece, but generative art is an iterative process and I like to make many pieces at once to help me get a feel for the statistical properties of the system. Waiting 8.5 seconds for one piece to render is one thing: waiting 15 minutes for 100 pieces to render is quite another. So it's helpful if I can do this in parallel.
+
+```{r package}
+library(queue)
+```
+
+Here's how I might do that with queue:
 
 ```{r my-first-queue}
-library(queue)
-
-q <- Queue$new(workers = 6)
-for(seed in 101:118) q$add(subdivision, list(seed))
-q$run(message = "verbose")
+#| cache: true
+q1 <- Queue$new(workers = 6)
+for(seed in 101:108) q1$add(donut, list(seed))
+out1 <- q1$run(message = "verbose")
 ```
+
+It doesn't run six times faster. There's overhead: R sessions have to be initialised, the scheduler needs to assign the tasks, data have to be serialised and passed between R sessions and so on. Perhaps most importantly, my little laptop doesn't really have six cores to spare. There's reason why the sixth worker took 20 seconds to finish -- the operating system didn't have any spare resources to allocate.  
+
+::: {.column-screen-inset}
+::: {layout-ncol=4}
+
+![](donut_101.png)
+
+![](donut_102.png)
+
+![](donut_103.png)
+
+![](donut_104.png)
+
+![](donut_105.png)
+
+![](donut_106.png)
+
+![](donut_107.png)
+
+![](donut_108.png)
+
+:::
+:::
+
+For comparison, let's make another eight pieces, this time with only three workers:
+
+```{r my-second-queue}
+#| cache: true
+q2 <- Queue$new(workers = 3)
+for(seed in 109:116) q2$add(donut, list(seed))
+out2 <- q2$run(message = "verbose")
+```
+
+The completion time is essentially the same. Ultimately, whenever you're using multithreading as your mechanism for parallel computing, you're relying on the operating system to do the work for you. The queue package doesn't do any clever scheduling. All it does is set the R process running and polls them intermittently to see if they've finished their assigned tasks. The operating system tasks care of low level details. If you create 100 workers but your machine only has 3 cores free, well, the operating system isn't a magic wand. It can't make computing resources appear if they don't exist. 
+
+By default, queue sets the concurrency to 4 workers, on the -- thorougly unscientific -- logic that this usually speeds things up on my laptop without being absurd, and pushing any higher than that rarely does anything useful. 
+
+::: {.column-screen-inset}
+::: {layout-ncol=4}
+
+![](donut_109.png)
+
+![](donut_110.png)
+
+![](donut_111.png)
+
+![](donut_112.png)
+
+![](donut_113.png)
+
+![](donut_114.png)
+
+![](donut_115.png)
+
+![](donut_116.png)
+
+:::
+:::
+
+
+## What does it store?
+
+Okay, so let's take a look at what it actually stores
+
+`r options(width = wide)`
+
+```{r}
+#| column: page
+out1
+```
+
+`r options(width = narrow)`
+
+
+## Surviving a crash
+
+I'm going to be honest. Sometimes^[Often] I write bad code when I am exploring a new generative art system. Code that crashes the R session unpredictably. So it would be nice if the queue had a little bit of robustness for that. To be honest, the queue package isn't very sophisticated in detecting sessions that have crashed,^[I mean, it was just a fun side project I did over the weekend because I found myself unexpectedly unemployed all of a sudden and Stella needs to get her groove back okay?] but it does have some ability to recover when a task crashes its thread. Let's keep this simple. I'll define a perfectly safe function that waits for a moment and then returns, and another function that always crashes the R session as soon as it is called:
+
+```{r, simple-functions}
+wait <- function(x) {
+  Sys.sleep(x)
+  x
+}
+crash <- function(x) .Call("abort")
+```
+
+Now let's define a queue that has only two workers, but has no less than three tasks that are guaranteed to crash the worker the moment the tasks are started:
+
+```{r, crashing-queue}
+queue <- Queue$new(workers = 2)
+queue$add(wait, list(x = .1))
+queue$add(crash)
+queue$add(crash)
+queue$add(crash)
+queue$add(wait, list(x = .1))
+```
+
+The queue allocates task in a first-in first-out order, so the three "crash tasks" are guaranteed to be allocated before the final "wait task". Let's take a look at what happens when the queue runs:
+
+```{r}
+queue$run()
+```
+
+It's a little slower than we'd hope, but it does finish both valid tasks and returns nothing for the tasks that crashed their R sessions. What has happened in the background is that the queue runs a simple check to see if any of the R sessions have crashed, and attempts to replace them with a new worker whenever it detects that this has happened. It's not in any sense optimised, but it does sort of work.
+
+
+
+
 
 <!--------------- appendices go here ----------------->
 
