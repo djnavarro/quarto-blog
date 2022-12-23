@@ -15,7 +15,387 @@
 <link>https://blog.djnavarro.net/index.html</link>
 </image>
 <generator>quarto-1.2.280</generator>
-<lastBuildDate>Sat, 17 Dec 2022 13:00:00 GMT</lastBuildDate>
+<lastBuildDate>Wed, 21 Dec 2022 13:00:00 GMT</lastBuildDate>
+<item>
+  <title>Queue</title>
+  <dc:creator>Danielle Navarro</dc:creator>
+  <link>https://blog.djnavarro.net/posts/2022-12-22_queue/index.html</link>
+  <description><![CDATA[ 
+
+
+
+
+<!--------------- my typical setup ----------------->
+<!--------------- post begins here ----------------->
+<p>Okay. So I wrote a simple package for <a href="https://queue.djnavarro.net">multi-threaded tasks queues in R</a> this week. It wasn’t intentional, I swear. I was just trying to teach myself how to use the <a href="https://callr.r-lib.org/">callr</a> package,<sup>1</sup> and making sure I had a solid grasp of encapsulated object-oriented programming with <a href="https://r6.r-lib.org/">R6</a>. Things got a little out of hand. Sorry.</p>
+<p>And let’s be very clear about something at the outset. If you want to do parallel computing in R correctly, you go look at <a href="https://www.futureverse.org/">futureverse.org</a>. The <a href="https://future.futureverse.org/">future</a> package by Henrik Bengtsson provides a fabulous way to execute R code asynchronously and in parallel. And there are many excellent packages built on top of that, so there’s a whole lovely ecosystem there just waiting for you.<sup>2</sup> Relatedly, if the reason you’re thinking about parallel computing is that you’ve found yourself with a burning need to analyse terabytes of data with R then babe it might be time to start learning some R workflows using <a href="https://therinspark.com/">Spark</a>, <a href="https://blog.djnavarro.net/category/apachearrow">Arrow</a>, <a href="https://www.r-bloggers.com/2022/04/wtf-is-kubernetes-and-should-i-care-as-r-user/">Kubernetes</a>. It may be time to learn about some of those other eldritch words of power that have figured rather more prominently in my life than one might expect for a simple country girl.<sup>3</sup></p>
+<p>My little queue package is a personal project. I happen to like it, but you should not be looking at it as an alternative to serious tools.</p>
+<p>That’s been said now. Good. We can put aside all pretension.</p>
+<section id="what-does-it-do" class="level2 page-columns page-full">
+<h2 class="anchored" data-anchor-id="what-does-it-do">What does it do?</h2>
+<p>Let’s say I have a generative art function called <code>donut()</code>, based loosely on a <a href="https://art-from-code.netlify.app/day-1/session-1/#composition">teaching example from my art from code workshop</a>. The <code>donut()</code> function takes an input <code>seed</code>, creates a piece of generative art using ggplot2, and writes the output to an image file. This process takes several seconds to complete on my laptop:</p>
+<div class="cell" data-hash="index_cache/html/my-first-donut_78cc3a9337022adc6a85a72fd51f194e">
+<div class="sourceCode cell-code" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><span class="fu" style="color: #4758AB;">library</span>(tictoc)</span>
+<span id="cb1-2"><span class="fu" style="color: #4758AB;">tic</span>()</span>
+<span id="cb1-3"><span class="fu" style="color: #4758AB;">donut</span>(<span class="at" style="color: #657422;">seed =</span> <span class="dv" style="color: #AD0000;">100</span>)</span>
+<span id="cb1-4"><span class="fu" style="color: #4758AB;">toc</span>()</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>5.277 sec elapsed</code></pre>
+</div>
+</div>
+<p>Here’s the piece, by the way:</p>
+<p><img src="https://blog.djnavarro.net/posts/2022-12-22_queue/donut_100.png" class="img-fluid"></p>
+<p>That’s nice and I do like this piece, but generative art is an iterative process and I like to make many pieces at once to help me get a feel for the statistical properties of the system. Waiting five or six seconds for one piece to render is one thing: waiting 8-10 minutes for 100 pieces to render is quite another. So it’s helpful if I can do this in parallel.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb3" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1"><span class="fu" style="color: #4758AB;">library</span>(queue)</span></code></pre></div>
+</div>
+<p>Here’s how I might do that using queue. I designed the package using R6 classes – more on that later – so we’ll be working in the “encapsulated” object oriented programming style that is more common in other programming languages. The first step is to initialise a <a href="https://queue.djnavarro.net/reference/Queue.html"><code>Queue</code></a> object, specifying the number of workers we want to use. I’ll use six:</p>
+<div class="cell" data-hash="index_cache/html/my-first-queue_dfc1ff39dc3ddb607ec985d5339378c1">
+<div class="sourceCode cell-code" id="cb4" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1">queue <span class="ot" style="color: #003B4F;">&lt;-</span> Queue<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">new</span>(<span class="at" style="color: #657422;">workers =</span> <span class="dv" style="color: #AD0000;">6</span>)</span></code></pre></div>
+</div>
+<p>When I do this, the queue package starts six R sessions for us, and all my computations will be done in those R sessions. Under the hood, all the hard work of managing the R sessions is being done by the wonderful callr package by Gábor Csárdi<sup>4</sup> – the only thing that queue does is provide a layer of abstraction and automation to the whole process.</p>
+<p>Next, I’ll add some tasks to the queue. <code>Queue</code> objects have an <code>add()</code> method that take a function and a list of arguments, so I can do this to push a task to the queue:</p>
+<div class="cell" data-hash="index_cache/html/my-first-task_e9d06a818d4aab8856c997131ca80f42">
+<div class="sourceCode cell-code" id="cb5" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1">queue<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">add</span>(donut, <span class="at" style="color: #657422;">args =</span> <span class="fu" style="color: #4758AB;">list</span>(<span class="at" style="color: #657422;">seed =</span> <span class="dv" style="color: #AD0000;">100</span>))</span></code></pre></div>
+</div>
+<p>When the queue executes, it will be in a “first in, first out” order,<sup>5</sup> so this task will be the first one to be assigned to a worker. Though of course that’s no guarantee that it will be the first one to finish!</p>
+<p>Anyway, let’s load up several more tasks. There’s some weird aversion out there to using loops in R, but this isn’t one of those situations where we need to worry about unnecessary copying, so I’m going to use a loop:</p>
+<div class="cell" data-hash="index_cache/html/load-several-tasks_5cc68af5a47beff90603fa0c398907e3">
+<div class="sourceCode cell-code" id="cb6" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1"><span class="cf" style="color: #003B4F;">for</span>(s <span class="cf" style="color: #003B4F;">in</span> <span class="dv" style="color: #AD0000;">101</span><span class="sc" style="color: #5E5E5E;">:</span><span class="dv" style="color: #AD0000;">108</span>) queue<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">add</span>(donut, <span class="fu" style="color: #4758AB;">list</span>(<span class="at" style="color: #657422;">seed =</span> s))</span></code></pre></div>
+</div>
+<p>So now we have nine tasks loaded onto a queue with six workers. To start it running I call the <code>run()</code> method for the queue. By default, all you’d see while the queue is running is a spinner with a progress message telling you how many tasks have completed so far, how many are currently running, and how many are still waiting. But I’ll ask it to be a bit more chatty. I’ll call it setting <code>message = "verbose"</code> so that we can see a log showing the order in which the tasks completed and time each task took to complete, in addition to the total time elapsed on my system while the queue was running:</p>
+<div class="cell" data-hash="index_cache/html/run-my-queue_f0e1b58ef56570b65d67c0ec4ae0c11c">
+<div class="sourceCode cell-code" id="cb7" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1">out <span class="ot" style="color: #003B4F;">&lt;-</span> queue<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">run</span>(<span class="at" style="color: #657422;">message =</span> <span class="st" style="color: #20794D;">"verbose"</span>)</span></code></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: task_5 finished in 3.18 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: task_2 finished in 5.78 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: task_6 finished in 5.78 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: task_4 finished in 7.34 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: task_3 finished in 8.09 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: task_1 finished in 9.46 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: task_7 finished in 7.76 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: task_9 finished in 6.09 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: task_8 finished in 6.92 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>✔ Queue complete: 9 tasks done in 12.7 secs</code></pre>
+</div>
+</div>
+<p>Here are the nine pieces that popped off the queue in 13 seconds:</p>
+<div class="column-screen-inset">
+<div class="quarto-layout-panel">
+<div class="quarto-layout-row quarto-layout-valign-top">
+<div class="quarto-layout-cell" style="flex-basis: 33.3%;justify-content: center;">
+<p><img src="https://blog.djnavarro.net/posts/2022-12-22_queue/donut_100.png" class="img-fluid"></p>
+</div>
+<div class="quarto-layout-cell" style="flex-basis: 33.3%;justify-content: center;">
+<p><img src="https://blog.djnavarro.net/posts/2022-12-22_queue/donut_101.png" class="img-fluid"></p>
+</div>
+<div class="quarto-layout-cell" style="flex-basis: 33.3%;justify-content: center;">
+<p><img src="https://blog.djnavarro.net/posts/2022-12-22_queue/donut_102.png" class="img-fluid"></p>
+</div>
+</div>
+<div class="quarto-layout-row quarto-layout-valign-top">
+<div class="quarto-layout-cell" style="flex-basis: 33.3%;justify-content: center;">
+<p><img src="https://blog.djnavarro.net/posts/2022-12-22_queue/donut_103.png" class="img-fluid"></p>
+</div>
+<div class="quarto-layout-cell" style="flex-basis: 33.3%;justify-content: center;">
+<p><img src="https://blog.djnavarro.net/posts/2022-12-22_queue/donut_104.png" class="img-fluid"></p>
+</div>
+<div class="quarto-layout-cell" style="flex-basis: 33.3%;justify-content: center;">
+<p><img src="https://blog.djnavarro.net/posts/2022-12-22_queue/donut_105.png" class="img-fluid"></p>
+</div>
+</div>
+<div class="quarto-layout-row quarto-layout-valign-top">
+<div class="quarto-layout-cell" style="flex-basis: 33.3%;justify-content: center;">
+<p><img src="https://blog.djnavarro.net/posts/2022-12-22_queue/donut_106.png" class="img-fluid"></p>
+</div>
+<div class="quarto-layout-cell" style="flex-basis: 33.3%;justify-content: center;">
+<p><img src="https://blog.djnavarro.net/posts/2022-12-22_queue/donut_107.png" class="img-fluid"></p>
+</div>
+<div class="quarto-layout-cell" style="flex-basis: 33.3%;justify-content: center;">
+<p><img src="https://blog.djnavarro.net/posts/2022-12-22_queue/donut_108.png" class="img-fluid"></p>
+</div>
+</div>
+</div>
+</div>
+<p>So it’s a three-step process: (1) create the queue, (2) load up the tasks, (3) execute the tasks. In practice I would probably simplify the code to this:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb18" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1">queue <span class="ot" style="color: #003B4F;">&lt;-</span> Queue<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">new</span>(<span class="at" style="color: #657422;">workers =</span> <span class="dv" style="color: #AD0000;">6</span>)</span>
+<span id="cb18-2"><span class="cf" style="color: #003B4F;">for</span>(s <span class="cf" style="color: #003B4F;">in</span> <span class="dv" style="color: #AD0000;">100</span><span class="sc" style="color: #5E5E5E;">:</span><span class="dv" style="color: #AD0000;">108</span>) queue<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">add</span>(donut, <span class="fu" style="color: #4758AB;">list</span>(<span class="at" style="color: #657422;">seed =</span> s))</span>
+<span id="cb18-3">out <span class="ot" style="color: #003B4F;">&lt;-</span> queue<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">run</span>()</span></code></pre></div>
+</div>
+<p>True, I could simplify it further. For example, if I know that I’m always calling the same function and always passing the same the same arguments – just with different values – this could be wrapped up in <a href="https://purrr.tidyverse.org/">purrr</a> style syntax, but honestly I’m not sure why I would bother doing that when <a href="https://furrr.futureverse.org/">furrr</a> already exists? I’m not planning to reinvent the wheel, especially not when Davis Vaughn already offers a fully-operational mass-transit system free of charge.</p>
+</section>
+<section id="what-does-it-store" class="level2 page-columns page-full">
+<h2 class="anchored" data-anchor-id="what-does-it-store">What does it store?</h2>
+<p>The output object <code>out</code> stores quite a lot of information about the tasks, the results, and the events that occurred during task execution, but most of it isn’t immediately interesting to us (especially when things actually work!) So let’s keep things simple for the moment and just look at the first five columns:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb19" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb19-1">out[, <span class="dv" style="color: #AD0000;">1</span><span class="sc" style="color: #5E5E5E;">:</span><span class="dv" style="color: #AD0000;">5</span>]</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>  task_id worker_id state        result       runtime
+1  task_1    577202  done donut_100.png 9.457713 secs
+2  task_2    577226  done donut_101.png 5.782191 secs
+3  task_3    577239  done donut_102.png 8.087054 secs
+4  task_4    577251  done donut_103.png 7.336802 secs
+5  task_5    577263  done donut_104.png 3.183247 secs
+6  task_6    577275  done donut_105.png 5.780861 secs
+7  task_7    577263  done donut_106.png 7.763061 secs
+8  task_8    577226  done donut_107.png 6.921016 secs
+9  task_9    577275  done donut_108.png 6.093996 secs</code></pre>
+</div>
+</div>
+<p>The columns are pretty self-explanatory I think?</p>
+<ul>
+<li><code>task_id</code> is a unique identifier for the task itself</li>
+<li><code>worker_id</code> is a unique identifier for the worker that completed the task (it’s also the process id for the R session)</li>
+<li><code>state</code> summarises the current state of the task (they’re all <code>"done"</code> because the queue is finished)</li>
+<li><code>result</code> is a list column containing the output from each task</li>
+<li><code>runtime</code> is a difftime column telling you how long each task took to finish</li>
+</ul>
+<p>As for the the full output… well… here it is…</p>
+<div class="cell column-page">
+<div class="sourceCode cell-code" id="cb21" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb21-1">out</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>  task_id worker_id state        result       runtime                                                                          fun args
+1  task_1    577202  done donut_100.png 9.457713 secs function (seed) , {,     source("donut.R", local = TRUE),     donut(seed), }  100
+2  task_2    577226  done donut_101.png 5.782191 secs function (seed) , {,     source("donut.R", local = TRUE),     donut(seed), }  101
+3  task_3    577239  done donut_102.png 8.087054 secs function (seed) , {,     source("donut.R", local = TRUE),     donut(seed), }  102
+4  task_4    577251  done donut_103.png 7.336802 secs function (seed) , {,     source("donut.R", local = TRUE),     donut(seed), }  103
+5  task_5    577263  done donut_104.png 3.183247 secs function (seed) , {,     source("donut.R", local = TRUE),     donut(seed), }  104
+6  task_6    577275  done donut_105.png 5.780861 secs function (seed) , {,     source("donut.R", local = TRUE),     donut(seed), }  105
+7  task_7    577263  done donut_106.png 7.763061 secs function (seed) , {,     source("donut.R", local = TRUE),     donut(seed), }  106
+8  task_8    577226  done donut_107.png 6.921016 secs function (seed) , {,     source("donut.R", local = TRUE),     donut(seed), }  107
+9  task_9    577275  done donut_108.png 6.093996 secs function (seed) , {,     source("donut.R", local = TRUE),     donut(seed), }  108
+              created              queued            assigned             started            finished code
+1 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:28:03  200
+2 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:28:00  200
+3 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:28:02  200
+4 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:28:01  200
+5 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:27:57  200
+6 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:28:00  200
+7 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:27:57 2022-12-23 12:27:57 2022-12-23 12:28:05  200
+8 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:28:00 2022-12-23 12:28:00 2022-12-23 12:28:06  200
+9 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:28:00 2022-12-23 12:28:00 2022-12-23 12:28:06  200
+                             message stdout stderr error
+1 done callr-rs-result-8ce3e320ef539                NULL
+2 done callr-rs-result-8ce3e6e032153                NULL
+3 done callr-rs-result-8ce3e5d32c7ba                NULL
+4  done callr-rs-result-8ce3e72346af                NULL
+5 done callr-rs-result-8ce3e4193129d                NULL
+6 done callr-rs-result-8ce3e42c3653c                NULL
+7 done callr-rs-result-8ce3e6ecedbfa                NULL
+8 done callr-rs-result-8ce3e41e0f9e6                NULL
+9 done callr-rs-result-8ce3e5a3c4630                NULL</code></pre>
+</div>
+</div>
+<p>Okay so there’s a bit more to unpack here. Let’s take a look…</p>
+<ul>
+<li>The <code>fun</code> and <code>args</code> columns contain the functions and arguments that were originally used to specify the task</li>
+<li>The <code>created</code>, <code>queued</code>, <code>assigned</code>, <code>started</code>, and <code>finished</code> columns contain POSIXct timestamps indicating when the task was created, added to a queue, assigned to a worker, started running on a worker, and returned from the worker</li>
+<li><code>code</code> is a numeric code returned by the callr R session: of particular note 200 means it returned successfully, 500 means the session exited cleanly, and 501 means the session crashed</li>
+<li><code>message</code> is a message returned by callr</li>
+<li><code>stdout</code> and <code>stderr</code> are the contents of the output and error streams from the worker session while the task was running</li>
+<li><code>error</code> currently is <code>NULL</code> because I haven’t implemented that bit yet lol.</li>
+</ul>
+</section>
+<section id="surviving-a-crash" class="level2">
+<h2 class="anchored" data-anchor-id="surviving-a-crash">Surviving a crash</h2>
+<p>I’m going to be honest. Sometimes<sup>6</sup> I write bad code when I am exploring a new generative art system. Code that crashes the R session unpredictably. So it would be nice if the queue had a little bit of robustness for that. To be honest, the queue package isn’t very sophisticated in detecting sessions that have crashed,<sup>7</sup> but it does have some ability to recover when a task crashes its thread. Let’s keep this simple. I’ll define a perfectly safe function that waits for a moment and then returns, and another function that always crashes the R session as soon as it is called:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb23" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb23-1">wait <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>(x) {</span>
+<span id="cb23-2">  <span class="fu" style="color: #4758AB;">Sys.sleep</span>(x)</span>
+<span id="cb23-3">  x</span>
+<span id="cb23-4">}</span>
+<span id="cb23-5">crash <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>(x) <span class="fu" style="color: #4758AB;">.Call</span>(<span class="st" style="color: #20794D;">"abort"</span>)</span></code></pre></div>
+</div>
+<p>Now let’s define a queue that has only two workers, but has no less than three tasks that are guaranteed to crash the worker the moment the tasks are started:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb24" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb24-1">queue <span class="ot" style="color: #003B4F;">&lt;-</span> Queue<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">new</span>(<span class="at" style="color: #657422;">workers =</span> <span class="dv" style="color: #AD0000;">2</span>)</span>
+<span id="cb24-2">queue<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">add</span>(wait, <span class="fu" style="color: #4758AB;">list</span>(<span class="at" style="color: #657422;">x =</span> .<span class="dv" style="color: #AD0000;">1</span>))</span>
+<span id="cb24-3">queue<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">add</span>(crash)</span>
+<span id="cb24-4">queue<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">add</span>(crash)</span>
+<span id="cb24-5">queue<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">add</span>(crash)</span>
+<span id="cb24-6">queue<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">add</span>(wait, <span class="fu" style="color: #4758AB;">list</span>(<span class="at" style="color: #657422;">x =</span> .<span class="dv" style="color: #AD0000;">1</span>))</span></code></pre></div>
+</div>
+<p>The queue allocates task in a first-in first-out order, so the three “crash tasks” are guaranteed to be allocated before the final “wait task”. Let’s take a look at what happens when the queue runs:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb25" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb25-1">queue<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">run</span>()</span></code></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>✔ Queue complete: 5 tasks done in 3.34 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 5 × 17
+  task_id worker_id state result    runtime        fun    args            
+  &lt;chr&gt;       &lt;int&gt; &lt;chr&gt; &lt;list&gt;    &lt;drtn&gt;         &lt;list&gt; &lt;list&gt;          
+1 task_1     624437 done  &lt;dbl [1]&gt; 0.1263957 secs &lt;fn&gt;   &lt;named list [1]&gt;
+2 task_2     624445 done  &lt;NULL&gt;    1.1492345 secs &lt;fn&gt;   &lt;list [0]&gt;      
+3 task_3     624437 done  &lt;NULL&gt;    2.0157561 secs &lt;fn&gt;   &lt;list [0]&gt;      
+4 task_4     624467 done  &lt;NULL&gt;    1.9129426 secs &lt;fn&gt;   &lt;list [0]&gt;      
+5 task_5     624484 done  &lt;dbl [1]&gt; 0.1606448 secs &lt;fn&gt;   &lt;named list [1]&gt;
+# … with 10 more variables: created &lt;dttm&gt;, queued &lt;dttm&gt;, assigned &lt;dttm&gt;,
+#   started &lt;dttm&gt;, finished &lt;dttm&gt;, code &lt;dbl&gt;, message &lt;chr&gt;,
+#   stdout &lt;list&gt;, stderr &lt;list&gt;, error &lt;list&gt;</code></pre>
+</div>
+</div>
+<p>It’s a little slower than we’d hope, but it does finish both valid tasks and returns nothing for the tasks that crashed their R sessions. What has happened in the background is that the queue runs a simple check to see if any of the R sessions have crashed, and attempts to replace them with a new worker whenever it detects that this has happened. It’s not in any sense optimised, but it does sort of work.</p>
+</section>
+<section id="design" class="level2">
+<h2 class="anchored" data-anchor-id="design">Design</h2>
+<p>Although my confidence in my ability to have a career in tech is at an all-time low, I have to admit that the work I’ve done over the last year has made me a better programmer. I didn’t much effort into writing queue, but the code feels cleaner and more modular than the code I was writing a year ago. Good practices have become habits, I suppose. That’s a nice feeling. I automatically write proper unit tests as I go, knowing that those tests will save me when I need to make changes later. I document properly as I go, knowing that I won’t remember a bloody thing about how my own code works six hours later – never mind six months. And, maybe most importantly of all, my code now seems to have this habit of organising itself into small, manageable abstractions. I have no idea when that happened, because I wasn’t actually part of a software engineering team. I was just the girl who wrote some docs and few little blog posts.<sup>8</sup></p>
+<p>Here’s what I mean. If you take a look at the <a href="https://github.com/djnavarro/queue/blob/4c70aad373fd518250c6bd6c29cebccb6d16dc65/R/queue.R">source code for the <code>Queue</code></a> object, it’s actually not very long: the file is mostly devoted to the documentation, and the object doesn’t have very many methods. Honestly, we’ve already seen most of them:</p>
+<ul>
+<li><code>new()</code> creates a new queue</li>
+<li><code>add()</code> adds a task to a queue</li>
+<li><code>run()</code> sets the queue running</li>
+</ul>
+<p>If everything works smoothly you don’t need anything else, so why burden the user with extra details? Sure, there’s a little complexity to these methods which is of course documented on the <a href="https://queue.djnavarro.net/reference/Queue.html">relevant pkgdown page</a> because I’m not a jerk, but this isn’t a complicated package…</p>
+<p>…when it’s working.</p>
+<p>Of course, when things start to break, you start to care a lot more about the internals. Fair enough. There are two important data structures within the <code>Queue</code>:</p>
+<ul>
+<li>Internally, a <code>Queue</code> manages a <a href="https://queue.djnavarro.net/reference/WorkerPool.html"><code>WorkerPool</code></a> comprised of one or more <a href="https://queue.djnavarro.net/reference/Worker.html"><code>Worker</code></a> objects. As you’d expect given the names, these provide abstractions for managing the R sessions. A <code>Worker</code> object provides a wrapper around a callr R session, and tools that automate the interaction between that session and a task.</li>
+<li>The <code>Queue</code> also holds a <a href="https://queue.djnavarro.net/reference/TaskList.html"><code>TaskList</code></a> comprised of one or more <a href="https://queue.djnavarro.net/reference/Task.html"><code>Task</code></a> objects. Again, as you might expect from the names, these are the storage classes. A <code>Task</code> object is a container that holds a function, its arguments, any results it might have returned, and any logged information about the process of its execution.</li>
+</ul>
+<p>In some situations it can be awfully handy to have access to these constituent data structures, particularly because those objects expose additional tools that I deliberately chose not to make available at the <code>Queue</code> level. From the <code>Queue</code> itself what you can do is return the objects:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb28" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb28-1">workers <span class="ot" style="color: #003B4F;">&lt;-</span> queue<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">get_workers</span>()</span>
+<span id="cb28-2">tasks <span class="ot" style="color: #003B4F;">&lt;-</span> queue<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">get_tasks</span>()</span></code></pre></div>
+</div>
+<p>These objects are R6 classes: they have reference semantics so anything I do with <code>workers</code> and <code>tasks</code> will have corresponding effects on <code>queue</code>. For this blog post I don’t intend to dive into details of what I did when designing the <code>WorkerPool</code> and <code>TaskList</code> classes – especially because queue is only at version 0.0.2 and I don’t yet know what I’m going to do with this cute little package – but I’ll give one example.</p>
+<p>Let’s take the workers. By default, a <code>Queue</code> cleans up after itself and closes any R sessions that it started. The <code>WorkerPool</code> object associated with a <code>Queue</code> has a <code>get_pool_state()</code> method that I can use to check the state of the workers, and some other methods to modify the workers if I so choose. Let’s have a go. I ask <code>workers</code> to report on the status of the R sessions, this is what I get:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb29" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb29-1">workers<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">get_pool_state</span>()</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>    624484     624496 
+"finished" "finished" </code></pre>
+</div>
+</div>
+<p>Yes, as expected the workers have stopped. But I can replace them with live R sessions by calling the <code>refill_pool()</code> method:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb31" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb31-1">workers<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">refill_pool</span>()</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>624512 624524 
+"idle" "idle" </code></pre>
+</div>
+</div>
+<p>And I can shut them down again by calling <code>shutdown_pool()</code>:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb33" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb33-1">workers<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">shutdown_pool</span>()</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>    624512     624524 
+"finished" "finished" </code></pre>
+</div>
+</div>
+<p>Along similar lines the <code>TaskList</code> object has some methods that let me manipulate the data storage associated with my <code>Queue</code>. Normally I don’t need to. Sometimes I do. It’s handy to have those tools lying around. At the moment the toolkit feels a little light, but the nice thing about writing your own package is that I can always add more if I need them :-)</p>
+</section>
+<section id="epilogue" class="level2">
+<h2 class="anchored" data-anchor-id="epilogue">Epilogue</h2>
+<div class="cell" data-hash="index_cache/html/austen-joke_faf2b96ff686ee96563e01788b849faf">
+<div class="sourceCode cell-code" id="cb35" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb35-1">queue <span class="ot" style="color: #003B4F;">&lt;-</span> Queue<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">new</span>(<span class="at" style="color: #657422;">workers =</span> <span class="dv" style="color: #AD0000;">6</span>)</span>
+<span id="cb35-2">queue<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">add</span>(wait, <span class="fu" style="color: #4758AB;">list</span>(<span class="at" style="color: #657422;">x =</span> <span class="fl" style="color: #AD0000;">1.3</span>), <span class="at" style="color: #657422;">id =</span> <span class="fu" style="color: #4758AB;">toupper</span>(<span class="st" style="color: #20794D;">"multithreading"</span>))</span>
+<span id="cb35-3">queue<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">add</span>(wait, <span class="fu" style="color: #4758AB;">list</span>(<span class="at" style="color: #657422;">x =</span> <span class="fl" style="color: #AD0000;">0.1</span>), <span class="at" style="color: #657422;">id =</span> <span class="fu" style="color: #4758AB;">toupper</span>(<span class="st" style="color: #20794D;">"it is"</span>))</span>
+<span id="cb35-4">queue<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">add</span>(wait, <span class="fu" style="color: #4758AB;">list</span>(<span class="at" style="color: #657422;">x =</span> <span class="fl" style="color: #AD0000;">0.7</span>), <span class="at" style="color: #657422;">id =</span> <span class="fu" style="color: #4758AB;">toupper</span>(<span class="st" style="color: #20794D;">"acknowledged"</span>))</span>
+<span id="cb35-5">queue<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">add</span>(wait, <span class="fu" style="color: #4758AB;">list</span>(<span class="at" style="color: #657422;">x =</span> <span class="fl" style="color: #AD0000;">1.0</span>), <span class="at" style="color: #657422;">id =</span> <span class="fu" style="color: #4758AB;">toupper</span>(<span class="st" style="color: #20794D;">"post"</span>))</span>
+<span id="cb35-6">queue<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">add</span>(wait, <span class="fu" style="color: #4758AB;">list</span>(<span class="at" style="color: #657422;">x =</span> <span class="fl" style="color: #AD0000;">0.5</span>), <span class="at" style="color: #657422;">id =</span> <span class="fu" style="color: #4758AB;">toupper</span>(<span class="st" style="color: #20794D;">"universally"</span>))</span>
+<span id="cb35-7">queue<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">add</span>(wait, <span class="fu" style="color: #4758AB;">list</span>(<span class="at" style="color: #657422;">x =</span> <span class="fl" style="color: #AD0000;">0.1</span>), <span class="at" style="color: #657422;">id =</span> <span class="fu" style="color: #4758AB;">toupper</span>(<span class="st" style="color: #20794D;">"a truth"</span>))</span>
+<span id="cb35-8">queue<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">add</span>(wait, <span class="fu" style="color: #4758AB;">list</span>(<span class="at" style="color: #657422;">x =</span> <span class="fl" style="color: #AD0000;">1.2</span>), <span class="at" style="color: #657422;">id =</span> <span class="fu" style="color: #4758AB;">toupper</span>(<span class="st" style="color: #20794D;">"must be"</span>))</span>
+<span id="cb35-9">queue<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">add</span>(wait, <span class="fu" style="color: #4758AB;">list</span>(<span class="at" style="color: #657422;">x =</span> <span class="fl" style="color: #AD0000;">0.9</span>), <span class="at" style="color: #657422;">id =</span> <span class="fu" style="color: #4758AB;">toupper</span>(<span class="st" style="color: #20794D;">"about"</span>))</span>
+<span id="cb35-10">queue<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">add</span>(wait, <span class="fu" style="color: #4758AB;">list</span>(<span class="at" style="color: #657422;">x =</span> <span class="fl" style="color: #AD0000;">1.6</span>), <span class="at" style="color: #657422;">id =</span> <span class="fu" style="color: #4758AB;">toupper</span>(<span class="st" style="color: #20794D;">"trick"</span>))</span>
+<span id="cb35-11">queue<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">add</span>(wait, <span class="fu" style="color: #4758AB;">list</span>(<span class="at" style="color: #657422;">x =</span> <span class="fl" style="color: #AD0000;">0.1</span>), <span class="at" style="color: #657422;">id =</span> <span class="fu" style="color: #4758AB;">toupper</span>(<span class="st" style="color: #20794D;">"that a"</span>))</span>
+<span id="cb35-12">queue<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">add</span>(wait, <span class="fu" style="color: #4758AB;">list</span>(<span class="at" style="color: #657422;">x =</span> <span class="fl" style="color: #AD0000;">0.5</span>), <span class="at" style="color: #657422;">id =</span> <span class="fu" style="color: #4758AB;">toupper</span>(<span class="st" style="color: #20794D;">"in want of"</span>))</span>
+<span id="cb35-13">queue<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">add</span>(wait, <span class="fu" style="color: #4758AB;">list</span>(<span class="at" style="color: #657422;">x =</span> <span class="fl" style="color: #AD0000;">1.0</span>), <span class="at" style="color: #657422;">id =</span> <span class="fu" style="color: #4758AB;">toupper</span>(<span class="st" style="color: #20794D;">"an async"</span>))</span>
+<span id="cb35-14">out <span class="ot" style="color: #003B4F;">&lt;-</span> queue<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">run</span>(<span class="at" style="color: #657422;">message =</span> <span class="st" style="color: #20794D;">"verbose"</span>)</span></code></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: IT IS finished in 0.172 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: A TRUTH finished in 0.169 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: UNIVERSALLY finished in 0.536 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: ACKNOWLEDGED finished in 0.776 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: THAT A finished in 0.173 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: POST finished in 1.07 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: ABOUT finished in 0.957 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: MULTITHREADING finished in 1.37 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: MUST BE finished in 1.25 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: IN WANT OF finished in 0.582 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: AN ASYNC finished in 1.06 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: TRICK finished in 1.66 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>✔ Queue complete: 12 tasks done in 2.21 secs</code></pre>
+</div>
+</div>
+<!--------------- appendices go here ----------------->
+
+
+</section>
+
+
+<div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
+
+<ol>
+<li id="fn1"><p>Honestly, the whole reason this exists is that I was reading the callr blog post on writing <a href="https://www.tidyverse.org/blog/2019/09/callr-task-q/">multi-worker task queues</a> and decided to try doing it myself…↩︎</p></li>
+<li id="fn2"><p>Note to self: Learn <a href="https://www.jottr.org/2022/12/05/avoid-detectcores/">parallelly</a>↩︎</p></li>
+<li id="fn3"><p><code>kubectl auth can-i create chaos</code>↩︎</p></li>
+<li id="fn4"><p>Longtime readers will have noticed that I have become a bit of a fangirl. I swear I’m not stalking him, but like, every time I think… gosh this is a really handy bit of infrastructure tooling, who do I have to thank for this… oh, of course it’s bloody Gábor again. Anyway.↩︎</p></li>
+<li id="fn5"><p>I am a country girl, so FIFO means “fly-in fly-out”, and I shan’t be listening to any of you computer nerds who claim it has another meaning↩︎</p></li>
+<li id="fn6"><p>Often↩︎</p></li>
+<li id="fn7"><p>I mean, it was just a fun side project I did over the weekend because I have found myself quite unexpectedly unemployed, and my self-confidence is utterly shattered at the moment, and Stella needs to get her groove back slowly okay?↩︎</p></li>
+<li id="fn8"><p>For the record, dear potential future employer, this is what is known as “self-deprecation”. Mistake not my awareness of the absurd cultural norms to which women are expected to conform with a literal claim about competence. In point of fact I am rather good at what I do.↩︎</p></li>
+</ol>
+</section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
+  author = {Danielle Navarro},
+  title = {Queue},
+  date = {2022-12-22},
+  url = {https://blog.djnavarro.net/posts/2022-12-22_queue},
+  langid = {en}
+}
+</code></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2022" class="csl-entry quarto-appendix-citeas">
+Danielle Navarro. 2022. <span>“Queue.”</span> December 22, 2022. <a href="https://blog.djnavarro.net/posts/2022-12-22_queue">https://blog.djnavarro.net/posts/2022-12-22_queue</a>.
+</div></div></section></div> ]]></description>
+  <category>Parallel Computing</category>
+  <category>R</category>
+  <category>Object-Oriented Programming</category>
+  <guid>https://blog.djnavarro.net/posts/2022-12-22_queue/index.html</guid>
+  <pubDate>Wed, 21 Dec 2022 13:00:00 GMT</pubDate>
+  <media:content url="https://blog.djnavarro.net/posts/2022-12-22_queue/donut_100.png" medium="image" type="image/png" height="144" width="144"/>
+</item>
 <item>
   <title>Crayola crayon colours</title>
   <dc:creator>Danielle Navarro</dc:creator>
@@ -688,6 +1068,8 @@ Danielle Navarro. 2022. <span>“Crayola Crayon Colours.”</span> December
 18, 2022. <a href="https://blog.djnavarro.net/posts/2022-12-18_crayola-crayon-colours">https://blog.djnavarro.net/posts/2022-12-18_crayola-crayon-colours</a>.
 </div></div></section></div> ]]></description>
   <category>R</category>
+  <category>Data Cleaning</category>
+  <category>Data Visualisation</category>
   <guid>https://blog.djnavarro.net/posts/2022-12-18_crayola-crayon-colours/index.html</guid>
   <pubDate>Sat, 17 Dec 2022 13:00:00 GMT</pubDate>
   <media:content url="https://blog.djnavarro.net/posts/2022-12-18_crayola-crayon-colours/crayola.png" medium="image" type="image/png" height="144" width="144"/>
@@ -11351,110 +11733,6 @@ Danielle Navarro. 2021. <span>“Unpredictable Paintings.”</span> November
   <guid>https://blog.djnavarro.net/posts/2021-11-01_unpredictable-paintings/index.html</guid>
   <pubDate>Sun, 31 Oct 2021 13:00:00 GMT</pubDate>
   <media:content url="https://blog.djnavarro.net/posts/2021-11-01_unpredictable-paintings/featured.png" medium="image" type="image/png" height="89" width="144"/>
-</item>
-<item>
-  <title>Generative art resources in R</title>
-  <dc:creator>Danielle Navarro</dc:creator>
-  <link>https://blog.djnavarro.net/posts/2021-10-19_rtistry-posts/index.html</link>
-  <description><![CDATA[ 
-
-
-
-
-<!--------------- setup post ----------------->
-<!--------------- post ----------------->
-<p>People often ask me if I have any words of advice for young people. No wait, that’s not right. Nobody wants to hear my words of advice for young people, largely because I have none. What they often <em>do</em> ask me is if I have any words of advice for aspiring generative artists who want to use R to make pretty pictures. To be honest, I don’t have a lot of advice there either, but I’ll try my best.</p>
-<p>Let’s start with the big picture: there are no books or general purpose introductions out there. There are no books, no CRAN task views, no courses you can take. In fact, until quite recently generative art in R was an extremely niche topic. To my knowledge, the <a href="https://twitter.com/hashtag/rtistry">#rtistry hashtag on twitter</a> is where you’ll find the most art and the most posts about the topic, but that hashtag is pretty new.<sup>1</sup> There were resources that existed prior to that, of course: how could there not be? After all, Thomas Lin Pedersen has been building a toolkit for generative art in R for quite some time now. In his <a href="https://www.data-imaginist.com/slides/celebRation2020">keynote talk at celebRation2020</a>, he refers to an “art driven development” process that has led him to create several packages that are valuable to the would-be generative artist. For example:</p>
-<ul>
-<li><a href="https://ambient.data-imaginist.com/">ambient</a> is amazingly useful when you want to play around with flow fields or generate interesting multidimensional noise patterns</li>
-<li><a href="https://github.com/thomasp85/particles">particles</a> provides a toolkit for particle simulation in R: it’s inspired by the d3-force javascript module, and is useful when you want to simulate forces acting on particles</li>
-<li><a href="https://ggforce.data-imaginist.com/">ggforce</a> provides a collection of tools that add some missing functionality to ggplot2, much of which is very handy when making art</li>
-</ul>
-<p>These tools are great, but if you’re just getting started it can be helpful to play around in a more constrained environment. If you want something extremely simple, you could play around with the <a href="https://flametree.djnavarro.net/">flametree</a> package I wrote. It’s not very flexible (it just draws branching things!) but it does have the advantage that you can get started with something as simple as this:</p>
-<div class="cell" data-layout-align="center" data-hash="index_cache/html/flametree_5becbb587dfbbe1a7c4322544fb5db18">
-<div class="sourceCode cell-code" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><span class="fu" style="color: #4758AB;">library</span>(flametree)</span>
-<span id="cb1-2"></span>
-<span id="cb1-3"><span class="co" style="color: #5E5E5E;"># pick some colours</span></span>
-<span id="cb1-4">shades <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="st" style="color: #20794D;">"#1b2e3c"</span>, <span class="st" style="color: #20794D;">"#0c0c1e"</span>, <span class="st" style="color: #20794D;">"#74112f"</span>, <span class="st" style="color: #20794D;">"#f3e3e2"</span>)</span>
-<span id="cb1-5"></span>
-<span id="cb1-6"><span class="co" style="color: #5E5E5E;"># data structure defining the trees</span></span>
-<span id="cb1-7">dat <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">flametree_grow</span>(<span class="at" style="color: #657422;">time =</span> <span class="dv" style="color: #AD0000;">10</span>, <span class="at" style="color: #657422;">trees =</span> <span class="dv" style="color: #AD0000;">10</span>)</span>
-<span id="cb1-8"></span>
-<span id="cb1-9"><span class="co" style="color: #5E5E5E;"># draw the plot</span></span>
-<span id="cb1-10">dat <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb1-11">  <span class="fu" style="color: #4758AB;">flametree_plot</span>(</span>
-<span id="cb1-12">    <span class="at" style="color: #657422;">background =</span> <span class="st" style="color: #20794D;">"antiquewhite"</span>,</span>
-<span id="cb1-13">    <span class="at" style="color: #657422;">palette =</span> shades, </span>
-<span id="cb1-14">    <span class="at" style="color: #657422;">style =</span> <span class="st" style="color: #20794D;">"nativeflora"</span></span>
-<span id="cb1-15">  )</span></code></pre></div>
-<div class="cell-output-display">
-<div class="quarto-figure quarto-figure-center">
-<figure class="figure">
-<p><img src="https://blog.djnavarro.net/posts/2021-10-19_rtistry-posts/index_files/figure-html/flametree-1.png" class="img-fluid figure-img" width="672"></p>
-</figure>
-</div>
-</div>
-</div>
-<p>Playing around with a package like flametree – or <a href="https://jasmines.djnavarro.net/">jasmines</a> if you want something a little more flexible – is a nice way to start drawing things, but at some point you might want to understand the process involved in creating a system like this. I’ve occasionally used art as a way to help teach people how to program in R, so you might find these <a href="https://slides.djnavarro.net/starting-programming/">programming of aRt</a> slides helpful, and the precursor to flametree is discussed in my slides on <a href="https://slides.djnavarro.net/starting-functions/">functional programming</a>.</p>
-<p>Resources like mine can help get you started, but there are many other great artists out there who often post tutorials and walkthroughs. For instance, Antonio Sánchez Chinchón has a <em>lot</em> of really useful tutorials on his blog <a href="https://fronkonstin.com/">fronkonstin.com</a>. Ijeamaka Anyene has written a lovely and gentle introduction to her system for <a href="https://ijeamaka-anyene.netlify.app/posts/2021-09-07-so-you-want-to-subdivide-a-rectangle/">rectangle subdivision</a>. Will Chase writes about his process on his blog sometimes: here’s <a href="https://www.williamrchase.com/post/grid-12-months-of-art-december/">an example on a grid system</a>. Jiwan Heo has a wonderful post on how to <a href="https://jiwanheo.rbind.io/post/2021-09-17-how-to-work-with-flow-fields-in-r/">get started with flow fields in R</a> among many other lovely posts! You can look outside of the R community too: Tyler Hobbs writes a lot of essays about generative art that describe algorithms in fairly general terms. For instance, one of my systems is built from his essay on <a href="https://tylerxhobbs.com/essays/2017/a-generative-approach-to-simulating-watercolor-paints">simulating watercolour paints</a>. And of course there’s also the walkthrough I wrote for one of my systems <a href="https://blog.djnavarro.net/water-colours">here</a> and the piece I wrote that talks a little bit about the <a href="https://blog.djnavarro.net/generative-art-in-r/">psychological process</a> of making art in R.</p>
-<p>My hope is that these resources will point you in the right direction to get started, but more than anything else I would emphasise that it takes time and effort. Art is a skill like any other. I’ve been practicing for about three years now, and while I am happy with the pieces I make, I still have a lot to learn. And that’s okay – one of the big things I always want to stress is that <em>play</em> is a huge part of the process. Making polished systems comes later!</p>
-<p>In any case, I’ll leave this post as it is for now but if folks would like to suggest additional resources, I can always update it if need be!</p>
-<section id="postscript" class="level2">
-<h2 class="anchored" data-anchor-id="postscript">Postscript</h2>
-<p>Okay, I’m going to start adding things. This is just a completely unstructured list for now, but I know how my brain works: if I don’t bookmark the cool posts and resources I see pop up on my timeline I’ll never find them again…</p>
-<section id="r-specific" class="level3">
-<h3 class="anchored" data-anchor-id="r-specific">R specific</h3>
-<ul>
-<li><p><a href="https://www.thetidytrekker.com/post/thinking-outside-the-grid">Thinking outside the grid</a> by <a href="https://twitter.com/meghansharris">Meghan Harris</a></p></li>
-<li><p><a href="https://github.com/sharlagelfand/gradients">Gradients</a> repository by <a href="https://twitter.com/sharlagelfand">Sharla Gelfand</a></p></li>
-<li><p>Generative art <a href="https://github.com/nrennie/aRt">package</a> by <a href="https://twitter.com/nrennie35">Nicola Rennie</a></p></li>
-<li><p>Various <a href="https://clauswilke.com/art/post/">art posts</a> by <a href="https://twitter.com/ClausWilke">Claus Wilke</a></p></li>
-<li><p><a href="https://urswilke.github.io/ggbenjamini/">ggbenjamini package</a> by <a href="https://twitter.com/UrsWilke">Urs Wilke</a></p></li>
-<li><p><a href="https://github.com/picasa/generative_examples">Generative art examples</a> by <a href="https://twitter.com/pircasa">Pierre Casadebaig</a></p></li>
-<li><p><a href="https://medium.com/@dorit.geifman_38625/the-art-in-randomness-f236a3663cb">The art in randomness</a> by <a href="https://twitter.com/GenerativeaRt4">Dorit Geifman</a></p></li>
-<li><p><a href="https://art.jacquietran.com/">Generative art galleries</a> by <a href="https://twitter.com/jacquietran">Jacquie Tran</a></p></li>
-<li><p><a href="https://ijeamaka.art/portfolio/">Art portfolio site</a> by <a href="https://twitter.com/ijeamaka_a">Ijeamaka Anyene</a></p></li>
-<li><p><a href="https://georgemsavva.github.io/creativecoding/posts/mystery/">Mystery curves</a> by <a href="https://twitter.com/georgemsavva">George Savva</a></p></li>
-</ul>
-</section>
-<section id="more-general" class="level3">
-<h3 class="anchored" data-anchor-id="more-general">More general</h3>
-<ul>
-<li><p><a href="https://thatcreativecode.page/">thatcreativecode.page</a> is a great general resource</p></li>
-<li><p>the description of <a href="https://asemi.ca">asemi.ca</a> shows a design process in detail</p></li>
-<li><p>Tyler Hobbs <a href="https://tylerxhobbs.com/essays">generative art essays</a></p></li>
-</ul>
-<!--------------- appendices go here ----------------->
-<div class="cell">
-
-</div>
-
-
-</section>
-</section>
-
-
-<div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
-
-<ol>
-<li id="fn1"><p>A little bit of searching on twitter suggests that I proposed the hashtag on January 20th 2021 in a now-deleted tweet.↩︎</p></li>
-</ol>
-</section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2021,
-  author = {Danielle Navarro},
-  title = {Generative Art Resources in {R}},
-  date = {2021-10-19},
-  url = {https://blog.djnavarro.net/rtistry-posts},
-  langid = {en}
-}
-</code></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2021" class="csl-entry quarto-appendix-citeas">
-Danielle Navarro. 2021. <span>“Generative Art Resources in R.”</span>
-October 19, 2021. <a href="https://blog.djnavarro.net/rtistry-posts">https://blog.djnavarro.net/rtistry-posts</a>.
-</div></div></section></div> ]]></description>
-  <category>Art</category>
-  <category>R</category>
-  <guid>https://blog.djnavarro.net/posts/2021-10-19_rtistry-posts/index.html</guid>
-  <pubDate>Mon, 18 Oct 2021 13:00:00 GMT</pubDate>
-  <media:content url="https://blog.djnavarro.net/posts/2021-10-19_rtistry-posts/preview-image.png" medium="image" type="image/png" height="89" width="144"/>
 </item>
 </channel>
 </rss>
