@@ -26,7 +26,7 @@ options(width = narrow)
 
 <!--------------- post begins here ----------------->
 
-Okay. So I wrote a simple package for [multi-threaded tasks queues in R](https://queue.djnavarro.net) this week. It wasn't intentional, I swear. I was just trying to teach myself how to use the [callr](https://callr.r-lib.org/) package, and making sure I had a solid grasp of encapsulated object-oriented programming with [R6](https://r6.r-lib.org/). Things got a little out of hand. Sorry.
+Okay. So I wrote a simple package for [multi-threaded tasks queues in R](https://queue.djnavarro.net) this week. It wasn't intentional, I swear. I was just trying to teach myself how to use the [callr](https://callr.r-lib.org/) package,^[Honestly, the whole reason this exists is that I was reading the callr blog post on writing [multi-worker task queues](https://www.tidyverse.org/blog/2019/09/callr-task-q/) and decided to try doing it myself...] and making sure I had a solid grasp of encapsulated object-oriented programming with [R6](https://r6.r-lib.org/). Things got a little out of hand. Sorry.
 
 And let's be very clear about something at the outset. If you want to do parallel computing in R correctly, you go look at [futureverse.org](https://www.futureverse.org/). The [future](https://future.futureverse.org/) package by Henrik Bengtsson provides a fabulous way to execute R code asynchronously and in parallel. And there are many excellent packages built on top of that, so there's a whole lovely ecosystem there just waiting for you.^[Note to self: Learn [parallelly](https://www.jottr.org/2022/12/05/avoid-detectcores/)] Relatedly, if the reason you're thinking about parallel computing is that you've found yourself with a burning need to analyze terabytes of data with R then babe it might be time to start learning some R workflows using [Spark](https://therinspark.com/), [Arrow](https://blog.djnavarro.net/category/apachearrow), [Kubernetes](https://www.r-bloggers.com/2022/04/wtf-is-kubernetes-and-should-i-care-as-r-user/). It may be time to learn about some of those other eldritch words of power that have figured rather more prominently in my life than one might expect for a simple country girl.^[`kubectl auth can-i create occult-chaos`] 
 
@@ -204,7 +204,53 @@ queue$run()
 
 It's a little slower than we'd hope, but it does finish both valid tasks and returns nothing for the tasks that crashed their R sessions. What has happened in the background is that the queue runs a simple check to see if any of the R sessions have crashed, and attempts to replace them with a new worker whenever it detects that this has happened. It's not in any sense optimised, but it does sort of work.
 
+## Design
 
+Although my confidence in my ability to have a career in tech is at an all-time low, I have to admit that the work I've done over the last year has made me much a better programmer than I ever was in the past. I haven't put a lot much effort into writing the queue package, but even so the code feels cleaner and more modular than what I was writing a year ago when I was trying harder. Good practices have become habits, I suppose. I automatically write proper unit tests as I go, knowing that those tests will save me when I need to make changes later. I document properly as I go, knowing that I won't remember a bloody thing about how my own code works six months later. And, maybe most importantly of all, my code now seems to have this habit of organising itself into small, manageable abstractions. I have no idea when that happened, because I wasn't actually part of a software engineering team. I was just the girl who wrote some docs and few little blog posts. 
+
+Here's what I mean. If you take a look at the [source code for the `Queue`](https://github.com/djnavarro/queue/blob/4c70aad373fd518250c6bd6c29cebccb6d16dc65/R/queue.R) object, it's actually not very long: the file is mostly devoted to the documentation, and the object doesn't have very many methods. Honestly, we've already seen most of them:
+
+- `new()` creates a new queue
+- `add()` adds a task to a queue
+- `run()` sets the queue running
+
+If everything works smoothly you don't need anything else, so why burden the user with extra details? Sure, there's a little complexity to these methods which is of course documented on the [relevant pkgdown page](https://queue.djnavarro.net/reference/Queue.html) because I'm not a jerk, but this isn't a complicated package... 
+
+...when it's working.
+
+Of course, when things start to break, you start to care a lot more about the internals. Fair enough. There are two important data structures within the `Queue`:
+
+- Internally, a `Queue` manages a [`WorkerPool`](https://queue.djnavarro.net/reference/WorkerPool.html) comprised of one or more [`Worker`](https://queue.djnavarro.net/reference/Worker.html) objects. As you'd expect given the names, these provide abstractions for managing the R sessions. A `Worker` object provides a wrapper around a callr R session, and tools that automate the interaction between that session and a task. 
+- The `Queue` also holds a [`TaskList`](https://queue.djnavarro.net/reference/TaskList.html) comprised of one or more [`Task`](https://queue.djnavarro.net/reference/Task.html) objects. Again, as you might expect from the names, these are the storage classes. A `Task` object is a container that holds a function, its arguments, any results it might have returned, and any logged information about the process of its execution. 
+
+In some situations it can be awfully handy to have access to these constituent data structures, particularly because those objects expose additional tools that I deliberately chose not to make available at the `Queue` level. From the `Queue` itself what you can do is return the objects:
+
+```{r}
+workers <- queue$get_workers()
+tasks <- queue$get_tasks()
+```
+
+These objects are R6 classes: they have reference semantics so anything I do with `workers` and `tasks` will have corresponding effects on `queue`. For this blog post I don't intend to dive into details of what I did when designing the `WorkerPool` and `TaskList` classes -- especially because queue is only at version 0.0.2 and I don't yet know what I'm going to do with this cute little package -- but I'll give one example.
+
+Let's take the workers. By default, a `Queue` cleans up after itself and closes any R sessions that it started. The `WorkerPool` object associated with a `Queue` has a `get_pool_state()` method that I can use to check the state of the workers, and some other methods to modify the workers if I so choose. Let's have a go. I ask `workers` to report on the status of the R sessions, this is what I get:
+
+```{r}
+workers$get_pool_state()
+```
+
+Yes, as expected the workers have stopped. But I can replace them with live R sessions by calling the `refill_pool()` method:
+
+```{r}
+workers$refill_pool()
+```
+
+And I can shut them down again by calling `shutdown_pool()`:
+
+```{r}
+workers$shutdown_pool()
+```
+
+Along similar lines the `TaskList` object has some methods that let me manipulate the data storage associated with my `Queue`. Normally I don't need to. Sometimes I do. It's handy to have those tools lying around. At the moment the toolkit feels a little light, but the nice thing about writing your own package is that I can always add more if I need them :-) 
 
 <!--------------- appendices go here ----------------->
 
