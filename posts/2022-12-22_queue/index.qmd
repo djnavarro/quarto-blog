@@ -28,17 +28,17 @@ options(width = narrow)
 
 Okay. So I wrote a simple package for [multi-threaded tasks queues in R](https://queue.djnavarro.net) this week. It wasn't intentional, I swear. I was just trying to teach myself how to use the [callr](https://callr.r-lib.org/) package, and making sure I had a solid grasp of encapsulated object-oriented programming with [R6](https://r6.r-lib.org/). Things got a little out of hand. Sorry.
 
-And let's be very clear about something at the outset. If you want to do parallel computing in R correctly, you go look at [futureverse.org](https://www.futureverse.org/). The [future](https://future.futureverse.org/) package provides a fabulous way to execute R code asynchronously and in parallel. And there are many excellent packages built on top of that, so there's a whole lovely ecosystem there just waiting for you.^[Note to self: Learn [parallelly](https://www.jottr.org/2022/12/05/avoid-detectcores/)] Relatedly, if the reason you're thinking about parallel computing is that you've found yourself with a burning need to analyze terabytes of data with R then babe it might be time to start learning some R workflows using [Spark](https://therinspark.com/), [Arrow](https://blog.djnavarro.net/category/apachearrow), [Kubernetes](https://www.r-bloggers.com/2022/04/wtf-is-kubernetes-and-should-i-care-as-r-user/). It may be time to learn about some of those other eldritch words of power that have figured rather more prominently in my life than one might expect for a simple country girl.^[`kubectl auth can-i create occult-chaos`] 
+And let's be very clear about something at the outset. If you want to do parallel computing in R correctly, you go look at [futureverse.org](https://www.futureverse.org/). The [future](https://future.futureverse.org/) package by Henrik Bengtsson provides a fabulous way to execute R code asynchronously and in parallel. And there are many excellent packages built on top of that, so there's a whole lovely ecosystem there just waiting for you.^[Note to self: Learn [parallelly](https://www.jottr.org/2022/12/05/avoid-detectcores/)] Relatedly, if the reason you're thinking about parallel computing is that you've found yourself with a burning need to analyze terabytes of data with R then babe it might be time to start learning some R workflows using [Spark](https://therinspark.com/), [Arrow](https://blog.djnavarro.net/category/apachearrow), [Kubernetes](https://www.r-bloggers.com/2022/04/wtf-is-kubernetes-and-should-i-care-as-r-user/). It may be time to learn about some of those other eldritch words of power that have figured rather more prominently in my life than one might expect for a simple country girl.^[`kubectl auth can-i create occult-chaos`] 
 
 My little queue package is a personal project. I happen to like it, but you should not be looking at it as an alternative to serious tools.
 
 That's been said now. Good. We can put aside all pretension.
 
-## What does it do, and why?
+## What does it do?
 
 Let's say I have a generative art function called `donut()`, based loosely on a [teaching example from my art from code workshop](https://art-from-code.netlify.app/day-1/session-1/#composition). The `donut()` function takes an input `seed`, creates a piece of generative art using ggplot2, and writes the output to an image file. This process takes several seconds to complete on my laptop:
 
-```{r source-subdivision}
+```{r source-donut}
 #| include: false
 source("donut.R")
 ```
@@ -55,25 +55,51 @@ Here's the piece, by the way:
 
 ![](donut_100.png)
 
-That's nice and I do like this piece, but generative art is an iterative process and I like to make many pieces at once to help me get a feel for the statistical properties of the system. Waiting 8.5 seconds for one piece to render is one thing: waiting 15 minutes for 100 pieces to render is quite another. So it's helpful if I can do this in parallel.
+That's nice and I do like this piece, but generative art is an iterative process and I like to make many pieces at once to help me get a feel for the statistical properties of the system. Waiting five or six seconds for one piece to render is one thing: waiting 8-10 minutes for 100 pieces to render is quite another. So it's helpful if I can do this in parallel.
 
 ```{r package}
 library(queue)
 ```
 
-Here's how I might do that with queue:
+Here's how I might do that using queue. I designed the package using R6 classes -- more on that later -- so we'll be working in the "encapsulated" object oriented programming style that is more common in other programming languages. The first step is to initialise a [`Queue`](https://queue.djnavarro.net/reference/Queue.html) object, specifying the number of workers we want to use. I'll use six:
 
 ```{r my-first-queue}
 #| cache: true
-q1 <- Queue$new(workers = 6)
-for(seed in 101:108) q1$add(donut, list(seed))
-out1 <- q1$run(message = "verbose")
+queue <- Queue$new(workers = 6)
 ```
 
-It doesn't run six times faster. There's overhead: R sessions have to be initialised, the scheduler needs to assign the tasks, data have to be serialised and passed between R sessions and so on. Perhaps most importantly, my little laptop doesn't really have six cores to spare. There's reason why the sixth worker took 20 seconds to finish -- the operating system didn't have any spare resources to allocate.  
+When I do this, the queue package starts six R sessions for us, and all my computations will be done in those R sessions. Under the hood, all the hard work of managing the R sessions is being done by the wonderful callr package by Gábor Csárdi^[Longtime readers will have noticed that I have become a bit of a fangirl. I swear I'm not stalking him, but like, every time I think... gosh this is a really handy bit of infrastructure tooling, who do I have to thank for this... oh, of course it's bloody Gábor again. Anyway.] -- the only thing that queue does is provide a layer of abstraction and automation to the whole process. 
+
+Next, I'll add some tasks to the queue. `Queue` objects have an `add()` method that take a function and a list of arguments, so I can do this to push a task to the queue:
+
+```{r my-first-task}
+#| cache: true
+queue$add(donut, args = list(seed = 100))
+```
+
+When the queue executes, it will be in a "first in, first out" order, so this task will be the first one to be assigned to a worker. Though of course that's no guarantee that it will be the first one to finish!
+
+Anyway, let's load up several more tasks. There's some weird aversion out there to using loops in R, but this isn't one of those situations where we need to worry about unnecessary copying, so I'm going to use a loop:
+
+```{r load-several-tasks}
+#| cache: true
+for(s in 101:108) queue$add(donut, list(seed = s))
+```
+
+So now we have nine tasks loaded onto a queue with six workers. To start it running I call the `run()` method for the queue. By default, all you'd see while the queue is running is a spinner with a progress message telling you how many tasks have completed so far, how many are currently running, and how many are still waiting. But I'll ask it to be a bit more chatty. I'll call it setting `message = "verbose"` so that we can see a log showing the order in which the tasks completed and time each task took to complete, in addition to the total time elapsed on my system while the queue was running:
+
+```{r run-my-queue}
+#| cache: true
+out <- queue$run(message = "verbose")
+```
+
+Here are the nine pieces that popped off the queue in 13 seconds: 
 
 ::: {.column-screen-inset}
-::: {layout-ncol=4}
+
+::: {layout-ncol=3}
+
+![](donut_100.png)
 
 ![](donut_101.png)
 
@@ -94,41 +120,16 @@ It doesn't run six times faster. There's overhead: R sessions have to be initial
 :::
 :::
 
-For comparison, let's make another eight pieces, this time with only three workers:
+So it's a three-step process: (1) create the queue, (2) load up the tasks, (3) execute the tasks. In practice I would probably simplify the code to this:
 
-```{r my-second-queue}
-#| cache: true
-q2 <- Queue$new(workers = 3)
-for(seed in 109:116) q2$add(donut, list(seed))
-out2 <- q2$run(message = "verbose")
+```{r summary-code}
+#| eval: false
+queue <- Queue$new(workers = 6)
+for(s in 100:108) queue$add(donut, list(seed = s))
+out <- queue$run()
 ```
 
-The completion time is essentially the same. Ultimately, whenever you're using multithreading as your mechanism for parallel computing, you're relying on the operating system to do the work for you. The queue package doesn't do any clever scheduling. All it does is set the R process running and polls them intermittently to see if they've finished their assigned tasks. The operating system tasks care of low level details. If you create 100 workers but your machine only has 3 cores free, well, the operating system isn't a magic wand. It can't make computing resources appear if they don't exist. 
-
-By default, queue sets the concurrency to 4 workers, on the -- thorougly unscientific -- logic that this usually speeds things up on my laptop without being absurd, and pushing any higher than that rarely does anything useful. 
-
-::: {.column-screen-inset}
-::: {layout-ncol=4}
-
-![](donut_109.png)
-
-![](donut_110.png)
-
-![](donut_111.png)
-
-![](donut_112.png)
-
-![](donut_113.png)
-
-![](donut_114.png)
-
-![](donut_115.png)
-
-![](donut_116.png)
-
-:::
-:::
-
+True, I could simplify it further. For example, if I know that I'm always calling the same function and always passing the same the same arguments -- just with different values -- this could be wrapped up in [purrr](https://purrr.tidyverse.org/) style syntax, but honestly I'm not sure why I would bother doing that when [furrr](https://furrr.futureverse.org/) already exists? I'm not planning to reinvent the wheel, especially not when Davis Vaughn already offers a fully-operational mass-transit system free of charge.
 
 ## What does it store?
 
@@ -138,7 +139,7 @@ Okay, so let's take a look at what it actually stores
 
 ```{r}
 #| column: page
-out1
+out
 ```
 
 `r options(width = narrow)`
@@ -146,7 +147,7 @@ out1
 
 ## Surviving a crash
 
-I'm going to be honest. Sometimes^[Often] I write bad code when I am exploring a new generative art system. Code that crashes the R session unpredictably. So it would be nice if the queue had a little bit of robustness for that. To be honest, the queue package isn't very sophisticated in detecting sessions that have crashed,^[I mean, it was just a fun side project I did over the weekend because I found myself unexpectedly unemployed all of a sudden and Stella needs to get her groove back okay?] but it does have some ability to recover when a task crashes its thread. Let's keep this simple. I'll define a perfectly safe function that waits for a moment and then returns, and another function that always crashes the R session as soon as it is called:
+I'm going to be honest. Sometimes^[Often] I write bad code when I am exploring a new generative art system. Code that crashes the R session unpredictably. So it would be nice if the queue had a little bit of robustness for that. To be honest, the queue package isn't very sophisticated in detecting sessions that have crashed,^[I mean, it was just a fun side project I did over the weekend because I found myself unexpectedly unemployed all of a sudden, and my self-confidence is utterly shattered at the moment, and Stella needs to get her groove back slowly okay?] but it does have some ability to recover when a task crashes its thread. Let's keep this simple. I'll define a perfectly safe function that waits for a moment and then returns, and another function that always crashes the R session as soon as it is called:
 
 ```{r, simple-functions}
 wait <- function(x) {
@@ -174,8 +175,6 @@ queue$run()
 ```
 
 It's a little slower than we'd hope, but it does finish both valid tasks and returns nothing for the tasks that crashed their R sessions. What has happened in the background is that the queue runs a simple check to see if any of the R sessions have crashed, and attempts to replace them with a new worker whenever it detects that this has happened. It's not in any sense optimised, but it does sort of work.
-
-
 
 
 
