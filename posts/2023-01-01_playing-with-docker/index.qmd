@@ -35,7 +35,7 @@ options(width = narrow)
 Here is the entire contents of the dockerfile:
 
 ``` dockerfile
-FROM ghcr.io/djnavarro/arch-r:main
+FROM ghcr.io/djnavarro/arch-r:base
 COPY script.R /home/script.R
 CMD Rscript /home/script.R
 ```
@@ -56,17 +56,48 @@ docker build --tag my-system-check .
 
 ```
 Sending build context to Docker daemon  3.072kB
-Step 1/3 : FROM ghcr.io/djnavarro/arch-r:main
- ---> 2f63d1340889
+Step 1/3 : FROM ghcr.io/djnavarro/arch-r:base
+base: Pulling from djnavarro/arch-r
+597018910566: Already exists 
+8150bcc6bc64: Already exists 
+c2ff38743c81: Pull complete 
+c5dd676c14d5: Pull complete 
+f30b21a3d71a: Pull complete 
+8545f2705041: Pull complete 
+Digest: sha256:5cd9e80d7263aabf541c2a2c7efe95b1482e8132ee9c3e6a744c3e54e8cade7a
+Status: Downloaded newer image for ghcr.io/djnavarro/arch-r:base
+ ---> c74e54ffdd8c
 Step 2/3 : COPY script.R /home/script.R
- ---> Using cache
- ---> d3661fb470f8
+ ---> 50c0c119b6d2
 Step 3/3 : CMD Rscript /home/script.R
- ---> Using cache
- ---> 315fd34395f4
-Successfully built 315fd34395f4
+ ---> Running in fa9d38781c17
+Removing intermediate container fa9d38781c17
+ ---> fed061a96fec
+Successfully built fed061a96fec
 Successfully tagged my-system-check:latest
 ```
+
+The "already exists" part of the output is worth commenting on. I'd been playing around with some of the images upon which `ghcr.io/djnavarro/arch-r:base` is built earlier (e.g., it's built on an Arch Linux image that I already have on my laptop) and docker is smart enough to realise it only has to download and build some layers. That's a really nice feature. Among other things, it means that if if I try building this image as second time, docker can use the cached copies of the build steps because nothing has changed and it doesn't have to do anything:
+
+``` bash
+docker build --tag my-system-check .
+```
+
+```
+Sending build context to Docker daemon  3.072kB
+Step 1/3 : FROM ghcr.io/djnavarro/arch-r:base
+ ---> c74e54ffdd8c
+Step 2/3 : COPY script.R /home/script.R
+ ---> Using cache
+ ---> 50c0c119b6d2
+Step 3/3 : CMD Rscript /home/script.R
+ ---> Using cache
+ ---> fed061a96fec
+Successfully built fed061a96fec
+Successfully tagged my-system-check:latest
+```
+
+
 
 Next tell docker to run it. Note that I'm referring to the image by name:
 
@@ -116,9 +147,402 @@ With locale:
   LC_IDENTIFICATION=C
 ```
 
+## Fancier example
+
+Let's pop over into a different folder where I've stored a slightly fancier project:
+
+``` bash
+cd ../test-on-arch
+```
+
+Here's my dockerfile. Notice that I'm building on top of a slightly different image:
+
+``` dockerfile
+FROM ghcr.io/djnavarro/arch-r:test
+
+# copy the testing script
+COPY clone-and-check.R /home/clone-and-check.R
+
+# pass args through environment variables
+ARG user
+ARG repo
+ENV user=$user
+ENV repo=$repo
+
+# run the testing script
+CMD Rscript /home/clone-and-check.R
+```
+
+The testing script:
+
+``` r
+# get the system environment variables
+user <- Sys.getenv("user")
+repo <- Sys.getenv("repo")
+cran <- Sys.getenv("cran")
+
+# define github url and a path for the local package install
+url <- paste("https://github.com", user, repo, sep = "/")
+dir <- paste("/home/project", repo, sep="/")
+
+# clone repo, install dependencies, and run checks
+gert::git_clone(url, dir, verbose = TRUE)
+remotes::install_deps(dir, dependencies = TRUE, repos = cran)
+rcmdcheck::rcmdcheck(dir)
+```
+
+I've never downloaded the test image, but I've already built the base image on my local machine and the test image is essentially the same as the base but with some extra system and R dependencies added. Let's see what happens when I try to build:
+
+``` bash
+docker build -t test-queue --build-arg user=djnavarro --build-arg repo=queue .
+```
+
+```
+Sending build context to Docker daemon  3.072kB
+Step 1/7 : FROM ghcr.io/djnavarro/arch-r:test
+test: Pulling from djnavarro/arch-r
+597018910566: Already exists 
+8150bcc6bc64: Already exists 
+c2ff38743c81: Already exists 
+c5dd676c14d5: Already exists 
+f30b21a3d71a: Already exists 
+8545f2705041: Already exists 
+d64243188ff1: Pull complete 
+98bfb679f27b: Pull complete 
+6627d8db8438: Pull complete 
+Digest: sha256:9eb6e1c28f7ebe30acbd320fe2d47ca8e356bdc582e633bd3b55eaab0ef03bc0
+Status: Downloaded newer image for ghcr.io/djnavarro/arch-r:test
+ ---> 549fdff95a53
+Step 2/7 : COPY clone-and-check.R /home/clone-and-check.R
+ ---> 90635e60ba89
+Step 3/7 : ARG user
+ ---> Running in 19c6fd3b47ce
+Removing intermediate container 19c6fd3b47ce
+ ---> aaf0a7677e56
+Step 4/7 : ARG repo
+ ---> Running in 9ea3246bded6
+Removing intermediate container 9ea3246bded6
+ ---> edfa009a9757
+Step 5/7 : ENV user=$user
+ ---> Running in ea2dcd08d511
+Removing intermediate container ea2dcd08d511
+ ---> 738933de7e6c
+Step 6/7 : ENV repo=$repo
+ ---> Running in fe9b2b07a311
+Removing intermediate container fe9b2b07a311
+ ---> 9361bae891f3
+Step 7/7 : CMD Rscript /home/clone-and-check.R
+ ---> Running in ffdb933cf785
+Removing intermediate container ffdb933cf785
+ ---> 9fbbbbe1188d
+Successfully built 9fbbbbe1188d
+Successfully tagged test-queue:latest
+```
+
+It downloads, but this is a much larger image because the testing environment has tex-live installed on it (among other things) and it's a few GB in size. This one isn't a frugal image! It takes a while but the nice thing is that if you've done it once you don't have to do it again.
 
 
-## Fancier workflows
+As a little sanity check -- because, dear reader, I have been sitting here waiting very patiently while a large image downloaded over a slow connection and would like to confirm that I don't have to do that again -- let's repeat the exercise from earlier and try building it a second time:
+
+``` bash
+docker build -t test-queue --build-arg user=djnavarro --build-arg repo=queue .
+```
+
+```
+Sending build context to Docker daemon  3.072kB
+Step 1/7 : FROM ghcr.io/djnavarro/arch-r:test
+ ---> 549fdff95a53
+Step 2/7 : COPY clone-and-check.R /home/clone-and-check.R
+ ---> Using cache
+ ---> 90635e60ba89
+Step 3/7 : ARG user
+ ---> Using cache
+ ---> aaf0a7677e56
+Step 4/7 : ARG repo
+ ---> Using cache
+ ---> edfa009a9757
+Step 5/7 : ENV user=$user
+ ---> Using cache
+ ---> 738933de7e6c
+Step 6/7 : ENV repo=$repo
+ ---> Using cache
+ ---> 9361bae891f3
+Step 7/7 : CMD Rscript /home/clone-and-check.R
+ ---> Using cache
+ ---> 9fbbbbe1188d
+Successfully built 9fbbbbe1188d
+Successfully tagged test-queue:latest
+```
+
+Not going to lie, I breathed a little sigh of relief. Docker used the cached layers, and that all happened instantaneously. 
+
+Now let's run it:
+
+``` bash
+docker run test-queue
+```
+
+```
+Transferred 766 of 766 objects...done!
+Checked out 34 of 34 commits... done!
+
+── R CMD build ─────────────────────────────────────────────────────────────────
+* checking for file ‘.../DESCRIPTION’ ... OK
+* preparing ‘queue’:
+* checking DESCRIPTION meta-information ... OK
+* installing the package to build vignettes
+* creating vignettes ... OK
+* checking for LF line-endings in source and make files and shell scripts
+* checking for empty or unneeded directories
+* building ‘queue_0.0.2.tar.gz’
+
+── R CMD check ─────────────────────────────────────────────────────────────────
+* using log directory ‘/tmp/Rtmp5JJJOo/file1487d1ddf/queue.Rcheck’
+* using R version 4.2.2 (2022-10-31)
+* using platform: x86_64-pc-linux-gnu (64-bit)
+* using session charset: UTF-8
+* checking for file ‘queue/DESCRIPTION’ ... OK
+* this is package ‘queue’ version ‘0.0.2’
+* package encoding: UTF-8
+* checking package namespace information ... OK
+* checking package dependencies ... OK
+* checking if this is a source package ... OK
+* checking if there is a namespace ... OK
+* checking for executable files ... OK
+* checking for hidden files and directories ... OK
+* checking for portable file names ... OK
+* checking for sufficient/correct file permissions ... OK
+* checking whether package ‘queue’ can be installed ... OK
+* checking installed package size ... OK
+* checking package directory ... OK
+* checking ‘build’ directory ... OK
+* checking DESCRIPTION meta-information ... OK
+* checking top-level files ... OK
+* checking for left-over files ... OK
+* checking index information ... OK
+* checking package subdirectories ... OK
+* checking R files for non-ASCII characters ... OK
+* checking R files for syntax errors ... OK
+* checking whether the package can be loaded ... OK
+* checking whether the package can be loaded with stated dependencies ... OK
+* checking whether the package can be unloaded cleanly ... OK
+* checking whether the namespace can be loaded with stated dependencies ... OK
+* checking whether the namespace can be unloaded cleanly ... OK
+* checking loading without being on the library search path ... OK
+* checking dependencies in R code ... NOTE
+Namespaces in Imports field not imported from:
+  ‘callr’ ‘cli’ ‘R6’ ‘tibble’
+  All declared Imports should be used.
+* checking S3 generic/method consistency ... OK
+* checking replacement functions ... OK
+* checking foreign function calls ... OK
+* checking R code for possible problems ... OK
+* checking Rd files ... OK
+* checking Rd metadata ... OK
+* checking Rd cross-references ... OK
+* checking for missing documentation entries ... OK
+* checking for code/documentation mismatches ... OK
+* checking Rd \usage sections ... OK
+* checking Rd contents ... OK
+* checking for unstated dependencies in examples ... OK
+* checking installed files from ‘inst/doc’ ... OK
+* checking files in ‘vignettes’ ... OK
+* checking examples ... OK
+* checking for unstated dependencies in ‘tests’ ... OK
+* checking tests ...
+  Running ‘testthat.R’
+ OK
+* checking for unstated dependencies in vignettes ... OK
+* checking package vignettes in ‘inst/doc’ ... OK
+* checking running R code from vignettes ...
+  ‘queue.Rmd’ using ‘UTF-8’... OK
+ NONE
+* checking re-building of vignette outputs ... OK
+* checking PDF version of manual ... OK
+* DONE
+
+Status: 1 NOTE
+See
+  ‘/tmp/Rtmp5JJJOo/file1487d1ddf/queue.Rcheck/00check.log’
+for details.
+System has not been booted with systemd as init system (PID 1). Can't operate.
+Failed to connect to bus: Host is down
+Warning: Your system is mis-configured: ‘/var/db/timezone/localtime’ is not a symlink
+Warning: ‘/var/db/timezone/localtime’ is not identical to any known timezone file
+Warning message:
+In system("timedatectl", intern = TRUE) :
+  running command 'timedatectl' had status 1
+── R CMD check results ──────────────────────────────────────── queue 0.0.2 ────
+Duration: 39.9s
+
+❯ checking dependencies in R code ... NOTE
+  Namespaces in Imports field not imported from:
+    ‘callr’ ‘cli’ ‘R6’ ‘tibble’
+    All declared Imports should be used.
+
+0 errors ✔ | 0 warnings ✔ | 1 note ✖
+```
+
+This is the expected result. I haven't gotten around to dealing with that note yet, so this is no different to what I'd get if I'd run it on Ubuntu. The one part that is slightly different is this:
+
+```
+System has not been booted with systemd as init system (PID 1). Can't operate.
+Failed to connect to bus: Host is down
+Warning: Your system is mis-configured: ‘/var/db/timezone/localtime’ is not a symlink
+Warning: ‘/var/db/timezone/localtime’ is not identical to any known timezone file
+Warning message:
+In system("timedatectl", intern = TRUE) :
+  running command 'timedatectl' had status 1
+```
+
+Yeah. I deliberately didn't try to faff about with systemd in these images, so this is an expected warning. It's not a problem with queue or with Arch, just a consequence of how I built the images. That would have some consequences for testing a lot of packages, but I'm not trying to recreate the rocker project here so I'm not too fussed about it in this little exercise.
+
+The advantage to passing arguments is that you can build many images from the same dockerfile, and docker will reuse the cached layers intelligently. Even though I've never tried testing the praise package on Arch before, this builds immediately and without downloading anything, because everything that actually matters was already done when I built the "test-queue" image earlier:
+
+``` bash
+docker build -t test-praise --build-arg user=rladies --build-arg repo=praise .
+```
+
+```
+Sending build context to Docker daemon  3.072kB
+Step 1/7 : FROM ghcr.io/djnavarro/arch-r:test
+ ---> 549fdff95a53
+Step 2/7 : COPY clone-and-check.R /home/clone-and-check.R
+ ---> Using cache
+ ---> 90635e60ba89
+Step 3/7 : ARG user
+ ---> Using cache
+ ---> aaf0a7677e56
+Step 4/7 : ARG repo
+ ---> Using cache
+ ---> edfa009a9757
+Step 5/7 : ENV user=$user
+ ---> Running in fee7736cc9b3
+Removing intermediate container fee7736cc9b3
+ ---> 4b17eb3a42ed
+Step 6/7 : ENV repo=$repo
+ ---> Running in 6e7686a3cc31
+Removing intermediate container 6e7686a3cc31
+ ---> 5182d4b98223
+Step 7/7 : CMD Rscript /home/clone-and-check.R
+ ---> Running in 1caac213f8b0
+Removing intermediate container 1caac213f8b0
+ ---> 2a6dc9df46f4
+Successfully built 2a6dc9df46f4
+Successfully tagged test-praise:latest
+```
+
+It's verbose, but fast, and it hasn't wasted anything by creating unnecessary copies. Let's run it:
+
+``` bash
+docker run test-praise
+```
+
+```
+Transferred 431 of 431 objects...done!
+Checked out 26 of 26 commits... done!
+
+── R CMD build ─────────────────────────────────────────────────────────────────
+* checking for file ‘.../DESCRIPTION’ ... OK
+* preparing ‘praise’:
+* checking DESCRIPTION meta-information ... OK
+* checking for LF line-endings in source and make files and shell scripts
+* checking for empty or unneeded directories
+Omitted ‘LazyData’ from DESCRIPTION
+* building ‘praise_1.0.0.tar.gz’
+
+── R CMD check ─────────────────────────────────────────────────────────────────
+* using log directory ‘/tmp/Rtmpi7Ngun/file12ad64a83/praise.Rcheck’
+* using R version 4.2.2 (2022-10-31)
+* using platform: x86_64-pc-linux-gnu (64-bit)
+* using session charset: UTF-8
+* checking for file ‘praise/DESCRIPTION’ ... OK
+* this is package ‘praise’ version ‘1.0.0’
+* checking package namespace information ... OK
+* checking package dependencies ... OK
+* checking if this is a source package ... OK
+* checking if there is a namespace ... OK
+* checking for executable files ... OK
+* checking for hidden files and directories ... OK
+* checking for portable file names ... OK
+* checking for sufficient/correct file permissions ... OK
+* checking whether package ‘praise’ can be installed ... OK
+* checking installed package size ... OK
+* checking package directory ... OK
+* checking DESCRIPTION meta-information ... OK
+* checking top-level files ... OK
+* checking for left-over files ... OK
+* checking index information ... OK
+* checking package subdirectories ... OK
+* checking R files for non-ASCII characters ... OK
+* checking R files for syntax errors ... OK
+* checking whether the package can be loaded ... OK
+* checking whether the package can be loaded with stated dependencies ... OK
+* checking whether the package can be unloaded cleanly ... OK
+* checking whether the namespace can be loaded with stated dependencies ... OK
+* checking whether the namespace can be unloaded cleanly ... OK
+* checking dependencies in R code ... OK
+* checking S3 generic/method consistency ... OK
+* checking replacement functions ... OK
+* checking foreign function calls ... OK
+* checking R code for possible problems ... OK
+* checking Rd files ... OK
+* checking Rd metadata ... OK
+* checking Rd cross-references ... OK
+* checking for missing documentation entries ... OK
+* checking for code/documentation mismatches ... OK
+* checking Rd \usage sections ... OK
+* checking Rd contents ... OK
+* checking for unstated dependencies in examples ... OK
+* checking examples ... OK
+* checking for unstated dependencies in ‘tests’ ... OK
+* checking tests ...
+  Running ‘testthat.R’
+ OK
+* checking PDF version of manual ... OK
+* DONE
+
+Status: OK
+
+System has not been booted with systemd as init system (PID 1). Can't operate.
+Failed to connect to bus: Host is down
+Warning: Your system is mis-configured: ‘/var/db/timezone/localtime’ is not a symlink
+Warning: ‘/var/db/timezone/localtime’ is not identical to any known timezone file
+Warning message:
+In system("timedatectl", intern = TRUE) :
+  running command 'timedatectl' had status 1
+── R CMD check results ─────────────────────────────────────── praise 1.0.0 ────
+Duration: 25.1s
+
+0 errors ✔ | 0 warnings ✔ | 0 notes ✔
+```
+
+Once again we see the warning about systemd, and once again I am ignoring it.
+
+We'll do one more. What about ggplot2? That has extra dependencies that aren't included in the test image. Let's see...
+
+``` bash
+docker build -t test-ggplot2 --build-arg user=tidyverse --build-arg repo=ggplot2 .
+```
+
+I'll skip the output this time because it's not interesting. Now let's run it and...
+
+```
+docker run test-ggplot2 
+```
+```
+Transferred 15676 of 74694 objects...
+```
+
+...uh, right. Look this is going to take a while so maybe we should move on? 
+
+The main reason I wanted to point to this is to highlight that this part is happening at run time: we're always downloading a fresh copy of the repository to run the tests. That makes sense in some context, but not others. The design choices I made in designing this docker image aren't the same ones I'd make if I was trying to design something that would work for a larger project.^[I mean, you could certainly write something similar as part of a containerised workflow on GitHub Actions that works similarly to existing workflows for R CMD check but executed within a container running Arch. That doesn't seem out of the question, but this isn't the way you'd set it up!] It's a toy, nothing more!^[I know the mystery will be too much so I'd better resolve it: no, it didn't pass on the Arch image. Some of the dependencies didn't install properly, and then eventually it threw an error trying to build the vignettes.]
+
+
+
+## Hosting your own images
+
+It's nice that I didn't have to rebuild my testing environment multiple times thanks to docker caching the layers, but it's not the most elegant solution. Given that the testing environment is one that I'll have to use with pretty much any package, it makes more sense to host that as its own image. 
 
 Edit the github PAT to include the scopes we need. If you've created your PAT using the default scopes provided by `usethis::create_github_token()`, you'll need a few more to run workflows that build and modify docker images:
 
