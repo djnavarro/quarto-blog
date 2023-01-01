@@ -551,14 +551,101 @@ The main reason I wanted to point to this is to highlight that this part is happ
 
 ## Hosting images
 
-Edit the github PAT to include the scopes we need. If you've created your PAT using the default scopes provided by `usethis::create_github_token()`, you'll need a few more to run workflows that build and modify docker images:
+Here's the dockerfile for the `ghcr.io/djnavarro/arch-r:base` image:
+
+``` dockerfile
+# Base image is Arch linux with the base-devel group installed
+FROM archlinux:base-devel
+
+# Labels provide metadata for the image
+LABEL org.opencontainers.image.source "https://github.com/djnavarro/arch-r-base" 
+LABEL org.opencontainers.image.authors "Danielle Navarro <djnavarro@protonmail.com>" 
+LABEL org.opencontainers.image.description DESCRIPTION
+LABEL org.opencontainers.image.licenses "GPL-3.0"
+
+# Set the locale
+COPY locale.gen /etc/locale.gen
+COPY locale.conf /etc/locale.conf
+RUN locale-gen
+ENV LANG=en_US.UTF-8
+ENV LC_ALL=en_US.UTF-8
+
+# Install R
+RUN pacman -Syu --noconfirm r
+
+# Default command: just start R
+CMD R --no-save
+```
+
+The two locale files aren't very interesting and could easily have been included as strings in the dockerfile, but I found it neater to keep them separate. This is the `locale.gen` file, which specifies the locales that the image generates:
+
+``` bash
+C.UTF8 UTF-8
+en_US.UTF-8 UTF-8
+```
+
+This is the `locale.conf` file specifying configuration details:
+
+``` bash
+LANG=en_US.UTF-8
+LC_ALL=en_US.UTF-8
+```
+
+Truly exciting. 
+
+These files are stored in the base branch of the github repo: [github.com/djnavarro/arch-r/tree/base](https://github.com/djnavarro/arch-r/tree/base). As you might have guessed, the source files for the test image are in the test branch. I'm not in any way an expert on GitHub Actions, but I do know a little bit. Just enough to be dangerous, I expect. Here's the [workflow](https://github.com/djnavarro/arch-r/blob/main/.github/workflows/publish-docker-image.yaml) I'm using:
+
+``` yaml
+name: publish-docker-image
+
+on:
+  push:
+    branches: ['base', 'test']
+    
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-push-image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: checkout-repository
+        uses: actions/checkout@v3
+        
+      - name: login-container-registry
+        uses: docker/login-action@f054a8b539a109f9f41c372932f1ae047eff08c9
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        
+      - name: extract-docker-metadata
+        id: meta
+        uses: docker/metadata-action@98669ae865ea3cffbcbaa878cf57c20bbf1c6c38
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        
+      - name: build-and-push
+        uses: docker/build-push-action@ad44023a93711e3deb337508980b4b5e9bcdc5dc
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+```
+
+For this workflow to run, I needed to edit the permissions associated with my github PAT to include some additional scopes. If, like me, you've created your PAT using the default scopes provided by `usethis::create_github_token()`, you'll need a few more to run workflows that build and modify docker images:
 
 - `read:packages` scope to download container images and read metadata.
 - `write:packages` scope to download and upload container images and read and write metadata.
 - `delete:packages` scope to delete container images.
 
-Add the GitHub Actions workflow, commit whatever changes you want to the repo. When you push upstream to main, it will trigger an automatic deployment to the GitHub Container Registry. In fact, if you look at how I set up
-[github.com/djnavarro/arch-r](https://github.com/djnavarro/arch-r) you'll notice that's exactly how it works there. You can also take a look at the more sophisticated workflows used by the rocker project: [github.com/rocker-org/rocker](https://github.com/rocker-org/rocker). The workflow I set up for my little side project is very simple by comparison.
+This workflow triggers an automatic deployment to the GitHub Container Registry whenever there is a new push to the base or test branches. This is what creates the `ghcr.io/djnavarro/arch-r:base` and `ghcr.io/djnavarro/arch-r:test` images. It's not as  sophisticated workflows used by the rocker project -- you can browse [github.com/rocker-org/rocker](https://github.com/rocker-org/rocker) if you want to see a nicer set up -- but it does work, and that was my main goal for this post.
 
 ## Resources
 
