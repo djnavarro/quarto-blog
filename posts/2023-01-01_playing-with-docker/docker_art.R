@@ -3,7 +3,7 @@ library(tidyr)
 library(tibble)
 library(dplyr)
 
-whale <- function(seed) {
+whale <- function(seed, box = TRUE, fancybox = TRUE) {
 
   set.seed(seed)
 
@@ -44,10 +44,12 @@ whale <- function(seed) {
 
   base_colour <- "black"
 
-  boxes <- boxes |>
-    group_by(x) |>
-    mutate(h = runif(1, min(y) - .3, max(y) + .3)) |>
-    filter(y < h)
+  if(fancybox) {
+    boxes <- boxes |>
+      group_by(x) |>
+      mutate(h = runif(1, min(y) - .3, max(y) + .3)) |>
+      filter(y < h)
+  }
 
   pic <- ggplot(mapping = aes(x, y)) +
     geom_polygon(
@@ -61,7 +63,9 @@ whale <- function(seed) {
       colour = base_colour,
       fill = base_colour,
       linewidth = 1
-    ) +
+    )
+
+  if(box) pic <- pic +
     geom_tile(
       width = .2,
       height = .2,
@@ -70,7 +74,9 @@ whale <- function(seed) {
       fill = base_colour,
       linewidth = 3,
       linejoin = "bevel"
-    ) +
+    )
+
+  pic <- pic +
     coord_equal(xlim = c(-1.5, 1.5), ylim = c(-1.5, 1.5)) +
     scale_x_continuous(labels = NULL, name = NULL) +
     scale_y_continuous(labels = NULL, name = NULL) +

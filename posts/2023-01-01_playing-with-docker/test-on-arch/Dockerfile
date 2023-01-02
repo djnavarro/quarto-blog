@@ -1,4 +1,4 @@
-FROM ghcr.io/djnavarro/arch-r:test
+FROM ghcr.io/djnavarro/arch-r-test:release
 
 # copy the testing script
 COPY clone-and-check.R /home/clone-and-check.R
