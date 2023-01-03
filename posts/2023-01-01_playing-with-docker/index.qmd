@@ -418,7 +418,22 @@ remotes::install_deps(dir, dependencies = TRUE, repos = cran)
 rcmdcheck::rcmdcheck(dir)
 ```
 
-Notice that I'm building on top of a slightly different image. The `system-check` image starts by building from `ghcr.io/djnavarro/arch-r-base:release`, whereas `test-on-check` uses `ghcr.io/djnavarro/arch-r-test:release`. The two are related: `arch-r-test:release` takes `arch-r-base:release` as its starting point and adds some system and R packages that are super-handy when building an R package and running its unit tests. 
+Like last time, the place to start is with the R script. It expects to find `user`, `repo`, and `cran` values as environment variables. Once it finds those, it clones the `user/repo` repository from github, installs any dependencies of the pacakge from `cran`, and then uses rcmdcheck to check the downloaded package. 
+
+Now let's look at how the dockerfile sets up the computing environment to enable this script to be run on arch linux: 
+
+- Just like we saw in the last example, the dockerfile begins with a `FROM` instruction. This time around though I'm using the `arch-r-test` image rather than the `arch-r-base` image. Much like the base image, the test image runs arch linux and installs R in the environment. However, it also installs several other system dependencies and R packages that come in handy when running `R CMD check`, which makes it a bit more useful in this context. 
+
+- The next step in the dockerfile is the `COPY` instruction that ensures that the image has a copy of the R script. There's nothing new here so we can move on. 
+
+- The next two steps use the [`ARG`](https://docs.docker.com/engine/reference/builder/#arg) instruction. This is a new one for us: it's a mechanism for allowing the user to specify arguments that will be passed to docker when building the image. That's handy because it means I can customise the image that gets built. The obvious use here is that I can specify the `user` and the `repo` for the package that I want to check! (Later on we'll see how this is done using the `--build-arg` argument to `docker build`)
+
+- Next up is another `ARG` step, used to specify the url for the `cran` repository that the container should use to download any R packages. Notice, however, that this time I've specified a default value, so you don't actually have to specify `cran` when you call `docker build`: if you don't it will just use the default url
+
+- The `ARG` steps pass the user input to docker, but they don't set any environment variables (remember, our R script is expecting to find environment variables). That's the job of the [`ENV`](https://docs.docker.com/engine/reference/builder/#env) instructions that appear in the next three steps.^[Okay yes, clever person, I could have chosen to pass environment variables at run time using the `--env` argument to `docker run`. I didn't need to do this at build time using `ARG`. But that would defeat the point of the exposition wouldn't it? I wanted to use `ARG` and `ENV` in the main text, and quietly mention the `--env` argument to `docker run` in an aside. And I have now accomplished exactly that, haven't I?] 
+
+- Finally, we have the `CMD` instruction, which specifies a default action for the container: run the script.
+
 
 ```{r whale-2}
 #| echo: false
@@ -429,7 +444,20 @@ whale(2)
 
 ### Building the image
 
-Let's see what happens when I try to build. The `arch-r-test` image is considerably larger than `arch-r-base`. This one isn't a frugal image! It takes a while, so I'm going to go have a smoke while I wait^[I am, after all, "on smoko" (which in my case means I am unemployed and bored out of my mind) but incidentally if you want to see the most fabulous cover ever (Wet Leg covering The Chats), [here it is](https://www.youtube.com/watch?v=P_dza9y6cg0).] but the nice thing is that if you've done it once you don't have to do it again. Anyway...
+Setting aside the fact that our `test-on-arch` project has a lot of flaws and limitations, it will serve the purposes we need it to. Let's say I want to create an image that will check the queue package hosted at [github.com/djnavarro/queue](https://github.com/djnavarro/queue/). To do that I'll need to set `user=djnavarro` and `repo=queue` when I build the image, which I can do with the `--build-arg` argument:
+
+```{bash build-test-queue-0}
+#| eval: false
+docker build \
+  --tag test-queue \
+  --build-arg user=djnavarro \
+  --build-arg repo=queue \
+  test-on-arch
+```
+
+Notice that I've chosen to call this image `test-queue`. A nice thing about being able to name the images independently from the dockerfile is that it's easy to create multiple images using the same dockerfile (just with different arguments) and give them meaningful names. And sure, this particular example is very silly because literally everything I'm doing here at the build stage could be done just as efficiently at the run stage. But whatever. 
+
+Let's see what happens when I try to execute this build command. The `arch-r-test` image is considerably larger than `arch-r-base`. This one isn't a frugal image! It takes a while, so I'm going to go have a smoke while I wait^[I am, after all, "on smoko" (which in my case means I am unemployed and bored out of my mind) but incidentally if you want to see the most fabulous cover ever (Wet Leg covering The Chats), [here it is](https://www.youtube.com/watch?v=P_dza9y6cg0).] but the nice thing is that if you've done it once you don't have to do it again. Anyway...
 
 ```{bash build-test-queue}
 #| eval: false

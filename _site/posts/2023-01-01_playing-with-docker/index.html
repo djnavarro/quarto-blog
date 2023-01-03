@@ -592,7 +592,16 @@ With locale:
 <span id="cb22-13"><a href="#cb22-13" aria-hidden="true" tabindex="-1"></a>rcmdcheck<span class="sc">::</span><span class="fu">rcmdcheck</span>(dir)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 </div>
-<p>Notice that I’m building on top of a slightly different image. The <code>system-check</code> image starts by building from <code>ghcr.io/djnavarro/arch-r-base:release</code>, whereas <code>test-on-check</code> uses <code>ghcr.io/djnavarro/arch-r-test:release</code>. The two are related: <code>arch-r-test:release</code> takes <code>arch-r-base:release</code> as its starting point and adds some system and R packages that are super-handy when building an R package and running its unit tests.</p>
+<p>Like last time, the place to start is with the R script. It expects to find <code>user</code>, <code>repo</code>, and <code>cran</code> values as environment variables. Once it finds those, it clones the <code>user/repo</code> repository from github, installs any dependencies of the pacakge from <code>cran</code>, and then uses rcmdcheck to check the downloaded package.</p>
+<p>Now let’s look at how the dockerfile sets up the computing environment to enable this script to be run on arch linux:</p>
+<ul>
+<li><p>Just like we saw in the last example, the dockerfile begins with a <code>FROM</code> instruction. This time around though I’m using the <code>arch-r-test</code> image rather than the <code>arch-r-base</code> image. Much like the base image, the test image runs arch linux and installs R in the environment. However, it also installs several other system dependencies and R packages that come in handy when running <code>R CMD check</code>, which makes it a bit more useful in this context.</p></li>
+<li><p>The next step in the dockerfile is the <code>COPY</code> instruction that ensures that the image has a copy of the R script. There’s nothing new here so we can move on.</p></li>
+<li><p>The next two steps use the <a href="https://docs.docker.com/engine/reference/builder/#arg"><code>ARG</code></a> instruction. This is a new one for us: it’s a mechanism for allowing the user to specify arguments that will be passed to docker when building the image. That’s handy because it means I can customise the image that gets built. The obvious use here is that I can specify the <code>user</code> and the <code>repo</code> for the package that I want to check! (Later on we’ll see how this is done using the <code>--build-arg</code> argument to <code>docker build</code>)</p></li>
+<li><p>Next up is another <code>ARG</code> step, used to specify the url for the <code>cran</code> repository that the container should use to download any R packages. Notice, however, that this time I’ve specified a default value, so you don’t actually have to specify <code>cran</code> when you call <code>docker build</code>: if you don’t it will just use the default url</p></li>
+<li><p>The <code>ARG</code> steps pass the user input to docker, but they don’t set any environment variables (remember, our R script is expecting to find environment variables). That’s the job of the <a href="https://docs.docker.com/engine/reference/builder/#env"><code>ENV</code></a> instructions that appear in the next three steps.<a href="#fn29" class="footnote-ref" id="fnref29" role="doc-noteref"><sup>29</sup></a></p></li>
+<li><p>Finally, we have the <code>CMD</code> instruction, which specifies a default action for the container: run the script.</p></li>
+</ul>
 <div class="cell page-columns page-full">
 
 <div class="no-row-height column-margin column-container"><div class="cell-output-display">
@@ -605,13 +614,22 @@ With locale:
 </div></div></div>
 <section id="building-the-image-1" class="level3">
 <h3 class="anchored" data-anchor-id="building-the-image-1">Building the image</h3>
-<p>Let’s see what happens when I try to build. The <code>arch-r-test</code> image is considerably larger than <code>arch-r-base</code>. This one isn’t a frugal image! It takes a while, so I’m going to go have a smoke while I wait<a href="#fn29" class="footnote-ref" id="fnref29" role="doc-noteref"><sup>29</sup></a> but the nice thing is that if you’ve done it once you don’t have to do it again. Anyway…</p>
+<p>Setting aside the fact that our <code>test-on-arch</code> project has a lot of flaws and limitations, it will serve the purposes we need it to. Let’s say I want to create an image that will check the queue package hosted at <a href="https://github.com/djnavarro/queue/">github.com/djnavarro/queue</a>. To do that I’ll need to set <code>user=djnavarro</code> and <code>repo=queue</code> when I build the image, which I can do with the <code>--build-arg</code> argument:</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb23"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb23-1"><a href="#cb23-1" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> build <span class="dt">\</span></span>
 <span id="cb23-2"><a href="#cb23-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--tag</span> test-queue <span class="dt">\</span></span>
 <span id="cb23-3"><a href="#cb23-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--build-arg</span> user=djnavarro <span class="dt">\</span></span>
 <span id="cb23-4"><a href="#cb23-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">--build-arg</span> repo=queue <span class="dt">\</span></span>
 <span id="cb23-5"><a href="#cb23-5" aria-hidden="true" tabindex="-1"></a>  test-on-arch</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>Notice that I’ve chosen to call this image <code>test-queue</code>. A nice thing about being able to name the images independently from the dockerfile is that it’s easy to create multiple images using the same dockerfile (just with different arguments) and give them meaningful names. And sure, this particular example is very silly because literally everything I’m doing here at the build stage could be done just as efficiently at the run stage. But whatever.</p>
+<p>Let’s see what happens when I try to execute this build command. The <code>arch-r-test</code> image is considerably larger than <code>arch-r-base</code>. This one isn’t a frugal image! It takes a while, so I’m going to go have a smoke while I wait<a href="#fn30" class="footnote-ref" id="fnref30" role="doc-noteref"><sup>30</sup></a> but the nice thing is that if you’ve done it once you don’t have to do it again. Anyway…</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb24"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb24-1"><a href="#cb24-1" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> build <span class="dt">\</span></span>
+<span id="cb24-2"><a href="#cb24-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--tag</span> test-queue <span class="dt">\</span></span>
+<span id="cb24-3"><a href="#cb24-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--build-arg</span> user=djnavarro <span class="dt">\</span></span>
+<span id="cb24-4"><a href="#cb24-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">--build-arg</span> repo=queue <span class="dt">\</span></span>
+<span id="cb24-5"><a href="#cb24-5" aria-hidden="true" tabindex="-1"></a>  test-on-arch</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <pre><code>Sending build context to Docker daemon  3.072kB
 Step 1/9 : FROM ghcr.io/djnavarro/arch-r-test:release
@@ -662,11 +680,11 @@ Successfully tagged test-queue:latest</code></pre>
 <p>Notice that during the first step when downloading <code>arch-r-test</code>, I didn’t have to download the whole thing. Two of the layers in <code>arch-r-test</code> are shared with the <code>arch-r-base</code> image, and docker is smart enough to notice that I already have those layers in my cache. That’s what the <code>Already exists</code> part of the output indicates. Admittedly it doesn’t save us much in this case because its the texlive installation that causes pain, but it’s a nice feature nevertheless.</p>
 <p>As a little sanity check – because, dear reader, I have been sitting here waiting very patiently while a large image downloaded over a slow connection and would like to confirm that I don’t have to do that again – let’s repeat the exercise from earlier and try building it a second time just to reassure ourselves that the cache is doing its job:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb25"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb25-1"><a href="#cb25-1" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> build <span class="dt">\</span></span>
-<span id="cb25-2"><a href="#cb25-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--tag</span> test-queue <span class="dt">\</span></span>
-<span id="cb25-3"><a href="#cb25-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--build-arg</span> user=djnavarro <span class="dt">\</span></span>
-<span id="cb25-4"><a href="#cb25-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">--build-arg</span> repo=queue <span class="dt">\</span></span>
-<span id="cb25-5"><a href="#cb25-5" aria-hidden="true" tabindex="-1"></a>  test-on-arch </span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb26"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb26-1"><a href="#cb26-1" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> build <span class="dt">\</span></span>
+<span id="cb26-2"><a href="#cb26-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--tag</span> test-queue <span class="dt">\</span></span>
+<span id="cb26-3"><a href="#cb26-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--build-arg</span> user=djnavarro <span class="dt">\</span></span>
+<span id="cb26-4"><a href="#cb26-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">--build-arg</span> repo=queue <span class="dt">\</span></span>
+<span id="cb26-5"><a href="#cb26-5" aria-hidden="true" tabindex="-1"></a>  test-on-arch </span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <pre><code>Sending build context to Docker daemon  3.072kB
 Step 1/9 : FROM ghcr.io/djnavarro/arch-r-test:release
@@ -699,7 +717,7 @@ Successfully built 76926d5616d7
 Successfully tagged test-queue:latest</code></pre>
 <p>Not going to lie, I breathed a little sigh of relief. Docker used the cached layers, and that all happened instantaneously. Okay cool. I’m going to stop doing these checks from now on, but one last time let’s take a peek at the list of images I have stored locally:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb27"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb27-1"><a href="#cb27-1" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> image list</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb28"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb28-1"><a href="#cb28-1" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> image list</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <pre><code>REPOSITORY                      TAG       IMAGE ID       CREATED              SIZE
 test-queue                      latest    76926d5616d7   About a minute ago   4.99GB
@@ -712,7 +730,7 @@ hello-world                     latest    feb5d9fea6a5   15 months ago        13
 <h3 class="anchored" data-anchor-id="run-in-a-container-1">Run in a container</h3>
 <p>Now let’s run it:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb29"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb29-1"><a href="#cb29-1" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> run test-queue</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb30"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb30-1"><a href="#cb30-1" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> run test-queue</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <pre><code>Transferred 766 of 766 objects...done!
 Checked out 34 of 34 commits... done!
@@ -826,11 +844,11 @@ In system("timedatectl", intern = TRUE) :
 <h3 class="anchored" data-anchor-id="two-images-one-dockerfile">Two images, one dockerfile</h3>
 <p>The advantage to passing arguments is that you can build many images from the same dockerfile, and docker will reuse the cached layers intelligently. Even though I’ve never tried testing the praise package on arch before, this builds immediately and without downloading anything, because everything that actually matters was already done when I built the “test-queue” image earlier:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb32"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb32-1"><a href="#cb32-1" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> build <span class="dt">\</span></span>
-<span id="cb32-2"><a href="#cb32-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--tag</span> test-praise <span class="dt">\</span></span>
-<span id="cb32-3"><a href="#cb32-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--build-arg</span> user=rladies <span class="dt">\</span></span>
-<span id="cb32-4"><a href="#cb32-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">--build-arg</span> repo=praise <span class="dt">\</span></span>
-<span id="cb32-5"><a href="#cb32-5" aria-hidden="true" tabindex="-1"></a>  test-on-arch </span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb33"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb33-1"><a href="#cb33-1" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> build <span class="dt">\</span></span>
+<span id="cb33-2"><a href="#cb33-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--tag</span> test-praise <span class="dt">\</span></span>
+<span id="cb33-3"><a href="#cb33-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--build-arg</span> user=rladies <span class="dt">\</span></span>
+<span id="cb33-4"><a href="#cb33-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">--build-arg</span> repo=praise <span class="dt">\</span></span>
+<span id="cb33-5"><a href="#cb33-5" aria-hidden="true" tabindex="-1"></a>  test-on-arch </span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <pre><code>Sending build context to Docker daemon  3.072kB
 Step 1/9 : FROM ghcr.io/djnavarro/arch-r-test:release
@@ -867,7 +885,7 @@ Successfully built a02feea26152
 Successfully tagged test-praise:latest</code></pre>
 <p>It’s verbose, but fast, and it hasn’t wasted anything by creating unnecessary copies.</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb34"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb34-1"><a href="#cb34-1" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> image list</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb35"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb35-1"><a href="#cb35-1" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> image list</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <pre><code>REPOSITORY                      TAG       IMAGE ID       CREATED          SIZE
 test-praise                     latest    a02feea26152   20 seconds ago   4.99GB
@@ -879,7 +897,7 @@ hello-world                     latest    feb5d9fea6a5   15 months ago    13.3kB
 <p>Again note the value of layer sharing. If these were all independent images we’d be looking at 17GB on disk. In fact, because <code>arch-r-test</code> reuses the layers from <code>arch-r-base</code> and all the other images are trivial additions to one of these two images, the <em>total</em> size of all these images is in fact “only” 5GB… i.e., the size of the <code>arch-r-test</code> image. And again, the only reason that one is so big is that I was really fussy about tex installations and bundled an entire texlive distribution with extra fonts and everything because I have no desire deal with tests whining about missing tex stuff.</p>
 <p>Anyway, let’s get back on track and run the <code>test-praise</code> image in a container:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb36"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb36-1"><a href="#cb36-1" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> run test-praise</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb37"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb37-1"><a href="#cb37-1" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> run test-praise</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <pre><code>Transferred 431 of 431 objects...done!
 Checked out 26 of 26 commits... done!
@@ -963,20 +981,20 @@ Duration: 25.1s
 <h3 class="anchored" data-anchor-id="a-small-caution">A small caution</h3>
 <p>Before we move onto the third project I want to talk about one more example using this one, as a way of cautioning anyone who might feel inclined to use it without fixing its many deficiencies. Let’s try using <code>test-on-arch</code> to run the unit tests for ggplot2, shall we? Unlike praise and queue, ggplot2 is a large and complicated package with substantial dependencies and a lot of unit tests. That’s going to be a problem given that <code>test-on-arch</code> clones the entire repository from scratch every time it’s called. Building the image is easy, because the build stage for <code>test-on-arch</code> doesn’t do anything except copy the script and pass a few arguments…</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb38"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb38-1"><a href="#cb38-1" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> build <span class="dt">\</span></span>
-<span id="cb38-2"><a href="#cb38-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--tag</span> test-ggplot2 <span class="dt">\</span></span>
-<span id="cb38-3"><a href="#cb38-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--build-arg</span> user=tidyverse <span class="dt">\</span></span>
-<span id="cb38-4"><a href="#cb38-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">--build-arg</span> repo=ggplot2 <span class="dt">\</span></span>
-<span id="cb38-5"><a href="#cb38-5" aria-hidden="true" tabindex="-1"></a>  test-on-arch </span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb39"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb39-1"><a href="#cb39-1" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> build <span class="dt">\</span></span>
+<span id="cb39-2"><a href="#cb39-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--tag</span> test-ggplot2 <span class="dt">\</span></span>
+<span id="cb39-3"><a href="#cb39-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--build-arg</span> user=tidyverse <span class="dt">\</span></span>
+<span id="cb39-4"><a href="#cb39-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">--build-arg</span> repo=ggplot2 <span class="dt">\</span></span>
+<span id="cb39-5"><a href="#cb39-5" aria-hidden="true" tabindex="-1"></a>  test-on-arch </span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <p>But when we call <code>docker run</code> things become unpleasant for us even before we’ve had a chance to start running the unit tests, because the git clone operation is very time consuming…</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb39"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb39-1"><a href="#cb39-1" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> run test-ggplot2 </span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb40"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb40-1"><a href="#cb40-1" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> run test-ggplot2 </span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <pre><code>Transferred 15676 of 74694 objects...</code></pre>
 <p><br></p>
 <p>…uh, right. Look this is going to take a while, so maybe we should move on?</p>
-<p>The main reason I wanted to point to this is to highlight that the clone step occurs at run time, and the entire clone operation is repeated every time we call it. That’s not a smart way to do this. If you really wanted to design a docker workflow for testing packages on arch, you’d want to make some smarter design choices than this! The <code>test-on-arch</code> project I’ve used in this blog post is a toy, nothing more.<a href="#fn30" class="footnote-ref" id="fnref30" role="doc-noteref"><sup>30</sup></a></p>
+<p>The main reason I wanted to point to this is to highlight that the clone step occurs at run time, and the entire clone operation is repeated every time we call it. That’s not a smart way to do this. If you really wanted to design a docker workflow for testing packages on arch, you’d want to make some smarter design choices than this! The <code>test-on-arch</code> project I’ve used in this blog post is a toy, nothing more.<a href="#fn31" class="footnote-ref" id="fnref31" role="doc-noteref"><sup>31</sup></a></p>
 <div class="cell page-columns page-full" data-layout-align="center" data-fig.dpi="200">
 <div class="cell-output-display column-screen-inset">
 <div class="quarto-figure quarto-figure-center">
@@ -998,23 +1016,23 @@ Duration: 25.1s
 <div class="code-with-filename-file">
 <pre><strong>base/Dockerfile</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb41"><pre class="sourceCode dockerfile code-with-copy"><code class="sourceCode dockerfile"><span id="cb41-1"><a href="#cb41-1" aria-hidden="true" tabindex="-1"></a><span class="kw">FROM</span> archlinux:base-devel</span>
-<span id="cb41-2"><a href="#cb41-2" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb41-3"><a href="#cb41-3" aria-hidden="true" tabindex="-1"></a><span class="kw">LABEL</span> org.opencontainers.image.source <span class="st">"https://github.com/djnavarro/arch-r/base"</span> </span>
-<span id="cb41-4"><a href="#cb41-4" aria-hidden="true" tabindex="-1"></a><span class="kw">LABEL</span> org.opencontainers.image.authors <span class="st">"Danielle Navarro &lt;djnavarro@protonmail.com&gt;"</span> </span>
-<span id="cb41-5"><a href="#cb41-5" aria-hidden="true" tabindex="-1"></a><span class="kw">LABEL</span> org.opencontainers.image.description DESCRIPTION</span>
-<span id="cb41-6"><a href="#cb41-6" aria-hidden="true" tabindex="-1"></a><span class="kw">LABEL</span> org.opencontainers.image.licenses <span class="st">"GPL-3.0"</span></span>
-<span id="cb41-7"><a href="#cb41-7" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb41-8"><a href="#cb41-8" aria-hidden="true" tabindex="-1"></a><span class="co"># set the locale</span></span>
-<span id="cb41-9"><a href="#cb41-9" aria-hidden="true" tabindex="-1"></a><span class="kw">COPY</span> base/locale.gen /etc/locale.gen</span>
-<span id="cb41-10"><a href="#cb41-10" aria-hidden="true" tabindex="-1"></a><span class="kw">COPY</span> base/locale.conf /etc/locale.conf</span>
-<span id="cb41-11"><a href="#cb41-11" aria-hidden="true" tabindex="-1"></a><span class="kw">RUN</span> <span class="ex">locale-gen</span></span>
-<span id="cb41-12"><a href="#cb41-12" aria-hidden="true" tabindex="-1"></a><span class="kw">ENV</span> LANG=en_US.UTF-8</span>
-<span id="cb41-13"><a href="#cb41-13" aria-hidden="true" tabindex="-1"></a><span class="kw">ENV</span> LC_ALL=en_US.UTF-8</span>
-<span id="cb41-14"><a href="#cb41-14" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb41-15"><a href="#cb41-15" aria-hidden="true" tabindex="-1"></a><span class="co"># install R and set default command</span></span>
-<span id="cb41-16"><a href="#cb41-16" aria-hidden="true" tabindex="-1"></a><span class="kw">RUN</span> <span class="ex">pacman</span> <span class="at">-Syu</span> <span class="at">--noconfirm</span> r</span>
-<span id="cb41-17"><a href="#cb41-17" aria-hidden="true" tabindex="-1"></a><span class="kw">CMD</span> <span class="ex">R</span> <span class="at">--no-save</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb42"><pre class="sourceCode dockerfile code-with-copy"><code class="sourceCode dockerfile"><span id="cb42-1"><a href="#cb42-1" aria-hidden="true" tabindex="-1"></a><span class="kw">FROM</span> archlinux:base-devel</span>
+<span id="cb42-2"><a href="#cb42-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb42-3"><a href="#cb42-3" aria-hidden="true" tabindex="-1"></a><span class="kw">LABEL</span> org.opencontainers.image.source <span class="st">"https://github.com/djnavarro/arch-r/base"</span> </span>
+<span id="cb42-4"><a href="#cb42-4" aria-hidden="true" tabindex="-1"></a><span class="kw">LABEL</span> org.opencontainers.image.authors <span class="st">"Danielle Navarro &lt;djnavarro@protonmail.com&gt;"</span> </span>
+<span id="cb42-5"><a href="#cb42-5" aria-hidden="true" tabindex="-1"></a><span class="kw">LABEL</span> org.opencontainers.image.description DESCRIPTION</span>
+<span id="cb42-6"><a href="#cb42-6" aria-hidden="true" tabindex="-1"></a><span class="kw">LABEL</span> org.opencontainers.image.licenses <span class="st">"GPL-3.0"</span></span>
+<span id="cb42-7"><a href="#cb42-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb42-8"><a href="#cb42-8" aria-hidden="true" tabindex="-1"></a><span class="co"># set the locale</span></span>
+<span id="cb42-9"><a href="#cb42-9" aria-hidden="true" tabindex="-1"></a><span class="kw">COPY</span> base/locale.gen /etc/locale.gen</span>
+<span id="cb42-10"><a href="#cb42-10" aria-hidden="true" tabindex="-1"></a><span class="kw">COPY</span> base/locale.conf /etc/locale.conf</span>
+<span id="cb42-11"><a href="#cb42-11" aria-hidden="true" tabindex="-1"></a><span class="kw">RUN</span> <span class="ex">locale-gen</span></span>
+<span id="cb42-12"><a href="#cb42-12" aria-hidden="true" tabindex="-1"></a><span class="kw">ENV</span> LANG=en_US.UTF-8</span>
+<span id="cb42-13"><a href="#cb42-13" aria-hidden="true" tabindex="-1"></a><span class="kw">ENV</span> LC_ALL=en_US.UTF-8</span>
+<span id="cb42-14"><a href="#cb42-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb42-15"><a href="#cb42-15" aria-hidden="true" tabindex="-1"></a><span class="co"># install R and set default command</span></span>
+<span id="cb42-16"><a href="#cb42-16" aria-hidden="true" tabindex="-1"></a><span class="kw">RUN</span> <span class="ex">pacman</span> <span class="at">-Syu</span> <span class="at">--noconfirm</span> r</span>
+<span id="cb42-17"><a href="#cb42-17" aria-hidden="true" tabindex="-1"></a><span class="kw">CMD</span> <span class="ex">R</span> <span class="at">--no-save</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 </div>
 <div class="cell">
@@ -1022,8 +1040,8 @@ Duration: 25.1s
 <div class="code-with-filename-file">
 <pre><strong>base/locale.gen</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb42"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb42-1"><a href="#cb42-1" aria-hidden="true" tabindex="-1"></a><span class="ex">C.UTF8</span> UTF-8</span>
-<span id="cb42-2"><a href="#cb42-2" aria-hidden="true" tabindex="-1"></a><span class="ex">en_US.UTF-8</span> UTF-8</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb43"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb43-1"><a href="#cb43-1" aria-hidden="true" tabindex="-1"></a><span class="ex">C.UTF8</span> UTF-8</span>
+<span id="cb43-2"><a href="#cb43-2" aria-hidden="true" tabindex="-1"></a><span class="ex">en_US.UTF-8</span> UTF-8</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 </div>
 <div class="cell">
@@ -1031,8 +1049,8 @@ Duration: 25.1s
 <div class="code-with-filename-file">
 <pre><strong>base/locale.conf</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb43"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb43-1"><a href="#cb43-1" aria-hidden="true" tabindex="-1"></a><span class="va">LANG</span><span class="op">=</span>en_US.UTF-8</span>
-<span id="cb43-2"><a href="#cb43-2" aria-hidden="true" tabindex="-1"></a><span class="va">LC_ALL</span><span class="op">=</span>en_US.UTF-8</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb44"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb44-1"><a href="#cb44-1" aria-hidden="true" tabindex="-1"></a><span class="va">LANG</span><span class="op">=</span>en_US.UTF-8</span>
+<span id="cb44-2"><a href="#cb44-2" aria-hidden="true" tabindex="-1"></a><span class="va">LC_ALL</span><span class="op">=</span>en_US.UTF-8</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 </div>
 <p>Truly exciting.</p>
@@ -1052,57 +1070,57 @@ Duration: 25.1s
 <div class="code-with-filename-file">
 <pre><strong>.github/workflows/build-image.yaml</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb44"><pre class="sourceCode yaml code-with-copy"><code class="sourceCode yaml"><span id="cb44-1"><a href="#cb44-1" aria-hidden="true" tabindex="-1"></a><span class="fu">name</span><span class="kw">:</span><span class="at"> publish arch-r images</span></span>
-<span id="cb44-2"><a href="#cb44-2" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb44-3"><a href="#cb44-3" aria-hidden="true" tabindex="-1"></a><span class="fu">on</span><span class="kw">:</span></span>
-<span id="cb44-4"><a href="#cb44-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">push</span><span class="kw">:</span></span>
-<span id="cb44-5"><a href="#cb44-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">branches</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="st">'release'</span><span class="kw">]</span></span>
-<span id="cb44-6"><a href="#cb44-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span></span>
-<span id="cb44-7"><a href="#cb44-7" aria-hidden="true" tabindex="-1"></a><span class="fu">env</span><span class="kw">:</span></span>
-<span id="cb44-8"><a href="#cb44-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">REGISTRY</span><span class="kw">:</span><span class="at"> ghcr.io</span></span>
-<span id="cb44-9"><a href="#cb44-9" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">IMAGE_NAME</span><span class="kw">:</span><span class="at"> ${{ github.repository }}</span></span>
-<span id="cb44-10"><a href="#cb44-10" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb44-11"><a href="#cb44-11" aria-hidden="true" tabindex="-1"></a><span class="fu">jobs</span><span class="kw">:</span></span>
-<span id="cb44-12"><a href="#cb44-12" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">build-and-push-image</span><span class="kw">:</span></span>
-<span id="cb44-13"><a href="#cb44-13" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">runs-on</span><span class="kw">:</span><span class="at"> ubuntu-latest</span></span>
-<span id="cb44-14"><a href="#cb44-14" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">strategy</span><span class="kw">:</span></span>
-<span id="cb44-15"><a href="#cb44-15" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">fail-fast</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span></span>
-<span id="cb44-16"><a href="#cb44-16" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">matrix</span><span class="kw">:</span></span>
-<span id="cb44-17"><a href="#cb44-17" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">include</span><span class="kw">:</span></span>
-<span id="cb44-18"><a href="#cb44-18" aria-hidden="true" tabindex="-1"></a><span class="at">          </span><span class="kw">-</span><span class="at"> </span><span class="fu">dockerfile</span><span class="kw">:</span><span class="at"> ./base/Dockerfile</span></span>
-<span id="cb44-19"><a href="#cb44-19" aria-hidden="true" tabindex="-1"></a><span class="at">            </span><span class="fu">image</span><span class="kw">:</span><span class="at"> ghcr.io/djnavarro/arch-r-base</span></span>
-<span id="cb44-20"><a href="#cb44-20" aria-hidden="true" tabindex="-1"></a><span class="at">          </span><span class="kw">-</span><span class="at"> </span><span class="fu">dockerfile</span><span class="kw">:</span><span class="at"> ./test/Dockerfile</span></span>
-<span id="cb44-21"><a href="#cb44-21" aria-hidden="true" tabindex="-1"></a><span class="at">            </span><span class="fu">image</span><span class="kw">:</span><span class="at"> ghcr.io/djnavarro/arch-r-test</span></span>
-<span id="cb44-22"><a href="#cb44-22" aria-hidden="true" tabindex="-1"></a><span class="at">            </span></span>
-<span id="cb44-23"><a href="#cb44-23" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">permissions</span><span class="kw">:</span></span>
-<span id="cb44-24"><a href="#cb44-24" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">contents</span><span class="kw">:</span><span class="at"> read</span></span>
-<span id="cb44-25"><a href="#cb44-25" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">packages</span><span class="kw">:</span><span class="at"> write</span></span>
-<span id="cb44-26"><a href="#cb44-26" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb44-27"><a href="#cb44-27" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">steps</span><span class="kw">:</span></span>
-<span id="cb44-28"><a href="#cb44-28" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> </span><span class="fu">name</span><span class="kw">:</span><span class="at"> checkout repository</span></span>
-<span id="cb44-29"><a href="#cb44-29" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">uses</span><span class="kw">:</span><span class="at"> actions/checkout@v2</span></span>
-<span id="cb44-30"><a href="#cb44-30" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb44-31"><a href="#cb44-31" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> </span><span class="fu">name</span><span class="kw">:</span><span class="at"> login to the container registry</span></span>
-<span id="cb44-32"><a href="#cb44-32" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">uses</span><span class="kw">:</span><span class="at"> docker/login-action@f054a8b539a109f9f41c372932f1ae047eff08c9</span></span>
-<span id="cb44-33"><a href="#cb44-33" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">with</span><span class="kw">:</span></span>
-<span id="cb44-34"><a href="#cb44-34" aria-hidden="true" tabindex="-1"></a><span class="at">          </span><span class="fu">registry</span><span class="kw">:</span><span class="at"> ${{ env.REGISTRY }}</span></span>
-<span id="cb44-35"><a href="#cb44-35" aria-hidden="true" tabindex="-1"></a><span class="at">          </span><span class="fu">username</span><span class="kw">:</span><span class="at"> ${{ github.actor }}</span></span>
-<span id="cb44-36"><a href="#cb44-36" aria-hidden="true" tabindex="-1"></a><span class="at">          </span><span class="fu">password</span><span class="kw">:</span><span class="at"> ${{ secrets.GITHUB_TOKEN }}</span></span>
-<span id="cb44-37"><a href="#cb44-37" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb44-38"><a href="#cb44-38" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> </span><span class="fu">name</span><span class="kw">:</span><span class="at"> extract metadata (tags, labels) for docker</span></span>
-<span id="cb44-39"><a href="#cb44-39" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">id</span><span class="kw">:</span><span class="at"> meta</span></span>
-<span id="cb44-40"><a href="#cb44-40" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">uses</span><span class="kw">:</span><span class="at"> docker/metadata-action@98669ae865ea3cffbcbaa878cf57c20bbf1c6c38</span></span>
-<span id="cb44-41"><a href="#cb44-41" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">with</span><span class="kw">:</span></span>
-<span id="cb44-42"><a href="#cb44-42" aria-hidden="true" tabindex="-1"></a><span class="at">          </span><span class="fu">images</span><span class="kw">:</span><span class="at"> ${{ matrix.image }}</span></span>
-<span id="cb44-43"><a href="#cb44-43" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb44-44"><a href="#cb44-44" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> </span><span class="fu">name</span><span class="kw">:</span><span class="at"> build and push docker image</span></span>
-<span id="cb44-45"><a href="#cb44-45" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">uses</span><span class="kw">:</span><span class="at"> docker/build-push-action@ad44023a93711e3deb337508980b4b5e9bcdc5dc</span></span>
-<span id="cb44-46"><a href="#cb44-46" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">with</span><span class="kw">:</span></span>
-<span id="cb44-47"><a href="#cb44-47" aria-hidden="true" tabindex="-1"></a><span class="at">          </span><span class="fu">context</span><span class="kw">:</span><span class="at"> .</span></span>
-<span id="cb44-48"><a href="#cb44-48" aria-hidden="true" tabindex="-1"></a><span class="at">          </span><span class="fu">file</span><span class="kw">:</span><span class="at"> ${{ matrix.dockerfile }}</span></span>
-<span id="cb44-49"><a href="#cb44-49" aria-hidden="true" tabindex="-1"></a><span class="at">          </span><span class="fu">push</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span>
-<span id="cb44-50"><a href="#cb44-50" aria-hidden="true" tabindex="-1"></a><span class="at">          </span><span class="fu">tags</span><span class="kw">:</span><span class="at"> ${{ steps.meta.outputs.tags }}</span></span>
-<span id="cb44-51"><a href="#cb44-51" aria-hidden="true" tabindex="-1"></a><span class="at">          </span><span class="fu">labels</span><span class="kw">:</span><span class="at"> ${{ steps.meta.outputs.labels }}</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb45"><pre class="sourceCode yaml code-with-copy"><code class="sourceCode yaml"><span id="cb45-1"><a href="#cb45-1" aria-hidden="true" tabindex="-1"></a><span class="fu">name</span><span class="kw">:</span><span class="at"> publish arch-r images</span></span>
+<span id="cb45-2"><a href="#cb45-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb45-3"><a href="#cb45-3" aria-hidden="true" tabindex="-1"></a><span class="fu">on</span><span class="kw">:</span></span>
+<span id="cb45-4"><a href="#cb45-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">push</span><span class="kw">:</span></span>
+<span id="cb45-5"><a href="#cb45-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">branches</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="st">'release'</span><span class="kw">]</span></span>
+<span id="cb45-6"><a href="#cb45-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span></span>
+<span id="cb45-7"><a href="#cb45-7" aria-hidden="true" tabindex="-1"></a><span class="fu">env</span><span class="kw">:</span></span>
+<span id="cb45-8"><a href="#cb45-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">REGISTRY</span><span class="kw">:</span><span class="at"> ghcr.io</span></span>
+<span id="cb45-9"><a href="#cb45-9" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">IMAGE_NAME</span><span class="kw">:</span><span class="at"> ${{ github.repository }}</span></span>
+<span id="cb45-10"><a href="#cb45-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb45-11"><a href="#cb45-11" aria-hidden="true" tabindex="-1"></a><span class="fu">jobs</span><span class="kw">:</span></span>
+<span id="cb45-12"><a href="#cb45-12" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">build-and-push-image</span><span class="kw">:</span></span>
+<span id="cb45-13"><a href="#cb45-13" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">runs-on</span><span class="kw">:</span><span class="at"> ubuntu-latest</span></span>
+<span id="cb45-14"><a href="#cb45-14" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">strategy</span><span class="kw">:</span></span>
+<span id="cb45-15"><a href="#cb45-15" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">fail-fast</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span></span>
+<span id="cb45-16"><a href="#cb45-16" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">matrix</span><span class="kw">:</span></span>
+<span id="cb45-17"><a href="#cb45-17" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">include</span><span class="kw">:</span></span>
+<span id="cb45-18"><a href="#cb45-18" aria-hidden="true" tabindex="-1"></a><span class="at">          </span><span class="kw">-</span><span class="at"> </span><span class="fu">dockerfile</span><span class="kw">:</span><span class="at"> ./base/Dockerfile</span></span>
+<span id="cb45-19"><a href="#cb45-19" aria-hidden="true" tabindex="-1"></a><span class="at">            </span><span class="fu">image</span><span class="kw">:</span><span class="at"> ghcr.io/djnavarro/arch-r-base</span></span>
+<span id="cb45-20"><a href="#cb45-20" aria-hidden="true" tabindex="-1"></a><span class="at">          </span><span class="kw">-</span><span class="at"> </span><span class="fu">dockerfile</span><span class="kw">:</span><span class="at"> ./test/Dockerfile</span></span>
+<span id="cb45-21"><a href="#cb45-21" aria-hidden="true" tabindex="-1"></a><span class="at">            </span><span class="fu">image</span><span class="kw">:</span><span class="at"> ghcr.io/djnavarro/arch-r-test</span></span>
+<span id="cb45-22"><a href="#cb45-22" aria-hidden="true" tabindex="-1"></a><span class="at">            </span></span>
+<span id="cb45-23"><a href="#cb45-23" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">permissions</span><span class="kw">:</span></span>
+<span id="cb45-24"><a href="#cb45-24" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">contents</span><span class="kw">:</span><span class="at"> read</span></span>
+<span id="cb45-25"><a href="#cb45-25" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">packages</span><span class="kw">:</span><span class="at"> write</span></span>
+<span id="cb45-26"><a href="#cb45-26" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb45-27"><a href="#cb45-27" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">steps</span><span class="kw">:</span></span>
+<span id="cb45-28"><a href="#cb45-28" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> </span><span class="fu">name</span><span class="kw">:</span><span class="at"> checkout repository</span></span>
+<span id="cb45-29"><a href="#cb45-29" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">uses</span><span class="kw">:</span><span class="at"> actions/checkout@v2</span></span>
+<span id="cb45-30"><a href="#cb45-30" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb45-31"><a href="#cb45-31" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> </span><span class="fu">name</span><span class="kw">:</span><span class="at"> login to the container registry</span></span>
+<span id="cb45-32"><a href="#cb45-32" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">uses</span><span class="kw">:</span><span class="at"> docker/login-action@f054a8b539a109f9f41c372932f1ae047eff08c9</span></span>
+<span id="cb45-33"><a href="#cb45-33" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">with</span><span class="kw">:</span></span>
+<span id="cb45-34"><a href="#cb45-34" aria-hidden="true" tabindex="-1"></a><span class="at">          </span><span class="fu">registry</span><span class="kw">:</span><span class="at"> ${{ env.REGISTRY }}</span></span>
+<span id="cb45-35"><a href="#cb45-35" aria-hidden="true" tabindex="-1"></a><span class="at">          </span><span class="fu">username</span><span class="kw">:</span><span class="at"> ${{ github.actor }}</span></span>
+<span id="cb45-36"><a href="#cb45-36" aria-hidden="true" tabindex="-1"></a><span class="at">          </span><span class="fu">password</span><span class="kw">:</span><span class="at"> ${{ secrets.GITHUB_TOKEN }}</span></span>
+<span id="cb45-37"><a href="#cb45-37" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb45-38"><a href="#cb45-38" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> </span><span class="fu">name</span><span class="kw">:</span><span class="at"> extract metadata (tags, labels) for docker</span></span>
+<span id="cb45-39"><a href="#cb45-39" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">id</span><span class="kw">:</span><span class="at"> meta</span></span>
+<span id="cb45-40"><a href="#cb45-40" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">uses</span><span class="kw">:</span><span class="at"> docker/metadata-action@98669ae865ea3cffbcbaa878cf57c20bbf1c6c38</span></span>
+<span id="cb45-41"><a href="#cb45-41" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">with</span><span class="kw">:</span></span>
+<span id="cb45-42"><a href="#cb45-42" aria-hidden="true" tabindex="-1"></a><span class="at">          </span><span class="fu">images</span><span class="kw">:</span><span class="at"> ${{ matrix.image }}</span></span>
+<span id="cb45-43"><a href="#cb45-43" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb45-44"><a href="#cb45-44" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> </span><span class="fu">name</span><span class="kw">:</span><span class="at"> build and push docker image</span></span>
+<span id="cb45-45"><a href="#cb45-45" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">uses</span><span class="kw">:</span><span class="at"> docker/build-push-action@ad44023a93711e3deb337508980b4b5e9bcdc5dc</span></span>
+<span id="cb45-46"><a href="#cb45-46" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">with</span><span class="kw">:</span></span>
+<span id="cb45-47"><a href="#cb45-47" aria-hidden="true" tabindex="-1"></a><span class="at">          </span><span class="fu">context</span><span class="kw">:</span><span class="at"> .</span></span>
+<span id="cb45-48"><a href="#cb45-48" aria-hidden="true" tabindex="-1"></a><span class="at">          </span><span class="fu">file</span><span class="kw">:</span><span class="at"> ${{ matrix.dockerfile }}</span></span>
+<span id="cb45-49"><a href="#cb45-49" aria-hidden="true" tabindex="-1"></a><span class="at">          </span><span class="fu">push</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span>
+<span id="cb45-50"><a href="#cb45-50" aria-hidden="true" tabindex="-1"></a><span class="at">          </span><span class="fu">tags</span><span class="kw">:</span><span class="at"> ${{ steps.meta.outputs.tags }}</span></span>
+<span id="cb45-51"><a href="#cb45-51" aria-hidden="true" tabindex="-1"></a><span class="at">          </span><span class="fu">labels</span><span class="kw">:</span><span class="at"> ${{ steps.meta.outputs.labels }}</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 </div>
 <p>For this workflow to run, I needed to edit the permissions associated with my github PAT to include some additional scopes. If, like me, you’ve created your PAT using the default scopes provided by <code>usethis::create_github_token()</code>, you’ll need a few more to run workflows that build and modify docker images:</p>
@@ -1143,121 +1161,121 @@ Duration: 25.1s
 <div class="cell">
 <details>
 <summary>Source code for <code>sample_whales()</code></summary>
-<div class="sourceCode cell-code" id="cb45"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb45-1"><a href="#cb45-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(ggplot2)</span>
-<span id="cb45-2"><a href="#cb45-2" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(tidyr)</span>
-<span id="cb45-3"><a href="#cb45-3" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(tibble)</span>
-<span id="cb45-4"><a href="#cb45-4" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(dplyr)</span>
-<span id="cb45-5"><a href="#cb45-5" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb45-6"><a href="#cb45-6" aria-hidden="true" tabindex="-1"></a>sample_whales <span class="ot">&lt;-</span> <span class="cf">function</span>(<span class="at">seed =</span> <span class="cn">NULL</span>, <span class="at">nrow =</span> <span class="dv">4</span>, <span class="at">ncol =</span> <span class="dv">6</span>) {</span>
-<span id="cb45-7"><a href="#cb45-7" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb45-8"><a href="#cb45-8" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span>(<span class="fu">is.null</span>(seed)) seed <span class="ot">&lt;-</span> <span class="fu">sample</span>(<span class="dv">1000</span>, <span class="dv">1</span>)</span>
-<span id="cb45-9"><a href="#cb45-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">set.seed</span>(seed)</span>
-<span id="cb45-10"><a href="#cb45-10" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb45-11"><a href="#cb45-11" aria-hidden="true" tabindex="-1"></a>  nwhales <span class="ot">&lt;-</span> nrow <span class="sc">*</span> ncol</span>
-<span id="cb45-12"><a href="#cb45-12" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb45-13"><a href="#cb45-13" aria-hidden="true" tabindex="-1"></a>  <span class="co"># define a circle</span></span>
-<span id="cb45-14"><a href="#cb45-14" aria-hidden="true" tabindex="-1"></a>  circle <span class="ot">&lt;-</span> <span class="fu">tibble</span>(</span>
-<span id="cb45-15"><a href="#cb45-15" aria-hidden="true" tabindex="-1"></a>    <span class="at">th =</span> <span class="fu">seq</span>(<span class="dv">0</span>, <span class="dv">2</span><span class="sc">*</span>pi, <span class="at">length.out =</span> <span class="dv">1000</span>),</span>
-<span id="cb45-16"><a href="#cb45-16" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> <span class="fu">cos</span>(th),</span>
-<span id="cb45-17"><a href="#cb45-17" aria-hidden="true" tabindex="-1"></a>    <span class="at">y =</span> <span class="fu">sin</span>(th)</span>
-<span id="cb45-18"><a href="#cb45-18" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb45-19"><a href="#cb45-19" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb45-20"><a href="#cb45-20" aria-hidden="true" tabindex="-1"></a>  <span class="co"># distort a circle to create the whale body</span></span>
-<span id="cb45-21"><a href="#cb45-21" aria-hidden="true" tabindex="-1"></a>  whale_body <span class="ot">&lt;-</span> circle <span class="sc">|&gt;</span></span>
-<span id="cb45-22"><a href="#cb45-22" aria-hidden="true" tabindex="-1"></a>    <span class="fu">mutate</span>(</span>
-<span id="cb45-23"><a href="#cb45-23" aria-hidden="true" tabindex="-1"></a>      <span class="at">y =</span> <span class="fu">if_else</span>(y <span class="sc">&gt;</span> <span class="dv">0</span>, <span class="dv">0</span>, y),</span>
-<span id="cb45-24"><a href="#cb45-24" aria-hidden="true" tabindex="-1"></a>      <span class="at">y =</span> <span class="fu">if_else</span>(x <span class="sc">&lt;</span> <span class="dv">0</span>, <span class="sc">-</span><span class="fu">abs</span>(y) <span class="sc">^</span> .<span class="dv">6</span>, <span class="sc">-</span><span class="fu">abs</span>(y) <span class="sc">^</span> <span class="fl">1.7</span>)</span>
-<span id="cb45-25"><a href="#cb45-25" aria-hidden="true" tabindex="-1"></a>    )</span>
-<span id="cb45-26"><a href="#cb45-26" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb45-27"><a href="#cb45-27" aria-hidden="true" tabindex="-1"></a>  <span class="co"># distort a circle to create the whale tail</span></span>
-<span id="cb45-28"><a href="#cb45-28" aria-hidden="true" tabindex="-1"></a>  whale_tail <span class="ot">&lt;-</span> circle <span class="sc">|&gt;</span></span>
-<span id="cb45-29"><a href="#cb45-29" aria-hidden="true" tabindex="-1"></a>    <span class="fu">mutate</span>(</span>
-<span id="cb45-30"><a href="#cb45-30" aria-hidden="true" tabindex="-1"></a>      <span class="at">weight =</span> (<span class="fu">abs</span>(th <span class="sc">-</span> pi)<span class="sc">/</span>pi) <span class="sc">^</span> <span class="fl">1.3</span>,</span>
-<span id="cb45-31"><a href="#cb45-31" aria-hidden="true" tabindex="-1"></a>      <span class="at">angle =</span> pi <span class="sc">*</span> <span class="fl">1.2</span>,</span>
-<span id="cb45-32"><a href="#cb45-32" aria-hidden="true" tabindex="-1"></a>      <span class="at">x =</span> x <span class="sc">*</span> weight <span class="sc">+</span> .<span class="dv">35</span> <span class="sc">*</span> (<span class="dv">1</span> <span class="sc">-</span> weight),</span>
-<span id="cb45-33"><a href="#cb45-33" aria-hidden="true" tabindex="-1"></a>      <span class="at">x_scaled =</span> x <span class="sc">*</span> .<span class="dv">6</span>,</span>
-<span id="cb45-34"><a href="#cb45-34" aria-hidden="true" tabindex="-1"></a>      <span class="at">y_scaled =</span> y <span class="sc">*</span> .<span class="dv">4</span>,</span>
-<span id="cb45-35"><a href="#cb45-35" aria-hidden="true" tabindex="-1"></a>      <span class="at">x =</span> x_scaled <span class="sc">*</span> <span class="fu">cos</span>(angle) <span class="sc">-</span> y_scaled <span class="sc">*</span> <span class="fu">sin</span>(angle),</span>
-<span id="cb45-36"><a href="#cb45-36" aria-hidden="true" tabindex="-1"></a>      <span class="at">y =</span> x_scaled <span class="sc">*</span> <span class="fu">sin</span>(angle) <span class="sc">+</span> y_scaled <span class="sc">*</span> <span class="fu">cos</span>(angle),</span>
-<span id="cb45-37"><a href="#cb45-37" aria-hidden="true" tabindex="-1"></a>      <span class="at">x =</span> x <span class="sc">+</span> <span class="fl">1.35</span>,</span>
-<span id="cb45-38"><a href="#cb45-38" aria-hidden="true" tabindex="-1"></a>      <span class="at">y =</span> y <span class="sc">+</span> <span class="fl">0.25</span></span>
-<span id="cb45-39"><a href="#cb45-39" aria-hidden="true" tabindex="-1"></a>    )</span>
-<span id="cb45-40"><a href="#cb45-40" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb45-41"><a href="#cb45-41" aria-hidden="true" tabindex="-1"></a>  <span class="co"># bind the body to the tail to make a whale</span></span>
-<span id="cb45-42"><a href="#cb45-42" aria-hidden="true" tabindex="-1"></a>  whale <span class="ot">&lt;-</span> <span class="fu">bind_rows</span>(whale_body, whale_tail)</span>
-<span id="cb45-43"><a href="#cb45-43" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb45-44"><a href="#cb45-44" aria-hidden="true" tabindex="-1"></a>  <span class="co"># fully stacked set of boxes</span></span>
-<span id="cb45-45"><a href="#cb45-45" aria-hidden="true" tabindex="-1"></a>  box_stack <span class="ot">&lt;-</span> <span class="fu">expand_grid</span>(</span>
-<span id="cb45-46"><a href="#cb45-46" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> <span class="fu">seq</span>(<span class="sc">-</span>.<span class="dv">7</span>, .<span class="dv">5</span>, .<span class="dv">3</span>),</span>
-<span id="cb45-47"><a href="#cb45-47" aria-hidden="true" tabindex="-1"></a>    <span class="at">y =</span> <span class="fu">seq</span>(.<span class="dv">25</span>, <span class="fl">1.5</span>, .<span class="dv">3</span>)</span>
-<span id="cb45-48"><a href="#cb45-48" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb45-49"><a href="#cb45-49" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb45-50"><a href="#cb45-50" aria-hidden="true" tabindex="-1"></a>  <span class="co"># sample names using babynames package</span></span>
-<span id="cb45-51"><a href="#cb45-51" aria-hidden="true" tabindex="-1"></a>  names <span class="ot">&lt;-</span> <span class="fu">unique</span>(<span class="fu">sample</span>(</span>
-<span id="cb45-52"><a href="#cb45-52" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> babynames<span class="sc">::</span>babynames<span class="sc">$</span>name,</span>
-<span id="cb45-53"><a href="#cb45-53" aria-hidden="true" tabindex="-1"></a>    <span class="at">size =</span> <span class="fu">ceiling</span>(nwhales <span class="sc">*</span> <span class="fl">1.2</span>)</span>
-<span id="cb45-54"><a href="#cb45-54" aria-hidden="true" tabindex="-1"></a>  ))</span>
-<span id="cb45-55"><a href="#cb45-55" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb45-56"><a href="#cb45-56" aria-hidden="true" tabindex="-1"></a>  <span class="co"># sample colours using a blue palette from ggthemes</span></span>
-<span id="cb45-57"><a href="#cb45-57" aria-hidden="true" tabindex="-1"></a>  shades <span class="ot">&lt;-</span> <span class="fu">sample</span>(</span>
-<span id="cb45-58"><a href="#cb45-58" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> ggthemes<span class="sc">::</span>canva_palettes<span class="sc">$</span><span class="st">`</span><span class="at">Cool blues</span><span class="st">`</span>,</span>
-<span id="cb45-59"><a href="#cb45-59" aria-hidden="true" tabindex="-1"></a>    <span class="at">size =</span> nrow <span class="sc">*</span> ncol,</span>
-<span id="cb45-60"><a href="#cb45-60" aria-hidden="true" tabindex="-1"></a>    <span class="at">replace =</span> <span class="cn">TRUE</span></span>
-<span id="cb45-61"><a href="#cb45-61" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb45-62"><a href="#cb45-62" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb45-63"><a href="#cb45-63" aria-hidden="true" tabindex="-1"></a>  boxes <span class="ot">&lt;-</span> <span class="fu">list</span>()</span>
-<span id="cb45-64"><a href="#cb45-64" aria-hidden="true" tabindex="-1"></a>  whales <span class="ot">&lt;-</span> <span class="fu">list</span>()</span>
-<span id="cb45-65"><a href="#cb45-65" aria-hidden="true" tabindex="-1"></a>  <span class="cf">for</span>(i <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span>(nrow <span class="sc">*</span> ncol)) {</span>
-<span id="cb45-66"><a href="#cb45-66" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb45-67"><a href="#cb45-67" aria-hidden="true" tabindex="-1"></a>    <span class="co"># assign the whales a name and a look</span></span>
-<span id="cb45-68"><a href="#cb45-68" aria-hidden="true" tabindex="-1"></a>    whales[[i]] <span class="ot">&lt;-</span> whale <span class="sc">|&gt;</span></span>
-<span id="cb45-69"><a href="#cb45-69" aria-hidden="true" tabindex="-1"></a>      <span class="fu">mutate</span>(</span>
-<span id="cb45-70"><a href="#cb45-70" aria-hidden="true" tabindex="-1"></a>        <span class="at">name =</span> names[[i]],</span>
-<span id="cb45-71"><a href="#cb45-71" aria-hidden="true" tabindex="-1"></a>        <span class="at">look =</span> shades[[i]]</span>
-<span id="cb45-72"><a href="#cb45-72" aria-hidden="true" tabindex="-1"></a>      )</span>
-<span id="cb45-73"><a href="#cb45-73" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb45-74"><a href="#cb45-74" aria-hidden="true" tabindex="-1"></a>    <span class="co"># assign the whales a name and colour,</span></span>
-<span id="cb45-75"><a href="#cb45-75" aria-hidden="true" tabindex="-1"></a>    <span class="co"># and randomly remove boxes off the stack</span></span>
-<span id="cb45-76"><a href="#cb45-76" aria-hidden="true" tabindex="-1"></a>    boxes[[i]] <span class="ot">&lt;-</span> box_stack <span class="sc">|&gt;</span></span>
-<span id="cb45-77"><a href="#cb45-77" aria-hidden="true" tabindex="-1"></a>      <span class="fu">mutate</span>(</span>
-<span id="cb45-78"><a href="#cb45-78" aria-hidden="true" tabindex="-1"></a>        <span class="at">name =</span> names[[i]],</span>
-<span id="cb45-79"><a href="#cb45-79" aria-hidden="true" tabindex="-1"></a>        <span class="at">look =</span> shades[[i]]</span>
-<span id="cb45-80"><a href="#cb45-80" aria-hidden="true" tabindex="-1"></a>      ) <span class="sc">|&gt;</span></span>
-<span id="cb45-81"><a href="#cb45-81" aria-hidden="true" tabindex="-1"></a>      <span class="fu">group_by</span>(x) <span class="sc">|&gt;</span></span>
-<span id="cb45-82"><a href="#cb45-82" aria-hidden="true" tabindex="-1"></a>      <span class="fu">mutate</span>(<span class="at">max_height =</span> <span class="fu">runif</span>(<span class="dv">1</span>, <span class="at">min =</span> .<span class="dv">05</span>, <span class="at">max =</span> <span class="fl">1.8</span>)) <span class="sc">|&gt;</span></span>
-<span id="cb45-83"><a href="#cb45-83" aria-hidden="true" tabindex="-1"></a>      <span class="fu">filter</span>(y <span class="sc">&lt;</span> max_height)</span>
-<span id="cb45-84"><a href="#cb45-84" aria-hidden="true" tabindex="-1"></a>  }</span>
-<span id="cb45-85"><a href="#cb45-85" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb45-86"><a href="#cb45-86" aria-hidden="true" tabindex="-1"></a>  <span class="co"># collapse lists to data frames</span></span>
-<span id="cb45-87"><a href="#cb45-87" aria-hidden="true" tabindex="-1"></a>  boxes <span class="ot">&lt;-</span> <span class="fu">bind_rows</span>(boxes)</span>
-<span id="cb45-88"><a href="#cb45-88" aria-hidden="true" tabindex="-1"></a>  whales <span class="ot">&lt;-</span> <span class="fu">bind_rows</span>(whales)</span>
-<span id="cb45-89"><a href="#cb45-89" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb45-90"><a href="#cb45-90" aria-hidden="true" tabindex="-1"></a>  <span class="co"># last minute tinkering... :-)</span></span>
-<span id="cb45-91"><a href="#cb45-91" aria-hidden="true" tabindex="-1"></a>  boxes <span class="ot">&lt;-</span> boxes <span class="sc">|&gt;</span> <span class="fu">mutate</span>(<span class="at">y =</span> y <span class="sc">-</span> .<span class="dv">3</span>, <span class="at">x =</span> x <span class="sc">+</span> .<span class="dv">01</span>)</span>
-<span id="cb45-92"><a href="#cb45-92" aria-hidden="true" tabindex="-1"></a>  whales <span class="ot">&lt;-</span> whales <span class="sc">|&gt;</span> <span class="fu">mutate</span>(<span class="at">y =</span> y <span class="sc">-</span> .<span class="dv">31</span>)</span>
-<span id="cb45-93"><a href="#cb45-93" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb45-94"><a href="#cb45-94" aria-hidden="true" tabindex="-1"></a>  <span class="co"># draw the plot</span></span>
-<span id="cb45-95"><a href="#cb45-95" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>(<span class="at">mapping =</span> <span class="fu">aes</span>(x, y, <span class="at">fill =</span> look, <span class="at">colour =</span> look)) <span class="sc">+</span></span>
-<span id="cb45-96"><a href="#cb45-96" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_polygon</span>(<span class="at">data =</span> whales, <span class="at">linewidth =</span> <span class="dv">2</span>) <span class="sc">+</span></span>
-<span id="cb45-97"><a href="#cb45-97" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_tile</span>(</span>
-<span id="cb45-98"><a href="#cb45-98" aria-hidden="true" tabindex="-1"></a>      <span class="at">data =</span> boxes,</span>
-<span id="cb45-99"><a href="#cb45-99" aria-hidden="true" tabindex="-1"></a>      <span class="at">width =</span> .<span class="dv">18</span>,</span>
-<span id="cb45-100"><a href="#cb45-100" aria-hidden="true" tabindex="-1"></a>      <span class="at">height =</span> .<span class="dv">18</span>,</span>
-<span id="cb45-101"><a href="#cb45-101" aria-hidden="true" tabindex="-1"></a>      <span class="at">linewidth =</span> <span class="dv">2</span>,</span>
-<span id="cb45-102"><a href="#cb45-102" aria-hidden="true" tabindex="-1"></a>      <span class="at">linejoin =</span> <span class="st">"bevel"</span></span>
-<span id="cb45-103"><a href="#cb45-103" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">+</span></span>
-<span id="cb45-104"><a href="#cb45-104" aria-hidden="true" tabindex="-1"></a>    <span class="fu">facet_wrap</span>(<span class="fu">vars</span>(name), <span class="at">nrow =</span> nrow, <span class="at">ncol =</span> ncol) <span class="sc">+</span></span>
-<span id="cb45-105"><a href="#cb45-105" aria-hidden="true" tabindex="-1"></a>    <span class="fu">coord_equal</span>(<span class="at">xlim =</span> <span class="fu">c</span>(<span class="sc">-</span><span class="fl">1.5</span>, <span class="fl">1.5</span>), <span class="at">ylim =</span> <span class="fu">c</span>(<span class="sc">-</span><span class="fl">1.5</span>, <span class="fl">1.5</span>)) <span class="sc">+</span></span>
-<span id="cb45-106"><a href="#cb45-106" aria-hidden="true" tabindex="-1"></a>    <span class="fu">scale_x_continuous</span>(<span class="at">labels =</span> <span class="cn">NULL</span>, <span class="at">name =</span> <span class="cn">NULL</span>) <span class="sc">+</span></span>
-<span id="cb45-107"><a href="#cb45-107" aria-hidden="true" tabindex="-1"></a>    <span class="fu">scale_y_continuous</span>(<span class="at">labels =</span> <span class="cn">NULL</span>, <span class="at">name =</span> <span class="cn">NULL</span>) <span class="sc">+</span></span>
-<span id="cb45-108"><a href="#cb45-108" aria-hidden="true" tabindex="-1"></a>    <span class="fu">scale_fill_identity</span>() <span class="sc">+</span></span>
-<span id="cb45-109"><a href="#cb45-109" aria-hidden="true" tabindex="-1"></a>    <span class="fu">scale_color_identity</span>() <span class="sc">+</span></span>
-<span id="cb45-110"><a href="#cb45-110" aria-hidden="true" tabindex="-1"></a>    <span class="fu">theme_minimal</span>(<span class="at">base_size =</span> <span class="dv">14</span>) <span class="sc">+</span></span>
-<span id="cb45-111"><a href="#cb45-111" aria-hidden="true" tabindex="-1"></a>    <span class="fu">theme</span>(</span>
-<span id="cb45-112"><a href="#cb45-112" aria-hidden="true" tabindex="-1"></a>      <span class="at">axis.ticks =</span> <span class="fu">element_blank</span>(),</span>
-<span id="cb45-113"><a href="#cb45-113" aria-hidden="true" tabindex="-1"></a>      <span class="at">panel.border =</span> <span class="fu">element_rect</span>(<span class="at">fill =</span> <span class="cn">NA</span>, <span class="at">colour =</span> <span class="st">"grey90"</span>)</span>
-<span id="cb45-114"><a href="#cb45-114" aria-hidden="true" tabindex="-1"></a>    )</span>
-<span id="cb45-115"><a href="#cb45-115" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb46"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb46-1"><a href="#cb46-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(ggplot2)</span>
+<span id="cb46-2"><a href="#cb46-2" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(tidyr)</span>
+<span id="cb46-3"><a href="#cb46-3" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(tibble)</span>
+<span id="cb46-4"><a href="#cb46-4" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(dplyr)</span>
+<span id="cb46-5"><a href="#cb46-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb46-6"><a href="#cb46-6" aria-hidden="true" tabindex="-1"></a>sample_whales <span class="ot">&lt;-</span> <span class="cf">function</span>(<span class="at">seed =</span> <span class="cn">NULL</span>, <span class="at">nrow =</span> <span class="dv">4</span>, <span class="at">ncol =</span> <span class="dv">6</span>) {</span>
+<span id="cb46-7"><a href="#cb46-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb46-8"><a href="#cb46-8" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span>(<span class="fu">is.null</span>(seed)) seed <span class="ot">&lt;-</span> <span class="fu">sample</span>(<span class="dv">1000</span>, <span class="dv">1</span>)</span>
+<span id="cb46-9"><a href="#cb46-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">set.seed</span>(seed)</span>
+<span id="cb46-10"><a href="#cb46-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb46-11"><a href="#cb46-11" aria-hidden="true" tabindex="-1"></a>  nwhales <span class="ot">&lt;-</span> nrow <span class="sc">*</span> ncol</span>
+<span id="cb46-12"><a href="#cb46-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb46-13"><a href="#cb46-13" aria-hidden="true" tabindex="-1"></a>  <span class="co"># define a circle</span></span>
+<span id="cb46-14"><a href="#cb46-14" aria-hidden="true" tabindex="-1"></a>  circle <span class="ot">&lt;-</span> <span class="fu">tibble</span>(</span>
+<span id="cb46-15"><a href="#cb46-15" aria-hidden="true" tabindex="-1"></a>    <span class="at">th =</span> <span class="fu">seq</span>(<span class="dv">0</span>, <span class="dv">2</span><span class="sc">*</span>pi, <span class="at">length.out =</span> <span class="dv">1000</span>),</span>
+<span id="cb46-16"><a href="#cb46-16" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> <span class="fu">cos</span>(th),</span>
+<span id="cb46-17"><a href="#cb46-17" aria-hidden="true" tabindex="-1"></a>    <span class="at">y =</span> <span class="fu">sin</span>(th)</span>
+<span id="cb46-18"><a href="#cb46-18" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb46-19"><a href="#cb46-19" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb46-20"><a href="#cb46-20" aria-hidden="true" tabindex="-1"></a>  <span class="co"># distort a circle to create the whale body</span></span>
+<span id="cb46-21"><a href="#cb46-21" aria-hidden="true" tabindex="-1"></a>  whale_body <span class="ot">&lt;-</span> circle <span class="sc">|&gt;</span></span>
+<span id="cb46-22"><a href="#cb46-22" aria-hidden="true" tabindex="-1"></a>    <span class="fu">mutate</span>(</span>
+<span id="cb46-23"><a href="#cb46-23" aria-hidden="true" tabindex="-1"></a>      <span class="at">y =</span> <span class="fu">if_else</span>(y <span class="sc">&gt;</span> <span class="dv">0</span>, <span class="dv">0</span>, y),</span>
+<span id="cb46-24"><a href="#cb46-24" aria-hidden="true" tabindex="-1"></a>      <span class="at">y =</span> <span class="fu">if_else</span>(x <span class="sc">&lt;</span> <span class="dv">0</span>, <span class="sc">-</span><span class="fu">abs</span>(y) <span class="sc">^</span> .<span class="dv">6</span>, <span class="sc">-</span><span class="fu">abs</span>(y) <span class="sc">^</span> <span class="fl">1.7</span>)</span>
+<span id="cb46-25"><a href="#cb46-25" aria-hidden="true" tabindex="-1"></a>    )</span>
+<span id="cb46-26"><a href="#cb46-26" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb46-27"><a href="#cb46-27" aria-hidden="true" tabindex="-1"></a>  <span class="co"># distort a circle to create the whale tail</span></span>
+<span id="cb46-28"><a href="#cb46-28" aria-hidden="true" tabindex="-1"></a>  whale_tail <span class="ot">&lt;-</span> circle <span class="sc">|&gt;</span></span>
+<span id="cb46-29"><a href="#cb46-29" aria-hidden="true" tabindex="-1"></a>    <span class="fu">mutate</span>(</span>
+<span id="cb46-30"><a href="#cb46-30" aria-hidden="true" tabindex="-1"></a>      <span class="at">weight =</span> (<span class="fu">abs</span>(th <span class="sc">-</span> pi)<span class="sc">/</span>pi) <span class="sc">^</span> <span class="fl">1.3</span>,</span>
+<span id="cb46-31"><a href="#cb46-31" aria-hidden="true" tabindex="-1"></a>      <span class="at">angle =</span> pi <span class="sc">*</span> <span class="fl">1.2</span>,</span>
+<span id="cb46-32"><a href="#cb46-32" aria-hidden="true" tabindex="-1"></a>      <span class="at">x =</span> x <span class="sc">*</span> weight <span class="sc">+</span> .<span class="dv">35</span> <span class="sc">*</span> (<span class="dv">1</span> <span class="sc">-</span> weight),</span>
+<span id="cb46-33"><a href="#cb46-33" aria-hidden="true" tabindex="-1"></a>      <span class="at">x_scaled =</span> x <span class="sc">*</span> .<span class="dv">6</span>,</span>
+<span id="cb46-34"><a href="#cb46-34" aria-hidden="true" tabindex="-1"></a>      <span class="at">y_scaled =</span> y <span class="sc">*</span> .<span class="dv">4</span>,</span>
+<span id="cb46-35"><a href="#cb46-35" aria-hidden="true" tabindex="-1"></a>      <span class="at">x =</span> x_scaled <span class="sc">*</span> <span class="fu">cos</span>(angle) <span class="sc">-</span> y_scaled <span class="sc">*</span> <span class="fu">sin</span>(angle),</span>
+<span id="cb46-36"><a href="#cb46-36" aria-hidden="true" tabindex="-1"></a>      <span class="at">y =</span> x_scaled <span class="sc">*</span> <span class="fu">sin</span>(angle) <span class="sc">+</span> y_scaled <span class="sc">*</span> <span class="fu">cos</span>(angle),</span>
+<span id="cb46-37"><a href="#cb46-37" aria-hidden="true" tabindex="-1"></a>      <span class="at">x =</span> x <span class="sc">+</span> <span class="fl">1.35</span>,</span>
+<span id="cb46-38"><a href="#cb46-38" aria-hidden="true" tabindex="-1"></a>      <span class="at">y =</span> y <span class="sc">+</span> <span class="fl">0.25</span></span>
+<span id="cb46-39"><a href="#cb46-39" aria-hidden="true" tabindex="-1"></a>    )</span>
+<span id="cb46-40"><a href="#cb46-40" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb46-41"><a href="#cb46-41" aria-hidden="true" tabindex="-1"></a>  <span class="co"># bind the body to the tail to make a whale</span></span>
+<span id="cb46-42"><a href="#cb46-42" aria-hidden="true" tabindex="-1"></a>  whale <span class="ot">&lt;-</span> <span class="fu">bind_rows</span>(whale_body, whale_tail)</span>
+<span id="cb46-43"><a href="#cb46-43" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb46-44"><a href="#cb46-44" aria-hidden="true" tabindex="-1"></a>  <span class="co"># fully stacked set of boxes</span></span>
+<span id="cb46-45"><a href="#cb46-45" aria-hidden="true" tabindex="-1"></a>  box_stack <span class="ot">&lt;-</span> <span class="fu">expand_grid</span>(</span>
+<span id="cb46-46"><a href="#cb46-46" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> <span class="fu">seq</span>(<span class="sc">-</span>.<span class="dv">7</span>, .<span class="dv">5</span>, .<span class="dv">3</span>),</span>
+<span id="cb46-47"><a href="#cb46-47" aria-hidden="true" tabindex="-1"></a>    <span class="at">y =</span> <span class="fu">seq</span>(.<span class="dv">25</span>, <span class="fl">1.5</span>, .<span class="dv">3</span>)</span>
+<span id="cb46-48"><a href="#cb46-48" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb46-49"><a href="#cb46-49" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb46-50"><a href="#cb46-50" aria-hidden="true" tabindex="-1"></a>  <span class="co"># sample names using babynames package</span></span>
+<span id="cb46-51"><a href="#cb46-51" aria-hidden="true" tabindex="-1"></a>  names <span class="ot">&lt;-</span> <span class="fu">unique</span>(<span class="fu">sample</span>(</span>
+<span id="cb46-52"><a href="#cb46-52" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> babynames<span class="sc">::</span>babynames<span class="sc">$</span>name,</span>
+<span id="cb46-53"><a href="#cb46-53" aria-hidden="true" tabindex="-1"></a>    <span class="at">size =</span> <span class="fu">ceiling</span>(nwhales <span class="sc">*</span> <span class="fl">1.2</span>)</span>
+<span id="cb46-54"><a href="#cb46-54" aria-hidden="true" tabindex="-1"></a>  ))</span>
+<span id="cb46-55"><a href="#cb46-55" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb46-56"><a href="#cb46-56" aria-hidden="true" tabindex="-1"></a>  <span class="co"># sample colours using a blue palette from ggthemes</span></span>
+<span id="cb46-57"><a href="#cb46-57" aria-hidden="true" tabindex="-1"></a>  shades <span class="ot">&lt;-</span> <span class="fu">sample</span>(</span>
+<span id="cb46-58"><a href="#cb46-58" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> ggthemes<span class="sc">::</span>canva_palettes<span class="sc">$</span><span class="st">`</span><span class="at">Cool blues</span><span class="st">`</span>,</span>
+<span id="cb46-59"><a href="#cb46-59" aria-hidden="true" tabindex="-1"></a>    <span class="at">size =</span> nrow <span class="sc">*</span> ncol,</span>
+<span id="cb46-60"><a href="#cb46-60" aria-hidden="true" tabindex="-1"></a>    <span class="at">replace =</span> <span class="cn">TRUE</span></span>
+<span id="cb46-61"><a href="#cb46-61" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb46-62"><a href="#cb46-62" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb46-63"><a href="#cb46-63" aria-hidden="true" tabindex="-1"></a>  boxes <span class="ot">&lt;-</span> <span class="fu">list</span>()</span>
+<span id="cb46-64"><a href="#cb46-64" aria-hidden="true" tabindex="-1"></a>  whales <span class="ot">&lt;-</span> <span class="fu">list</span>()</span>
+<span id="cb46-65"><a href="#cb46-65" aria-hidden="true" tabindex="-1"></a>  <span class="cf">for</span>(i <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span>(nrow <span class="sc">*</span> ncol)) {</span>
+<span id="cb46-66"><a href="#cb46-66" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb46-67"><a href="#cb46-67" aria-hidden="true" tabindex="-1"></a>    <span class="co"># assign the whales a name and a look</span></span>
+<span id="cb46-68"><a href="#cb46-68" aria-hidden="true" tabindex="-1"></a>    whales[[i]] <span class="ot">&lt;-</span> whale <span class="sc">|&gt;</span></span>
+<span id="cb46-69"><a href="#cb46-69" aria-hidden="true" tabindex="-1"></a>      <span class="fu">mutate</span>(</span>
+<span id="cb46-70"><a href="#cb46-70" aria-hidden="true" tabindex="-1"></a>        <span class="at">name =</span> names[[i]],</span>
+<span id="cb46-71"><a href="#cb46-71" aria-hidden="true" tabindex="-1"></a>        <span class="at">look =</span> shades[[i]]</span>
+<span id="cb46-72"><a href="#cb46-72" aria-hidden="true" tabindex="-1"></a>      )</span>
+<span id="cb46-73"><a href="#cb46-73" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb46-74"><a href="#cb46-74" aria-hidden="true" tabindex="-1"></a>    <span class="co"># assign the whales a name and colour,</span></span>
+<span id="cb46-75"><a href="#cb46-75" aria-hidden="true" tabindex="-1"></a>    <span class="co"># and randomly remove boxes off the stack</span></span>
+<span id="cb46-76"><a href="#cb46-76" aria-hidden="true" tabindex="-1"></a>    boxes[[i]] <span class="ot">&lt;-</span> box_stack <span class="sc">|&gt;</span></span>
+<span id="cb46-77"><a href="#cb46-77" aria-hidden="true" tabindex="-1"></a>      <span class="fu">mutate</span>(</span>
+<span id="cb46-78"><a href="#cb46-78" aria-hidden="true" tabindex="-1"></a>        <span class="at">name =</span> names[[i]],</span>
+<span id="cb46-79"><a href="#cb46-79" aria-hidden="true" tabindex="-1"></a>        <span class="at">look =</span> shades[[i]]</span>
+<span id="cb46-80"><a href="#cb46-80" aria-hidden="true" tabindex="-1"></a>      ) <span class="sc">|&gt;</span></span>
+<span id="cb46-81"><a href="#cb46-81" aria-hidden="true" tabindex="-1"></a>      <span class="fu">group_by</span>(x) <span class="sc">|&gt;</span></span>
+<span id="cb46-82"><a href="#cb46-82" aria-hidden="true" tabindex="-1"></a>      <span class="fu">mutate</span>(<span class="at">max_height =</span> <span class="fu">runif</span>(<span class="dv">1</span>, <span class="at">min =</span> .<span class="dv">05</span>, <span class="at">max =</span> <span class="fl">1.8</span>)) <span class="sc">|&gt;</span></span>
+<span id="cb46-83"><a href="#cb46-83" aria-hidden="true" tabindex="-1"></a>      <span class="fu">filter</span>(y <span class="sc">&lt;</span> max_height)</span>
+<span id="cb46-84"><a href="#cb46-84" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb46-85"><a href="#cb46-85" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb46-86"><a href="#cb46-86" aria-hidden="true" tabindex="-1"></a>  <span class="co"># collapse lists to data frames</span></span>
+<span id="cb46-87"><a href="#cb46-87" aria-hidden="true" tabindex="-1"></a>  boxes <span class="ot">&lt;-</span> <span class="fu">bind_rows</span>(boxes)</span>
+<span id="cb46-88"><a href="#cb46-88" aria-hidden="true" tabindex="-1"></a>  whales <span class="ot">&lt;-</span> <span class="fu">bind_rows</span>(whales)</span>
+<span id="cb46-89"><a href="#cb46-89" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb46-90"><a href="#cb46-90" aria-hidden="true" tabindex="-1"></a>  <span class="co"># last minute tinkering... :-)</span></span>
+<span id="cb46-91"><a href="#cb46-91" aria-hidden="true" tabindex="-1"></a>  boxes <span class="ot">&lt;-</span> boxes <span class="sc">|&gt;</span> <span class="fu">mutate</span>(<span class="at">y =</span> y <span class="sc">-</span> .<span class="dv">3</span>, <span class="at">x =</span> x <span class="sc">+</span> .<span class="dv">01</span>)</span>
+<span id="cb46-92"><a href="#cb46-92" aria-hidden="true" tabindex="-1"></a>  whales <span class="ot">&lt;-</span> whales <span class="sc">|&gt;</span> <span class="fu">mutate</span>(<span class="at">y =</span> y <span class="sc">-</span> .<span class="dv">31</span>)</span>
+<span id="cb46-93"><a href="#cb46-93" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb46-94"><a href="#cb46-94" aria-hidden="true" tabindex="-1"></a>  <span class="co"># draw the plot</span></span>
+<span id="cb46-95"><a href="#cb46-95" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>(<span class="at">mapping =</span> <span class="fu">aes</span>(x, y, <span class="at">fill =</span> look, <span class="at">colour =</span> look)) <span class="sc">+</span></span>
+<span id="cb46-96"><a href="#cb46-96" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_polygon</span>(<span class="at">data =</span> whales, <span class="at">linewidth =</span> <span class="dv">2</span>) <span class="sc">+</span></span>
+<span id="cb46-97"><a href="#cb46-97" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_tile</span>(</span>
+<span id="cb46-98"><a href="#cb46-98" aria-hidden="true" tabindex="-1"></a>      <span class="at">data =</span> boxes,</span>
+<span id="cb46-99"><a href="#cb46-99" aria-hidden="true" tabindex="-1"></a>      <span class="at">width =</span> .<span class="dv">18</span>,</span>
+<span id="cb46-100"><a href="#cb46-100" aria-hidden="true" tabindex="-1"></a>      <span class="at">height =</span> .<span class="dv">18</span>,</span>
+<span id="cb46-101"><a href="#cb46-101" aria-hidden="true" tabindex="-1"></a>      <span class="at">linewidth =</span> <span class="dv">2</span>,</span>
+<span id="cb46-102"><a href="#cb46-102" aria-hidden="true" tabindex="-1"></a>      <span class="at">linejoin =</span> <span class="st">"bevel"</span></span>
+<span id="cb46-103"><a href="#cb46-103" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">+</span></span>
+<span id="cb46-104"><a href="#cb46-104" aria-hidden="true" tabindex="-1"></a>    <span class="fu">facet_wrap</span>(<span class="fu">vars</span>(name), <span class="at">nrow =</span> nrow, <span class="at">ncol =</span> ncol) <span class="sc">+</span></span>
+<span id="cb46-105"><a href="#cb46-105" aria-hidden="true" tabindex="-1"></a>    <span class="fu">coord_equal</span>(<span class="at">xlim =</span> <span class="fu">c</span>(<span class="sc">-</span><span class="fl">1.5</span>, <span class="fl">1.5</span>), <span class="at">ylim =</span> <span class="fu">c</span>(<span class="sc">-</span><span class="fl">1.5</span>, <span class="fl">1.5</span>)) <span class="sc">+</span></span>
+<span id="cb46-106"><a href="#cb46-106" aria-hidden="true" tabindex="-1"></a>    <span class="fu">scale_x_continuous</span>(<span class="at">labels =</span> <span class="cn">NULL</span>, <span class="at">name =</span> <span class="cn">NULL</span>) <span class="sc">+</span></span>
+<span id="cb46-107"><a href="#cb46-107" aria-hidden="true" tabindex="-1"></a>    <span class="fu">scale_y_continuous</span>(<span class="at">labels =</span> <span class="cn">NULL</span>, <span class="at">name =</span> <span class="cn">NULL</span>) <span class="sc">+</span></span>
+<span id="cb46-108"><a href="#cb46-108" aria-hidden="true" tabindex="-1"></a>    <span class="fu">scale_fill_identity</span>() <span class="sc">+</span></span>
+<span id="cb46-109"><a href="#cb46-109" aria-hidden="true" tabindex="-1"></a>    <span class="fu">scale_color_identity</span>() <span class="sc">+</span></span>
+<span id="cb46-110"><a href="#cb46-110" aria-hidden="true" tabindex="-1"></a>    <span class="fu">theme_minimal</span>(<span class="at">base_size =</span> <span class="dv">14</span>) <span class="sc">+</span></span>
+<span id="cb46-111"><a href="#cb46-111" aria-hidden="true" tabindex="-1"></a>    <span class="fu">theme</span>(</span>
+<span id="cb46-112"><a href="#cb46-112" aria-hidden="true" tabindex="-1"></a>      <span class="at">axis.ticks =</span> <span class="fu">element_blank</span>(),</span>
+<span id="cb46-113"><a href="#cb46-113" aria-hidden="true" tabindex="-1"></a>      <span class="at">panel.border =</span> <span class="fu">element_rect</span>(<span class="at">fill =</span> <span class="cn">NA</span>, <span class="at">colour =</span> <span class="st">"grey90"</span>)</span>
+<span id="cb46-114"><a href="#cb46-114" aria-hidden="true" tabindex="-1"></a>    )</span>
+<span id="cb46-115"><a href="#cb46-115" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </details>
 </div>
 <div class="cell page-columns page-full" data-layout-align="center" data-fig.dpi="200">
@@ -1306,8 +1324,9 @@ Duration: 25.1s
 <li id="fn26"><p>In truth I didn’t actually need to construct the <code>my-system-check</code> image at all: I could have just run <code>arch-r-base</code> in a container with a few arguments tweaked. But that would defeat the point of the exposition, obviously.<a href="#fnref26" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
 <li id="fn27"><p>Phrasing.<a href="#fnref27" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
 <li id="fn28"><p>Okay yeah I could do this at runtime too, but I want an excuse to talk about the <code>ARG</code> instruction.<a href="#fnref28" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
-<li id="fn29"><p>I am, after all, “on smoko” (which in my case means I am unemployed and bored out of my mind) but incidentally if you want to see the most fabulous cover ever (Wet Leg covering The Chats), <a href="https://www.youtube.com/watch?v=P_dza9y6cg0">here it is</a>.<a href="#fnref29" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
-<li id="fn30"><p>I know the mystery will be too much for some people so I’d better resolve it: no, the ggplot2 tests didn’t pass on the arch image. Some of the dependencies didn’t install properly, and then eventually it threw an error trying to build the vignettes. If I had the energy I’d dig into it and figure out why… but I don’t.<a href="#fnref30" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn29"><p>Okay yes, clever person, I could have chosen to pass environment variables at run time using the <code>--env</code> argument to <code>docker run</code>. I didn’t need to do this at build time using <code>ARG</code>. But that would defeat the point of the exposition wouldn’t it? I wanted to use <code>ARG</code> and <code>ENV</code> in the main text, and quietly mention the <code>--env</code> argument to <code>docker run</code> in an aside. And I have now accomplished exactly that, haven’t I?<a href="#fnref29" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn30"><p>I am, after all, “on smoko” (which in my case means I am unemployed and bored out of my mind) but incidentally if you want to see the most fabulous cover ever (Wet Leg covering The Chats), <a href="https://www.youtube.com/watch?v=P_dza9y6cg0">here it is</a>.<a href="#fnref30" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn31"><p>I know the mystery will be too much for some people so I’d better resolve it: no, the ggplot2 tests didn’t pass on the arch image. Some of the dependencies didn’t install properly, and then eventually it threw an error trying to build the vignettes. If I had the energy I’d dig into it and figure out why… but I don’t.<a href="#fnref31" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
 </ol>
 </section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2023,
   author = {Danielle Navarro},
