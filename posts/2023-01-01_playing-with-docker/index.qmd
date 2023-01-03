@@ -6,7 +6,7 @@ author:
     affiliation: I'm on smoko
     affiliation-url: https://www.youtube.com/watch?v=j58V2vC9EPc
     orcid: 0000-0001-7648-6578
-description: "There is no reason for this."
+description: "In which the author learns how to use docker and, in her usual fashion, goes a little bit overboard. But there are also generative art whales, so that's nice."
 date: "2023-01-01"
 categories: [Linux, R, Docker]
 image: "whales.png"
@@ -751,7 +751,7 @@ Successfully built a02feea26152
 Successfully tagged test-praise:latest
 ```
 
-Once again, we can take a look at the list of images:
+Once again, we can take a look at the list of images:   
 
 ```{bash docker-image-list-praise}
 #| eval: false
@@ -900,13 +900,7 @@ sample_whales(nrow = 1, ncol = 8)
 
 ## Hosting images
 
-For the third example, let's look at the [`ghcr.io/djnavarro/arch-r-base:release`](https://github.com/djnavarro/arch-r/tree/base) image. In addition to the dockerfile there are two small text files used to specify locale information. The two locale files aren't very interesting and could easily have been included as strings in the dockerfile, but I found it neater to keep them separate. The `locale-gen` file specifies locales that the image understands, and `locale.conf` specifies configuration details. (Both are configuration files on linux). In any case, here's the whole thing:
-
-labels explained 
-https://github.com/opencontainers/image-spec/blob/main/annotations.md
-
-https://snyk.io/blog/how-and-when-to-use-docker-labels-oci-container-annotations/
-
+For the third example, let's look at the [`arch-r-base`](https://github.com/djnavarro/arch-r/blob/main/base/Dockerfile) image itself. In addition to the dockerfile there are two small text files used to specify locale information. The two locale files aren't very interesting and could easily have been included as strings in the dockerfile, but I found it neater to keep them separate. The `locale-gen` file specifies locales that the image understands, and `locale.conf` specifies configuration details. (Both are configuration files on linux). In any case, here's the whole thing:
 
 
 ```{dockerfile arch-r-base-docker}
@@ -914,7 +908,7 @@ https://snyk.io/blog/how-and-when-to-use-docker-labels-oci-container-annotations
 #| filename: "base/Dockerfile"
 FROM archlinux:base-devel
 
-LABEL org.opencontainers.image.source "https://github.com/djnavarro/arch-r/base" 
+LABEL org.opencontainers.image.source "https://github.com/djnavarro/arch-r" 
 LABEL org.opencontainers.image.authors "Danielle Navarro <djnavarro@protonmail.com>" 
 LABEL org.opencontainers.image.description DESCRIPTION
 LABEL org.opencontainers.image.licenses "GPL-3.0"
@@ -945,7 +939,13 @@ LANG=en_US.UTF-8
 LC_ALL=en_US.UTF-8
 ```
 
-Truly exciting. 
+Truly exciting stuff, I know. Thankfully only some of it is new. The `FROM` instruction uses the `archlinux:base-devel` image hosted [here](https://hub.docker.com/_/archlinux). The [`RUN`](https://docs.docker.com/engine/reference/builder/#run) instruction is used to execute commands at build time, so you can see in this example I've used it to create system locale information (by calling `locale-gen`) and to install R (using the `pacman` package manager used on arch linux).
+
+The other new thing here is the [`LABEL`](https://docs.docker.com/engine/reference/builder/#label) instruction used to supply metadata about the image. This is particularly important if you're planning to make your image public, as I have done with the `arch-r-base` and `arch-r-test` images. The labelling that I've supplied here follows the [specifications](https://github.com/opencontainers/image-spec/blob/main/annotations.md) provided by the [open container initiative](https://opencontainers.org/), or at least attempts to. I'm still new to this, but as far as I can tell this is correct? Anyway, you can see that it specifies the location of the source code, the author of the image, and the licence. That's the main thing. 
+
+You are probably wondering, though, why the description just reads "DESCRIPTION" and doesn't have an actual... you know... description. The reason for that is that I'm hosting these through the [github container registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry) that links my github repository to the images automatically. Specifically, I'm using a github action that automates the build process and populates the description on the [arch-r-base package page](https://github.com/djnavarro/arch-r/pkgs/container/arch-r-base) using the description field from the [arch-r github repository](https://github.com/djnavarro/arch-r). Leaving the value for that field as "DESCRIPTION" ensures that all works smoothly.
+
+
 
 ```{r whale-3}
 #| echo: false
@@ -954,7 +954,7 @@ Truly exciting.
 whale(3)
 ```
 
-I'm not in any way an expert on github actions, but I do know a little bit. Just enough to be dangerous, I expect. Here's the [workflow](https://github.com/djnavarro/arch-r/blob/main/.github/workflows/publish-docker-image.yaml) I'm using:
+Speaking of which, I'm not in any way an expert on github actions -- this is my first attempt at creating a workflow and I cribbed heavily from other workflows I found online -- but for whatever it's worth I figure I should share. Here's the [workflow](https://github.com/djnavarro/arch-r/blob/main/.github/workflows/build-image.yaml) I'm using:
 
 ```{yaml publish-docker-yaml}
 #| eval: false
@@ -1012,13 +1012,13 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
 ```
 
-For this workflow to run, I needed to edit the permissions associated with my github PAT to include some additional scopes. If, like me, you've created your PAT using the default scopes provided by `usethis::create_github_token()`, you'll need a few more to run workflows that build and modify docker images:
+For this workflow to run, I needed to edit the permissions associated with my github PAT to include some additional scopes. If, like me, you've created your PAT using the default scopes provided by `usethis::create_github_token()`, you'll need a few more to run workflows that build and modify docker images if you want to work with github packages. This workflow doesn't use all these, but the permissions typically required for to work with container images on github are these:
 
 - `read:packages` scope to download container images and read metadata.
 - `write:packages` scope to download and upload container images and read and write metadata.
 - `delete:packages` scope to delete container images.
 
-This workflow triggers an automatic deployment to the github container registry whenever there is a new push to the base or test branches. This is what creates the `ghcr.io/djnavarro/arch-r-base:release` and `ghcr.io/djnavarro/arch-r-test:release` images. It's not as  sophisticated workflows used by the rocker project -- you can browse [github.com/rocker-org/rocker](https://github.com/rocker-org/rocker) if you want to see a nicer set up -- but it does work, and that was my main goal for this post.
+In any case, this github actions workflow triggers an automatic deployment to the github container registry whenever there is a new push to the release branch of the repository. This is what creates the `ghcr.io/djnavarro/arch-r-base:release` and `ghcr.io/djnavarro/arch-r-test:release` images. I'm entirely certain that this could be done in a more sophisticated way, but it does work, and that was my main goal for this post.
 
 
 ```{r whale-row-4}
@@ -1032,6 +1032,8 @@ sample_whales(nrow = 1, ncol = 8)
 ```
 
 ## Resources
+
+Some resources I relied on when writing this:
 
 - The docker reference documentation: [docs.docker.com/reference](https://docs.docker.com/reference/)
 
@@ -1053,6 +1055,9 @@ sample_whales(nrow = 1, ncol = 8)
 
 - Working with the github container registry:
 [docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)
+
+- Information about open containers labels:  [github.com/opencontainers/image-spec/blob/main/annotations.md](https://github.com/opencontainers/image-spec/blob/main/annotations.md)
+
 
 
 ## Postscript: Making "dockerplots" in ggplot2
