@@ -57,7 +57,37 @@ Anyway. I've been meaning to teach myself docker for a few years now. It's one o
 The [installation guides](https://docs.docker.com/get-docker/) on the docker website are good, and have information for various operating systems. I'm doing this on my ubuntu laptop^[Yes I know [I use Arch now](https://blog.djnavarro.net/posts/2022-12-31_btw-i-use-arch/), hush. you'll see why I'm doing this from ubuntu in a moment...] so I followed the [ubuntu install guide](https://docs.docker.com/engine/install/ubuntu/). I also went a little further and followed the [post-install instructions for linux](https://docs.docker.com/engine/install/linux-postinstall/) so that I could run docker commands without requiring superuser privileges: that's the reason you won't see any `sudo` commands in this post. Obviously, that's something that will be a bit different on different operating systems and I'm not trying to write a tutorial here, but if you are using this post as a resource you can check that everything is working on your own installation by running this command:
 
 ```{bash}
+#| eval: false
 docker run hello-world
+```
+
+```
+Unable to find image 'hello-world:latest' locally
+latest: Pulling from library/hello-world
+2db29710123e: Pull complete 
+Digest: sha256:c77be1d3a47d0caf71a82dd893ee61ce01f32fc758031a6ec4cf1389248bb833
+Status: Downloaded newer image for hello-world:latest
+
+Hello from Docker!
+This message shows that your installation appears to be working correctly.
+
+To generate this message, Docker took the following steps:
+ 1. The Docker client contacted the Docker daemon.
+ 2. The Docker daemon pulled the "hello-world" image from the Docker Hub.
+    (amd64)
+ 3. The Docker daemon created a new container from that image which runs the
+    executable that produces the output you are currently reading.
+ 4. The Docker daemon streamed that output to the Docker client, which sent it
+    to your terminal.
+
+To try something more ambitious, you can run an Ubuntu container with:
+ $ docker run -it ubuntu bash
+
+Share images, automate workflows, and more with a free Docker ID:
+ https://hub.docker.com/
+
+For more examples and ideas, visit:
+ https://docs.docker.com/get-started/
 ```
 
 Okay that looks good. Docker^[I suppose, for the sake of precision, I should draw attention to the part of the output that refers to the **docker client** and the **docker daemon**. Docker takes a client-server approach. When I'm typing these commands I'm interacting with the docker client, which passes my requests over to the docker daemon. The daemon is the process that does most of the work. It pulls images from registries (e.g., [docker hub](https://hub.docker.com/), [github container registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry), etc), it builds images, it creates containers, etc. In this case, the client and the daemon are both running on the same machine, but they don't actually have to. The daemon could totally run on a remote system. However, the distinction between the client and the daemon isn't important for this post so I'm going to ignore it and collectively refer to both of them working together as "docker".] seems to be running on my machine. As an aside, as long as you are online you don't need to have a copy `hello-world` itself for this to work: docker will download it for you when you run the command. 
@@ -75,7 +105,34 @@ So it works like this. You use a dockerfile to **build** an image, the image con
 $$
 \mbox{dockerfile} \xrightarrow{\mbox{build}} \mbox{image} \xrightarrow{\mbox{run}} \mbox{container}
 $$
-Shall we have a go at this then?
+
+At any point you can get a summary of the images on your system by running `docker image list`. If you're doing this with a fresh installation and you run the command after running the "hello world" example above,^[As a little aside. In order to create this output with the "appearance" of starting with a fresh docker installation I -- quite nobly -- cleared out all my cached containers and images so that I could start from a clean system. Should you ever want to do the same, it's a two step process. Assuming you don't have any containers running, your first step is to delete any containers on your system that aren't running (i.e., all of them) with `docker container prune`. Then you can delete any "dangling" images that aren't associated with a container (i.e., all of them) with `docker image prune --all`. You're welcome.] you'd get output that looks like this:
+
+```{bash docker-image-list}
+#| eval: false
+docker image list
+```
+
+```
+REPOSITORY    TAG       IMAGE ID       CREATED         SIZE
+hello-world   latest    feb5d9fea6a5   15 months ago   13.3kB
+```
+
+You can do the same thing for containers with `docker container ls`,^[No I don't know why they use `list` for images and `ls` for containers. That seems unhelpful.] which by default will show you currently-running containers. To see all containers, running or not, add the `--all` parameter:
+
+```{bash docker-container-ls}
+#| eval: false
+docker container ls --all
+```
+
+```
+CONTAINER ID   IMAGE         COMMAND    CREATED         STATUS                     PORTS     NAMES
+efcf7186776f   hello-world   "/hello"   6 minutes ago   Exited (0) 6 minutes ago             bold_davinci
+```
+
+Notice the difference in the "CREATED" time! The *image* for hello-world is something that someone else created 15 months ago and kindly placed online so I could pull it onto my machine without building it myself. The *container* is the executable that I created from that image a mere 6 minutes ago when I called `docker run`. They're both currently on my laptop, but they are quite different things.
+
+Ah, but I am rambling again, aren't I? Sorry. Shall we have a go at this then?
 
 ```{r whale-0}
 #| echo: false
@@ -170,11 +227,36 @@ It's a sequence of three **docker instructions**.
 
 - Like all dockerfiles, it begins with a [`FROM`](https://docs.docker.com/engine/reference/builder/#from)^[Technically it's possible for an `ARG` instruction to precede a `FROM` instruction but I'm yet to actually see that in the wild.] ^[Much like SQL clauses, docker instructions are written in uppercase by convention. They don't actually *have* to be uppercase, but again, I've never seen a dockerfile written any other way. Along the same lines, your dockerfile doesn't actually have to be called "Dockerfile", but it's the default and everyone uses it.] instruction that specifies the name of a preexisting docker image to use as a starting point. I've been very explicit here and [referenced the image](https://windsock.io/referencing-docker-images/) using a fully qualified name that consists of a container repository (`ghcr.io`), a username (`djnavarro`), the image name `arch-r-base`, and an optional tag (`release`). You don't always need to be that precise, especially if you're using an image that you know exists locally. 
 
-- The second step is a [`COPY`](https://docs.docker.com/engine/reference/builder/#copy) instruction that copies the R script to a specific file path within the image. This takes place at build time. This step is necessary because when the container starts up it will be isolated from other processes on the system. It doesn't have access to the host file system. If you want the container to have access to a file you need to copy it at build time.^[Alternatively, you can use the [`VOLUME`](https://docs.docker.com/engine/reference/builder/#volume) instruction to create a mount point and use that as a way to share a folder between the host and the container at run time, but that's more fiddly and there's really no need for that in this simple example.]
+- The second step is a [`COPY`](https://docs.docker.com/engine/reference/builder/#copy) instruction that copies the R script to a specific file path within the image. This takes place at build time. This step is necessary because when the container starts up it will be isolated from other processes on the system. It doesn't have access to the host file system. If you want the container to have access to a file you need to copy it at build time.^[Alternatively, you can use the [`VOLUME`](https://docs.docker.com/engine/reference/builder/#volume) instruction to create a mount point and use that as a way to share a folder between the host and the container at run time, but that's more fiddly and there's really no need for that in this simple example. But if you want an easy-to-follow example using the `VOLUME` instruction in an R project, Colin Fay uses it in his [docker for R users](https://colinfay.me/docker-r-reproducibility/) post.]
 
 - The third step is a [`CMD`](https://docs.docker.com/engine/reference/builder/#cmd) instruction. Every dockerfile must have a `CMD` instruction (and much like highlanders there can be only one) specifying a default for what the container should do when it is launched.^[The user can override the default by when calling `docker run` but I'm not going to cover that in this post]
 
-Build it:
+Later on, when you're starting to feel comfortable with the basic idea of writing dockerfiles, its worth reading the official guide on [dockerfile best practices](https://docs.docker.com/develop/develop-images/dockerfile_best-practices/
+). Lots of little things started to make sense to me when I did that. For now, let's just acknowledged that yes Virginia we have a dockerfile. 
+
+### Building the image
+
+Our next step is to build it to an image. The way we do that from the terminal is with the [`docker build`](https://docs.docker.com/engine/reference/commandline/build/) command. For the purposes of this post -- which I am writing in quarto and thus has a code execution engine blah blah blah -- I am going to assume^[Correctly.] that the working directory is set to the folder containing the post, and that it contains a subfolder called `system-check` in which the dockerfile and the R script are stored. In other words, `system-check` is the directory holding the docker project.
+
+The simplest way to build an image from this project is like this:
+
+```{bash build-system-check-0}
+#| eval: false
+docker build system-check
+```
+
+This command tells docker to look for a dockerfile in the `system-check` folder, and make an image using whatever it finds there. That's a perfectly fine way to do it, but my personal preference is to give the resulting image a name, using the `--tag` flag. So the command, which I've broken over a few lines to highlight its structure, now looks like this:
+
+```{bash build-system-check-1}
+#| eval: false
+docker build \
+  --tag my-system-check \
+  system-check
+```
+
+The reason I've done this is that later on when I call the `docker run` command I can refer to the image by name, which does make life simpler. Under normal circumstances I'd probably have called the image `system-check` rather than `my-system-check` (why create new names when I don't need to?) but for the purposes of this post I think it's helpful to be clear that when I refer to the image name I'm referring to the thing I created using `--tag`, not the name of the folder that holds the dockerfile!
+
+Okay, enough talk. Let's run it this time:
 
 ```{bash build-system-check}
 #| eval: false
@@ -186,27 +268,31 @@ docker build \
 ```
 Sending build context to Docker daemon  3.072kB
 Step 1/3 : FROM ghcr.io/djnavarro/arch-r-base:release
-base: Pulling from djnavarro/arch-r
-597018910566: Already exists 
-8150bcc6bc64: Already exists 
-c2ff38743c81: Pull complete 
-c5dd676c14d5: Pull complete 
-f30b21a3d71a: Pull complete 
-8545f2705041: Pull complete 
-Digest: sha256:5cd9e80d7263aabf541c2a2c7efe95b1482e8132ee9c3e6a744c3e54e8cade7a
+release: Pulling from djnavarro/arch-r-base
+597018910566: Pull complete 
+8150bcc6bc64: Pull complete 
+e49e8a34689c: Pull complete 
+c14eff78251d: Pull complete 
+42b358854199: Pull complete 
+babcc0d99cfd: Pull complete 
+Digest: sha256:f9ff0f7b431ed1b975823c871949ccbc15c3e3d7dce23775f793f9f64bb2779e
 Status: Downloaded newer image for ghcr.io/djnavarro/arch-r-base:release
- ---> c74e54ffdd8c
+ ---> 0a9929e54a6b
 Step 2/3 : COPY script.R /home/script.R
- ---> 50c0c119b6d2
+ ---> b9913096b118
 Step 3/3 : CMD Rscript /home/script.R
- ---> Running in fa9d38781c17
-Removing intermediate container fa9d38781c17
- ---> fed061a96fec
-Successfully built fed061a96fec
+ ---> Running in 1314ee0ff2fb
+Removing intermediate container 1314ee0ff2fb
+ ---> 489003ffb5d0
+Successfully built 489003ffb5d0
 Successfully tagged my-system-check:latest
 ```
 
-The "already exists" part of the output is worth commenting on.^[I swear I had something for this.] I'd been playing around with some of the images upon which `ghcr.io/djnavarro/arch-r-base:release` is built earlier (e.g., it's built on an arch linux image that I already have on my laptop) and docker is smart enough to realise it only has to download and build some layers. That's a really nice feature. Among other things, it means that if I try building this image a second time, docker can use the cached copies of the build steps because nothing has changed and it doesn't have to do anything:
+The output here shows you that the build process unfolds as a sequence of three steps: one for each of our docker instructions. It also gives you the impression (correctly!) that the first step is considerably more complex than the other two. That makes sense: the `arch-r-base` image is itself constructed from a sequence of steps, and those steps have produced an image that is built from several "layers". Each of those hexadecimal hashes refers to one of the layers.^[To a first approximation you can imagine that every docker instruction produces a layer, and it is my understanding that this is how it used to be. But for efficiency reasons more recent versions of docker only produce persistent layers from `RUN`, `COPY`, and `ADD` instructions. Other instructions produce temporary intermediate images, but do not create persistent layers in the final image.]
+
+When you run this on your own system you'll see little progress bars as the different layers of the image are downloaded. For example, that line that says `597018910566: Pull complete`? That's referring to the very first layer in the `arch-r-base` image (which is arch linux itself) and that layer is about 280MB or something like that, so you get a little progress bar to let you know how its going. That's super helpful if you ever find yourself using the `arch-r-test` image, because one of the layers in that image includes a texlive installation (ugh) so that layer is (I'm so sorry) about 2GB in size. 
+
+Downloading large images is a huge pain, and generally I would try to avoid creating an image with a layer that large. Thankfully, docker is smart enough to check the local cache before trying to download anything.^[Or, as Sterling would phrase it, "I swear I had something for this."] ^[Or are we not doing phrasing anymore?] We can see this in action if we repeat the exact same command:
 
 ```{bash build-system-check-2}
 #| eval: false
@@ -218,16 +304,35 @@ docker build \
 ```
 Sending build context to Docker daemon  3.072kB
 Step 1/3 : FROM ghcr.io/djnavarro/arch-r-base:release
- ---> c74e54ffdd8c
+ ---> 0a9929e54a6b
 Step 2/3 : COPY script.R /home/script.R
  ---> Using cache
- ---> 50c0c119b6d2
+ ---> b9913096b118
 Step 3/3 : CMD Rscript /home/script.R
  ---> Using cache
- ---> fed061a96fec
-Successfully built fed061a96fec
+ ---> 489003ffb5d0
+Successfully built 489003ffb5d0
 Successfully tagged my-system-check:latest
 ```
+
+This finishes instantaneously because docker^[Now that I've started making Archer jokes, it's very hard not to turn "docker" into a euphemism. Hm. I should call him.] notices that I already have a copy of this image so it uses the cache for everything. 
+
+We can confirm that this has worked by running `docker image list`:
+
+```{bash docker-image-list-minimal}
+docker image list
+```
+
+```
+REPOSITORY                      TAG       IMAGE ID       CREATED          SIZE
+my-system-check                 latest    489003ffb5d0   26 minutes ago   955MB
+ghcr.io/djnavarro/arch-r-base   release   0a9929e54a6b   13 hours ago     955MB
+hello-world                     latest    feb5d9fea6a5   15 months ago    13.3kB
+```
+
+The sheer excitement of working with computers is just too much for me to bear sometimes.
+
+### Run in a container
 
 Next tell docker to run it. Note that I'm referring to the image by name:
 
@@ -831,6 +936,8 @@ sample_whales(nrow = 1, ncol = 8)
 ## Resources
 
 - The docker reference documentation: [docs.docker.com/reference](https://docs.docker.com/reference/)
+
+- Dockerfile best practices [docs.docker.com/develop/develop-images/dockerfile_best-practices](https://docs.docker.com/develop/develop-images/dockerfile_best-practices/)
 
 - Instructions on giving docker sudo privileges for linux users: [docs.docker.com/engine/install/linux-postinstall](https://docs.docker.com/engine/install/linux-postinstall/)
 
