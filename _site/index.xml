@@ -296,7 +296,8 @@ With locale:
 </section>
 <section id="fancier-example" class="level2 page-columns page-full">
 <h2 class="anchored" data-anchor-id="fancier-example">Fancier example</h2>
-<p>Let’s take a look at a slightly fancier version. Images created using <a href="https://github.com/djnavarro/quarto-blog/tree/main/posts/2023-01-01_playing-with-docker/test-on-arch"><code>test-on-arch</code></a> download an R package from a github repository, install any dependencies of the package, and then run <code>R CMD check</code> within an Arch Linux environment. Again it consists of two files, a dockerfile and an R script. Here they are:</p>
+<p>For the next example I’ll add a little bit of extra complexity. The real reason I wanted the <code>arch-r</code> images in the first place was to make it easier to run unit tests for an R package on a system running arch linux. If I were going to do this properly I’d set it up in a way that could be incorporated into a CI workflow with github actions, but I’m not going to be that fancy for this blog post. Instead, I’ll set it up so that I can generate containers running arch linux that can clone a package repository from github into the container, and then run the unit tests. I’ll even give it a bit of flexibility so that the user can decide at build time<sup>28</sup> which github repository the container points to.</p>
+<p>As before the project – which I’ve called <code>test-on-arch</code> – consists of two files. There’s an R script that executes at run time, and the dockerfile executed at build time. Here they are:</p>
 <div class="cell">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
@@ -310,11 +311,13 @@ With locale:
 <span id="cb21-6"><span class="co" style="color: #5E5E5E;"># pass args through environment variables</span></span>
 <span id="cb21-7"><span class="kw" style="color: #003B4F;">ARG</span> user</span>
 <span id="cb21-8"><span class="kw" style="color: #003B4F;">ARG</span> repo</span>
-<span id="cb21-9"><span class="kw" style="color: #003B4F;">ENV</span> user=$user</span>
-<span id="cb21-10"><span class="kw" style="color: #003B4F;">ENV</span> repo=$repo</span>
-<span id="cb21-11"></span>
-<span id="cb21-12"><span class="co" style="color: #5E5E5E;"># run the testing script</span></span>
-<span id="cb21-13"><span class="kw" style="color: #003B4F;">CMD</span> <span class="ex" style="color: null;">Rscript</span> /home/clone-and-check.R</span></code></pre></div>
+<span id="cb21-9"><span class="kw" style="color: #003B4F;">ARG</span> cran=https://cloud.r-project.org</span>
+<span id="cb21-10"><span class="kw" style="color: #003B4F;">ENV</span> user=$user</span>
+<span id="cb21-11"><span class="kw" style="color: #003B4F;">ENV</span> repo=$repo</span>
+<span id="cb21-12"><span class="kw" style="color: #003B4F;">ENV</span> cran=$cran</span>
+<span id="cb21-13"></span>
+<span id="cb21-14"><span class="co" style="color: #5E5E5E;"># run the testing script</span></span>
+<span id="cb21-15"><span class="kw" style="color: #003B4F;">CMD</span> <span class="ex" style="color: null;">Rscript</span> /home/clone-and-check.R</span></code></pre></div>
 </div>
 </div>
 <div class="cell">
@@ -350,7 +353,7 @@ With locale:
 </div></div></div>
 <section id="building-the-image-1" class="level3">
 <h3 class="anchored" data-anchor-id="building-the-image-1">Building the image</h3>
-<p>Let’s see what happens when I try to build. The <code>arch-r-test</code> image is considerably larger than <code>arch-r-base</code>. This one isn’t a frugal image! It takes a while, so I’m going to go have a smoke while I wait<sup>28</sup> but the nice thing is that if you’ve done it once you don’t have to do it again. Anyway…</p>
+<p>Let’s see what happens when I try to build. The <code>arch-r-test</code> image is considerably larger than <code>arch-r-base</code>. This one isn’t a frugal image! It takes a while, so I’m going to go have a smoke while I wait<sup>29</sup> but the nice thing is that if you’ve done it once you don’t have to do it again. Anyway…</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb23" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb23-1"><span class="ex" style="color: null;">docker</span> build <span class="dt" style="color: #AD0000;">\</span></span>
 <span id="cb23-2">  <span class="at" style="color: #657422;">--tag</span> test-queue <span class="dt" style="color: #AD0000;">\</span></span>
@@ -359,7 +362,7 @@ With locale:
 <span id="cb23-5">  test-on-arch</span></code></pre></div>
 </div>
 <pre><code>Sending build context to Docker daemon  3.072kB
-Step 1/7 : FROM ghcr.io/djnavarro/arch-r-test:release
+Step 1/9 : FROM ghcr.io/djnavarro/arch-r-test:release
 release: Pulling from djnavarro/arch-r-test
 597018910566: Already exists 
 8150bcc6bc64: Already exists 
@@ -372,29 +375,37 @@ ff05f09f5a58: Pull complete
 Digest: sha256:f4605c32e18168589bd32248f5af97f8f1b57bd4de5fa6e1b54e53db13ab9514
 Status: Downloaded newer image for ghcr.io/djnavarro/arch-r-test:release
  ---&gt; 4f873f316861
-Step 2/7 : COPY clone-and-check.R /home/clone-and-check.R
- ---&gt; f83258dcdeee
-Step 3/7 : ARG user
- ---&gt; Running in 200bae8e0a85
-Removing intermediate container 200bae8e0a85
- ---&gt; 82f0cbb2d2ad
-Step 4/7 : ARG repo
- ---&gt; Running in 85f22b6c7bdc
-Removing intermediate container 85f22b6c7bdc
- ---&gt; b1806a37d636
-Step 5/7 : ENV user=$user
- ---&gt; Running in f9368d0cd58f
-Removing intermediate container f9368d0cd58f
- ---&gt; 25fda6b7645e
-Step 6/7 : ENV repo=$repo
- ---&gt; Running in 7045b37b7432
-Removing intermediate container 7045b37b7432
- ---&gt; c0288e2c8dac
-Step 7/7 : CMD Rscript /home/clone-and-check.R
- ---&gt; Running in 68e730f44158
-Removing intermediate container 68e730f44158
- ---&gt; 081c995adc3c
-Successfully built 081c995adc3c
+Step 2/9 : COPY clone-and-check.R /home/clone-and-check.R
+ ---&gt; d7c276834cf8
+Step 3/9 : ARG user
+ ---&gt; Running in efeeb43f874d
+Removing intermediate container efeeb43f874d
+ ---&gt; d5d055328ea4
+Step 4/9 : ARG repo
+ ---&gt; Running in 75f6d1ff1502
+Removing intermediate container 75f6d1ff1502
+ ---&gt; 7edce4d95863
+Step 5/9 : ARG cran=https://cloud.r-project.org
+ ---&gt; Running in 3f620871b0d7
+Removing intermediate container 3f620871b0d7
+ ---&gt; 51a7ec6700ba
+Step 6/9 : ENV user=$user
+ ---&gt; Running in c7a7811e374e
+Removing intermediate container c7a7811e374e
+ ---&gt; b8e01e708a08
+Step 7/9 : ENV repo=$repo
+ ---&gt; Running in 2f01c723898c
+Removing intermediate container 2f01c723898c
+ ---&gt; 0939221c1a35
+Step 8/9 : ENV cran=$cran
+ ---&gt; Running in 37399a0bbe70
+Removing intermediate container 37399a0bbe70
+ ---&gt; ccba9748fdd2
+Step 9/9 : CMD Rscript /home/clone-and-check.R
+ ---&gt; Running in 5d3eb7184e21
+Removing intermediate container 5d3eb7184e21
+ ---&gt; 76926d5616d7
+Successfully built 76926d5616d7
 Successfully tagged test-queue:latest</code></pre>
 <p>Notice that during the first step when downloading <code>arch-r-test</code>, I didn’t have to download the whole thing. Two of the layers in <code>arch-r-test</code> are shared with the <code>arch-r-base</code> image, and docker is smart enough to notice that I already have those layers in my cache. That’s what the <code>Already exists</code> part of the output indicates. Admittedly it doesn’t save us much in this case because its the texlive installation that causes pain, but it’s a nice feature nevertheless.</p>
 <p>As a little sanity check – because, dear reader, I have been sitting here waiting very patiently while a large image downloaded over a slow connection and would like to confirm that I don’t have to do that again – let’s repeat the exercise from earlier and try building it a second time just to reassure ourselves that the cache is doing its job:</p>
@@ -406,38 +417,44 @@ Successfully tagged test-queue:latest</code></pre>
 <span id="cb25-5">  test-on-arch </span></code></pre></div>
 </div>
 <pre><code>Sending build context to Docker daemon  3.072kB
-Step 1/7 : FROM ghcr.io/djnavarro/arch-r-test:release
+Step 1/9 : FROM ghcr.io/djnavarro/arch-r-test:release
  ---&gt; 4f873f316861
-Step 2/7 : COPY clone-and-check.R /home/clone-and-check.R
+Step 2/9 : COPY clone-and-check.R /home/clone-and-check.R
  ---&gt; Using cache
- ---&gt; f83258dcdeee
-Step 3/7 : ARG user
+ ---&gt; d7c276834cf8
+Step 3/9 : ARG user
  ---&gt; Using cache
- ---&gt; 82f0cbb2d2ad
-Step 4/7 : ARG repo
+ ---&gt; d5d055328ea4
+Step 4/9 : ARG repo
  ---&gt; Using cache
- ---&gt; b1806a37d636
-Step 5/7 : ENV user=$user
+ ---&gt; 7edce4d95863
+Step 5/9 : ARG cran=https://cloud.r-project.org
  ---&gt; Using cache
- ---&gt; 25fda6b7645e
-Step 6/7 : ENV repo=$repo
+ ---&gt; 51a7ec6700ba
+Step 6/9 : ENV user=$user
  ---&gt; Using cache
- ---&gt; c0288e2c8dac
-Step 7/7 : CMD Rscript /home/clone-and-check.R
+ ---&gt; b8e01e708a08
+Step 7/9 : ENV repo=$repo
  ---&gt; Using cache
- ---&gt; 081c995adc3c
-Successfully built 081c995adc3c
+ ---&gt; 0939221c1a35
+Step 8/9 : ENV cran=$cran
+ ---&gt; Using cache
+ ---&gt; ccba9748fdd2
+Step 9/9 : CMD Rscript /home/clone-and-check.R
+ ---&gt; Using cache
+ ---&gt; 76926d5616d7
+Successfully built 76926d5616d7
 Successfully tagged test-queue:latest</code></pre>
 <p>Not going to lie, I breathed a little sigh of relief. Docker used the cached layers, and that all happened instantaneously. Okay cool. I’m going to stop doing these checks from now on, but one last time let’s take a peek at the list of images I have stored locally:</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb27" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb27-1"><span class="ex" style="color: null;">docker</span> image list</span></code></pre></div>
 </div>
-<pre><code>REPOSITORY                      TAG       IMAGE ID       CREATED             SIZE
-test-queue                      latest    081c995adc3c   9 minutes ago       4.99GB
-my-system-check                 latest    489003ffb5d0   About an hour ago   955MB
-ghcr.io/djnavarro/arch-r-test   release   4f873f316861   14 hours ago        4.99GB
-ghcr.io/djnavarro/arch-r-base   release   0a9929e54a6b   14 hours ago        955MB
-hello-world                     latest    feb5d9fea6a5   15 months ago       13.3kB</code></pre>
+<pre><code>REPOSITORY                      TAG       IMAGE ID       CREATED              SIZE
+test-queue                      latest    76926d5616d7   About a minute ago   4.99GB
+my-system-check                 latest    b7426ffb1484   12 minutes ago       955MB
+ghcr.io/djnavarro/arch-r-test   release   4f873f316861   17 hours ago         4.99GB
+ghcr.io/djnavarro/arch-r-base   release   0a9929e54a6b   17 hours ago         955MB
+hello-world                     latest    feb5d9fea6a5   15 months ago        13.3kB</code></pre>
 </section>
 <section id="run-in-a-container-1" class="level3">
 <h3 class="anchored" data-anchor-id="run-in-a-container-1">Run in a container</h3>
@@ -459,7 +476,7 @@ Checked out 34 of 34 commits... done!
 * building ‘queue_0.0.2.tar.gz’
 
 ── R CMD check ─────────────────────────────────────────────────────────────────
-* using log directory ‘/tmp/Rtmp5JJJOo/file1487d1ddf/queue.Rcheck’
+* using log directory ‘/tmp/Rtmp1Nld2I/file131069108/queue.Rcheck’
 * using R version 4.2.2 (2022-10-31)
 * using platform: x86_64-pc-linux-gnu (64-bit)
 * using session charset: UTF-8
@@ -525,7 +542,7 @@ Namespaces in Imports field not imported from:
 
 Status: 1 NOTE
 See
-  ‘/tmp/Rtmp5JJJOo/file1487d1ddf/queue.Rcheck/00check.log’
+  ‘/tmp/Rtmp1Nld2I/file131069108/queue.Rcheck/00check.log’
 for details.
 System has not been booted with systemd as init system (PID 1). Can't operate.
 Failed to connect to bus: Host is down
@@ -535,7 +552,7 @@ Warning message:
 In system("timedatectl", intern = TRUE) :
   running command 'timedatectl' had status 1
 ── R CMD check results ──────────────────────────────────────── queue 0.0.2 ────
-Duration: 39.9s
+Duration: 38.5s
 
 ❯ checking dependencies in R code ... NOTE
   Namespaces in Imports field not imported from:
@@ -564,43 +581,51 @@ In system("timedatectl", intern = TRUE) :
 <span id="cb32-5">  test-on-arch </span></code></pre></div>
 </div>
 <pre><code>Sending build context to Docker daemon  3.072kB
-Step 1/7 : FROM ghcr.io/djnavarro/arch-r-test:release
+Step 1/9 : FROM ghcr.io/djnavarro/arch-r-test:release
  ---&gt; 4f873f316861
-Step 2/7 : COPY clone-and-check.R /home/clone-and-check.R
+Step 2/9 : COPY clone-and-check.R /home/clone-and-check.R
  ---&gt; Using cache
- ---&gt; f83258dcdeee
-Step 3/7 : ARG user
+ ---&gt; d7c276834cf8
+Step 3/9 : ARG user
  ---&gt; Using cache
- ---&gt; 82f0cbb2d2ad
-Step 4/7 : ARG repo
+ ---&gt; d5d055328ea4
+Step 4/9 : ARG repo
  ---&gt; Using cache
- ---&gt; b1806a37d636
-Step 5/7 : ENV user=$user
- ---&gt; Running in f9036800f937
-Removing intermediate container f9036800f937
- ---&gt; acb5c19bbb93
-Step 6/7 : ENV repo=$repo
- ---&gt; Running in 9c3ca78bf379
-Removing intermediate container 9c3ca78bf379
- ---&gt; 6c1cf19da9be
-Step 7/7 : CMD Rscript /home/clone-and-check.R
- ---&gt; Running in f1746911174f
-Removing intermediate container f1746911174f
- ---&gt; cc634cbf837e
-Successfully built cc634cbf837e
+ ---&gt; 7edce4d95863
+Step 5/9 : ARG cran=https://cloud.r-project.org
+ ---&gt; Using cache
+ ---&gt; 51a7ec6700ba
+Step 6/9 : ENV user=$user
+ ---&gt; Running in 3a9b1843d5b4
+Removing intermediate container 3a9b1843d5b4
+ ---&gt; aa2578d71155
+Step 7/9 : ENV repo=$repo
+ ---&gt; Running in 1d15632dd6ca
+Removing intermediate container 1d15632dd6ca
+ ---&gt; 057a61970d7c
+Step 8/9 : ENV cran=$cran
+ ---&gt; Running in e5586a32b05a
+Removing intermediate container e5586a32b05a
+ ---&gt; 48852232e4b7
+Step 9/9 : CMD Rscript /home/clone-and-check.R
+ ---&gt; Running in 0fb9a526210c
+Removing intermediate container 0fb9a526210c
+ ---&gt; a02feea26152
+Successfully built a02feea26152
 Successfully tagged test-praise:latest</code></pre>
 <p>It’s verbose, but fast, and it hasn’t wasted anything by creating unnecessary copies.</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb34" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb34-1"><span class="ex" style="color: null;">docker</span> image list</span></code></pre></div>
 </div>
-<pre><code>REPOSITORY                      TAG       IMAGE ID       CREATED             SIZE
-test-praise                     latest    cc634cbf837e   50 seconds ago      4.99GB
-test-queue                      latest    081c995adc3c   13 minutes ago      4.99GB
-my-system-check                 latest    489003ffb5d0   About an hour ago   955MB
-ghcr.io/djnavarro/arch-r-test   release   4f873f316861   14 hours ago        4.99GB
-ghcr.io/djnavarro/arch-r-base   release   0a9929e54a6b   14 hours ago        955MB
-hello-world                     latest    feb5d9fea6a5   15 months ago       13.3kB</code></pre>
-<p>Let’s run it:</p>
+<pre><code>REPOSITORY                      TAG       IMAGE ID       CREATED          SIZE
+test-praise                     latest    a02feea26152   20 seconds ago   4.99GB
+test-queue                      latest    76926d5616d7   4 minutes ago    4.99GB
+my-system-check                 latest    b7426ffb1484   14 minutes ago   955MB
+ghcr.io/djnavarro/arch-r-test   release   4f873f316861   17 hours ago     4.99GB
+ghcr.io/djnavarro/arch-r-base   release   0a9929e54a6b   17 hours ago     955MB
+hello-world                     latest    feb5d9fea6a5   15 months ago    13.3kB</code></pre>
+<p>Again note the value of layer sharing. If these were all independent images we’d be looking at 17GB on disk. In fact, because <code>arch-r-test</code> reuses the layers from <code>arch-r-base</code> and all the other images are trivial additions to one of these two images, the <em>total</em> size of all these images is in fact “only” 5GB… i.e., the size of the <code>arch-r-test</code> image. And again, the only reason that one is so big is that I was really fussy about tex installations and bundled an entire texlive distribution with extra fonts and everything because I have no desire deal with tests whining about missing tex stuff.</p>
+<p>Anyway, let’s get back on track and run the <code>test-praise</code> image in a container:</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb36" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb36-1"><span class="ex" style="color: null;">docker</span> run test-praise</span></code></pre></div>
 </div>
@@ -680,7 +705,7 @@ In system("timedatectl", intern = TRUE) :
 Duration: 25.1s
 
 0 errors ✔ | 0 warnings ✔ | 0 notes ✔</code></pre>
-<p>Once again we see the warning about systemd, and once again I am ignoring it.</p>
+<p>Once again we see the warning about systemd, and once again I am ignoring it. The thing that matters here, as far as I’m concerned, is that the unit tests for the praise package pass on arch.</p>
 </section>
 <section id="a-small-caution" class="level3 page-columns page-full">
 <h3 class="anchored" data-anchor-id="a-small-caution">A small caution</h3>
@@ -698,7 +723,7 @@ Duration: 25.1s
 </div>
 <pre><code>Transferred 15676 of 74694 objects...</code></pre>
 <p>…uh, right. Look this is going to take a while so maybe we should move on?</p>
-<p>The main reason I wanted to point to this is to highlight that this part is happening at run time: we’re always downloading a fresh copy of the repository to run the tests. That makes sense in some context, but not others. The design choices I made in designing this docker image aren’t the same ones I’d make if I was trying to design something that would work for a larger project.<sup>29</sup> It’s a toy, nothing more!<sup>30</sup></p>
+<p>The main reason I wanted to point to this is to highlight that this part is happening at run time: we’re always downloading a fresh copy of the repository to run the tests. That makes sense in some context, but not others. The design choices I made in designing this docker image aren’t the same ones I’d make if I was trying to design something that would work for a larger project.<sup>30</sup> It’s a toy, nothing more!<sup>31</sup></p>
 <div class="cell page-columns page-full" data-layout-align="center" data-fig.dpi="200">
 <div class="cell-output-display column-screen-inset">
 <div class="quarto-figure quarto-figure-center">
@@ -1027,9 +1052,10 @@ Duration: 25.1s
 <li id="fn25"><p>Look all I’m saying is that “Queering the dock: images as tops, containers as bottoms” would make a terrible thesis and I would read the hell out of it.↩︎</p></li>
 <li id="fn26"><p>In truth I didn’t actually need to construct the <code>my-system-check</code> image at all: I could have just run <code>arch-r-base</code> in a container with a few arguments tweaked. But that would defeat the point of the exposition, obviously.↩︎</p></li>
 <li id="fn27"><p>Phrasing.↩︎</p></li>
-<li id="fn28"><p>I am, after all, “on smoko” (which in my case means I am unemployed and bored out of my mind) but incidentally if you want to see the most fabulous cover ever (Wet Leg covering The Chats), <a href="https://www.youtube.com/watch?v=P_dza9y6cg0">here it is</a>.↩︎</p></li>
-<li id="fn29"><p>I mean, you could certainly write something similar as part of a containerised workflow on github actions that works similarly to existing workflows for R CMD check but executed within a container running arch. That doesn’t seem out of the question, but this isn’t the way you’d set it up!↩︎</p></li>
-<li id="fn30"><p>I know the mystery will be too much so I’d better resolve it: no, it didn’t pass on the arch image. Some of the dependencies didn’t install properly, and then eventually it threw an error trying to build the vignettes.↩︎</p></li>
+<li id="fn28"><p>Okay yeah I could do this at runtime too, but I want an excuse to talk about the <code>ARG</code> instruction.↩︎</p></li>
+<li id="fn29"><p>I am, after all, “on smoko” (which in my case means I am unemployed and bored out of my mind) but incidentally if you want to see the most fabulous cover ever (Wet Leg covering The Chats), <a href="https://www.youtube.com/watch?v=P_dza9y6cg0">here it is</a>.↩︎</p></li>
+<li id="fn30"><p>I mean, you could certainly write something similar as part of a containerised workflow on github actions that works similarly to existing workflows for R CMD check but executed within a container running arch. That doesn’t seem out of the question, but this isn’t the way you’d set it up!↩︎</p></li>
+<li id="fn31"><p>I know the mystery will be too much so I’d better resolve it: no, it didn’t pass on the arch image. Some of the dependencies didn’t install properly, and then eventually it threw an error trying to build the vignettes.↩︎</p></li>
 </ol>
 </section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2023,
   author = {Danielle Navarro},
