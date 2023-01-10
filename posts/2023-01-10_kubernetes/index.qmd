@@ -33,7 +33,7 @@ options(width = narrow)
 
 
 ```{=html}
-<img width="100%" src="http://donut.djnavarro.net" title="donut.djnavarro.net">
+<img width="100%" src="https://donut.djnavarro.net" title="donut.djnavarro.net">
 ```
 
 <br><br>
@@ -370,7 +370,7 @@ https://kubernetes.io/docs/tutorials/stateless-application/expose-external-ip-ad
 
 https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
 
-## Expose the deployment
+## Expose the deployment (no https)
 
 ```{bash kubectl-expose}
 #| eval: false
@@ -382,6 +382,147 @@ then over in my website create a DNS record that points donut.djnavarro.net at t
 more detail:
 
 https://kubernetes.io/docs/concepts/services-networking/service/
+
+## Expose the deployment (with https)
+
+https://cloud.google.com/kubernetes-engine/docs/how-to/managed-certs
+
+```{bash}
+#| eval: false
+gcloud compute addresses create donut-ip-address --global --project donut-art
+```
+
+```
+Created [https://www.googleapis.com/compute/v1/projects/donut-art/global/addresses/donut-ip-address]
+```
+
+```{bash}
+#| eval: false
+gcloud compute addresses describe donut-ip-address --global --project donut-art
+```
+
+This prints out the IP address and some other details.
+
+
+Now create the managed certificate:
+
+```{yaml}
+#| eval: false
+#| filename: managed-cert.yaml
+#| code-line-numbers: true
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: managed-cert
+spec:
+  domains:
+    - donut.djnavarro.net
+```
+
+Apply it to your cluster:
+
+```{bash}
+#| eval: false
+kubectl apply -f managed-cert.yaml
+```
+
+Sometimes when they say "it might take an hour to..." it only takes like 20 seconds. Yeah nah this is one where it actually took about an hour. We'll come back to it.
+
+NodePort: https://kubernetes.io/docs/concepts/services-networking/service/
+
+Important bit: notice that under `spec.selector` I'm referring to the name of my deployment (donut-example). That's what the kubernetes docs tell you to do when setting up a NodePort service, but the help docs on the corresponding GKE page that I linked to at the start of the page are misleading: they make it look like you're supposed to use the name of the service not the app. 
+
+Probably less important bit: I'm doing everything on port 80 regardless of what the GKE docs suggest because there was an issue at some point with hardcoding port 80 somewhere. Pretty certain that's been properly resolved now but it was one of the tweaks I made on the way to figuring out the problem with spec.selector and fuck it this works so I'm not changing it
+
+```{yaml}
+#| eval: false
+#| filename: mc-service.yaml
+#| code-line-numbers: true
+apiVersion: v1
+kind: Service
+metadata:
+  name: mc-service
+spec:
+  selector:
+    app.kubernetes.io/name: donut-example
+  type: NodePort
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+```
+
+Apply it to your cluster:
+
+```{bash}
+#| eval: false
+kubectl apply -f mc-service.yaml
+```
+
+Point the DNS record to the right place then...
+
+Create the ingress:
+
+```{yaml}
+#| eval: false
+#| filename: mc-ingress.yaml
+#| code-line-numbers: true
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mc-ingress
+  annotations:
+    kubernetes.io/ingress.global-static-ip-name: donut-ip-address
+    networking.gke.io/managed-certificates: managed-cert
+    kubernetes.io/ingress.class: "gce"
+spec:
+  defaultBackend:
+    service:
+      name: mc-service
+      port:
+        number: 80
+```
+
+```{bash}
+#| eval: false
+kubectl apply -f mc-ingress.yaml 
+```
+
+Now let's get the results:
+
+```{bash}
+#| eval: false
+kubectl get ingress
+```
+
+```
+NAME         CLASS    HOSTS   ADDRESS         PORTS   AGE
+mc-ingress   <none>   *       34.149.195.33   80      98s
+```
+
+Might have to wait a bit for provisioning to finish:
+
+```{bash}
+#| eval: false
+kubectl describe managedcertificate managed-cert
+```
+
+Relevant bit of the output once it's all working:
+
+```
+Spec:
+  Domains:
+    donut.djnavarro.net
+Status:
+  Certificate Name:    mcrt-b2204ff4-ad92-4811-a56d-f007190bb659
+  Certificate Status:  Active
+  Domain Status:
+    Domain:     donut.djnavarro.net
+    Status:     Active
+```
+
+
+
 
 ## Where next?
 
