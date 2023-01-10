@@ -27,7 +27,9 @@ options(width = narrow)
 
 > Me: ooh I made a kubernetes app <br>
 > 10yo: I made a paper dragon <br>
-> Me: yeah... yours is cooler
+> Me: yeah... yours is cooler <br>
+> &nbsp; -- My daughter, reminding me that perspective is a thing
+
 
 Story time. There was a very weird moment in machine learning history, about 20 years ago, when the probabilistic AI folks were completely obsessed with Bayesian nonparametrics, and a disproportionate number of papers at NeurIPS had titles like "[Cutesy prefix]: An infinite dimensional model of [something really boring]". In most cases, you'd dig into the paper and discover that they hadn't done anything very special. All they'd done is implement a Bayesian model of [boring thing] that was ambiguous about the number of [components], and instead of thinking about what prior constraints make sense for the problem they were trying to solve, the authors used a [Chinese restaurant process](https://en.wikipedia.org/wiki/Chinese_restaurant_process) (CRP) to specify the conditional prior distribution over allocations of observations to components. The CRP has the mildly-interesting property that for any finite sample size there is a non-negligible conditional probability that the next observation belongs to a hitherto unobserved component, and asymptotically the partitions over observations it generates have a countably infinite number of components. Alas, exactly zero of these papers happened to have an infinitely large data set to train the model on, and without fail the results in the papers didn't appear to have anything "infinite dimensional" about them whatsoever.
 
@@ -53,13 +55,25 @@ Well, maybe. Shall we take a look at how it works? Perhaps, like so many other t
 
 ## Um. What is kubernetes? Do I care?
 
+There's nothing I love more than looking at the website for a software tool and trying to work out what it does by reading how the developers have chosen to describe it. On the [kubernetes](https://kubernetes.io/) website they've gone with the headline *"Production-Grade Container Orchestration"*, and started with this:
 
+> Kubernetes, also known as K8s, is an open-source system for automating deployment, scaling, and management of containerized applications.
+
+As opening lines go it wouldn't get you a lot of attention on grindr^[Though who knows: there's a lot of strange on grindr.] but context makes a difference and it's not so terrible as a description of what kubernetes does. It's a useful tool if you need to deploy an application on a cluster^[Lots of computers working as a single unit.] and have that application run smoothly as you "scale" your cluster by adding more "nodes"^[Also known colloquially as "computers". A node in a cluster is one of the machines that makes up the cluster. I'm endlessly entertained by the human ability to make concepts impenetrable to outsiders by writing in jargon that is never explained to novices.] to the cluster. For the application I'm about to write, kubernetes is overkill. I don't actually need kubernetes to run something this simple, but this is a learning exercise. I'm doing it so that I can familiarise myself with core concepts. When I get to the part of the post that actually *does* something with kubernetes I'll start introducing terminology, but for now that's enough for us.
+
+Should you care as an R user? I mean, probably not. If you want a proper answer, Roel Hogervorst has an excellent blog post called [*"WTF is Kubernetes and Should I Care as R User?"*](https://www.r-bloggers.com/2022/04/wtf-is-kubernetes-and-should-i-care-as-r-user/) I won't duplicate content here: you should read the original post. But the short answer is that you probably won't need to run your own application using kubernetes, but you might need to contribute code to a larger application that uses it. If so, you may want to play around with kubernetes to make sure you understand what it does. 
 
 ## Write the R code
 
+> Likes to watch me in the glass room, bathroom <br>
+> Chateau Marmont, slippin' on my red dress, puttin' on my makeup <br>
+> Glass room, perfume, cognac, lilac fumes <br>
+> Says it feels like heaven to him <br>
+> &nbsp; -- Lana Del Rey^[Oh look it's a trans who likes Lana, how original.]
+
 Let's begin at the beginning. Anytime you want to write something, it helps to have something to say. There is nothing more tiresome than an op-ed writer trying to fill out 1000 words to make the Saturday paper deadline, but tech writing that tries to demonstrate a tool^[The author does not count.] without anything even remotely resembling an application runs a very close second. So let's at least *pretend* we have a use case for this yeah?
 
-In real life I am an unemployed 40-something woman who smokes and drinks too much and makes very poor choices around men, but in my spare moments I make [generative art](https://art.djnavarro.net/) using R. It's an extremely unprofitable hobby^[Unless you are Thomas Lin Pedersen, but I think it is very clear that he is considerably taller than me.] but it's not completely without market value. Among other things the lovely folks at Posit were kind enough to pay me to put together an ["art from code"](https://art-from-code.netlify.app) workshop last year, and thanks to their kindness and my weird priorities there is now a nice little online tutorial that you can use to learn how to make generative art in R. What I'm going to do in this post is build a little kubernetes app that creates generative in R. It won't be very fancy, but hopefully you can see how an app like this could be expanded^[After a *staggering* amount of work, mind you...] to create a platform for "long form generative art" with R, not dissimilar to what [artblocks](https://www.artblocks.io/) or [fxhash](https://www.fxhash.xyz/) allow generative artists to do with javascript. The artist supplies code (in this case using R) that generates artwork, and the server uses that code to generate an arbitrary number of pieces that... idk, I guess you could sell them? Whatever. Do I look like a capitalist to you?
+In real life I am an unemployed 40-something woman who smokes and drinks too much and makes very poor choices around men, but in my spare moments I make [generative art](https://art.djnavarro.net/) using R. It's an extremely unprofitable hobby^[Unless you are Thomas Lin Pedersen, but I think it is very clear that he is much taller than me.] but it's not completely without market value. Among other things the lovely folks at Posit were kind enough to pay me to put together an ["art from code"](https://art-from-code.netlify.app) workshop last year, and thanks to their kindness and my weird priorities there is now a nice little online tutorial that you can use to learn how to make generative art in R. What I'm going to do in this post is build a little kubernetes app that creates generative in R. It won't be very fancy, but hopefully you can see how an app like this could be expanded^[After a *staggering* amount of work, mind you...] to create a platform for "long form generative art" with R, not dissimilar to what [artblocks](https://www.artblocks.io/) or [fxhash](https://www.fxhash.xyz/) allow generative artists to do with javascript. The artist supplies code (in this case using R) that generates artwork, and the server uses that code to generate an arbitrary number of pieces that... idk, I guess you could sell them? Whatever. Do I look like a capitalist to you?
 
 To build something like this we'll need some R code that creates generative art. I won't try to make anything too fancy here. In fact, I'll reuse code for the "donuts" system I used in my [multi-threaded task queues post](https://blog.djnavarro.net/queue/). It's a good choice for this application because the donuts system is something that is extremely easy to implement in R because the ggplot2 package provides tooling for creating data visualisations that use polar geometry^[To be honest I am still not convinced `coord_polar()` is particularly useful for visualisation because I very rarely have anything to say that is naturally expressed as a pie chart, but it's brilliant for generative art.]
 
@@ -186,6 +200,9 @@ Not my finest work, but still pretty enough to be fun.
 
 ## Expose an API
 
+> Are you posting hole on main again? <br>
+> &nbsp; -- Everyone who knows me, eventually
+
 The next step in the process is to define a public API that specifies how visitors to the website can interact with the underlying R code. That's not something we typically do with R code because we aren't usually in the business of writing web applications in R, but thanks to endless joy that is the [plumber](https://www.rplumber.io/) this task can be accomplished with a few lines of code decoration:
 
 ```{r plumber-api, attr.source='.numberLines startFrom="91"'}
@@ -224,7 +241,7 @@ plumber::plumb(file="server.R")$run(port = 3456)
 
 At this point in the process I have a perfectly functional webserver... that only runs on my machine which just happens to have the dependencies installed, and is only accessible locally from that machine. We'll need to fix both of those problems. 
 
-Let's start by fixing the first one by running the website from within a docker container. Under normal circumstances I'd walk you through that process, but since I wrote a [long blog post about docker](https://blog.djnavarro.net/playing-with-docker/) just the other day, I'll jump straight to showing you the [Dockerfile](https://github.com/djnavarro/donut/blob/main/Dockerfile):
+Let's start by fixing the first one by running the website from within a docker container. Under normal circumstances I'd walk you through that process, but since I wrote a [long blog post about docker](https://blog.djnavarro.net/playing-with-docker/) just the other day, I'll jump straight to showing you the [`Dockerfile`](https://github.com/djnavarro/donut/blob/main/Dockerfile):
 
 :::{.column-page-right}
 
@@ -317,6 +334,9 @@ jobs:
 At long, long last we have all the precursors in place. We can get started on the kubernetes side of things...
 
 ## Create a project
+
+
+
 
 First create a project from the console https://console.cloud.google.com/
 
@@ -443,6 +463,12 @@ more detail:
 https://kubernetes.io/docs/concepts/services-networking/service/
 
 ## Expose the deployment (with https)
+
+> I like the kick in the face <br>
+> And the things you do to me <br>
+> I love the way that it hurts <br>
+> I don't miss you, I miss the misery <br>
+> &nbsp; -- Halestorm
 
 https://cloud.google.com/kubernetes-engine/docs/how-to/managed-certs
 
