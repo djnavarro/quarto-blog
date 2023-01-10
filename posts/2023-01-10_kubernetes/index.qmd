@@ -25,17 +25,239 @@ options(width = narrow)
 
 <!--------------- post begins here ----------------->
 
+
+> Me: ooh I made a Kubernetes app <br>
+> 10yo: I made a paper dragon <br>
+> Me: yeah... yours is cooler
+
+
+
+```{=html}
+<img width="100%" src="http://donut.djnavarro.net" title="donut.djnavarro.net">
+```
+
+<br><br>
+
+
 ## Write the R code
 
+Define a function that samples a palette randomly:
+
+```{r donut-system-palette, attr.source='.numberLines startFrom="4"'}
+#| filename: "server.R"
+#| code-line-numbers: true
+sample_canva <- function(seed = NULL) {
+  if(!is.null(seed)) set.seed(seed)
+  sample(ggthemes::canva_palettes, 1)[[1]]
+}
+```
+
+```{r donut-system-data, attr.source='.numberLines startFrom="10"'}
+#| filename: "server.R"
+#| code-line-numbers: true
+sample_data <- function(seed = NULL, n = 100){
+  if(!is.null(seed)) set.seed(seed)
+  dat <- tibble::tibble(
+    x0 = stats::runif(n),
+    y0 = stats::runif(n),
+    x1 = x0 + stats::runif(n, min = -.2, max = .2),
+    y1 = y0 + stats::runif(n, min = -.2, max = .2),
+    shade = stats::runif(n),
+    size = stats::runif(n),
+    shape = factor(sample(0:22, size = n, replace = TRUE))
+  )
+}
+```
+
+```{r donut-system-style, attr.source='.numberLines startFrom="24"'}
+#| filename: "server.R"
+#| code-line-numbers: true
+donut_style <- function(data = NULL, palette) {
+  ggplot2::ggplot(
+    data = data,
+    mapping = ggplot2::aes(
+      x = x0,
+      y = y0,
+      xend = x1,
+      yend = y1,
+      colour = shade,
+      linewidth = size
+    )) +
+    ggplot2::coord_polar(clip = "off") +
+    ggplot2::scale_y_continuous(
+      expand = c(0, 0),
+      limits = c(-1, 1),
+      oob = scales::oob_keep
+    ) +
+    ggplot2::scale_x_continuous(
+      expand = c(0, 0),
+      limits = c(0, 1),
+      oob = scales::oob_keep
+    ) +
+    ggplot2::scale_colour_gradientn(colours = palette) +
+    ggplot2::scale_linewidth(range = c(0, 6)) +
+    ggplot2::theme_void() +
+    ggplot2::theme(
+      panel.background = ggplot2::element_rect(
+        fill = palette[1], colour = palette[1]
+      )
+    ) +
+    ggplot2::guides(
+      colour = ggplot2::guide_none(),
+      linewidth = ggplot2::guide_none(),
+      fill = ggplot2::guide_none(),
+      shape = ggplot2::guide_none()
+    )
+}
+```
+
+```{r donut-system-generator, attr.source='.numberLines startFrom="63"'}
+#| filename: "server.R"
+#| code-line-numbers: true
+donut <- function(seed) {
+
+  dat <- sample_data(n = 200, seed = seed) |>
+    dplyr::mutate(y1 = y0, size = size / 3)
+
+  line_spec <- sample(c("331311", "11", "111115"), 1)
+
+  pic <- donut_style(palette = sample_canva(seed = seed)) +
+    ggplot2::geom_segment(data = dat, linetype = line_spec)
+
+  if(stats::runif(1) < .5) {
+    pic <- pic +
+      ggplot2::geom_segment(
+        data = dat |> dplyr::mutate(y1 = y1 - .2, y0 = y0 - .2),
+        linetype = line_spec
+      )
+  }
+  if(stats::runif(1) < .5) {
+    pic <- pic +
+      ggplot2::geom_segment(
+        data = dat |> dplyr::mutate(y1 = y1 - .4, y0 = y0 - .4),
+        linetype = line_spec
+      )
+  }
+
+  pic
+}
+```
 
 
-## Wrap the R code in a plumber api
+## Expose an API
+
+with plumber
+
+```{r plumber-api, attr.source='.numberLines startFrom="91"'}
+#| eval: false
+#| filename: "server.R"
+#| code-line-numbers: true
+#* draws a donut plot
+#* @serializer svg list(width = 10, height = 10)
+#* @get /
+function(seed = NA) {
+  if(is.na(seed)) {
+    seed <- as.integer(Sys.time())
+  }
+  print(donut(seed))
+}
+```
+
 
 ## Containerise it
 
-## Push the container to the registry
+:::{.column-page-right}
 
-## Create a google cloud project
+```{dockerfile donut-docker}
+#| eval: false
+#| filename: "Dockerfile"
+#| code-line-numbers: true
+FROM rocker/r-ver:4.2.2
+
+LABEL org.opencontainers.image.source "https://github.com/djnavarro/donut"
+LABEL org.opencontainers.image.authors "Danielle Navarro <djnavarro@protonmail.com>"
+LABEL org.opencontainers.image.description DESCRIPTION
+LABEL org.opencontainers.image.licenses "MIT"
+
+RUN Rscript -e 'install.packages(c("ggplot2", "scales", "tibble", "dplyr", "plumber", "ggthemes"))'
+COPY server.R /home/server.R
+EXPOSE 80
+CMD Rscript -e 'plumber::plumb(file="/home/server.R")$run(host="0.0.0.0", port = 80)'
+```
+
+:::
+
+https://docs.docker.com/engine/reference/builder/#expose
+
+https://nickjanetakis.com/blog/docker-tip-59-difference-between-exposing-and-publishing-ports
+
+## Push it to the registry
+
+https://github.com/djnavarro/donut/pkgs/container/donut
+
+
+:::{.column-page-right}
+
+```{yaml}
+#| eval: false
+#| filename: ".github/workflows/build-image.yaml"
+#| code-line-numbers: true
+
+name: publish donut image
+
+on:
+  push:
+    branches: ['main']
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-push-image:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - dockerfile: ./Dockerfile
+            image: ghcr.io/djnavarro/donut
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: checkout repository
+        uses: actions/checkout@v2
+
+      - name: login to the container registry
+        uses: docker/login-action@f054a8b539a109f9f41c372932f1ae047eff08c9
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: extract metadata (tags, labels) for docker
+        id: meta
+        uses: docker/metadata-action@98669ae865ea3cffbcbaa878cf57c20bbf1c6c38
+        with:
+          images: ${{ matrix.image }}
+
+      - name: build and push docker image
+        uses: docker/build-push-action@ad44023a93711e3deb337508980b4b5e9bcdc5dc
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+```
+
+:::
+
+## Create a project
 
 First create a project from the console https://console.cloud.google.com/
 
@@ -44,7 +266,7 @@ Give it a fancy name like `donut-art`
 Your project will need to enable google kubernetes engine
 
 
-# do you want to be able to connect to your cluster?
+## Set up the tools!
 
 This is a bit of a digression but I promise it's a useful one. click on the "connect" button and it will reveal a command you can use to connect to your cluster from the command line. you can do it right away by selecting the "run in cloud shell" option: that will execute the fancy little command in a terminal that google has already configured to have the tools you need to directly interact with your kubernetes cluster. however, there's nothing stopping you from doing it yourself from the pretty little bash terminal on your machine.
 
@@ -61,52 +283,110 @@ https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/
 Footnote: Autocompletion for kubectl https://kubernetes.io/docs/reference/kubectl/cheatsheet/
 (thank you to @jan@toot.io for the hint)
 
-don't forget: `gcloud auth login` to authenticate 
+don't forget: 
 
-# create the cluster using autopilot
+```{bash gcloud-auth-login}
+#| eval: false
+gcloud auth login
+```
+
+to authenticate 
+
+## Create your cluster 
+
+using autopilot
 
 I called mine `donut-cluster`, region `australia-southeast1`
 
 now connect:
 
-```
+```{bash gloud-get-credentials}
+#| eval: false
 export USE_GKE_GCLOUD_AUTH_PLUGIN=True
-gcloud container clusters get-credentials donut-cluster --zone australia-southeast1 --project donut-art
+gcloud container clusters get-credentials donut-cluster \
+  --zone australia-southeast1 \
+  --project donut-art
 ```
 
 check that we can connect:
 
-```
+```{bash kubectl-cluster-info}
+#| eval: false
 kubectl cluster-info
 ```
 
-## deploy 
+## Create a deployment
 
+
+```{yaml}
+#| eval: false
+#| filename: "deployment.yaml"
+#| code-line-numbers: true
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/name: donut-example
+  name: donut
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: donut-example
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: donut-example
+    spec:
+      containers:
+        - name: donut
+          image: ghcr.io/djnavarro/donut:main
+          imagePullPolicy: Always
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "250m"
+            limits:
+              memory: "128Mi"
+              cpu: "500m"
+          ports:
+            - containerPort: 80
 ```
+
+
+```{bash kubectl-apply-deployment}
+#| eval: false
 kubectl apply -f deployment.yaml
 ```
 
-```
+```{bash kubectl-get-deployments}
+#| eval: false
 kubectl get deployments
 ```
+
+https://kubernetes.io/docs/tasks/run-application/run-stateless-application-deployment/
 
 https://kubernetes.io/docs/tutorials/stateless-application/expose-external-ip-address/
 
 https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
 
-## expose 
+## Expose the deployment
 
-```
+```{bash kubectl-expose}
+#| eval: false
 kubectl expose deployment donut --type=LoadBalancer --name=donut-service
 ```
 
 then over in my website create a DNS record that points donut.djnavarro.net at the IP address
 
-## where next?
+more detail:
 
-- enabling https: https://kubernetes.io/docs/tasks/tls/managing-tls-in-a-cluster/ https://medium.com/avmconsulting-blog/how-to-secure-applications-on-kubernetes-ssl-tls-certificates-8f7f5751d788
-- storage: the app generates a new image every time it is called. that's wasteful, especially if you're going to reuse images. enable google cloud storage and have the plumber app check for the relevant file on gcs before trying to generate a new one
-- multiple containers: once storage is in the mix you probably want to split this into a server (pulls files from storage to display files to user) and a generator (creates image files and writes to storage), each with their own container. you could choose run both of these containers in one pod, or have two single-container pods. i have no idea which is better yet.
-- fancier things like spark-on-kubernetes already have helm charts. so you'd want to install helm and learn how to create deployments from that
+https://kubernetes.io/docs/concepts/services-networking/service/
+
+## Where next?
+
+- enabling https: https://kubernetes.io/docs/tasks/tls/managing-tls-in-a-cluster/ https://medium.com/avmconsulting-blog/how-to-secure-applications-on-kubernetes-ssl-tls-certificates-8f7f5751d788 https://snyk.io/blog/setting-up-ssl-tls-for-kubernetes-ingress/
+- storage: the app generates a new image every time it is called. that's wasteful, especially if you're going to reuse images. enable google cloud storage and have the plumber app check for the relevant file on gcs before trying to generate a new one https://cloud.google.com/kubernetes-engine/docs/concepts/volumes  https://cloud.google.com/kubernetes-engine/docs/how-to/volumes
+- fancier things like spark-on-kubernetes already have helm charts. so you'd want to install helm and learn how to create deployments from that https://bitnami.com/stack/spark/helm
 
 <!--------------- appendices go here ----------------->
