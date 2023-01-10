@@ -63,7 +63,7 @@ In real life I am an unemployed 40-something woman who smokes and drinks too muc
 
 To build something like this we'll need some R code that creates generative art. I won't try to make anything too fancy here. In fact, I'll reuse code for the "donuts" system I used in my [multi-threaded task queues post](https://blog.djnavarro.net/queue/). It's a good choice for this application because the donuts system is something that is extremely easy to implement in R because the ggplot2 package provides tooling for creating data visualisations that use polar geometry^[To be honest I am still not convinced `coord_polar()` is particularly useful for visualisation because I very rarely have anything to say that is naturally expressed as a pie chart, but it's brilliant for generative art.]
 
-Here's how you build the system. First, the plot is going to need a colour scheme, so we'll define a function that samples a palette randomly with the assistance of the ggthemes package:
+Here's how you build the system. I won't go into detail because this system is a very minor variation on [this one in my art-from-code tutorial](https://art-from-code.netlify.app/day-1/session-1/#composition), but here's the gist. First, the plot is going to need a colour scheme, so we'll define a function that samples a palette randomly with the assistance of the ggthemes package:
 
 ```{r donut-system-palette, attr.source='.numberLines startFrom="4"'}
 #| filename: "server.R"
@@ -186,7 +186,7 @@ Not my finest work, but still pretty enough to be fun.
 
 ## Expose an API
 
-with plumber
+The next step in the process is to define a public API that specifies how visitors to the website can interact with the underlying R code. That's not something we typically do with R code because we aren't usually in the business of writing web applications in R, but thanks to endless joy that is the [plumber](https://www.rplumber.io/) this task can be accomplished with a few lines of code decoration:
 
 ```{r plumber-api, attr.source='.numberLines startFrom="91"'}
 #| eval: false
@@ -203,8 +203,28 @@ function(seed = NA) {
 }
 ```
 
+There are a few things to note here:
+
+- The code decoration on line 93 specifies that the function defined in lines 94-99 will be called whenever an HTML `GET` request is sent to the `/` endpoint. Or, in simpler language, whenever someone visits the main page for the website that eventually ended up being hosted at [donut.djnavarro.net](https://donut.djnavarro.net). 
+
+- The code decoration on line 92 how the output from the R function (an in-memory data structure) will be serialised (to a binary stream) and transmitted to the user.^[This isn't the right place for a deep dive on [serialising R objects](https://blog.djnavarro.net/serialisation-with-rds/), but I've written about it before.] In this case, the output is a plot object that would normally be handled by the R graphics device. What I've used plumber to do here, is have this output converted to an svg file. It's that svg file that the website will serve to the user.
+
+- Finally, notice that the function does take a `seed` argument.^[Arguments can be passed to a plumber endpoint through the query string. For instance, the URL [http://donut.djnavarro.net/?seed=6](http://donut.djnavarro.net/?seed=6) fixes the `seed` to 6, so the output will always be the same as the red and black donut shown in the bottom right of the output above.] I've set `NA` as the default value rather than the more conventional `NULL` because plumber won't accept a `NULL` default in this context.
+
+Noting that all the code I've presented so far belongs to a file called [`server.R`](https://github.com/djnavarro/donut/blob/main/server.R) (the link goes to the github repo for this "donut" side-project), I can start the web server running locally on port 3456 like this:
+
+```{r start-plumber}
+#| eval: false
+plumber::plumb(file="server.R")$run(port = 3456)
+```
+
+
 
 ## Containerise it
+
+At this point in the process I have a perfectly functional webserver... that only runs on my machine which just happens to have the dependencies installed, and is only accessible locally from that machine. We'll need to fix both of those problems. 
+
+Let's start by fixing the first one by running the website from within a docker container. Under normal circumstances I'd walk you through that process, but since I wrote a [long blog post about docker](https://blog.djnavarro.net/playing-with-docker/) just the other day, I'll jump straight to showing you the [Dockerfile](https://github.com/djnavarro/donut/blob/main/Dockerfile):
 
 :::{.column-page-right}
 
@@ -227,14 +247,11 @@ CMD Rscript -e 'plumber::plumb(file="/home/server.R")$run(host="0.0.0.0", port =
 
 :::
 
-https://docs.docker.com/engine/reference/builder/#expose
-
-https://nickjanetakis.com/blog/docker-tip-59-difference-between-exposing-and-publishing-ports
+Every instruction in this dockerfile is something I covered in the last post, except for the [`EXPOSE`](https://docs.docker.com/engine/reference/builder/#expose) instruction on line 10. That one tells the container to listen on port 80. It doesn't necessarily publish the output anywhere accessible from outside the container^[Here's a blog post on the difference between [exposing and publishing ports](https://nickjanetakis.com/blog/docker-tip-59-difference-between-exposing-and-publishing-ports) in docker if you need it!] but it does mean that the plumber web server running inside the container is listening on port 80 and can create a response when it receives a request. I'll deal with the publishing issue later.
 
 ## Push it to the registry
 
-https://github.com/djnavarro/donut/pkgs/container/donut
-
+The next step in the process is to host the image created from this dockerfile on a public registry.^[It doesn't have to be public: kubernetes can pull images from private registries too, but I'm not going to bother with that sort of thing here] I talked about that process in the last post too, so again I'll keep things simple. The process I followed for the donut project is essentially identical to the one I used in this [section of the docker post](https://blog.djnavarro.net/posts/2023-01-01_playing-with-docker/#hosting-images). I've created a github actions workflow that automatically builds the image on github and hosts it with the github container registry. The resulting image name is `ghcr.io/djnavarro/donut:main` and here's the [`build-image.yaml`](https://github.com/djnavarro/donut/blob/main/.github/workflows/build-image.yaml) workflow I'm using:
 
 :::{.column-page-right}
 
@@ -296,6 +313,8 @@ jobs:
 ```
 
 :::
+
+At long, long last we have all the precursors in place. We can get started on the kubernetes side of things...
 
 ## Create a project
 
