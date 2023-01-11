@@ -410,10 +410,25 @@ Okay, I may have edited the output slightly. The missing bits are the various UR
 
 ## Kubernetes terminology
 
+Not surprisingly, kubernetes has a lot of terminology. That's quite daunting when you're getting started and I'm not going to attempt a complete glossary here. Instead, let's start with these four terms, since we'll use them a lot:
+
+- Container
+- Pod
+- Deployment
+- Service
+
+Conceptually, it's also helpful to know these terms at the very beginning, even though frankly I'm not going to do anything with them here:
+
+- Node
+- Control Plane
+
+More terms will appears as we go along -- and I'll try to explain all those when they pop up -- but these are the ones that I wish I'd understood properly before I started trying to play with kubernetes clusters.
+
 ## Create a deployment
 
+The way to configure your kubernetes cluster is with manifest files that are written in [yaml](https://en.wikipedia.org/wiki/YAML) format and use the `kubectl apply` command to update your cluster using the instructions laid out in the manifest file. You can use a manifest to modify any aspect to your cluster configuration, and later in this post I'll show a few more manifests, but for now here's the [`deployment.yaml`](https://github.com/djnavarro/donut/blob/main/deployment.yaml) file I'm using to specify a deployment for the donuts application:
 
-```{yaml}
+```{yaml deployment-1}
 #| eval: false
 #| filename: "deployment.yaml"
 #| code-line-numbers: true
@@ -448,22 +463,121 @@ spec:
             - containerPort: 80
 ```
 
+For the moment, let's censor the metadata and everything that uses the metadata so that we can focus on what the rest of the manifest is doing:
+
+```{yaml deployment-2}
+#| eval: false
+#| filename: "deployment.yaml"
+#| code-line-numbers: true
+apiVersion: apps/v1
+kind: Deployment
+metadata: 
+  [some metadata]
+spec:
+  replicas: 2
+  selector:
+    [use some metadata]
+  template:
+    metadata:
+      [some metadata]
+    spec:
+      containers:
+        - name: [names are metadata]
+          image: ghcr.io/djnavarro/donut:main
+          imagePullPolicy: Always
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "250m"
+            limits:
+              memory: "128Mi"
+              cpu: "500m"
+          ports:
+            - containerPort: 80
+```
+
+
+There's a lot going on here, so for the moment let's focus on the bottom.^[Too obvious.] The section of the code from lines 17-29 is used to specify the docker containers^[Kubernetes supports other types of containers besides docker, but let's not complicate matters.] that my cluster is going to deploy. There's only one container listed in this section, and the line that reads `image: ghcr.io/djnavarro/donut:main` is the way that I've specified the docker image to use when creating the container. There are other settings I've used to set up this container: I've asked kubernetes to allocate memory and cpu resources to the container, and I've exposed container port 80 (which, if you can remember back that far, is where the plumber web API is running inside the container). I've also set `imagePullPolicy: Always` to ensure that every time I update this deployment kubernetes will pull the image from the registry afresh. I did that because more often than not while I was writing code for the kubernetes deployment I was tweaking the image too, and I wanted to make sure that I was always trying to deploy the most recent version of the image.
+
+Okay, now that we know what's going on in that section of the code, let's collapse that part and think about the manifest file like this:
+
+```{yaml deployment-3}
+#| eval: false
+#| filename: "deployment.yaml"
+#| code-line-numbers: true
+apiVersion: apps/v1
+kind: Deployment
+metadata: 
+  [some metadata]
+spec:
+  replicas: 2
+  selector:
+    [use some metadata]
+  template:
+    metadata:
+      [some metadata]
+    spec:
+      [details of one or more containers]
+```
+
+Okay, so now let's think about the bottom part of this code too. Lines 13 through 25 of this condensed pseudo-manifest describe some kind of template. But a template for what? Well, as clearly stated on line 25 in human(ish) language, it's a template for "one or more containers". In kubernetes terminology, a deployable thing that holds one or more containers is a pod... so this section of the code is describing a [pod template](https://kubernetes.io/docs/concepts/workloads/pods/#pod-templates). It's an instruction to kubernetes that says... "hey, when you create a pod as part of this deployment, here's the template you should use". So we can simplify again:
+
+```{yaml deployment-4}
+#| eval: false
+#| filename: "deployment.yaml"
+#| code-line-numbers: true
+apiVersion: apps/v1
+kind: Deployment
+metadata: 
+  [some metadata]
+spec:
+  replicas: 2
+  selector:
+    [use some metadata]
+  template:
+    [details of the pod template]
+```
+
+In this condensed form we can see that lines 5-10 provide a specification of the deployment itself. I've given it a pod template that tells kubernetes what the pods should look like, and I've specified the number of "replicas". How many copies of this pod do I want it to run in this deployment: for no good reason at all I decided to run two (i.e., two replicas). 
+
+If we simplify the manifest yet again, we can see the top-level description:
+
+```{yaml deployment-5}
+#| eval: false
+#| filename: "deployment.yaml"
+#| code-line-numbers: true
+apiVersion: apps/v1
+kind: Deployment
+metadata: 
+  [some metadata]
+spec:
+  [details of the deployment]
+```
+
+The only other things to point out right now is that the  "kind" field is used to tell kubernetes what type of object to create (a Deployment), and the "apiVersion" field is used to specify which version of the kubernetes API to use when interpreting the manifest. That's handy to note because later on I'll be using APIs that are a bit more specific to the google kubernetes engine.
+
+Okay, so now that we have some sense of what's going on in the `deployment.yaml` file (ignoring the fact that I've glossed over the metadata bits), let's actually apply it to our cluster:^[The `-f` argument in `kubectl apply` here tells it to use the manifest **f**ile.]
 
 ```{bash kubectl-apply-deployment}
 #| eval: false
 kubectl apply -f deployment.yaml
 ```
 
+To see if it's working we can use `kubectl get deployments`:
+
 ```{bash kubectl-get-deployments}
 #| eval: false
 kubectl get deployments
 ```
 
-https://kubernetes.io/docs/tasks/run-application/run-stateless-application-deployment/
+```
+NAME    READY   UP-TO-DATE   AVAILABLE   AGE
+donut   2/2     2            2           19h
+```
 
-https://kubernetes.io/docs/tutorials/stateless-application/expose-external-ip-address/
+It is alive.
 
-https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+For more details on this part of the process, check out the kubernetes documentation on [deploying a stateless application](https://kubernetes.io/docs/tasks/run-application/run-stateless-application-deployment/). You may also want to look at the page on [managing container resources](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/) at this point. 
 
 ## Expose the deployment (no https)
 
@@ -477,6 +591,9 @@ then over in my website create a DNS record that points donut.djnavarro.net at t
 more detail:
 
 https://kubernetes.io/docs/concepts/services-networking/service/
+
+https://kubernetes.io/docs/tutorials/stateless-application/expose-external-ip-address/
+
 
 ## Expose the deployment (with https)
 
