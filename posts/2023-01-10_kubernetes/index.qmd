@@ -331,68 +331,84 @@ jobs:
 
 :::
 
-At long, long last we have all the precursors in place. We can get started on the kubernetes side of things...
+At long, long last we have all the precursors in place. We have a little web application that runs inside a docker container, and the image describing that container is hosted on a registry.^[If this were something fancier you'd probably have more than one container, but I'm keeping this as simple as possible for the sake of what's left of my sanity.] We can get started on the kubernetes side of things...
 
-## Create a project
+## Create a kubernetes cluster
 
+At the risk of stating the bloody obvious, if you want to use kubernetes to deploy an application on a cluster... you're probably going to need a cluster running kubernetes. You can get yourself one of these in lots of different ways but the way I'm going to do it is with GKE, the [google kubernetes engine](https://cloud.google.com/kubernetes-engine). You'll need a google account to do this, and yes this is something that they charge actual money for, but the good news is that when you sign up for google cloud services you get a few hundred dollars of credit to start with. That's pretty useful for novices: it's nice to be able to play around and learn the basics before you have to start worrying about what it's going to cost. 
 
+If you go down that path you can access your projects from the cloud console, located at [console.cloud.google.com](https://console.cloud.google.com/). Once there you can navigate to the various pages you'll need by clicking on links and menu items, but google offers a lot of different cloud services and it does take a little while for the interface to start feeling familiar, so I'll link to the pages you need directly as well.
 
+Before you can create a cluster of your very own, you need to create a project. Pretty much everything you do with google cloud services is organised into projects so that's where we'll start. To create a project, go to [console.cloud.google.com/projectcreate](https://console.cloud.google.com/projectcreate) and follow the prompts. Give your project a fancy name that makes you sound cool: I called mine `donut-art`.
 
-First create a project from the console https://console.cloud.google.com/
+Now that you have a project, you'll need to enable the specific google cloud services that your project will need access to. In this example the only thing I'll need is GKE itself, but in other situations you might need access to google cloud storage or something like that. To enable GKE on your current project go to [console.cloud.google.com/kubernetes/](https://console.cloud.google.com/kubernetes/). If it hasn't already been enabled for the project the page will ask if you want to. Even more conveniently, if you don't have a cluster running it will ask if you want to create one.^[I should mention that yes you can do all this with the `gcloud` command line tool, but I haven't reached the point in the post where I talk about that yet, and in any case the point-and-click process is actually pretty easy.] It will give you two options: an "autopilot" cluster is one where google will automatically manage the configuration for you, whereas for a "standard" cluster you'll have to be more explicit about how many nodes you want and how they are organised. There are situations where you need to use the standard cluster,^[An example would be if you plan to deploy [spark](https://spark.apache.org/) on kubernetes. I've been playing around with that a little and for that you really need to have google back off and not delete nodes whenever the autopilot thinks you don't need them. But that's not the case for the donut app so I'm keeping it simple.] but this is not one of those so I went with the autopilot approache because it's simpler. I didn't need to change any of the defaults: I called my cluster `donut-cluster`, and created it in the region `australia-southeast1`.^[Also known as "Sydney" to those of us who live here]
 
-Give it a fancy name like `donut-art`
+Here's a screenshot showing you what the relevant bit of the google kubernetes engine console looks like for me now that I have a cluster up and running:
 
-Your project will need to enable google kubernetes engine
+![](donut-cluster.png)
 
+If I click on the "donut-cluster" link it takes me to a page with a lot more detail, but you can see that some of the information is the same: 
 
-## Set up the tools!
+<br>
 
-This is a bit of a digression but I promise it's a useful one. click on the "connect" button and it will reveal a command you can use to connect to your cluster from the command line. you can do it right away by selecting the "run in cloud shell" option: that will execute the fancy little command in a terminal that google has already configured to have the tools you need to directly interact with your kubernetes cluster. however, there's nothing stopping you from doing it yourself from the pretty little bash terminal on your machine.
+![](donut-cluster-detail.png)
 
-The tools you need to install first are gcloud (the google cloud software development kit) and kubectl (tools for interacting with kubernetes). you'll also need the "google kubernetes engine gcloud auth plugin":
+## Command line tools
 
-- install gcloud sdk (on ubuntu: https://cloud.google.com/sdk/docs/install#deb)
-- install gke-gcloud-auth-plugin (`sudo apt-get install google-cloud-sdk-gke-gcloud-auth-plugin`)
-- install kubectl (you can install with snap or apt-get); https://kubernetes.io/docs/reference/kubectl/
+Time for a little digression.
 
-https://kubernetes.io/docs/reference/kubectl/
+Take a look at the menu shown in the last screenshot. If I click on the "connect" button and it will reveal a command I can use to connect to the cluster from the terminal on my laptop... but it requires me to have the gcloud command line tools installed. Now, if you want to skip the step of installing all the tools you need locally by selecting the "run in cloud shell" option that also appears on the dialoh bog. However, I dislike the cloud shell and prefer to work from my own terminal. So, the next step is to install the command line tools. For this project, the two things I need are gcloud (to interact with google cloud services) and kubectl (to interact with kubernetes).
 
-https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/
+### Installing gcloud
 
-Footnote: Autocompletion for kubectl https://kubernetes.io/docs/reference/kubectl/cheatsheet/
-(thank you to @jan@toot.io for the hint)
-
-don't forget: 
+It turns out that installing the command line tools is relatively straightforward, and is made a lot easier thanks to the [gcloud installation instructions](https://cloud.google.com/sdk/docs/install) which are detailed and not too hard to follow. In addition to the basic tools, I installed the "gke-gcloud-auth-plugin" which are needed for authentication. Once the command line tools are installed, authentication from your terminal is a one-line command:
 
 ```{bash gcloud-auth-login}
 #| eval: false
 gcloud auth login
 ```
 
-to authenticate 
+I can now interact with my google cloud projects from my command line.
 
-## Create your cluster 
+### Installing kubectl
 
-using autopilot
+The second tool I need for this project is [kubectl](https://kubernetes.io/docs/reference/kubectl/), a command line tool used to control a kubernetes cluster. You can find installation instructions for different operating systems by visiting the kubernetes [install tools](https://kubernetes.io/docs/tasks/tools/) page. I'm doing this from a linux machine, so I also found it useful to enable autocompletion of kubectl commands within the bash shell. The instructions for this are included in the kubectl install page for linux.
 
-I called mine `donut-cluster`, region `australia-southeast1`
+### Connect to the cluster
 
-now connect:
+Now that I have gcloud and kubectl running, I can connect to my cluster. The first thing to do is use gcloud to get the credentials needed to connect to my cluster:
 
 ```{bash gloud-get-credentials}
 #| eval: false
-export USE_GKE_GCLOUD_AUTH_PLUGIN=True
-gcloud container clusters get-credentials donut-cluster \
-  --zone australia-southeast1 \
-  --project donut-art
+  export USE_GKE_GCLOUD_AUTH_PLUGIN=True
+  gcloud container clusters get-credentials donut-cluster \
+    --zone australia-southeast1 \
+    --project donut-art
 ```
 
-check that we can connect:
+```
+Fetching cluster endpoint and auth data.
+kubeconfig entry generated for donut-cluster.
+```
+
+Then I can use kubectl to verify that it can connect to my cluster: 
 
 ```{bash kubectl-cluster-info}
 #| eval: false
 kubectl cluster-info
 ```
+
+```
+Kubernetes control plane is running at blah blah blah
+GLBCDefaultBackend is running at blah blah blah
+KubeDNS is running at blah blah blah
+KubeDNSUpstream is running at blah blah blah
+Metrics-server is running at blah blah blah
+```
+
+Okay, I may have edited the output slightly. The missing bits are the various URLs. They aren't very interesting... the main thing to notice is that yes, kubectl can connect to my cluster and the cluster is up and running.
+
+## Kubernetes terminology
 
 ## Create a deployment
 
@@ -611,7 +627,6 @@ Status:
 
 ## Where next?
 
-- enabling https: https://kubernetes.io/docs/tasks/tls/managing-tls-in-a-cluster/ https://medium.com/avmconsulting-blog/how-to-secure-applications-on-kubernetes-ssl-tls-certificates-8f7f5751d788 https://snyk.io/blog/setting-up-ssl-tls-for-kubernetes-ingress/
 - storage: the app generates a new image every time it is called. that's wasteful, especially if you're going to reuse images. enable google cloud storage and have the plumber app check for the relevant file on gcs before trying to generate a new one https://cloud.google.com/kubernetes-engine/docs/concepts/volumes  https://cloud.google.com/kubernetes-engine/docs/how-to/volumes
 - fancier things like spark-on-kubernetes already have helm charts. so you'd want to install helm and learn how to create deployments from that https://bitnami.com/stack/spark/helm
 
