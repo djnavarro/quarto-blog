@@ -534,29 +534,41 @@ donut   2/2     2            2           19h</code></pre>
 </section>
 <section id="expose-the-deployment-no-https" class="level2">
 <h2 class="anchored" data-anchor-id="expose-the-deployment-no-https">Expose the deployment (no https)</h2>
+<p>At this point my little donut application is running happily on the cluster, but it doesn’t have a public IP address. No-one can visit it. To expose the deployment to the world you’ll need to start a service running that takes care of this for you. Exactly how you go about doing this depends on whether you want to enable https on the website. If you’re not too fussed about https the process is fairly simple and you can find details on how to do it by reading the <a href="https://kubernetes.io/docs/tutorials/stateless-application/expose-external-ip-address/">tutorial on exposing an external IP address</a>, and you may find the kubernetes <a href="https://kubernetes.io/docs/concepts/services-networking/service/">documentation on services</a> helpful too. The TL;DR is that it’s simple enough that you don’t even need to bother with a manifest file:</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb23" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb23-1"><span class="ex" style="color: null;">kubectl</span> expose deployment donut <span class="at" style="color: #657422;">--type</span><span class="op" style="color: #5E5E5E;">=</span>LoadBalancer <span class="at" style="color: #657422;">--name</span><span class="op" style="color: #5E5E5E;">=</span>donut-service</span></code></pre></div>
 </div>
-<p>then over in my website create a DNS record that points donut.djnavarro.net at the IP address</p>
-<p>more detail:</p>
-<p>https://kubernetes.io/docs/concepts/services-networking/service/</p>
-<p>https://kubernetes.io/docs/tutorials/stateless-application/expose-external-ip-address/</p>
+<p>The application is now online. It has a public IP address that you can find, and if you own a domain that you want to map to that IP address all you have to do is create a DNS record that points the URL at the appropriate IP. With any luck your domain provider will have some decent documentation for this. For instance, I use google domains for <code>djnavarro.net</code> domain, and they have some pretty decent <a href="https://support.google.com/a/answer/2579934?hl=en">instructions on configuring DNS records</a> that I could use to point <code>donut.djnavarro.net</code> at the IP address for my kubernetes application.</p>
+<p>Unfortunately for me, I am a masochist, and as such I chose the option that delivers pain.</p>
 </section>
-<section id="expose-the-deployment-with-https" class="level2">
+<section id="expose-the-deployment-with-https" class="level2 page-columns page-full">
 <h2 class="anchored" data-anchor-id="expose-the-deployment-with-https">Expose the deployment (with https)</h2>
 <blockquote class="blockquote">
 <p>I like the kick in the face <br> And the things you do to me <br> I love the way that it hurts <br> I don’t miss you, I miss the misery <br> &nbsp; – Halestorm</p>
 </blockquote>
-<p>https://cloud.google.com/kubernetes-engine/docs/how-to/managed-certs</p>
+<p>Configuring the kubernetes application to use https is a bit of a pain in the ass.<sup>20</sup> I’m deploying all this through google kubernetes engine, so the approach I took was to follow the guide for using <a href="https://cloud.google.com/kubernetes-engine/docs/how-to/managed-certs">google-managed ssl certificates</a>. The guide is excellent… apart from a couple of minor… issues… that really fucked me<sup>21</sup> when I tried to follow it. I’ll mention those as I go.</p>
+<section id="get-a-static-ip" class="level3 page-columns page-full">
+<h3 class="anchored" data-anchor-id="get-a-static-ip">Get a static IP</h3>
+<p>The first thing you have to do is create a static IP address that you’ll later use for your cluster. The <code>gcloud compute addresses create</code> command does that for you. Here’s how I did that for my cluster:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb24" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb24-1"><span class="ex" style="color: null;">gcloud</span> compute addresses create donut-ip-address <span class="at" style="color: #657422;">--global</span> <span class="at" style="color: #657422;">--project</span> donut-art</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb24" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb24-1"><span class="ex" style="color: null;">gcloud</span> compute addresses create donut-ip-address <span class="dt" style="color: #AD0000;">\</span></span>
+<span id="cb24-2">  <span class="at" style="color: #657422;">--global</span> <span class="dt" style="color: #AD0000;">\</span></span>
+<span id="cb24-3">  <span class="at" style="color: #657422;">--project</span> donut-art</span></code></pre></div>
 </div>
+<div class="column-page-right">
 <pre><code>Created [https://www.googleapis.com/compute/v1/projects/donut-art/global/addresses/donut-ip-address]</code></pre>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb26" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb26-1"><span class="ex" style="color: null;">gcloud</span> compute addresses describe donut-ip-address <span class="at" style="color: #657422;">--global</span> <span class="at" style="color: #657422;">--project</span> donut-art</span></code></pre></div>
 </div>
-<p>This prints out the IP address and some other details.</p>
-<p>Now create the managed certificate:</p>
+<p>Now that the IP address exists you can ask google to tell you what it is:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb26" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb26-1"><span class="ex" style="color: null;">gcloud</span> compute addresses describe donut-ip-address <span class="dt" style="color: #AD0000;">\</span></span>
+<span id="cb26-2">  <span class="at" style="color: #657422;">--global</span> <span class="dt" style="color: #AD0000;">\</span></span>
+<span id="cb26-3">  <span class="at" style="color: #657422;">--project</span> donut-art</span></code></pre></div>
+</div>
+<p>When you do this, the output prints out the IP address and some other details. Later on, this is the address you’ll create a DNS record for so that – in my case – the <a href="https://donut.djnavarro.net/">https://donut.djnavarro.net/</a> address points to the correct location.</p>
+</section>
+<section id="get-a-certificate" class="level3">
+<h3 class="anchored" data-anchor-id="get-a-certificate">Get a certificate</h3>
+<p>The next step in the process is to create a managed certificate. Somebody needs to certify that my website is what it says it is.<sup>22</sup> I’m going to need a manifest file for this, which I’ve saved as <a href="https://github.com/djnavarro/donut/blob/main/managed-cert.yaml"><code>managed-cert.yaml</code></a>:</p>
 <div class="cell">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
@@ -571,11 +583,21 @@ donut   2/2     2            2           19h</code></pre>
 <span id="cb27-7"><span class="at" style="color: #657422;">    </span><span class="kw" style="color: #003B4F;">-</span><span class="at" style="color: #657422;"> donut.djnavarro.net</span></span></code></pre></div>
 </div>
 </div>
-<p>Apply it to your cluster:</p>
+<p>Notice that the <code>apiVersion</code> field here is using something specific to GKE: I’m using google infrastructure here and they’ve kindly<sup>23</sup> provided an API that makes it easy to use their managed certificates. The yaml here is pretty simple: I’m asking google to supply me with a certificate for my kubernetes application, which will be valid for the domain <code>donut.djnavarro.net</code> (you can list more than one here but I didn’t).</p>
+<p>Now that I have a manifest, I apply it to my cluster in the usual way:</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb28" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb28-1"><span class="ex" style="color: null;">kubectl</span> apply <span class="at" style="color: #657422;">-f</span> managed-cert.yaml</span></code></pre></div>
 </div>
-<p>Sometimes when they say “it might take an hour to…” it only takes like 20 seconds. Yeah nah this is one where it actually took about an hour. We’ll come back to it.</p>
+</section>
+<section id="create-a-service" class="level3">
+<h3 class="anchored" data-anchor-id="create-a-service">Create a service</h3>
+<p>Okay, at this point in the guide it warns you that it might take an hour or so for the certificate to be provisioned. I manage so many websites now that I’d stopped paying attention to this warning because like, 90% of the time, the thing actually happens in 20 seconds. Yeah nah, not this time babe. This one actually took an hour. We’ll come back to it. I mean, if you want to check you can try this command:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb29" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb29-1"><span class="ex" style="color: null;">kubectl</span> describe managedcertificate managed-cert</span></code></pre></div>
+</div>
+<p>It will print out a bunch of stuff, but when you scroll through the output you’ll very likely come across something that says that the certificate is “Provisioning”. It did work for me but it took a while so let’s move on while that is happening.</p>
+<p>Next up is the step that fucked me in the worst possible way. It failed, because I did a copy-paste on a bit of code that I needed to edit. I did that because the guide on the google website doesn’t flag this as something you need to edit. Worse yet, it failed silently because kubernetes had no bloody way to know my manifest was fucked up. Worst of all, for at least three hours I was convinced that my error was in the <em>later</em> step because this step failed silently.</p>
+<p>Siiiiiiiiiiiiiigh. Computers were a mistake.</p>
 <p>NodePort: https://kubernetes.io/docs/concepts/services-networking/service/</p>
 <p>Important bit: notice that under <code>spec.selector</code> I’m referring to the name of my deployment (donut-example). That’s what the kubernetes docs tell you to do when setting up a NodePort service, but the help docs on the corresponding GKE page that I linked to at the start of the page are misleading: they make it look like you’re supposed to use the name of the service not the app.</p>
 <p>Probably less important bit: I’m doing everything on port 80 regardless of what the GKE docs suggest because there was an issue at some point with hardcoding port 80 somewhere. Pretty certain that’s been properly resolved now but it was one of the tweaks I made on the way to figuring out the problem with spec.selector and fuck it this works so I’m not changing it</p>
@@ -584,59 +606,65 @@ donut   2/2     2            2           19h</code></pre>
 <div class="code-with-filename-file">
 <pre><strong>mc-service.yaml</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb29" style="background: #f1f3f5;"><pre class="sourceCode numberSource yaml number-lines code-with-copy"><code class="sourceCode yaml"><span id="cb29-1"><span class="fu" style="color: #4758AB;">apiVersion</span><span class="kw" style="color: #003B4F;">:</span><span class="at" style="color: #657422;"> v1</span></span>
-<span id="cb29-2"><span class="fu" style="color: #4758AB;">kind</span><span class="kw" style="color: #003B4F;">:</span><span class="at" style="color: #657422;"> Service</span></span>
-<span id="cb29-3"><span class="fu" style="color: #4758AB;">metadata</span><span class="kw" style="color: #003B4F;">:</span></span>
-<span id="cb29-4"><span class="at" style="color: #657422;">  </span><span class="fu" style="color: #4758AB;">name</span><span class="kw" style="color: #003B4F;">:</span><span class="at" style="color: #657422;"> mc-service</span></span>
-<span id="cb29-5"><span class="fu" style="color: #4758AB;">spec</span><span class="kw" style="color: #003B4F;">:</span></span>
-<span id="cb29-6"><span class="at" style="color: #657422;">  </span><span class="fu" style="color: #4758AB;">selector</span><span class="kw" style="color: #003B4F;">:</span></span>
-<span id="cb29-7"><span class="at" style="color: #657422;">    </span><span class="fu" style="color: #4758AB;">app.kubernetes.io/name</span><span class="kw" style="color: #003B4F;">:</span><span class="at" style="color: #657422;"> donut-example</span></span>
-<span id="cb29-8"><span class="at" style="color: #657422;">  </span><span class="fu" style="color: #4758AB;">type</span><span class="kw" style="color: #003B4F;">:</span><span class="at" style="color: #657422;"> NodePort</span></span>
-<span id="cb29-9"><span class="at" style="color: #657422;">  </span><span class="fu" style="color: #4758AB;">ports</span><span class="kw" style="color: #003B4F;">:</span></span>
-<span id="cb29-10"><span class="at" style="color: #657422;">    </span><span class="kw" style="color: #003B4F;">-</span><span class="at" style="color: #657422;"> </span><span class="fu" style="color: #4758AB;">protocol</span><span class="kw" style="color: #003B4F;">:</span><span class="at" style="color: #657422;"> TCP</span></span>
-<span id="cb29-11"><span class="at" style="color: #657422;">      </span><span class="fu" style="color: #4758AB;">port</span><span class="kw" style="color: #003B4F;">:</span><span class="at" style="color: #657422;"> </span><span class="dv" style="color: #AD0000;">80</span></span>
-<span id="cb29-12"><span class="at" style="color: #657422;">      </span><span class="fu" style="color: #4758AB;">targetPort</span><span class="kw" style="color: #003B4F;">:</span><span class="at" style="color: #657422;"> </span><span class="dv" style="color: #AD0000;">80</span></span></code></pre></div>
+<div class="sourceCode cell-code" id="cb30" style="background: #f1f3f5;"><pre class="sourceCode numberSource yaml number-lines code-with-copy"><code class="sourceCode yaml"><span id="cb30-1"><span class="fu" style="color: #4758AB;">apiVersion</span><span class="kw" style="color: #003B4F;">:</span><span class="at" style="color: #657422;"> v1</span></span>
+<span id="cb30-2"><span class="fu" style="color: #4758AB;">kind</span><span class="kw" style="color: #003B4F;">:</span><span class="at" style="color: #657422;"> Service</span></span>
+<span id="cb30-3"><span class="fu" style="color: #4758AB;">metadata</span><span class="kw" style="color: #003B4F;">:</span></span>
+<span id="cb30-4"><span class="at" style="color: #657422;">  </span><span class="fu" style="color: #4758AB;">name</span><span class="kw" style="color: #003B4F;">:</span><span class="at" style="color: #657422;"> mc-service</span></span>
+<span id="cb30-5"><span class="fu" style="color: #4758AB;">spec</span><span class="kw" style="color: #003B4F;">:</span></span>
+<span id="cb30-6"><span class="at" style="color: #657422;">  </span><span class="fu" style="color: #4758AB;">selector</span><span class="kw" style="color: #003B4F;">:</span></span>
+<span id="cb30-7"><span class="at" style="color: #657422;">    </span><span class="fu" style="color: #4758AB;">app.kubernetes.io/name</span><span class="kw" style="color: #003B4F;">:</span><span class="at" style="color: #657422;"> donut-example</span></span>
+<span id="cb30-8"><span class="at" style="color: #657422;">  </span><span class="fu" style="color: #4758AB;">type</span><span class="kw" style="color: #003B4F;">:</span><span class="at" style="color: #657422;"> NodePort</span></span>
+<span id="cb30-9"><span class="at" style="color: #657422;">  </span><span class="fu" style="color: #4758AB;">ports</span><span class="kw" style="color: #003B4F;">:</span></span>
+<span id="cb30-10"><span class="at" style="color: #657422;">    </span><span class="kw" style="color: #003B4F;">-</span><span class="at" style="color: #657422;"> </span><span class="fu" style="color: #4758AB;">protocol</span><span class="kw" style="color: #003B4F;">:</span><span class="at" style="color: #657422;"> TCP</span></span>
+<span id="cb30-11"><span class="at" style="color: #657422;">      </span><span class="fu" style="color: #4758AB;">port</span><span class="kw" style="color: #003B4F;">:</span><span class="at" style="color: #657422;"> </span><span class="dv" style="color: #AD0000;">80</span></span>
+<span id="cb30-12"><span class="at" style="color: #657422;">      </span><span class="fu" style="color: #4758AB;">targetPort</span><span class="kw" style="color: #003B4F;">:</span><span class="at" style="color: #657422;"> </span><span class="dv" style="color: #AD0000;">80</span></span></code></pre></div>
 </div>
 </div>
 <p>Apply it to your cluster:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb30" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb30-1"><span class="ex" style="color: null;">kubectl</span> apply <span class="at" style="color: #657422;">-f</span> mc-service.yaml</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb31" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb31-1"><span class="ex" style="color: null;">kubectl</span> apply <span class="at" style="color: #657422;">-f</span> mc-service.yaml</span></code></pre></div>
 </div>
+</section>
+<section id="create-the-dns-record" class="level3">
+<h3 class="anchored" data-anchor-id="create-the-dns-record">Create the DNS record</h3>
 <p>Point the DNS record to the right place then…</p>
+</section>
+<section id="create-an-ingress" class="level3">
+<h3 class="anchored" data-anchor-id="create-an-ingress">Create an ingress</h3>
 <p>Create the ingress:</p>
 <div class="cell">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
 <pre><strong>mc-ingress.yaml</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb31" style="background: #f1f3f5;"><pre class="sourceCode numberSource yaml number-lines code-with-copy"><code class="sourceCode yaml"><span id="cb31-1"><span class="fu" style="color: #4758AB;">apiVersion</span><span class="kw" style="color: #003B4F;">:</span><span class="at" style="color: #657422;"> networking.k8s.io/v1</span></span>
-<span id="cb31-2"><span class="fu" style="color: #4758AB;">kind</span><span class="kw" style="color: #003B4F;">:</span><span class="at" style="color: #657422;"> Ingress</span></span>
-<span id="cb31-3"><span class="fu" style="color: #4758AB;">metadata</span><span class="kw" style="color: #003B4F;">:</span></span>
-<span id="cb31-4"><span class="at" style="color: #657422;">  </span><span class="fu" style="color: #4758AB;">name</span><span class="kw" style="color: #003B4F;">:</span><span class="at" style="color: #657422;"> mc-ingress</span></span>
-<span id="cb31-5"><span class="at" style="color: #657422;">  </span><span class="fu" style="color: #4758AB;">annotations</span><span class="kw" style="color: #003B4F;">:</span></span>
-<span id="cb31-6"><span class="at" style="color: #657422;">    </span><span class="fu" style="color: #4758AB;">kubernetes.io/ingress.global-static-ip-name</span><span class="kw" style="color: #003B4F;">:</span><span class="at" style="color: #657422;"> donut-ip-address</span></span>
-<span id="cb31-7"><span class="at" style="color: #657422;">    </span><span class="fu" style="color: #4758AB;">networking.gke.io/managed-certificates</span><span class="kw" style="color: #003B4F;">:</span><span class="at" style="color: #657422;"> managed-cert</span></span>
-<span id="cb31-8"><span class="at" style="color: #657422;">    </span><span class="fu" style="color: #4758AB;">kubernetes.io/ingress.class</span><span class="kw" style="color: #003B4F;">:</span><span class="at" style="color: #657422;"> </span><span class="st" style="color: #20794D;">"gce"</span></span>
-<span id="cb31-9"><span class="fu" style="color: #4758AB;">spec</span><span class="kw" style="color: #003B4F;">:</span></span>
-<span id="cb31-10"><span class="at" style="color: #657422;">  </span><span class="fu" style="color: #4758AB;">defaultBackend</span><span class="kw" style="color: #003B4F;">:</span></span>
-<span id="cb31-11"><span class="at" style="color: #657422;">    </span><span class="fu" style="color: #4758AB;">service</span><span class="kw" style="color: #003B4F;">:</span></span>
-<span id="cb31-12"><span class="at" style="color: #657422;">      </span><span class="fu" style="color: #4758AB;">name</span><span class="kw" style="color: #003B4F;">:</span><span class="at" style="color: #657422;"> mc-service</span></span>
-<span id="cb31-13"><span class="at" style="color: #657422;">      </span><span class="fu" style="color: #4758AB;">port</span><span class="kw" style="color: #003B4F;">:</span></span>
-<span id="cb31-14"><span class="at" style="color: #657422;">        </span><span class="fu" style="color: #4758AB;">number</span><span class="kw" style="color: #003B4F;">:</span><span class="at" style="color: #657422;"> </span><span class="dv" style="color: #AD0000;">80</span></span></code></pre></div>
+<div class="sourceCode cell-code" id="cb32" style="background: #f1f3f5;"><pre class="sourceCode numberSource yaml number-lines code-with-copy"><code class="sourceCode yaml"><span id="cb32-1"><span class="fu" style="color: #4758AB;">apiVersion</span><span class="kw" style="color: #003B4F;">:</span><span class="at" style="color: #657422;"> networking.k8s.io/v1</span></span>
+<span id="cb32-2"><span class="fu" style="color: #4758AB;">kind</span><span class="kw" style="color: #003B4F;">:</span><span class="at" style="color: #657422;"> Ingress</span></span>
+<span id="cb32-3"><span class="fu" style="color: #4758AB;">metadata</span><span class="kw" style="color: #003B4F;">:</span></span>
+<span id="cb32-4"><span class="at" style="color: #657422;">  </span><span class="fu" style="color: #4758AB;">name</span><span class="kw" style="color: #003B4F;">:</span><span class="at" style="color: #657422;"> mc-ingress</span></span>
+<span id="cb32-5"><span class="at" style="color: #657422;">  </span><span class="fu" style="color: #4758AB;">annotations</span><span class="kw" style="color: #003B4F;">:</span></span>
+<span id="cb32-6"><span class="at" style="color: #657422;">    </span><span class="fu" style="color: #4758AB;">kubernetes.io/ingress.global-static-ip-name</span><span class="kw" style="color: #003B4F;">:</span><span class="at" style="color: #657422;"> donut-ip-address</span></span>
+<span id="cb32-7"><span class="at" style="color: #657422;">    </span><span class="fu" style="color: #4758AB;">networking.gke.io/managed-certificates</span><span class="kw" style="color: #003B4F;">:</span><span class="at" style="color: #657422;"> managed-cert</span></span>
+<span id="cb32-8"><span class="at" style="color: #657422;">    </span><span class="fu" style="color: #4758AB;">kubernetes.io/ingress.class</span><span class="kw" style="color: #003B4F;">:</span><span class="at" style="color: #657422;"> </span><span class="st" style="color: #20794D;">"gce"</span></span>
+<span id="cb32-9"><span class="fu" style="color: #4758AB;">spec</span><span class="kw" style="color: #003B4F;">:</span></span>
+<span id="cb32-10"><span class="at" style="color: #657422;">  </span><span class="fu" style="color: #4758AB;">defaultBackend</span><span class="kw" style="color: #003B4F;">:</span></span>
+<span id="cb32-11"><span class="at" style="color: #657422;">    </span><span class="fu" style="color: #4758AB;">service</span><span class="kw" style="color: #003B4F;">:</span></span>
+<span id="cb32-12"><span class="at" style="color: #657422;">      </span><span class="fu" style="color: #4758AB;">name</span><span class="kw" style="color: #003B4F;">:</span><span class="at" style="color: #657422;"> mc-service</span></span>
+<span id="cb32-13"><span class="at" style="color: #657422;">      </span><span class="fu" style="color: #4758AB;">port</span><span class="kw" style="color: #003B4F;">:</span></span>
+<span id="cb32-14"><span class="at" style="color: #657422;">        </span><span class="fu" style="color: #4758AB;">number</span><span class="kw" style="color: #003B4F;">:</span><span class="at" style="color: #657422;"> </span><span class="dv" style="color: #AD0000;">80</span></span></code></pre></div>
 </div>
 </div>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb32" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb32-1"><span class="ex" style="color: null;">kubectl</span> apply <span class="at" style="color: #657422;">-f</span> mc-ingress.yaml </span></code></pre></div>
+<div class="sourceCode cell-code" id="cb33" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb33-1"><span class="ex" style="color: null;">kubectl</span> apply <span class="at" style="color: #657422;">-f</span> mc-ingress.yaml </span></code></pre></div>
 </div>
 <p>Now let’s get the results:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb33" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb33-1"><span class="ex" style="color: null;">kubectl</span> get ingress</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb34" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb34-1"><span class="ex" style="color: null;">kubectl</span> get ingress</span></code></pre></div>
 </div>
 <pre><code>NAME         CLASS    HOSTS   ADDRESS         PORTS   AGE
 mc-ingress   &lt;none&gt;   *       34.149.195.33   80      98s</code></pre>
 <p>Might have to wait a bit for provisioning to finish:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb35" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb35-1"><span class="ex" style="color: null;">kubectl</span> describe managedcertificate managed-cert</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb36" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb36-1"><span class="ex" style="color: null;">kubectl</span> describe managedcertificate managed-cert</span></code></pre></div>
 </div>
 <p>Relevant bit of the output once it’s all working:</p>
 <pre><code>Spec:
@@ -648,6 +676,7 @@ Status:
   Domain Status:
     Domain:     donut.djnavarro.net
     Status:     Active</code></pre>
+</section>
 </section>
 <section id="where-next" class="level2">
 <h2 class="anchored" data-anchor-id="where-next">Where next?</h2>
@@ -683,6 +712,10 @@ Status:
 <li id="fn17"><p>Too obvious.↩︎</p></li>
 <li id="fn18"><p>Kubernetes supports other types of containers besides docker, but let’s not complicate matters.↩︎</p></li>
 <li id="fn19"><p>The <code>-f</code> argument in <code>kubectl apply</code> here tells it to use the manifest <strong>f</strong>ile.↩︎</p></li>
+<li id="fn20"><p>Which may be your thing in an appropriate mutually consensual context, but it’s not everyone’s cup of tea.↩︎</p></li>
+<li id="fn21"><p>Not in the fun way.↩︎</p></li>
+<li id="fn22"><p>I could go on a long ramble about all my issues with authority figures at this point, but frankly I don’t think that certification authorities are a bad thing so perhaps just this once I’ll be a good girl and use the damn service. It’s convenient and it’s useful.↩︎</p></li>
+<li id="fn23"><p>lol no. This is a figure of speech. Nothing that google or any large tech company does is a kindness. It is self interest on their part, of course, but it’s convenient for my purposes here.↩︎</p></li>
 </ol>
 </section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2023,
   author = {Danielle Navarro},

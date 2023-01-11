@@ -581,19 +581,16 @@ For more details on this part of the process, check out the kubernetes documenta
 
 ## Expose the deployment (no https)
 
+At this point my little donut application is running happily on the cluster, but it doesn't have a public IP address. No-one can visit it. To expose the deployment to the world you'll need to start a service running that takes care of this for you. Exactly how you go about doing this depends on whether you want to enable https on the website. If you're not too fussed about https the process is fairly simple and you can find details on how to do it by reading the [tutorial on exposing an external IP address](https://kubernetes.io/docs/tutorials/stateless-application/expose-external-ip-address/), and you may find the kubernetes [documentation on services](https://kubernetes.io/docs/concepts/services-networking/service/) helpful too. The TL;DR is that it's simple enough that you don't even need to bother with a manifest file:
+
 ```{bash kubectl-expose}
 #| eval: false
 kubectl expose deployment donut --type=LoadBalancer --name=donut-service
 ```
 
-then over in my website create a DNS record that points donut.djnavarro.net at the IP address
+The application is now online. It has a public IP address that you can find, and if you own a domain that you want to map to that IP address all you have to do is create a DNS record that points the URL at the appropriate IP. With any luck your domain provider will have some decent documentation for this. For instance, I use google domains for `djnavarro.net` domain, and they have some pretty decent [instructions on configuring DNS records](https://support.google.com/a/answer/2579934?hl=en) that I could use to point `donut.djnavarro.net` at the IP address for my kubernetes application.
 
-more detail:
-
-https://kubernetes.io/docs/concepts/services-networking/service/
-
-https://kubernetes.io/docs/tutorials/stateless-application/expose-external-ip-address/
-
+Unfortunately for me, I am a masochist, and as such I chose the option that delivers pain. 
 
 ## Expose the deployment (with https)
 
@@ -603,26 +600,41 @@ https://kubernetes.io/docs/tutorials/stateless-application/expose-external-ip-ad
 > I don't miss you, I miss the misery <br>
 > &nbsp; -- Halestorm
 
-https://cloud.google.com/kubernetes-engine/docs/how-to/managed-certs
+Configuring the kubernetes application to use https is a bit of a pain in the ass.^[Which may be your thing in an appropriate mutually consensual context, but it's not everyone's cup of tea.] I'm deploying all this through google kubernetes engine, so the approach I took was to follow the guide for using [google-managed ssl certificates](https://cloud.google.com/kubernetes-engine/docs/how-to/managed-certs). The guide is excellent... apart from a couple of minor... issues... that really fucked me^[Not in the fun way.] when I tried to follow it. I'll mention those as I go.
+
+### Get a static IP
+
+The first thing you have to do is create a static IP address that you'll later use for your cluster. The `gcloud compute addresses create` command does that for you. Here's how I did that for my cluster: 
 
 ```{bash}
 #| eval: false
-gcloud compute addresses create donut-ip-address --global --project donut-art
+gcloud compute addresses create donut-ip-address \
+  --global \
+  --project donut-art
 ```
+
+:::{.column-page-right}
 
 ```
 Created [https://www.googleapis.com/compute/v1/projects/donut-art/global/addresses/donut-ip-address]
 ```
 
+:::
+
+Now that the IP address exists you can ask google to tell you what it is:
+
 ```{bash}
 #| eval: false
-gcloud compute addresses describe donut-ip-address --global --project donut-art
+gcloud compute addresses describe donut-ip-address \
+  --global \
+  --project donut-art
 ```
 
-This prints out the IP address and some other details.
+When you do this, the output prints out the IP address and some other details. Later on, this is the address you'll create a DNS record for so that -- in my case -- the [https://donut.djnavarro.net/](https://donut.djnavarro.net/) address points to the correct location. 
 
+### Get a certificate
 
-Now create the managed certificate:
+The next step in the process is to create a managed certificate. Somebody needs to certify that my website is what it says it is.^[I could go on a long ramble about all my issues with authority figures at this point, but frankly I don't think that certification authorities are a bad thing so perhaps just this once I'll be a good girl and use the damn service. It's convenient and it's useful.] I'm going to need a manifest file for this, which I've saved as [`managed-cert.yaml`](https://github.com/djnavarro/donut/blob/main/managed-cert.yaml):
 
 ```{yaml}
 #| eval: false
@@ -637,14 +649,30 @@ spec:
     - donut.djnavarro.net
 ```
 
-Apply it to your cluster:
+Notice that the `apiVersion` field here is using something specific to GKE: I'm using google infrastructure here and they've kindly^[lol no. This is a figure of speech. Nothing that google or any large tech company does is a kindness. It is self interest on their part, of course, but it's convenient for my purposes here.] provided an API that makes it easy to use their managed certificates. The yaml here is pretty simple: I'm asking google to supply me with a certificate for my kubernetes application, which will be valid for the domain `donut.djnavarro.net` (you can list more than one here but I didn't). 
+
+Now that I have a manifest, I apply it to my cluster in the usual way:
 
 ```{bash}
 #| eval: false
 kubectl apply -f managed-cert.yaml
 ```
 
-Sometimes when they say "it might take an hour to..." it only takes like 20 seconds. Yeah nah this is one where it actually took about an hour. We'll come back to it.
+### Create a service
+
+Okay, at this point in the guide it warns you that it might take an hour or so for the certificate to be provisioned. I manage so many websites now that I'd stopped paying attention to this warning because like, 90% of the time, the thing actually happens in 20 seconds. Yeah nah, not this time babe. This one actually took an hour. We'll come back to it. I mean, if you want to check you can try this command:
+
+```{bash}
+#| eval: false
+kubectl describe managedcertificate managed-cert
+```
+
+It will print out a bunch of stuff, but when you scroll through the output you'll very likely come across something that says that the certificate is "Provisioning". It did work for me but it took a while so let's move on while that is happening. 
+
+Next up is the step that fucked me in the worst possible way. It failed, because I did a copy-paste on a bit of code that I needed to edit. I did that because the guide on the google website doesn't flag this as something you need to edit. Worse yet, it failed silently because kubernetes had no bloody way to know my manifest was fucked up. Worst of all, for at least three hours I was convinced that my error was in the *later* step because this step failed silently. 
+
+Siiiiiiiiiiiiiigh. Computers were a mistake.
+
 
 NodePort: https://kubernetes.io/docs/concepts/services-networking/service/
 
@@ -677,7 +705,11 @@ Apply it to your cluster:
 kubectl apply -f mc-service.yaml
 ```
 
+### Create the DNS record
+
 Point the DNS record to the right place then...
+
+### Create an ingress
 
 Create the ingress:
 
