@@ -1,0 +1,311 @@
+---
+title: "Fun and games with p5.js and observable.js in quarto"
+author:
+  - name: Danielle Navarro
+    url: https://djnavarro.net
+    affiliation: I'm on smoko
+    affiliation-url: https://www.youtube.com/watch?v=j58V2vC9EPc
+    orcid: 0000-0001-7648-6578
+description: "Because I can"
+date: "2023-01-14"
+categories: [Art, P5, Observable, Javascript, Quarto]
+image: donut.jpg
+---
+
+<!--------------- my typical setup ----------------->
+
+```{r setup, include=FALSE}
+set.seed(8)
+long_slug <- "2023-01-14_p5js"
+wide <- 136
+narrow <- 76
+options(width = narrow)
+```
+
+<!--------------- post begins here ----------------->
+
+> Be sweet to me, baby <br>
+I wanna believe in you <br>
+I wanna believe <br>
+Be sweet <br>
+Be sweet to me, baby <br>
+I wanna believe in you <br>
+I wanna believe in something <br>
+&nbsp; -- Japanese Breakfast
+
+Okay, so... I write this blog using [quarto](https://quarto.org/), and quarto has native support for [observable.js](https://observablehq.com)
+... and observable.js supports third-party javascript libraries such as [p5.js](https://p5js.org/) executing in code cells... so, like... I can use p5.js to create generative art, inside the browser, inside a blog post? Right?
+
+Apparently the answer to that is yes. 
+
+There is but one tiny problem. I don't know anything about observable.js or p5.js. I supposed I'd best remedy that.
+
+## Enabling p5js
+
+The first step in the process is enabling p5.js, which is not one of the core libraries in observable, and is not immediately available. To use a third-party library that exists as an [NPM modules](https://docs.npmjs.com/about-packages-and-modules) we can import it using `require()`.
+
+```{ojs}
+//| output: all
+P5 = require("p5")
+```
+
+Just like that, thanks to the joy of the [jsDelivr CDN](https://www.jsdelivr.com/), p5.js is now available to me in this post.
+
+Well, sort of. As you can see from the output,^[An assignment like this would not normally produce any visible output for an observable.js code cell within in a quarto document, but I've set `output: all` for expository purposes.] the `P5` object is a function that takes three inputs. To do anything useful with it, I'll use a trick I learned from [this fabulous notebook by Tom MacWright](https://observablehq.com/@tmcw/p5) to run p5.js in "instance mode". Normally, p5.js works by defining a lot of global objects. That works fine if you're only doing one "sketch" on a single page, but it's not so clean if you want to write modular code where a single page (like this one) could contain multiple p5.js sketches.  
+
+To run p5.js in instance mode, and in a way that plays nicely with observable.js and quarto, I'll define  `createSketch` as a [generator function](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/function*):
+
+```{ojs}
+function* createSketch(sketch) {
+  const element = DOM.element('div');
+  yield element;
+  const instance = new P5(sketch, element, true);
+  try {
+    while (true) {
+      yield element;
+    }
+  } finally {
+    instance.remove();
+  }
+}
+```
+
+Using this approach, each instantiation of `P5` is attached to a div element that created when `createSketch` is called. If you want to know more about how this approach works, it's probably best to go to the original source that I adapted it from, because Tom has commented it and explained it nicely: [observablehq.com/@tmcw/p5](https://observablehq.com/@tmcw/p5)
+
+## Donut 1
+
+In keeping with the tradition I've set up in the last few blog posts, all the examples are donut themed.^[A tradition that, like most things, will last only until I get bored with it.] When calling `createSketch` I'll pass an anonymous function that takes a single argument `s`, the document element to which all the p5 functions are attached. I'll use the [arrow notation](https://www.w3schools.com/js/js_arrow_function.asp), so my code is going to look something like this:
+
+```{ojs}
+//| eval: false
+createSketch(s => {
+  // add some p5.js code 
+})
+```
+
+The idea in p5.js is all the work is done by two functions. The `setup` function includes code that is called only once, and if you want to draw static images you can do everything at the setup stage. In contrast the `draw` function is called repeatedly, so you can use that to add dynamic elements. 
+
+Here's an example of a static sketch that draws a single donut shape using two circles:
+
+```{ojs}
+createSketch(s => {
+    s.setup = function() {
+      s.createCanvas(500, 500);
+      s.background("black");
+      s.fill("red").circle(250, 250, 100);
+      s.fill("black").circle(250, 250, 30);
+    };
+  }
+)
+```
+
+In this example: 
+
+- `createCanvas` creates the drawing area in which the sketch will be rendered. Arguments are the width and height in pixels 
+- `background` sets the background colour. The colour specification is flexible: it can be a recognised colour name, a hex string, or a numeric RGB specification
+- `fill` sets the fill colour
+- `circle` draws a circle: the first two arguments specify the origin of the circle, and the third argument specifies the diameter
+
+I've used [method chaining](https://dev.to/isiakaabd/method-chaining-in-javascript-154a) here to remind me that the first `fill` and the first `circle` go together: writing `s.fill("red").circle(250, 250, 100)` on a single line helps me group code together conceptually. It's mostly for my own convenience though.
+
+## Donut 2
+
+Okay Danielle, that's nice but it's not *that* nice. Can we do something a little more interesting? Maybe with some dynamics? Well okay, Other Danielle, since you asked so sweetly, here's an example with a moving circle that changes colour and traces out a donut shape:
+
+```{ojs}
+createSketch(s => {
+  
+    s.setup = function() {
+      s.createCanvas(500, 500);
+      s.background(0);
+      s.noStroke();
+    };
+    
+    s.draw = function() {
+      s.translate(
+        100 * s.cos(s.millis() * .001 * s.PI),
+        100 * s.sin(s.millis() * .001 * s.PI),
+      );
+      if (s.random(0, 1) < .1) {
+        s.fill(s.random(0, 255));
+      }
+      s.circle(250, 250, 100);
+    };
+    
+  }
+)
+```
+
+This example makes use of some geometry functions included in p5.j (`sin`, `cos`, `translate`), a random number generator (`random`), and timer that returns the number of milliseconds since the sketch started (`millis`). These are all documented in the [p5.js reference](https://p5js.org/reference/). 
+
+
+## Donut 3
+
+For the third example we'll introduce some fonts, adapting an example from [observablehq.com/@tmcw/p5](https://observablehq.com/@tmcw/p5). First, I'll add some CSS to import the Courgette font:
+
+```{css}
+@import url(https://fonts.googleapis.com/css?family=Courgette);
+```
+
+Now we can use that font in a p5.js scrolling window:
+
+```{ojs}
+createSketch(s => {
+  
+    s.setup = function() {
+      s.createCanvas(746, 300);
+      s.textFont('Courgette');
+      s.textStyle(s.BOLD);
+      s.textAlign(s.CENTER, s.CENTER)
+    };
+    
+    s.draw = function() {
+      s.translate(
+        s.millis() * (-0.1) % (s.width + 1000), 
+        s.height / 2
+      );
+      s.background('#222222');
+      s.fill('#DC3F74').textSize(100);
+      s.text('Donuts: A Hole World', s.width + 500, 0);
+    };
+    
+  }
+)
+```
+
+Could life be any more thrilling than this?
+
+
+## Donut 4
+
+Well, maybe it can. We could make it a little more interesting by using webGL to move our donut plots into the... THIRD DIMENSION! (Gasp!)
+
+
+```{ojs}
+createSketch(s => {
+
+  s.setup = function() {
+    s.createCanvas(746, 746, s.WEBGL);
+    s.noStroke();
+  }
+
+  s.draw = function() {
+
+    s.background(0);
+
+    let locX = s.mouseX - s.height / 2;
+    let locY = s.mouseY - s.width / 2;  
+    
+    s.ambientLight(60, 60, 60);
+    s.pointLight(190, 80, 190, locX, locY, 100);
+    s.pointLight(80, 80, 190, 0, 0, 100);
+  
+    s.specularMaterial(255);
+    s.rotateX(s.frameCount * 0.01);
+    s.rotateY(s.frameCount * 0.01);
+    s.torus(150, 80, 64, 64);
+  }
+
+})
+```
+
+If you move the mouse over the donut^[I can't make up my mind if the colour scheme implies this is a bisexual donut or a trans donut. Oh wait, it's probably both.] you'll see that the light source moves with it.
+
+
+## Donut 5
+
+For the final example, I'll do a tiny bit of object-oriented programming. Inspired by a generative art course by Bernat Ferragut ([ga-course.surge.sh](https://ga-course.surge.sh/)) that I was skimming yesterday, I'll define a `Dot` class that creates a particle that moves around on the canvas and has the ability to bounce off circular boundaries:
+
+
+```{ojs}
+class Dot {
+  constructor(sketch, x, y, colour, size) {
+    this.s = sketch;
+    this.x = x | 0;
+    this.y = y | 0;
+    this.colour = colour;
+    this.size = size;
+    this.velX = this.s.random(-2, 2);
+    this.velY = this.s.random(-2, 2);
+  }
+
+  on() {
+    this.s.noStroke();
+    this.s.fill(this.colour);
+    this.s.circle(this.x, this.y, this.size);
+  }
+
+  move() {
+    this.x += this.velX;
+    this.y += this.velY;
+  }
+  
+  bounce(radius, inside) {
+    let x = this.x - this.s.width/2;
+    let y = this.y - this.s.height/2;
+    if (
+      inside && x*x + y*y > radius * radius ||
+      !inside && x*x + y*y < radius * radius
+    ) {
+    
+      // https://math.stackexchange.com/a/611836
+      let nx = x / this.s.sqrt(x*x + y*y);
+      let ny = y / this.s.sqrt(x*x + y*y);
+      let vx = this.velX;
+      let vy = this.velY;
+      this.velX = (ny*ny - nx*nx)*vx - 2*nx*ny*vy;
+      this.velY = (nx*nx - ny*ny)*vy - 2*nx*ny*vx;
+    
+    }
+  }
+  
+}
+```
+
+
+Naturally, I will use this to draw a donut:
+
+```{ojs}  
+createSketch(s => {
+
+  let n = 100;
+  let dot;
+  let dotList = [];
+  let palette = [
+    s.color("#6B1B00"),
+    s.color("#AE8B70"),
+    s.color("#F9FEFB"),
+    s.color("#56382D") 
+  ];
+
+  s.setup = function() {
+    s.createCanvas(746, 746);
+    for(let i = 0; i < n; i++) {
+      let angle = s.random(0, s.TWO_PI);
+      let radius = s.width * s.random(.12, .33);
+      dotList.push(dot = new Dot(
+        s,
+        s.width/2 + s.cos(angle) * radius,
+        s.height/2 + s.sin(angle) * radius,
+        s.random(palette),
+        s.random(1, 5)
+      ));
+    }
+  };
+    
+  s.draw = function() {
+    dotList.map(dot => {
+      dot.on();
+      dot.move();
+      dot.bounce(s.width * .35, true);
+      dot.bounce(s.width * .1, false);
+    });
+  };
+})
+
+```
+
+Mmmm.... donuts.
+
+
+<!--------------- appendices go here ----------------->
