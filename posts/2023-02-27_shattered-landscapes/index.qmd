@@ -1,0 +1,251 @@
+---
+title: "Shattered landscapes"
+author:
+  - name: Danielle Navarro
+    url: https://djnavarro.net
+    affiliation: I'm on smoko
+    affiliation-url: https://www.youtube.com/watch?v=j58V2vC9EPc
+    orcid: 0000-0001-7648-6578
+description: "Using ambient and rayshader to create weird, broken landcape images in R"
+date: "2023-02-27"
+categories: [Art, R]
+---
+
+<!--------------- my typical setup ----------------->
+
+```{r setup, include=FALSE}
+set.seed(8)
+long_slug <- "2023-02-27_shattered-landscapes"
+wide <- 136
+narrow <- 76
+options(width = narrow)
+```
+
+<!--------------- post begins here ----------------->
+
+:::{.column-screen-inset}
+:::{layout-ncol=3} 
+
+![](https://djnavarro.net/series-broken-lands/3000/alien-floe_15_2406.png)
+
+![](https://djnavarro.net/series-broken-lands/3000/alien-floe_15_2416.png)
+
+![](https://djnavarro.net/series-broken-lands/3000/alien-floe_15_2496.png)
+
+:::
+:::
+
+
+```{r curl-transform}
+transform_to_curl_space <- function(x, y) {
+  ambient::curl_noise(
+    generator = ambient::fracture,
+    noise = ambient::gen_simplex,
+    fractal = ambient::fbm,
+    octaves = 3,
+    frequency = ~ . * 2,
+    freq_init = .3,
+    gain_init = 1,
+    gain = ~ . * .5,
+    x = x,
+    y = y
+  )
+}
+```
+
+The first trick is to define a two dimensional manifold that maps to the original "base" space in a rather nonlinear way. Curl transformations work rather nicely for this:
+
+
+```{r demo-curl-transform}
+set.seed(8)
+grid <- ambient::long_grid(
+  x = seq(0, 1, length.out = 500),
+  y = seq(0, 1, length.out = 500)
+)
+coords <- transform_to_curl_space(grid$x, grid$y)
+```
+
+In the final image we'll do this in a finer grain: a 500x500 grid is a little coarse for what we have in mind. But the coarse-grained version is a little easier to visualise:
+
+```{r plot-curl-transform}
+ggplot2::ggplot(coords, ggplot2::aes(x, y)) +
+  ggplot2::geom_point(size = .1, alpha = .1) + 
+  ggplot2::coord_equal() + 
+  ggplot2::theme_void()
+```
+
+Our noise operations will be specified on the transformed manifold, but the final image will be defined on the base space. Here's what I mean:
+
+```{r plot-curl}
+grid <- grid |>
+  dplyr::mutate(
+    curl_x = coords$x, 
+    curl_y = coords$y
+  )
+
+ggplot2::ggplot(grid, ggplot2::aes(x, y, colour = curl_x)) +
+  ggplot2::geom_point(size = .1) + 
+  ggplot2::coord_equal() + 
+  ggplot2::theme_void()
+```
+
+Next, this...
+
+```{r define-worley}
+compute_worley_distance <- function(x, y) {
+  ambient::fracture(
+    noise = ambient::gen_worley,
+    fractal = ambient::billow,
+    octaves = 8,
+    freq_init = .1,
+    frequency = ~ . * 2,
+    gain_init = 3,
+    gain = ~ . * .5,
+    value = "distance2",
+    x = x,
+    y = y
+  )
+}
+```
+
+
+```{r demo-worley-distance}
+grid <- grid |>
+  dplyr::mutate(
+    dist = compute_worley_distance(curl_x, curl_y)
+  )
+
+ggplot2::ggplot(grid, ggplot2::aes(curl_x, curl_y, colour = dist)) +
+  ggplot2::geom_point(size = .1) + 
+  ggplot2::coord_equal() + 
+  ggplot2::theme_void()
+```
+
+Here it is plotted in the original space:
+
+```{r plot-worley-distance}
+ggplot2::ggplot(grid, ggplot2::aes(x, y, colour = dist)) +
+  ggplot2::geom_point(size = .1) + 
+  ggplot2::coord_equal() + 
+  ggplot2::theme_void()
+```
+
+Third transformation:
+
+```{r demo-simplex-transform}
+simplex_noise <- function(x, y) {
+  ambient::fracture(
+    noise = ambient::gen_simplex,
+    fractal = ambient::billow,
+    octaves = 10,
+    freq_init = .02,
+    frequency = ~ . * 2,
+    gain_init = 1,
+    gain = ~ . * .8,
+    x = x,
+    y = y
+  )
+}
+```
+
+```{r demo-simplex-distance}
+grid <- grid |>
+  dplyr::mutate(
+    paint = simplex_noise(x + dist, y + dist)
+  )
+
+ggplot2::ggplot(grid, ggplot2::aes(curl_x, curl_y, colour = paint)) +
+  ggplot2::geom_point(size = .1) + 
+  ggplot2::coord_equal() + 
+  ggplot2::theme_void()
+```
+
+```{r plot-simplex-transform}
+ggplot2::ggplot(grid, ggplot2::aes(x, y, colour = paint)) +
+  ggplot2::geom_point(size = .1) + 
+  ggplot2::coord_equal() + 
+  ggplot2::theme_void()
+```
+
+Discretise:
+
+```{r discretise}
+discretise <- function(x, n) {
+  round(ambient::normalise(x) * n) / n
+}
+```
+
+```{r discrete-plot}
+set.seed(8)
+grid <- ambient::long_grid(
+  x = seq(0, 1, length.out = 500),
+  y = seq(0, 1, length.out = 500)
+)
+coords <- transform_to_curl_space(grid$x, grid$y)
+
+grid <- grid |> dplyr::mutate(
+  curl_x = coords$x |> discretise(20), 
+  curl_y = coords$y |> discretise(20),
+  dist = compute_worley_distance(curl_x, curl_y),
+  paint = simplex_noise(x + dist, y + dist) |> discretise(20)
+)
+
+ggplot2::ggplot(grid, ggplot2::aes(x, y, colour = paint)) +
+  ggplot2::geom_point(size = .1) + 
+  ggplot2::coord_equal() + 
+  ggplot2::theme_void()
+```
+
+```{r thresholded-plot}
+grid <- grid |> 
+  dplyr::mutate(
+    height = dplyr::if_else(paint < .5, .5, paint)
+  )
+
+ggplot2::ggplot(grid, ggplot2::aes(x, y, colour = height)) +
+  ggplot2::geom_point(size = .1) + 
+  ggplot2::coord_equal() + 
+  ggplot2::theme_void()
+```
+
+Colour scale:
+
+```{r colorise}
+ggplot2::ggplot(grid, ggplot2::aes(x, y, colour = height)) +
+  ggplot2::geom_point(size = .1) + 
+  ggplot2::coord_equal() + 
+  ggplot2::theme_void() + 
+  ggplot2::scale_color_viridis_c()
+```
+
+Convert to raster-friendly array:
+
+```{r array}
+mat <- as.array(grid, value = height)
+```
+
+Rayshade it:
+
+```{r rayshaded}
+ncol <- length(unique(mat))
+rayshader::height_shade(
+  heightmap = mat,
+  texture = viridis::viridis(ncol)
+) |>
+  rayshader::add_shadow(
+    shadowmap = rayshader::ray_shade(
+      heightmap = mat,
+      sunaltitude = 50,
+      sunangle = 80,
+      multicore = TRUE,
+      zscale = .005
+    ),
+    max_darken = .2
+  ) |>
+  rayshader::plot_map()
+```
+
+
+<!--------------- appendices go here ----------------->
+
+
