@@ -23,6 +23,11 @@ options(width = narrow)
 
 <!--------------- post begins here ----------------->
 
+> Magic doesn't come from talent. It comes from pain. <br>
+> &nbsp; &nbsp; -- [Eliot Waugh](https://www.youtube.com/watch?v=WBeLX3O_mEU)^[Also Lev Grossman I guess, but honestly Hale Appleman's delivery is so good that I cannot possibly attribute the quote to anyone except Eliot.]
+
+In the last few weeks I've been tinkering with a generative art system I ended up calling [broken lands](https://art.djnavarro.net/gallery/broken-lands/). It creates maps of bizarre and -- I expect -- impossible landscapes in R, using the [ambient](https://ambient.data-imaginist.com/) package to generate the topography, and [rayshader](https://www.rayshader.com/) to render shadows cast by a hypothetical light source. It creates images like these:
+
 :::{.column-screen-inset}
 :::{layout-ncol=3} 
 
@@ -35,9 +40,154 @@ options(width = narrow)
 :::
 :::
 
+To my eye, at least, these images are both beautiful and tragic. I cannot help but interpret them as coastal landscapes in an alien geography of some kind, a land that has suffered some cataclysm like the [Doom of Valyria](https://awoiaf.westeros.org/index.php/Doom_of_Valyria) or the [Fall of Istar](https://dragonlancenexus.com/the-rise-and-demise-of-istar/). The contours feel too contorted to be the result of any terrestrial process, and -- again, by my interpretation -- there's a tension between the smoothness of the individual contours and the jagged, chaotic structure of the landscape overall. 
+
+But what would I know? I wrote the code that makes the system work, but I don't have a monopoly of interpretation of the images. [Death of the author](https://en.wikipedia.org/wiki/The_Death_of_the_Author) and all that. Barthes would call me the "scriptor" rather than the author, I suppose, which honestly feels about right for generative art. So yeah. The pieces are what they are, quite separate from the artist and from the process by which the system was constructed.
+
+That said, if you're familiar with the R ecosystem you can probably take an educated guess about the tools I used to make these pieces. The spatial noise patterns that form the basis of these pieces are created using the [ambient](https://ambient.data-imaginist.com/) package. The shadows and three-dimensional look are provided by  [rayshader](https://www.rayshader.com/). I wrote about both of these packages in my workshop on [generative art in R](https://art-from-code.netlify.app/) workshop (specifically: [ambient art](https://art-from-code.netlify.app/day-1/session-2/), [rayshader  art](https://art-from-code.netlify.app/day-1/session-4/)), and those tutorials are probably the place to begin if you've never used either of these packages for generative art before. 
+
+## Starting simple
+
+Here's a simple system constructed from these tools. It's built using three functions. There's a `new_grid()` function used to define a grid of x and y coordinates, a `generate_simplex()` function used to create spatial noise patterns on such a grid, and a `render()` function used to create an image. First, the `new_grid()` function:
+
+```{r, echo=FALSE}
+library(tibble)
+```
+
+```{r new-grid}
+new_grid <- function(n = 500) {
+  ambient::long_grid(
+    x = seq(0, 1, length.out = n),
+    y = seq(0, 1, length.out = n)
+  )
+}
+
+canvas <- new_grid()
+canvas
+```
+
+The output appears to be a tibble that contains x and y coordinates.^[It's actually a slightly different kind of object called a "long grid" but for now I'll treat it like a tibble] This defines the spatial locations that we'll use to create the image, but we'll need to assign colours to each of those locations. 
+
+<br>
+
+### Painting a canvas with spatial noise
+
+In order to do this, we'll write a function called `generate_simplex()` that generates interesting patterns of spatial noise:
+
+```{r generate-simplex}
+generate_simplex <- function(x, y) {
+  ambient::fracture(
+    noise = ambient::gen_simplex,
+    fractal = ambient::billow,
+    octaves = 10,
+    freq_init = .02,
+    frequency = ~ . * 2,
+    gain_init = 1,
+    gain = ~ . * .8,
+    x = x,
+    y = y
+  )
+}
+```
+
+The particular choices I've made here came about from trial and error. I played around with a lot of different settings when creating generative art in this style, and these were things I liked. I'm not going to dive into the details here: you can find out more by reading the [tutorial on spatial noise art]([ambient art](https://art-from-code.netlify.app/day-1/session-2/)) I linked to earlier. For the current post, all I want to highlight is that we can use this function to add a new column to the `canvas` that defines our artwork:
+
+```{r show-canvas}
+canvas <- canvas |> dplyr::mutate(paint = generate_simplex(x, y)) 
+canvas
+```
+
+This `canvas` object is structured like a lookup table: it's a data frame with columns specifying x and y coordinates, and it contains a third column that specifies the colour of "paint" that needs to be applied at each coordinate. However, it's a very structured data frame because the x and y values form a grid. This^[Or, more precisely, the fact that we created this object by calling `ambient::long_grid()` rather than `tidyr::expand_grid()` or the `expand.grid()` function in base R.] makes straightforward to flip from this format to a "bitmap" matrix format:^[I'd ordinarily refer to this as a raster format but it's not strictly a raster object in the R sense.]
+
+```{r show-bitmap}
+bitmap <- canvas |> as.array(value = paint)
+bitmap[1:10, 1:10]
+```
+
+A grid of numbers isn't very pretty to look at, but we will need to create this matrix representation before passing the data to rayshader later. But I'm getting ahead of myself. For now, we can use the `image()` function to render an image from matrix-formatted data:
+
+```{r echo=FALSE}
+par(mar = c(0, 0, 0, 0))
+```
+
+```{r simple-render}
+#| fig-width: 6
+#| fig-height: 6
+canvas |> 
+  as.array(value = paint) |>
+  image(axes = FALSE, asp = 1, useRaster = TRUE)
+```
+
+Much nicer. 
+
+<br>
+
+### Casting shadows across the landscape
+
+
+
+```{r render}
+render <- function(mat, shades = NULL) {
+  if(is.null(shades)) {
+    shades <- hcl.colors(12, "YlOrRd", rev = TRUE)
+  }
+  rayshader::height_shade(
+    heightmap = mat,
+    texture = shades
+  ) |>
+    rayshader::add_shadow(
+      shadowmap = rayshader::ray_shade(
+        heightmap = mat,
+        sunaltitude = 50,
+        sunangle = 80,
+        multicore = TRUE,
+        zscale = .005
+      ),
+      max_darken = .2
+    ) |>
+    rayshader::plot_map()
+}
+```
+
+
+```{r render-landscape}
+canvas |>
+  as.array(value = paint) |>
+  render()
+```
+
+<br>
+
+### Making islands with a crude cut
+
+> I cut my bangs with some rusty kitchen scissors <br>
+I screamed his name 'til the neighbors called the cops <br>
+I numbed the pain at the expense of my liver <br>
+Don't know what I did next, all I know I couldn't stop <br>
+&nbsp; &nbsp; -- Miranda Lambert
+
+
+```{r render-islands}
+canvas |> 
+  dplyr::mutate(islands = dplyr::if_else(
+    condition = paint < median(paint),
+    true = median(paint), 
+    false = paint
+  )) |>
+  as.array(value = islands) |>
+  render()
+```
+
+The complete source code for generating this image is included in the [islands.R](islands.R) script accompanying this post.
+
+<br>
+
+## Contorting the geography
+
+
 
 ```{r curl-transform}
-transform_to_curl_space <- function(x, y) {
+generate_curl <- function(x, y) {
   ambient::curl_noise(
     generator = ambient::fracture,
     noise = ambient::gen_simplex,
@@ -58,16 +208,13 @@ The first trick is to define a two dimensional manifold that maps to the origina
 
 ```{r demo-curl-transform}
 set.seed(8)
-grid <- ambient::long_grid(
-  x = seq(0, 1, length.out = 500),
-  y = seq(0, 1, length.out = 500)
-)
-coords <- transform_to_curl_space(grid$x, grid$y)
+grid <- new_grid()
+coords <- generate_curl(grid$x, grid$y)
 ```
 
 In the final image we'll do this in a finer grain: a 500x500 grid is a little coarse for what we have in mind. But the coarse-grained version is a little easier to visualise:
 
-```{r plot-curl-transform}
+```{r plot-curl-transform, cache=TRUE}
 ggplot2::ggplot(coords, ggplot2::aes(x, y)) +
   ggplot2::geom_point(size = .1, alpha = .1) + 
   ggplot2::coord_equal() + 
@@ -76,7 +223,7 @@ ggplot2::ggplot(coords, ggplot2::aes(x, y)) +
 
 Our noise operations will be specified on the transformed manifold, but the final image will be defined on the base space. Here's what I mean:
 
-```{r plot-curl}
+```{r plot-curl, cache=TRUE}
 grid <- grid |>
   dplyr::mutate(
     curl_x = coords$x, 
@@ -92,7 +239,7 @@ ggplot2::ggplot(grid, ggplot2::aes(x, y, colour = curl_x)) +
 Next, this...
 
 ```{r define-worley}
-compute_worley_distance <- function(x, y) {
+generate_worley <- function(x, y) {
   ambient::fracture(
     noise = ambient::gen_worley,
     fractal = ambient::billow,
@@ -109,10 +256,10 @@ compute_worley_distance <- function(x, y) {
 ```
 
 
-```{r demo-worley-distance}
+```{r demo-worley-distance, cache=TRUE}
 grid <- grid |>
   dplyr::mutate(
-    dist = compute_worley_distance(curl_x, curl_y)
+    dist = generate_worley(curl_x, curl_y)
   )
 
 ggplot2::ggplot(grid, ggplot2::aes(curl_x, curl_y, colour = dist)) +
@@ -123,7 +270,7 @@ ggplot2::ggplot(grid, ggplot2::aes(curl_x, curl_y, colour = dist)) +
 
 Here it is plotted in the original space:
 
-```{r plot-worley-distance}
+```{r plot-worley-distance, cache=TRUE}
 ggplot2::ggplot(grid, ggplot2::aes(x, y, colour = dist)) +
   ggplot2::geom_point(size = .1) + 
   ggplot2::coord_equal() + 
@@ -132,26 +279,10 @@ ggplot2::ggplot(grid, ggplot2::aes(x, y, colour = dist)) +
 
 Third transformation:
 
-```{r demo-simplex-transform}
-simplex_noise <- function(x, y) {
-  ambient::fracture(
-    noise = ambient::gen_simplex,
-    fractal = ambient::billow,
-    octaves = 10,
-    freq_init = .02,
-    frequency = ~ . * 2,
-    gain_init = 1,
-    gain = ~ . * .8,
-    x = x,
-    y = y
-  )
-}
-```
-
-```{r demo-simplex-distance}
+```{r demo-simplex-distance, cache=TRUE}
 grid <- grid |>
   dplyr::mutate(
-    paint = simplex_noise(x + dist, y + dist)
+    paint = generate_simplex(x + dist, y + dist)
   )
 
 ggplot2::ggplot(grid, ggplot2::aes(curl_x, curl_y, colour = paint)) +
@@ -160,7 +291,7 @@ ggplot2::ggplot(grid, ggplot2::aes(curl_x, curl_y, colour = paint)) +
   ggplot2::theme_void()
 ```
 
-```{r plot-simplex-transform}
+```{r plot-simplex-transform, cache=TRUE}
 ggplot2::ggplot(grid, ggplot2::aes(x, y, colour = paint)) +
   ggplot2::geom_point(size = .1) + 
   ggplot2::coord_equal() + 
@@ -175,19 +306,16 @@ discretise <- function(x, n) {
 }
 ```
 
-```{r discrete-plot}
+```{r discrete-plot, cache=TRUE}
 set.seed(8)
-grid <- ambient::long_grid(
-  x = seq(0, 1, length.out = 500),
-  y = seq(0, 1, length.out = 500)
-)
-coords <- transform_to_curl_space(grid$x, grid$y)
+grid <- new_grid() 
+coords <- generate_curl(grid$x, grid$y)
 
 grid <- grid |> dplyr::mutate(
   curl_x = coords$x |> discretise(20), 
   curl_y = coords$y |> discretise(20),
-  dist = compute_worley_distance(curl_x, curl_y),
-  paint = simplex_noise(x + dist, y + dist) |> discretise(20)
+  dist = generate_worley(curl_x, curl_y),
+  paint = generate_simplex(x + dist, y + dist) |> discretise(20)
 )
 
 ggplot2::ggplot(grid, ggplot2::aes(x, y, colour = paint)) +
@@ -196,7 +324,7 @@ ggplot2::ggplot(grid, ggplot2::aes(x, y, colour = paint)) +
   ggplot2::theme_void()
 ```
 
-```{r thresholded-plot}
+```{r thresholded-plot, cache=TRUE}
 grid <- grid |> 
   dplyr::mutate(
     height = dplyr::if_else(paint < .5, .5, paint)
@@ -210,7 +338,7 @@ ggplot2::ggplot(grid, ggplot2::aes(x, y, colour = height)) +
 
 Colour scale:
 
-```{r colorise}
+```{r colorise, cache=TRUE}
 ggplot2::ggplot(grid, ggplot2::aes(x, y, colour = height)) +
   ggplot2::geom_point(size = .1) + 
   ggplot2::coord_equal() + 
@@ -218,31 +346,12 @@ ggplot2::ggplot(grid, ggplot2::aes(x, y, colour = height)) +
   ggplot2::scale_color_viridis_c()
 ```
 
-Convert to raster-friendly array:
+Rayshade and render:
 
-```{r array}
-mat <- as.array(grid, value = height)
-```
-
-Rayshade it:
-
-```{r rayshaded}
-ncol <- length(unique(mat))
-rayshader::height_shade(
-  heightmap = mat,
-  texture = viridis::viridis(ncol)
-) |>
-  rayshader::add_shadow(
-    shadowmap = rayshader::ray_shade(
-      heightmap = mat,
-      sunaltitude = 50,
-      sunangle = 80,
-      multicore = TRUE,
-      zscale = .005
-    ),
-    max_darken = .2
-  ) |>
-  rayshader::plot_map()
+```{r rayshaded, cache=TRUE}
+grid |> 
+  as.array(value = height) |> 
+  render()
 ```
 
 
