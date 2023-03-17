@@ -53,8 +53,8 @@ ui <- fluidPage(
       shinycssloaders::withSpinner(
         ui_element = plotOutput(
           outputId = "art",
-          width = "calc(min(80vh, 60vw))",
-          height = "calc(min(80vh, 60vw))"
+          width = "calc(90vmin)",
+          height = "calc(90vmin)"
         ),
         type = 8,
         color = "#000000"
