@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.2.335">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+<meta name="author" content="Danielle Navarro">
+<meta name="dcterms.date" content="2022-12-22">
+<meta name="description" content="It is a truth universally acknowledged, that a post about multithreading must be in want of an async trick">
+
+<title>Notes from a data witch - Queue</title>
+<style>
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1.6em;
+  vertical-align: middle;
+}
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+    color: #aaaaaa;
+  }
+pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+code span.al { color: #ff0000; font-weight: bold; } /* Alert */
+code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } /* Annotation */
+code span.at { color: #7d9029; } /* Attribute */
+code span.bn { color: #40a070; } /* BaseN */
+code span.bu { color: #008000; } /* BuiltIn */
+code span.cf { color: #007020; font-weight: bold; } /* ControlFlow */
+code span.ch { color: #4070a0; } /* Char */
+code span.cn { color: #880000; } /* Constant */
+code span.co { color: #60a0b0; font-style: italic; } /* Comment */
+code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } /* CommentVar */
+code span.do { color: #ba2121; font-style: italic; } /* Documentation */
+code span.dt { color: #902000; } /* DataType */
+code span.dv { color: #40a070; } /* DecVal */
+code span.er { color: #ff0000; font-weight: bold; } /* Error */
+code span.ex { } /* Extension */
+code span.fl { color: #40a070; } /* Float */
+code span.fu { color: #06287e; } /* Function */
+code span.im { color: #008000; font-weight: bold; } /* Import */
+code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Information */
+code span.kw { color: #007020; font-weight: bold; } /* Keyword */
+code span.op { color: #666666; } /* Operator */
+code span.ot { color: #007020; } /* Other */
+code span.pp { color: #bc7a00; } /* Preprocessor */
+code span.sc { color: #4070a0; } /* SpecialChar */
+code span.ss { color: #bb6688; } /* SpecialString */
+code span.st { color: #4070a0; } /* String */
+code span.va { color: #19177c; } /* Variable */
+code span.vs { color: #4070a0; } /* VerbatimString */
+code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
+</style>
+
+
+<script src="../../site_libs/quarto-nav/quarto-nav.js"></script>
+<script src="../../site_libs/quarto-nav/headroom.min.js"></script>
+<script src="../../site_libs/clipboard/clipboard.min.js"></script>
+<script src="../../site_libs/quarto-search/autocomplete.umd.js"></script>
+<script src="../../site_libs/quarto-search/fuse.min.js"></script>
+<script src="../../site_libs/quarto-search/quarto-search.js"></script>
+<meta name="quarto:offset" content="../../">
+<script src="../../site_libs/quarto-html/quarto.js"></script>
+<script src="../../site_libs/quarto-html/popper.min.js"></script>
+<script src="../../site_libs/quarto-html/tippy.umd.min.js"></script>
+<script src="../../site_libs/quarto-html/anchor.min.js"></script>
+<link href="../../site_libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="../../site_libs/quarto-html/quarto-syntax-highlighting.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="../../site_libs/bootstrap/bootstrap.min.js"></script>
+<link href="../../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="../../site_libs/bootstrap/bootstrap.min.css" rel="stylesheet" id="quarto-bootstrap" data-mode="light">
+<script id="quarto-search-options" type="application/json">{
+  "location": "navbar",
+  "copy-button": false,
+  "collapse-after": 3,
+  "panel-placement": "end",
+  "type": "overlay",
+  "limit": 20,
+  "language": {
+    "search-no-results-text": "No results",
+    "search-matching-documents-text": "matching documents",
+    "search-copy-link-title": "Copy link to search",
+    "search-hide-matches-text": "Hide additional matches",
+    "search-more-match-text": "more match in this document",
+    "search-more-matches-text": "more matches in this document",
+    "search-clear-button-title": "Clear",
+    "search-detached-cancel-button-title": "Cancel",
+    "search-submit-button-title": "Submit"
+  }
+}</script>
+<style>
+    .quarto-title-block .quarto-title-banner {
+      background: #eeeeee;
+    }
+    </style>
+
+
+<link rel="stylesheet" href="../../styles.css">
+<meta property="og:title" content="Notes from a data witch - Queue">
+<meta property="og:description" content="It is a truth universally acknowledged, that a post about multithreading must be in want of an async trick">
+<meta property="og:image" content="">
+<meta property="og:site-name" content="Notes from a data witch">
+<meta name="twitter:title" content="Notes from a data witch - Queue">
+<meta name="twitter:description" content="It is a truth universally acknowledged, that a post about multithreading must be in want of an async trick">
+<meta name="twitter:image" content="">
+<meta name="twitter:creator" content="@djnavarro">
+<meta name="twitter:card" content="summary_large_image">
+</head>
+
+<body class="floating nav-fixed">
+
+<div id="quarto-search-results"></div>
+  <header id="quarto-header" class="headroom fixed-top">
+    <nav class="navbar navbar-expand-lg navbar-dark ">
+      <div class="navbar-container container-fluid">
+      <div class="navbar-brand-container">
+    <a class="navbar-brand" href="../../index.html">
+    <span class="navbar-title">Notes from a data witch</span>
+    </a>
+  </div>
+          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarCollapse" aria-controls="navbarCollapse" aria-expanded="false" aria-label="Toggle navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
+  <span class="navbar-toggler-icon"></span>
+</button>
+          <div class="collapse navbar-collapse" id="navbarCollapse">
+            <ul class="navbar-nav navbar-nav-scroll ms-auto">
+  <li class="nav-item compact">
+    <a class="nav-link" href="https://fosstodon.org/@djnavarro"><i class="bi bi-mastodon" role="img" aria-label="mastodon">
+</i> 
+ <span class="menu-text"></span></a>
+  </li>  
+  <li class="nav-item compact">
+    <a class="nav-link" href="https://github.com/djnavarro"><i class="bi bi-github" role="img" aria-label="github">
+</i> 
+ <span class="menu-text"></span></a>
+  </li>  
+  <li class="nav-item compact">
+    <a class="nav-link" href="https://djnavarro.net"><i class="bi bi-person-circle" role="img" aria-label="website">
+</i> 
+ <span class="menu-text"></span></a>
+  </li>  
+  <li class="nav-item compact">
+    <a class="nav-link" href="https://art.djnavarro.net"><i class="bi bi-palette-fill" role="img" aria-label="art">
+</i> 
+ <span class="menu-text"></span></a>
+  </li>  
+</ul>
+              <div id="quarto-search" class="" title="Search"></div>
+          </div> <!-- /navcollapse -->
+      </div> <!-- /container-fluid -->
+    </nav>
+</header>
+<!-- content -->
+<header id="title-block-header" class="quarto-title-block default toc-left page-columns page-full">
+  <div class="quarto-title-banner page-columns page-full">
+    <div class="quarto-title column-body">
+      <h1 class="title">Queue</h1>
+                  <div>
+        <div class="description">
+          It is a truth universally acknowledged, that a post about multithreading must be in want of an async trick
+        </div>
+      </div>
+                          <div class="quarto-categories">
+                <div class="quarto-category">Parallel Computing</div>
+                <div class="quarto-category">R</div>
+                <div class="quarto-category">Object-Oriented Programming</div>
+              </div>
+                  </div>
+  </div>
+    
+  <div class="quarto-title-meta-author">
+    <div class="quarto-title-meta-heading">Author</div>
+    <div class="quarto-title-meta-heading">Affiliation</div>
+    
+      <div class="quarto-title-meta-contents">
+      <a href="https://djnavarro.net">Danielle Navarro</a> <a href="https://orcid.org/0000-0001-7648-6578" class="quarto-title-author-orcid"> <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAA2ZpVFh0WE1MOmNvbS5hZG9iZS54bXAAAAAAADw/eHBhY2tldCBiZWdpbj0i77u/IiBpZD0iVzVNME1wQ2VoaUh6cmVTek5UY3prYzlkIj8+IDx4OnhtcG1ldGEgeG1sbnM6eD0iYWRvYmU6bnM6bWV0YS8iIHg6eG1wdGs9IkFkb2JlIFhNUCBDb3JlIDUuMC1jMDYwIDYxLjEzNDc3NywgMjAxMC8wMi8xMi0xNzozMjowMCAgICAgICAgIj4gPHJkZjpSREYgeG1sbnM6cmRmPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5LzAyLzIyLXJkZi1zeW50YXgtbnMjIj4gPHJkZjpEZXNjcmlwdGlvbiByZGY6YWJvdXQ9IiIgeG1sbnM6eG1wTU09Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC9tbS8iIHhtbG5zOnN0UmVmPSJodHRwOi8vbnMuYWRvYmUuY29tL3hhcC8xLjAvc1R5cGUvUmVzb3VyY2VSZWYjIiB4bWxuczp4bXA9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC8iIHhtcE1NOk9yaWdpbmFsRG9jdW1lbnRJRD0ieG1wLmRpZDo1N0NEMjA4MDI1MjA2ODExOTk0QzkzNTEzRjZEQTg1NyIgeG1wTU06RG9jdW1lbnRJRD0ieG1wLmRpZDozM0NDOEJGNEZGNTcxMUUxODdBOEVCODg2RjdCQ0QwOSIgeG1wTU06SW5zdGFuY2VJRD0ieG1wLmlpZDozM0NDOEJGM0ZGNTcxMUUxODdBOEVCODg2RjdCQ0QwOSIgeG1wOkNyZWF0b3JUb29sPSJBZG9iZSBQaG90b3Nob3AgQ1M1IE1hY2ludG9zaCI+IDx4bXBNTTpEZXJpdmVkRnJvbSBzdFJlZjppbnN0YW5jZUlEPSJ4bXAuaWlkOkZDN0YxMTc0MDcyMDY4MTE5NUZFRDc5MUM2MUUwNEREIiBzdFJlZjpkb2N1bWVudElEPSJ4bXAuZGlkOjU3Q0QyMDgwMjUyMDY4MTE5OTRDOTM1MTNGNkRBODU3Ii8+IDwvcmRmOkRlc2NyaXB0aW9uPiA8L3JkZjpSREY+IDwveDp4bXBtZXRhPiA8P3hwYWNrZXQgZW5kPSJyIj8+84NovQAAAR1JREFUeNpiZEADy85ZJgCpeCB2QJM6AMQLo4yOL0AWZETSqACk1gOxAQN+cAGIA4EGPQBxmJA0nwdpjjQ8xqArmczw5tMHXAaALDgP1QMxAGqzAAPxQACqh4ER6uf5MBlkm0X4EGayMfMw/Pr7Bd2gRBZogMFBrv01hisv5jLsv9nLAPIOMnjy8RDDyYctyAbFM2EJbRQw+aAWw/LzVgx7b+cwCHKqMhjJFCBLOzAR6+lXX84xnHjYyqAo5IUizkRCwIENQQckGSDGY4TVgAPEaraQr2a4/24bSuoExcJCfAEJihXkWDj3ZAKy9EJGaEo8T0QSxkjSwORsCAuDQCD+QILmD1A9kECEZgxDaEZhICIzGcIyEyOl2RkgwAAhkmC+eAm0TAAAAABJRU5ErkJggg=="></a>
+    </div>
+      <div class="quarto-title-meta-contents">
+          <p class="affiliation">
+              <a href="https://www.youtube.com/watch?v=j58V2vC9EPc">
+              I’m on smoko
+              </a>
+            </p>
+        </div>
+      </div>
+
+  <div class="quarto-title-meta">
+
+        
+      <div>
+      <div class="quarto-title-meta-heading">Published</div>
+      <div class="quarto-title-meta-contents">
+        <p class="date">December 22, 2022</p>
+      </div>
+    </div>
+    
+      
+    </div>
+    
+  
+  </header><div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-article page-navbar">
+<!-- sidebar -->
+  <nav id="quarto-sidebar" class="sidebar collapse sidebar-navigation floating overflow-auto">
+    <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">Table of contents</h2>
+   
+  <ul>
+  <li><a href="#what-does-it-do" id="toc-what-does-it-do" class="nav-link active" data-scroll-target="#what-does-it-do">What does it do?</a></li>
+  <li><a href="#what-does-it-store" id="toc-what-does-it-store" class="nav-link" data-scroll-target="#what-does-it-store">What does it store?</a></li>
+  <li><a href="#surviving-a-crash" id="toc-surviving-a-crash" class="nav-link" data-scroll-target="#surviving-a-crash">Surviving a crash</a></li>
+  <li><a href="#design" id="toc-design" class="nav-link" data-scroll-target="#design">Design</a></li>
+  <li><a href="#epilogue" id="toc-epilogue" class="nav-link" data-scroll-target="#epilogue">Epilogue</a></li>
+  </ul>
+</nav>
+</nav>
+<!-- margin-sidebar -->
+    <div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
+    </div>
+<!-- main -->
+<main class="content quarto-banner-title-block page-columns page-full" id="quarto-document-content">
+
+
+
+
+<!--------------- my typical setup ----------------->
+<!--------------- post begins here ----------------->
+<p>Okay. So I wrote a simple package for <a href="https://queue.djnavarro.net">multi-threaded tasks queues in R</a> this week. It wasn’t intentional, I swear. I was just trying to teach myself how to use the <a href="https://callr.r-lib.org/">callr</a> package,<a href="#fn1" class="footnote-ref" id="fnref1" role="doc-noteref"><sup>1</sup></a> and making sure I had a solid grasp of encapsulated object-oriented programming with <a href="https://r6.r-lib.org/">R6</a>. Things got a little out of hand. Sorry.</p>
+<p>And let’s be very clear about something at the outset. If you want to do parallel computing in R correctly, you go look at <a href="https://www.futureverse.org/">futureverse.org</a>. The <a href="https://future.futureverse.org/">future</a> package by Henrik Bengtsson provides a fabulous way to execute R code asynchronously and in parallel. And there are many excellent packages built on top of that, so there’s a whole lovely ecosystem there just waiting for you.<a href="#fn2" class="footnote-ref" id="fnref2" role="doc-noteref"><sup>2</sup></a> Relatedly, if the reason you’re thinking about parallel computing is that you’ve found yourself with a burning need to analyse terabytes of data with R then babe it might be time to start learning some R workflows using <a href="https://therinspark.com/">Spark</a>, <a href="https://blog.djnavarro.net/category/apachearrow">Arrow</a>, <a href="https://www.r-bloggers.com/2022/04/wtf-is-kubernetes-and-should-i-care-as-r-user/">Kubernetes</a>. It may be time to learn about some of those other eldritch words of power that have figured rather more prominently in my life than one might expect for a simple country girl.<a href="#fn3" class="footnote-ref" id="fnref3" role="doc-noteref"><sup>3</sup></a></p>
+<p>My little queue package is a personal project. I happen to like it, but you should not be looking at it as an alternative to serious tools.</p>
+<p>That’s been said now. Good. We can put aside all pretension.</p>
+<section id="what-does-it-do" class="level2 page-columns page-full">
+<h2 class="anchored" data-anchor-id="what-does-it-do">What does it do?</h2>
+<p>Let’s say I have a generative art function called <code>donut()</code>, based loosely on a <a href="https://art-from-code.netlify.app/day-1/session-1/#composition">teaching example from my art from code workshop</a>. The <code>donut()</code> function takes an input <code>seed</code>, creates a piece of generative art using ggplot2, and writes the output to an image file. This process takes several seconds to complete on my laptop:</p>
+<div class="cell" data-hash="index_cache/html/my-first-donut_78cc3a9337022adc6a85a72fd51f194e">
+<div class="sourceCode cell-code" id="cb1"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(tictoc)</span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="fu">tic</span>()</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="fu">donut</span>(<span class="at">seed =</span> <span class="dv">100</span>)</span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="fu">toc</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>5.277 sec elapsed</code></pre>
+</div>
+</div>
+<p>Here’s the piece, by the way:</p>
+<p><img src="donut_100.png" class="img-fluid"></p>
+<p>That’s nice and I do like this piece, but generative art is an iterative process and I like to make many pieces at once to help me get a feel for the statistical properties of the system. Waiting five or six seconds for one piece to render is one thing: waiting 8-10 minutes for 100 pieces to render is quite another. So it’s helpful if I can do this in parallel.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb3"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(queue)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>Here’s how I might do that using queue. I designed the package using R6 classes – more on that later – so we’ll be working in the “encapsulated” object oriented programming style that is more common in other programming languages. The first step is to initialise a <a href="https://queue.djnavarro.net/reference/Queue.html"><code>Queue</code></a> object, specifying the number of workers we want to use. I’ll use six:</p>
+<div class="cell" data-hash="index_cache/html/my-first-queue_dfc1ff39dc3ddb607ec985d5339378c1">
+<div class="sourceCode cell-code" id="cb4"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a>queue <span class="ot">&lt;-</span> Queue<span class="sc">$</span><span class="fu">new</span>(<span class="at">workers =</span> <span class="dv">6</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>When I do this, the queue package starts six R sessions for us, and all my computations will be done in those R sessions. Under the hood, all the hard work of managing the R sessions is being done by the wonderful callr package by Gábor Csárdi<a href="#fn4" class="footnote-ref" id="fnref4" role="doc-noteref"><sup>4</sup></a> – the only thing that queue does is provide a layer of abstraction and automation to the whole process.</p>
+<p>Next, I’ll add some tasks to the queue. <code>Queue</code> objects have an <code>add()</code> method that take a function and a list of arguments, so I can do this to push a task to the queue:</p>
+<div class="cell" data-hash="index_cache/html/my-first-task_e9d06a818d4aab8856c997131ca80f42">
+<div class="sourceCode cell-code" id="cb5"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a>queue<span class="sc">$</span><span class="fu">add</span>(donut, <span class="at">args =</span> <span class="fu">list</span>(<span class="at">seed =</span> <span class="dv">100</span>))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>When the queue executes, it will be in a “first in, first out” order,<a href="#fn5" class="footnote-ref" id="fnref5" role="doc-noteref"><sup>5</sup></a> so this task will be the first one to be assigned to a worker. Though of course that’s no guarantee that it will be the first one to finish!</p>
+<p>Anyway, let’s load up several more tasks. There’s some weird aversion out there to using loops in R, but this isn’t one of those situations where we need to worry about unnecessary copying, so I’m going to use a loop:</p>
+<div class="cell" data-hash="index_cache/html/load-several-tasks_5cc68af5a47beff90603fa0c398907e3">
+<div class="sourceCode cell-code" id="cb6"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span>(s <span class="cf">in</span> <span class="dv">101</span><span class="sc">:</span><span class="dv">108</span>) queue<span class="sc">$</span><span class="fu">add</span>(donut, <span class="fu">list</span>(<span class="at">seed =</span> s))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>So now we have nine tasks loaded onto a queue with six workers. To start it running I call the <code>run()</code> method for the queue. By default, all you’d see while the queue is running is a spinner with a progress message telling you how many tasks have completed so far, how many are currently running, and how many are still waiting. But I’ll ask it to be a bit more chatty. I’ll call it setting <code>message = "verbose"</code> so that we can see a log showing the order in which the tasks completed and time each task took to complete, in addition to the total time elapsed on my system while the queue was running:</p>
+<div class="cell" data-hash="index_cache/html/run-my-queue_f0e1b58ef56570b65d67c0ec4ae0c11c">
+<div class="sourceCode cell-code" id="cb7"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a>out <span class="ot">&lt;-</span> queue<span class="sc">$</span><span class="fu">run</span>(<span class="at">message =</span> <span class="st">"verbose"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: task_5 finished in 3.18 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: task_2 finished in 5.78 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: task_6 finished in 5.78 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: task_4 finished in 7.34 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: task_3 finished in 8.09 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: task_1 finished in 9.46 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: task_7 finished in 7.76 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: task_9 finished in 6.09 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: task_8 finished in 6.92 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>✔ Queue complete: 9 tasks done in 12.7 secs</code></pre>
+</div>
+</div>
+<p>Here are the nine pieces that popped off the queue in 13 seconds:</p>
+<div class="column-screen-inset">
+<div class="quarto-layout-panel">
+<div class="quarto-layout-row quarto-layout-valign-top">
+<div class="quarto-layout-cell" style="flex-basis: 33.3%;justify-content: center;">
+<p><img src="donut_100.png" class="img-fluid"></p>
+</div>
+<div class="quarto-layout-cell" style="flex-basis: 33.3%;justify-content: center;">
+<p><img src="donut_101.png" class="img-fluid"></p>
+</div>
+<div class="quarto-layout-cell" style="flex-basis: 33.3%;justify-content: center;">
+<p><img src="donut_102.png" class="img-fluid"></p>
+</div>
+</div>
+<div class="quarto-layout-row quarto-layout-valign-top">
+<div class="quarto-layout-cell" style="flex-basis: 33.3%;justify-content: center;">
+<p><img src="donut_103.png" class="img-fluid"></p>
+</div>
+<div class="quarto-layout-cell" style="flex-basis: 33.3%;justify-content: center;">
+<p><img src="donut_104.png" class="img-fluid"></p>
+</div>
+<div class="quarto-layout-cell" style="flex-basis: 33.3%;justify-content: center;">
+<p><img src="donut_105.png" class="img-fluid"></p>
+</div>
+</div>
+<div class="quarto-layout-row quarto-layout-valign-top">
+<div class="quarto-layout-cell" style="flex-basis: 33.3%;justify-content: center;">
+<p><img src="donut_106.png" class="img-fluid"></p>
+</div>
+<div class="quarto-layout-cell" style="flex-basis: 33.3%;justify-content: center;">
+<p><img src="donut_107.png" class="img-fluid"></p>
+</div>
+<div class="quarto-layout-cell" style="flex-basis: 33.3%;justify-content: center;">
+<p><img src="donut_108.png" class="img-fluid"></p>
+</div>
+</div>
+</div>
+</div>
+<p>So it’s a three-step process: (1) create the queue, (2) load up the tasks, (3) execute the tasks. In practice I would probably simplify the code to this:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb18"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a>queue <span class="ot">&lt;-</span> Queue<span class="sc">$</span><span class="fu">new</span>(<span class="at">workers =</span> <span class="dv">6</span>)</span>
+<span id="cb18-2"><a href="#cb18-2" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span>(s <span class="cf">in</span> <span class="dv">100</span><span class="sc">:</span><span class="dv">108</span>) queue<span class="sc">$</span><span class="fu">add</span>(donut, <span class="fu">list</span>(<span class="at">seed =</span> s))</span>
+<span id="cb18-3"><a href="#cb18-3" aria-hidden="true" tabindex="-1"></a>out <span class="ot">&lt;-</span> queue<span class="sc">$</span><span class="fu">run</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>True, I could simplify it further. For example, if I know that I’m always calling the same function and always passing the same the same arguments – just with different values – this could be wrapped up in <a href="https://purrr.tidyverse.org/">purrr</a> style syntax, but honestly I’m not sure why I would bother doing that when <a href="https://furrr.futureverse.org/">furrr</a> already exists? I’m not planning to reinvent the wheel, especially not when Davis Vaughn already offers a fully-operational mass-transit system free of charge.</p>
+</section>
+<section id="what-does-it-store" class="level2 page-columns page-full">
+<h2 class="anchored" data-anchor-id="what-does-it-store">What does it store?</h2>
+<p>The output object <code>out</code> stores quite a lot of information about the tasks, the results, and the events that occurred during task execution, but most of it isn’t immediately interesting to us (especially when things actually work!) So let’s keep things simple for the moment and just look at the first five columns:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb19"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a>out[, <span class="dv">1</span><span class="sc">:</span><span class="dv">5</span>]</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>  task_id worker_id state        result       runtime
+1  task_1    577202  done donut_100.png 9.457713 secs
+2  task_2    577226  done donut_101.png 5.782191 secs
+3  task_3    577239  done donut_102.png 8.087054 secs
+4  task_4    577251  done donut_103.png 7.336802 secs
+5  task_5    577263  done donut_104.png 3.183247 secs
+6  task_6    577275  done donut_105.png 5.780861 secs
+7  task_7    577263  done donut_106.png 7.763061 secs
+8  task_8    577226  done donut_107.png 6.921016 secs
+9  task_9    577275  done donut_108.png 6.093996 secs</code></pre>
+</div>
+</div>
+<p>The columns are pretty self-explanatory I think?</p>
+<ul>
+<li><code>task_id</code> is a unique identifier for the task itself</li>
+<li><code>worker_id</code> is a unique identifier for the worker that completed the task (it’s also the process id for the R session)</li>
+<li><code>state</code> summarises the current state of the task (they’re all <code>"done"</code> because the queue is finished)</li>
+<li><code>result</code> is a list column containing the output from each task</li>
+<li><code>runtime</code> is a difftime column telling you how long each task took to finish</li>
+</ul>
+<p>As for the the full output… well… here it is…</p>
+<div class="cell column-page">
+<div class="sourceCode cell-code" id="cb21"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb21-1"><a href="#cb21-1" aria-hidden="true" tabindex="-1"></a>out</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>  task_id worker_id state        result       runtime                                                                          fun args
+1  task_1    577202  done donut_100.png 9.457713 secs function (seed) , {,     source("donut.R", local = TRUE),     donut(seed), }  100
+2  task_2    577226  done donut_101.png 5.782191 secs function (seed) , {,     source("donut.R", local = TRUE),     donut(seed), }  101
+3  task_3    577239  done donut_102.png 8.087054 secs function (seed) , {,     source("donut.R", local = TRUE),     donut(seed), }  102
+4  task_4    577251  done donut_103.png 7.336802 secs function (seed) , {,     source("donut.R", local = TRUE),     donut(seed), }  103
+5  task_5    577263  done donut_104.png 3.183247 secs function (seed) , {,     source("donut.R", local = TRUE),     donut(seed), }  104
+6  task_6    577275  done donut_105.png 5.780861 secs function (seed) , {,     source("donut.R", local = TRUE),     donut(seed), }  105
+7  task_7    577263  done donut_106.png 7.763061 secs function (seed) , {,     source("donut.R", local = TRUE),     donut(seed), }  106
+8  task_8    577226  done donut_107.png 6.921016 secs function (seed) , {,     source("donut.R", local = TRUE),     donut(seed), }  107
+9  task_9    577275  done donut_108.png 6.093996 secs function (seed) , {,     source("donut.R", local = TRUE),     donut(seed), }  108
+              created              queued            assigned             started            finished code
+1 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:28:03  200
+2 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:28:00  200
+3 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:28:02  200
+4 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:28:01  200
+5 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:27:57  200
+6 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:28:00  200
+7 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:27:57 2022-12-23 12:27:57 2022-12-23 12:28:05  200
+8 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:28:00 2022-12-23 12:28:00 2022-12-23 12:28:06  200
+9 2022-12-23 12:27:54 2022-12-23 12:27:54 2022-12-23 12:28:00 2022-12-23 12:28:00 2022-12-23 12:28:06  200
+                             message stdout stderr error
+1 done callr-rs-result-8ce3e320ef539                NULL
+2 done callr-rs-result-8ce3e6e032153                NULL
+3 done callr-rs-result-8ce3e5d32c7ba                NULL
+4  done callr-rs-result-8ce3e72346af                NULL
+5 done callr-rs-result-8ce3e4193129d                NULL
+6 done callr-rs-result-8ce3e42c3653c                NULL
+7 done callr-rs-result-8ce3e6ecedbfa                NULL
+8 done callr-rs-result-8ce3e41e0f9e6                NULL
+9 done callr-rs-result-8ce3e5a3c4630                NULL</code></pre>
+</div>
+</div>
+<p>Okay so there’s a bit more to unpack here. Let’s take a look…</p>
+<ul>
+<li>The <code>fun</code> and <code>args</code> columns contain the functions and arguments that were originally used to specify the task</li>
+<li>The <code>created</code>, <code>queued</code>, <code>assigned</code>, <code>started</code>, and <code>finished</code> columns contain POSIXct timestamps indicating when the task was created, added to a queue, assigned to a worker, started running on a worker, and returned from the worker</li>
+<li><code>code</code> is a numeric code returned by the callr R session: of particular note 200 means it returned successfully, 500 means the session exited cleanly, and 501 means the session crashed</li>
+<li><code>message</code> is a message returned by callr</li>
+<li><code>stdout</code> and <code>stderr</code> are the contents of the output and error streams from the worker session while the task was running</li>
+<li><code>error</code> currently is <code>NULL</code> because I haven’t implemented that bit yet lol.</li>
+</ul>
+</section>
+<section id="surviving-a-crash" class="level2">
+<h2 class="anchored" data-anchor-id="surviving-a-crash">Surviving a crash</h2>
+<p>I’m going to be honest. Sometimes<a href="#fn6" class="footnote-ref" id="fnref6" role="doc-noteref"><sup>6</sup></a> I write bad code when I am exploring a new generative art system. Code that crashes the R session unpredictably. So it would be nice if the queue had a little bit of robustness for that. To be honest, the queue package isn’t very sophisticated in detecting sessions that have crashed,<a href="#fn7" class="footnote-ref" id="fnref7" role="doc-noteref"><sup>7</sup></a> but it does have some ability to recover when a task crashes its thread. Let’s keep this simple. I’ll define a perfectly safe function that waits for a moment and then returns, and another function that always crashes the R session as soon as it is called:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb23"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb23-1"><a href="#cb23-1" aria-hidden="true" tabindex="-1"></a>wait <span class="ot">&lt;-</span> <span class="cf">function</span>(x) {</span>
+<span id="cb23-2"><a href="#cb23-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">Sys.sleep</span>(x)</span>
+<span id="cb23-3"><a href="#cb23-3" aria-hidden="true" tabindex="-1"></a>  x</span>
+<span id="cb23-4"><a href="#cb23-4" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb23-5"><a href="#cb23-5" aria-hidden="true" tabindex="-1"></a>crash <span class="ot">&lt;-</span> <span class="cf">function</span>(x) <span class="fu">.Call</span>(<span class="st">"abort"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>Now let’s define a queue that has only two workers, but has no less than three tasks that are guaranteed to crash the worker the moment the tasks are started:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb24"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb24-1"><a href="#cb24-1" aria-hidden="true" tabindex="-1"></a>queue <span class="ot">&lt;-</span> Queue<span class="sc">$</span><span class="fu">new</span>(<span class="at">workers =</span> <span class="dv">2</span>)</span>
+<span id="cb24-2"><a href="#cb24-2" aria-hidden="true" tabindex="-1"></a>queue<span class="sc">$</span><span class="fu">add</span>(wait, <span class="fu">list</span>(<span class="at">x =</span> .<span class="dv">1</span>))</span>
+<span id="cb24-3"><a href="#cb24-3" aria-hidden="true" tabindex="-1"></a>queue<span class="sc">$</span><span class="fu">add</span>(crash)</span>
+<span id="cb24-4"><a href="#cb24-4" aria-hidden="true" tabindex="-1"></a>queue<span class="sc">$</span><span class="fu">add</span>(crash)</span>
+<span id="cb24-5"><a href="#cb24-5" aria-hidden="true" tabindex="-1"></a>queue<span class="sc">$</span><span class="fu">add</span>(crash)</span>
+<span id="cb24-6"><a href="#cb24-6" aria-hidden="true" tabindex="-1"></a>queue<span class="sc">$</span><span class="fu">add</span>(wait, <span class="fu">list</span>(<span class="at">x =</span> .<span class="dv">1</span>))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>The queue allocates task in a first-in first-out order, so the three “crash tasks” are guaranteed to be allocated before the final “wait task”. Let’s take a look at what happens when the queue runs:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb25"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb25-1"><a href="#cb25-1" aria-hidden="true" tabindex="-1"></a>queue<span class="sc">$</span><span class="fu">run</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>✔ Queue complete: 5 tasks done in 3.34 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 5 × 17
+  task_id worker_id state result    runtime        fun    args            
+  &lt;chr&gt;       &lt;int&gt; &lt;chr&gt; &lt;list&gt;    &lt;drtn&gt;         &lt;list&gt; &lt;list&gt;          
+1 task_1     624437 done  &lt;dbl [1]&gt; 0.1263957 secs &lt;fn&gt;   &lt;named list [1]&gt;
+2 task_2     624445 done  &lt;NULL&gt;    1.1492345 secs &lt;fn&gt;   &lt;list [0]&gt;      
+3 task_3     624437 done  &lt;NULL&gt;    2.0157561 secs &lt;fn&gt;   &lt;list [0]&gt;      
+4 task_4     624467 done  &lt;NULL&gt;    1.9129426 secs &lt;fn&gt;   &lt;list [0]&gt;      
+5 task_5     624484 done  &lt;dbl [1]&gt; 0.1606448 secs &lt;fn&gt;   &lt;named list [1]&gt;
+# … with 10 more variables: created &lt;dttm&gt;, queued &lt;dttm&gt;, assigned &lt;dttm&gt;,
+#   started &lt;dttm&gt;, finished &lt;dttm&gt;, code &lt;dbl&gt;, message &lt;chr&gt;,
+#   stdout &lt;list&gt;, stderr &lt;list&gt;, error &lt;list&gt;</code></pre>
+</div>
+</div>
+<p>It’s a little slower than we’d hope, but it does finish both valid tasks and returns nothing for the tasks that crashed their R sessions. What has happened in the background is that the queue runs a simple check to see if any of the R sessions have crashed, and attempts to replace them with a new worker whenever it detects that this has happened. It’s not in any sense optimised, but it does sort of work.</p>
+</section>
+<section id="design" class="level2">
+<h2 class="anchored" data-anchor-id="design">Design</h2>
+<p>Although my confidence in my ability to have a career in tech is at an all-time low, I have to admit that the work I’ve done over the last year has made me a better programmer. I didn’t much effort into writing queue, but the code feels cleaner and more modular than the code I was writing a year ago. Good practices have become habits, I suppose. That’s a nice feeling. I automatically write proper unit tests as I go, knowing that those tests will save me when I need to make changes later. I document properly as I go, knowing that I won’t remember a bloody thing about how my own code works six hours later – never mind six months. And, maybe most importantly of all, my code now seems to have this habit of organising itself into small, manageable abstractions. I have no idea when that happened, because I wasn’t actually part of a software engineering team. I was just the girl who wrote some docs and few little blog posts.<a href="#fn8" class="footnote-ref" id="fnref8" role="doc-noteref"><sup>8</sup></a></p>
+<p>Here’s what I mean. If you take a look at the <a href="https://github.com/djnavarro/queue/blob/4c70aad373fd518250c6bd6c29cebccb6d16dc65/R/queue.R">source code for the <code>Queue</code></a> object, it’s actually not very long: the file is mostly devoted to the documentation, and the object doesn’t have very many methods. Honestly, we’ve already seen most of them:</p>
+<ul>
+<li><code>new()</code> creates a new queue</li>
+<li><code>add()</code> adds a task to a queue</li>
+<li><code>run()</code> sets the queue running</li>
+</ul>
+<p>If everything works smoothly you don’t need anything else, so why burden the user with extra details? Sure, there’s a little complexity to these methods which is of course documented on the <a href="https://queue.djnavarro.net/reference/Queue.html">relevant pkgdown page</a> because I’m not a jerk, but this isn’t a complicated package…</p>
+<p>…when it’s working.</p>
+<p>Of course, when things start to break, you start to care a lot more about the internals. Fair enough. There are two important data structures within the <code>Queue</code>:</p>
+<ul>
+<li>Internally, a <code>Queue</code> manages a <a href="https://queue.djnavarro.net/reference/WorkerPool.html"><code>WorkerPool</code></a> comprised of one or more <a href="https://queue.djnavarro.net/reference/Worker.html"><code>Worker</code></a> objects. As you’d expect given the names, these provide abstractions for managing the R sessions. A <code>Worker</code> object provides a wrapper around a callr R session, and tools that automate the interaction between that session and a task.</li>
+<li>The <code>Queue</code> also holds a <a href="https://queue.djnavarro.net/reference/TaskList.html"><code>TaskList</code></a> comprised of one or more <a href="https://queue.djnavarro.net/reference/Task.html"><code>Task</code></a> objects. Again, as you might expect from the names, these are the storage classes. A <code>Task</code> object is a container that holds a function, its arguments, any results it might have returned, and any logged information about the process of its execution.</li>
+</ul>
+<p>In some situations it can be awfully handy to have access to these constituent data structures, particularly because those objects expose additional tools that I deliberately chose not to make available at the <code>Queue</code> level. From the <code>Queue</code> itself what you can do is return the objects:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb28"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb28-1"><a href="#cb28-1" aria-hidden="true" tabindex="-1"></a>workers <span class="ot">&lt;-</span> queue<span class="sc">$</span><span class="fu">get_workers</span>()</span>
+<span id="cb28-2"><a href="#cb28-2" aria-hidden="true" tabindex="-1"></a>tasks <span class="ot">&lt;-</span> queue<span class="sc">$</span><span class="fu">get_tasks</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>These objects are R6 classes: they have reference semantics so anything I do with <code>workers</code> and <code>tasks</code> will have corresponding effects on <code>queue</code>. For this blog post I don’t intend to dive into details of what I did when designing the <code>WorkerPool</code> and <code>TaskList</code> classes – especially because queue is only at version 0.0.2 and I don’t yet know what I’m going to do with this cute little package – but I’ll give one example.</p>
+<p>Let’s take the workers. By default, a <code>Queue</code> cleans up after itself and closes any R sessions that it started. The <code>WorkerPool</code> object associated with a <code>Queue</code> has a <code>get_pool_state()</code> method that I can use to check the state of the workers, and some other methods to modify the workers if I so choose. Let’s have a go. I ask <code>workers</code> to report on the status of the R sessions, this is what I get:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb29"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb29-1"><a href="#cb29-1" aria-hidden="true" tabindex="-1"></a>workers<span class="sc">$</span><span class="fu">get_pool_state</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>    624484     624496 
+"finished" "finished" </code></pre>
+</div>
+</div>
+<p>Yes, as expected the workers have stopped. But I can replace them with live R sessions by calling the <code>refill_pool()</code> method:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb31"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb31-1"><a href="#cb31-1" aria-hidden="true" tabindex="-1"></a>workers<span class="sc">$</span><span class="fu">refill_pool</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>624512 624524 
+"idle" "idle" </code></pre>
+</div>
+</div>
+<p>And I can shut them down again by calling <code>shutdown_pool()</code>:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb33"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb33-1"><a href="#cb33-1" aria-hidden="true" tabindex="-1"></a>workers<span class="sc">$</span><span class="fu">shutdown_pool</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>    624512     624524 
+"finished" "finished" </code></pre>
+</div>
+</div>
+<p>Along similar lines the <code>TaskList</code> object has some methods that let me manipulate the data storage associated with my <code>Queue</code>. Normally I don’t need to. Sometimes I do. It’s handy to have those tools lying around. At the moment the toolkit feels a little light, but the nice thing about writing your own package is that I can always add more if I need them :-)</p>
+</section>
+<section id="epilogue" class="level2">
+<h2 class="anchored" data-anchor-id="epilogue">Epilogue</h2>
+<div class="cell" data-hash="index_cache/html/austen-joke_faf2b96ff686ee96563e01788b849faf">
+<div class="sourceCode cell-code" id="cb35"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb35-1"><a href="#cb35-1" aria-hidden="true" tabindex="-1"></a>queue <span class="ot">&lt;-</span> Queue<span class="sc">$</span><span class="fu">new</span>(<span class="at">workers =</span> <span class="dv">6</span>)</span>
+<span id="cb35-2"><a href="#cb35-2" aria-hidden="true" tabindex="-1"></a>queue<span class="sc">$</span><span class="fu">add</span>(wait, <span class="fu">list</span>(<span class="at">x =</span> <span class="fl">1.3</span>), <span class="at">id =</span> <span class="fu">toupper</span>(<span class="st">"multithreading"</span>))</span>
+<span id="cb35-3"><a href="#cb35-3" aria-hidden="true" tabindex="-1"></a>queue<span class="sc">$</span><span class="fu">add</span>(wait, <span class="fu">list</span>(<span class="at">x =</span> <span class="fl">0.1</span>), <span class="at">id =</span> <span class="fu">toupper</span>(<span class="st">"it is"</span>))</span>
+<span id="cb35-4"><a href="#cb35-4" aria-hidden="true" tabindex="-1"></a>queue<span class="sc">$</span><span class="fu">add</span>(wait, <span class="fu">list</span>(<span class="at">x =</span> <span class="fl">0.7</span>), <span class="at">id =</span> <span class="fu">toupper</span>(<span class="st">"acknowledged"</span>))</span>
+<span id="cb35-5"><a href="#cb35-5" aria-hidden="true" tabindex="-1"></a>queue<span class="sc">$</span><span class="fu">add</span>(wait, <span class="fu">list</span>(<span class="at">x =</span> <span class="fl">1.0</span>), <span class="at">id =</span> <span class="fu">toupper</span>(<span class="st">"post"</span>))</span>
+<span id="cb35-6"><a href="#cb35-6" aria-hidden="true" tabindex="-1"></a>queue<span class="sc">$</span><span class="fu">add</span>(wait, <span class="fu">list</span>(<span class="at">x =</span> <span class="fl">0.5</span>), <span class="at">id =</span> <span class="fu">toupper</span>(<span class="st">"universally"</span>))</span>
+<span id="cb35-7"><a href="#cb35-7" aria-hidden="true" tabindex="-1"></a>queue<span class="sc">$</span><span class="fu">add</span>(wait, <span class="fu">list</span>(<span class="at">x =</span> <span class="fl">0.1</span>), <span class="at">id =</span> <span class="fu">toupper</span>(<span class="st">"a truth"</span>))</span>
+<span id="cb35-8"><a href="#cb35-8" aria-hidden="true" tabindex="-1"></a>queue<span class="sc">$</span><span class="fu">add</span>(wait, <span class="fu">list</span>(<span class="at">x =</span> <span class="fl">1.2</span>), <span class="at">id =</span> <span class="fu">toupper</span>(<span class="st">"must be"</span>))</span>
+<span id="cb35-9"><a href="#cb35-9" aria-hidden="true" tabindex="-1"></a>queue<span class="sc">$</span><span class="fu">add</span>(wait, <span class="fu">list</span>(<span class="at">x =</span> <span class="fl">0.9</span>), <span class="at">id =</span> <span class="fu">toupper</span>(<span class="st">"about"</span>))</span>
+<span id="cb35-10"><a href="#cb35-10" aria-hidden="true" tabindex="-1"></a>queue<span class="sc">$</span><span class="fu">add</span>(wait, <span class="fu">list</span>(<span class="at">x =</span> <span class="fl">1.6</span>), <span class="at">id =</span> <span class="fu">toupper</span>(<span class="st">"trick"</span>))</span>
+<span id="cb35-11"><a href="#cb35-11" aria-hidden="true" tabindex="-1"></a>queue<span class="sc">$</span><span class="fu">add</span>(wait, <span class="fu">list</span>(<span class="at">x =</span> <span class="fl">0.1</span>), <span class="at">id =</span> <span class="fu">toupper</span>(<span class="st">"that a"</span>))</span>
+<span id="cb35-12"><a href="#cb35-12" aria-hidden="true" tabindex="-1"></a>queue<span class="sc">$</span><span class="fu">add</span>(wait, <span class="fu">list</span>(<span class="at">x =</span> <span class="fl">0.5</span>), <span class="at">id =</span> <span class="fu">toupper</span>(<span class="st">"in want of"</span>))</span>
+<span id="cb35-13"><a href="#cb35-13" aria-hidden="true" tabindex="-1"></a>queue<span class="sc">$</span><span class="fu">add</span>(wait, <span class="fu">list</span>(<span class="at">x =</span> <span class="fl">1.0</span>), <span class="at">id =</span> <span class="fu">toupper</span>(<span class="st">"an async"</span>))</span>
+<span id="cb35-14"><a href="#cb35-14" aria-hidden="true" tabindex="-1"></a>out <span class="ot">&lt;-</span> queue<span class="sc">$</span><span class="fu">run</span>(<span class="at">message =</span> <span class="st">"verbose"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: IT IS finished in 0.172 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: A TRUTH finished in 0.169 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: UNIVERSALLY finished in 0.536 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: ACKNOWLEDGED finished in 0.776 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: THAT A finished in 0.173 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: POST finished in 1.07 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: ABOUT finished in 0.957 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: MULTITHREADING finished in 1.37 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: MUST BE finished in 1.25 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: IN WANT OF finished in 0.582 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: AN ASYNC finished in 1.06 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>→ Done: TRICK finished in 1.66 secs</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>✔ Queue complete: 12 tasks done in 2.21 secs</code></pre>
+</div>
+</div>
+<!--------------- appendices go here ----------------->
+
+
+</section>
+
+
+<div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document" role="doc-endnotes"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
+
+<ol>
+<li id="fn1"><p>Honestly, the whole reason this exists is that I was reading the callr blog post on writing <a href="https://www.tidyverse.org/blog/2019/09/callr-task-q/">multi-worker task queues</a> and decided to try doing it myself…<a href="#fnref1" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn2"><p>Note to self: Learn <a href="https://www.jottr.org/2022/12/05/avoid-detectcores/">parallelly</a><a href="#fnref2" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn3"><p><code>kubectl auth can-i create chaos</code><a href="#fnref3" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn4"><p>Longtime readers will have noticed that I have become a bit of a fangirl. I swear I’m not stalking him, but like, every time I think… gosh this is a really handy bit of infrastructure tooling, who do I have to thank for this… oh, of course it’s bloody Gábor again. Anyway.<a href="#fnref4" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn5"><p>I am a country girl, so FIFO means “fly-in fly-out”, and I shan’t be listening to any of you computer nerds who claim it has another meaning<a href="#fnref5" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn6"><p>Often<a href="#fnref6" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn7"><p>I mean, it was just a fun side project I did over the weekend because I have found myself quite unexpectedly unemployed, and my self-confidence is utterly shattered at the moment, and Stella needs to get her groove back slowly okay?<a href="#fnref7" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn8"><p>For the record, dear potential future employer, this is what is known as “self-deprecation”. Mistake not my awareness of the absurd cultural norms to which women are expected to conform with a literal claim about competence. In point of fact I am rather good at what I do.<a href="#fnref8" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+</ol>
+</section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
+  author = {Danielle Navarro},
+  title = {Queue},
+  date = {2022-12-22},
+  url = {https://blog.djnavarro.net/posts/2022-12-22_queue},
+  langid = {en}
+}
+</code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2022" class="csl-entry quarto-appendix-citeas" role="doc-biblioentry">
+Danielle Navarro. 2022. <span>“Queue.”</span> December 22, 2022. <a href="https://blog.djnavarro.net/posts/2022-12-22_queue">https://blog.djnavarro.net/posts/2022-12-22_queue</a>.
+</div></div></section></div></main> <!-- /main -->
+<!-- plausible -->
+<script async="" defer="" data-domain="blog.djnavarro.net" src="https://plausible.io/js/plausible.js"></script>
+<script id="quarto-html-after-body" type="application/javascript">
+window.document.addEventListener("DOMContentLoaded", function (event) {
+  const toggleBodyColorMode = (bsSheetEl) => {
+    const mode = bsSheetEl.getAttribute("data-mode");
+    const bodyEl = window.document.querySelector("body");
+    if (mode === "dark") {
+      bodyEl.classList.add("quarto-dark");
+      bodyEl.classList.remove("quarto-light");
+    } else {
+      bodyEl.classList.add("quarto-light");
+      bodyEl.classList.remove("quarto-dark");
+    }
+  }
+  const toggleBodyColorPrimary = () => {
+    const bsSheetEl = window.document.querySelector("link#quarto-bootstrap");
+    if (bsSheetEl) {
+      toggleBodyColorMode(bsSheetEl);
+    }
+  }
+  toggleBodyColorPrimary();  
+  const icon = "";
+  const anchorJS = new window.AnchorJS();
+  anchorJS.options = {
+    placement: 'right',
+    icon: icon
+  };
+  anchorJS.add('.anchored');
+  const clipboard = new window.ClipboardJS('.code-copy-button', {
+    target: function(trigger) {
+      return trigger.previousElementSibling;
+    }
+  });
+  clipboard.on('success', function(e) {
+    // button target
+    const button = e.trigger;
+    // don't keep focus
+    button.blur();
+    // flash "checked"
+    button.classList.add('code-copy-button-checked');
+    var currentTitle = button.getAttribute("title");
+    button.setAttribute("title", "Copied!");
+    let tooltip;
+    if (window.bootstrap) {
+      button.setAttribute("data-bs-toggle", "tooltip");
+      button.setAttribute("data-bs-placement", "left");
+      button.setAttribute("data-bs-title", "Copied!");
+      tooltip = new bootstrap.Tooltip(button, 
+        { trigger: "manual", 
+          customClass: "code-copy-button-tooltip",
+          offset: [0, -8]});
+      tooltip.show();    
+    }
+    setTimeout(function() {
+      if (tooltip) {
+        tooltip.hide();
+        button.removeAttribute("data-bs-title");
+        button.removeAttribute("data-bs-toggle");
+        button.removeAttribute("data-bs-placement");
+      }
+      button.setAttribute("title", currentTitle);
+      button.classList.remove('code-copy-button-checked');
+    }, 1000);
+    // clear code selection
+    e.clearSelection();
+  });
+  function tippyHover(el, contentFn) {
+    const config = {
+      allowHTML: true,
+      content: contentFn,
+      maxWidth: 500,
+      delay: 100,
+      arrow: false,
+      appendTo: function(el) {
+          return el.parentElement;
+      },
+      interactive: true,
+      interactiveBorder: 10,
+      theme: 'quarto',
+      placement: 'bottom-start'
+    };
+    window.tippy(el, config); 
+  }
+  const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+  for (var i=0; i<noterefs.length; i++) {
+    const ref = noterefs[i];
+    tippyHover(ref, function() {
+      // use id or data attribute instead here
+      let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+      try { href = new URL(href).hash; } catch {}
+      const id = href.replace(/^#\/?/, "");
+      const note = window.document.getElementById(id);
+      return note.innerHTML;
+    });
+  }
+  const findCites = (el) => {
+    const parentEl = el.parentElement;
+    if (parentEl) {
+      const cites = parentEl.dataset.cites;
+      if (cites) {
+        return {
+          el,
+          cites: cites.split(' ')
+        };
+      } else {
+        return findCites(el.parentElement)
+      }
+    } else {
+      return undefined;
+    }
+  };
+  var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+  for (var i=0; i<bibliorefs.length; i++) {
+    const ref = bibliorefs[i];
+    const citeInfo = findCites(ref);
+    if (citeInfo) {
+      tippyHover(citeInfo.el, function() {
+        var popup = window.document.createElement('div');
+        citeInfo.cites.forEach(function(cite) {
+          var citeDiv = window.document.createElement('div');
+          citeDiv.classList.add('hanging-indent');
+          citeDiv.classList.add('csl-entry');
+          var biblioDiv = window.document.getElementById('ref-' + cite);
+          if (biblioDiv) {
+            citeDiv.innerHTML = biblioDiv.innerHTML;
+          }
+          popup.appendChild(citeDiv);
+        });
+        return popup.innerHTML;
+      });
+    }
+  }
+});
+</script>
+</div> <!-- /content -->
+
+
+
+</body></html>

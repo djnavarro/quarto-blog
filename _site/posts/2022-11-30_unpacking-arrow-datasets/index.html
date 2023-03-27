@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.2.335">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+<meta name="author" content="Danielle Navarro">
+<meta name="dcterms.date" content="2022-11-30">
+<meta name="description" content="A comment on how Datasets work in Apache Arrow. I’m not really sure who the audience for this one. Am I just talking to myself? Probably.">
+
+<title>Notes from a data witch - Unpacking Arrow Datasets</title>
+<style>
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1.6em;
+  vertical-align: middle;
+}
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+    color: #aaaaaa;
+  }
+pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+code span.al { color: #ff0000; font-weight: bold; } /* Alert */
+code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } /* Annotation */
+code span.at { color: #7d9029; } /* Attribute */
+code span.bn { color: #40a070; } /* BaseN */
+code span.bu { color: #008000; } /* BuiltIn */
+code span.cf { color: #007020; font-weight: bold; } /* ControlFlow */
+code span.ch { color: #4070a0; } /* Char */
+code span.cn { color: #880000; } /* Constant */
+code span.co { color: #60a0b0; font-style: italic; } /* Comment */
+code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } /* CommentVar */
+code span.do { color: #ba2121; font-style: italic; } /* Documentation */
+code span.dt { color: #902000; } /* DataType */
+code span.dv { color: #40a070; } /* DecVal */
+code span.er { color: #ff0000; font-weight: bold; } /* Error */
+code span.ex { } /* Extension */
+code span.fl { color: #40a070; } /* Float */
+code span.fu { color: #06287e; } /* Function */
+code span.im { color: #008000; font-weight: bold; } /* Import */
+code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Information */
+code span.kw { color: #007020; font-weight: bold; } /* Keyword */
+code span.op { color: #666666; } /* Operator */
+code span.ot { color: #007020; } /* Other */
+code span.pp { color: #bc7a00; } /* Preprocessor */
+code span.sc { color: #4070a0; } /* SpecialChar */
+code span.ss { color: #bb6688; } /* SpecialString */
+code span.st { color: #4070a0; } /* String */
+code span.va { color: #19177c; } /* Variable */
+code span.vs { color: #4070a0; } /* VerbatimString */
+code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
+</style>
+
+
+<script src="../../site_libs/quarto-nav/quarto-nav.js"></script>
+<script src="../../site_libs/quarto-nav/headroom.min.js"></script>
+<script src="../../site_libs/clipboard/clipboard.min.js"></script>
+<script src="../../site_libs/quarto-search/autocomplete.umd.js"></script>
+<script src="../../site_libs/quarto-search/fuse.min.js"></script>
+<script src="../../site_libs/quarto-search/quarto-search.js"></script>
+<meta name="quarto:offset" content="../../">
+<script src="../../site_libs/quarto-html/quarto.js"></script>
+<script src="../../site_libs/quarto-html/popper.min.js"></script>
+<script src="../../site_libs/quarto-html/tippy.umd.min.js"></script>
+<script src="../../site_libs/quarto-html/anchor.min.js"></script>
+<link href="../../site_libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="../../site_libs/quarto-html/quarto-syntax-highlighting.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="../../site_libs/bootstrap/bootstrap.min.js"></script>
+<link href="../../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="../../site_libs/bootstrap/bootstrap.min.css" rel="stylesheet" id="quarto-bootstrap" data-mode="light">
+<script id="quarto-search-options" type="application/json">{
+  "location": "navbar",
+  "copy-button": false,
+  "collapse-after": 3,
+  "panel-placement": "end",
+  "type": "overlay",
+  "limit": 20,
+  "language": {
+    "search-no-results-text": "No results",
+    "search-matching-documents-text": "matching documents",
+    "search-copy-link-title": "Copy link to search",
+    "search-hide-matches-text": "Hide additional matches",
+    "search-more-match-text": "more match in this document",
+    "search-more-matches-text": "more matches in this document",
+    "search-clear-button-title": "Clear",
+    "search-detached-cancel-button-title": "Cancel",
+    "search-submit-button-title": "Submit"
+  }
+}</script>
+<style>
+    .quarto-title-block .quarto-title-banner {
+      background: #eeeeee;
+    }
+    </style>
+
+
+<link rel="stylesheet" href="../../styles.css">
+<meta property="og:title" content="Notes from a data witch - Unpacking Arrow Datasets">
+<meta property="og:description" content="A comment on how Datasets work in Apache Arrow. I'm not really sure who the audience for this one. Am I just talking to myself? Probably.">
+<meta property="og:image" content="https://blog.djnavarro.net/posts/2022-11-30_unpacking-arrow-datasets/img/subdivision_07_1650.png">
+<meta property="og:site-name" content="Notes from a data witch">
+<meta property="og:image:height" content="2000">
+<meta property="og:image:width" content="2000">
+<meta name="twitter:title" content="Notes from a data witch - Unpacking Arrow Datasets">
+<meta name="twitter:description" content="A comment on how Datasets work in Apache Arrow. I'm not really sure who the audience for this one. Am I just talking to myself? Probably.">
+<meta name="twitter:image" content="https://blog.djnavarro.net/posts/2022-11-30_unpacking-arrow-datasets/img/subdivision_07_1650.png">
+<meta name="twitter:creator" content="@djnavarro">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image-height" content="2000">
+<meta name="twitter:image-width" content="2000">
+</head>
+
+<body class="floating nav-fixed">
+
+<div id="quarto-search-results"></div>
+  <header id="quarto-header" class="headroom fixed-top">
+    <nav class="navbar navbar-expand-lg navbar-dark ">
+      <div class="navbar-container container-fluid">
+      <div class="navbar-brand-container">
+    <a class="navbar-brand" href="../../index.html">
+    <span class="navbar-title">Notes from a data witch</span>
+    </a>
+  </div>
+          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarCollapse" aria-controls="navbarCollapse" aria-expanded="false" aria-label="Toggle navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
+  <span class="navbar-toggler-icon"></span>
+</button>
+          <div class="collapse navbar-collapse" id="navbarCollapse">
+            <ul class="navbar-nav navbar-nav-scroll ms-auto">
+  <li class="nav-item compact">
+    <a class="nav-link" href="https://fosstodon.org/@djnavarro"><i class="bi bi-mastodon" role="img" aria-label="mastodon">
+</i> 
+ <span class="menu-text"></span></a>
+  </li>  
+  <li class="nav-item compact">
+    <a class="nav-link" href="https://github.com/djnavarro"><i class="bi bi-github" role="img" aria-label="github">
+</i> 
+ <span class="menu-text"></span></a>
+  </li>  
+  <li class="nav-item compact">
+    <a class="nav-link" href="https://djnavarro.net"><i class="bi bi-person-circle" role="img" aria-label="website">
+</i> 
+ <span class="menu-text"></span></a>
+  </li>  
+  <li class="nav-item compact">
+    <a class="nav-link" href="https://art.djnavarro.net"><i class="bi bi-palette-fill" role="img" aria-label="art">
+</i> 
+ <span class="menu-text"></span></a>
+  </li>  
+</ul>
+              <div id="quarto-search" class="" title="Search"></div>
+          </div> <!-- /navcollapse -->
+      </div> <!-- /container-fluid -->
+    </nav>
+</header>
+<!-- content -->
+<header id="title-block-header" class="quarto-title-block default toc-left page-columns page-full">
+  <div class="quarto-title-banner page-columns page-full">
+    <div class="quarto-title column-body">
+      <h1 class="title">Unpacking Arrow Datasets</h1>
+                  <div>
+        <div class="description">
+          A comment on how Datasets work in Apache Arrow. I’m not really sure who the audience for this one. Am I just talking to myself? Probably.
+        </div>
+      </div>
+                          <div class="quarto-categories">
+                <div class="quarto-category">Apache Arrow</div>
+                <div class="quarto-category">R</div>
+              </div>
+                  </div>
+  </div>
+    
+  <div class="quarto-title-meta-author">
+    <div class="quarto-title-meta-heading">Author</div>
+    <div class="quarto-title-meta-heading">Affiliation</div>
+    
+      <div class="quarto-title-meta-contents">
+      <a href="https://djnavarro.net">Danielle Navarro</a> <a href="https://orcid.org/0000-0001-7648-6578" class="quarto-title-author-orcid"> <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAA2ZpVFh0WE1MOmNvbS5hZG9iZS54bXAAAAAAADw/eHBhY2tldCBiZWdpbj0i77u/IiBpZD0iVzVNME1wQ2VoaUh6cmVTek5UY3prYzlkIj8+IDx4OnhtcG1ldGEgeG1sbnM6eD0iYWRvYmU6bnM6bWV0YS8iIHg6eG1wdGs9IkFkb2JlIFhNUCBDb3JlIDUuMC1jMDYwIDYxLjEzNDc3NywgMjAxMC8wMi8xMi0xNzozMjowMCAgICAgICAgIj4gPHJkZjpSREYgeG1sbnM6cmRmPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5LzAyLzIyLXJkZi1zeW50YXgtbnMjIj4gPHJkZjpEZXNjcmlwdGlvbiByZGY6YWJvdXQ9IiIgeG1sbnM6eG1wTU09Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC9tbS8iIHhtbG5zOnN0UmVmPSJodHRwOi8vbnMuYWRvYmUuY29tL3hhcC8xLjAvc1R5cGUvUmVzb3VyY2VSZWYjIiB4bWxuczp4bXA9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC8iIHhtcE1NOk9yaWdpbmFsRG9jdW1lbnRJRD0ieG1wLmRpZDo1N0NEMjA4MDI1MjA2ODExOTk0QzkzNTEzRjZEQTg1NyIgeG1wTU06RG9jdW1lbnRJRD0ieG1wLmRpZDozM0NDOEJGNEZGNTcxMUUxODdBOEVCODg2RjdCQ0QwOSIgeG1wTU06SW5zdGFuY2VJRD0ieG1wLmlpZDozM0NDOEJGM0ZGNTcxMUUxODdBOEVCODg2RjdCQ0QwOSIgeG1wOkNyZWF0b3JUb29sPSJBZG9iZSBQaG90b3Nob3AgQ1M1IE1hY2ludG9zaCI+IDx4bXBNTTpEZXJpdmVkRnJvbSBzdFJlZjppbnN0YW5jZUlEPSJ4bXAuaWlkOkZDN0YxMTc0MDcyMDY4MTE5NUZFRDc5MUM2MUUwNEREIiBzdFJlZjpkb2N1bWVudElEPSJ4bXAuZGlkOjU3Q0QyMDgwMjUyMDY4MTE5OTRDOTM1MTNGNkRBODU3Ii8+IDwvcmRmOkRlc2NyaXB0aW9uPiA8L3JkZjpSREY+IDwveDp4bXBtZXRhPiA8P3hwYWNrZXQgZW5kPSJyIj8+84NovQAAAR1JREFUeNpiZEADy85ZJgCpeCB2QJM6AMQLo4yOL0AWZETSqACk1gOxAQN+cAGIA4EGPQBxmJA0nwdpjjQ8xqArmczw5tMHXAaALDgP1QMxAGqzAAPxQACqh4ER6uf5MBlkm0X4EGayMfMw/Pr7Bd2gRBZogMFBrv01hisv5jLsv9nLAPIOMnjy8RDDyYctyAbFM2EJbRQw+aAWw/LzVgx7b+cwCHKqMhjJFCBLOzAR6+lXX84xnHjYyqAo5IUizkRCwIENQQckGSDGY4TVgAPEaraQr2a4/24bSuoExcJCfAEJihXkWDj3ZAKy9EJGaEo8T0QSxkjSwORsCAuDQCD+QILmD1A9kECEZgxDaEZhICIzGcIyEyOl2RkgwAAhkmC+eAm0TAAAAABJRU5ErkJggg=="></a>
+    </div>
+      <div class="quarto-title-meta-contents">
+          <p class="affiliation">
+              <a href="https://voltrondata.com">
+              Voltron Data
+              </a>
+            </p>
+        </div>
+      </div>
+
+  <div class="quarto-title-meta">
+
+        
+      <div>
+      <div class="quarto-title-meta-heading">Published</div>
+      <div class="quarto-title-meta-contents">
+        <p class="date">November 30, 2022</p>
+      </div>
+    </div>
+    
+      
+    </div>
+    
+  
+  </header><div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-article page-navbar">
+<!-- sidebar -->
+  <nav id="quarto-sidebar" class="sidebar collapse sidebar-navigation floating overflow-auto">
+    <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">Table of contents</h2>
+   
+  <ul>
+  <li><a href="#quick-recap-record-batches-and-tables" id="toc-quick-recap-record-batches-and-tables" class="nav-link active" data-scroll-target="#quick-recap-record-batches-and-tables">Quick recap: Record Batches and Tables</a></li>
+  <li><a href="#so-datasets" id="toc-so-datasets" class="nav-link" data-scroll-target="#so-datasets">So… Datasets?</a></li>
+  <li><a href="#what-is-a-dataset-on-disk" id="toc-what-is-a-dataset-on-disk" class="nav-link" data-scroll-target="#what-is-a-dataset-on-disk">What is a Dataset on-disk?</a></li>
+  <li><a href="#whats-stored-in-memory-by-the-dataset" id="toc-whats-stored-in-memory-by-the-dataset" class="nav-link" data-scroll-target="#whats-stored-in-memory-by-the-dataset">What’s stored in-memory by the Dataset?</a></li>
+  <li><a href="#how-does-a-dataset-query-work" id="toc-how-does-a-dataset-query-work" class="nav-link" data-scroll-target="#how-does-a-dataset-query-work">How does a Dataset query work?</a></li>
+  <li><a href="#what-was-the-point" id="toc-what-was-the-point" class="nav-link" data-scroll-target="#what-was-the-point">What was the point?</a></li>
+  </ul>
+</nav>
+</nav>
+<!-- margin-sidebar -->
+    <div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
+    </div>
+<!-- main -->
+<main class="content quarto-banner-title-block page-columns page-full" id="quarto-document-content">
+
+
+
+
+<!--------------- my typical setup ----------------->
+<!--------------- post begins here ----------------->
+<p>Hello again lovely people. I am, once again, blogging about Apache Arrow and I’m not even sorry. Oh well.</p>
+<p>In an earlier post I wrote about <a href="../../posts/2022-05-25_arrays-and-tables-in-arrow/index.html">Tables and other in-memory data structures</a> that Arrow uses to represent data objects. That meant the bulk of the post was focused on Record Batch and Table objects and the constituent objects used to define columns in one of these things (Arrays and Chunked Arrays).</p>
+<p>What I didn’t <em>really</em> talk about in that post was Datasets, which are used to represent data (typically larger-than-memory data) that are stored on-disk rather than in-memory. Okay, fine, yeah. Technically I did include a <a href="../../posts/2022-05-25_arrays-and-tables-in-arrow/index.html#datasets">section on Datasets</a> at the end of the post, but I was a bit evasive. I gave an example showing how to use Datasets, but I really didn’t talk much about what they are.</p>
+<p>I had a very good reason for this, dear reader, and that reason is this: when I wrote that post I had no f**king idea whatsoever how Datasets worked. I knew how to use them, but if you’d asked me questions about how the magic works I couldn’t have told you.<a href="#fn1" class="footnote-ref" id="fnref1" role="doc-noteref"><sup>1</sup></a></p>
+<p>Since that time I’ve learned a few things, and because I’m an annoying person I’m going to tell you about them.<a href="#fn2" class="footnote-ref" id="fnref2" role="doc-noteref"><sup>2</sup></a></p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb1"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(arrow, <span class="at">warn.conflicts =</span> <span class="cn">FALSE</span>)</span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(dplyr, <span class="at">warn.conflicts =</span> <span class="cn">FALSE</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p><br></p>
+<div class="column-screen">
+<p><img src="./img/subdivision_08_1731.png" class="img-fluid"></p>
+</div>
+<section id="quick-recap-record-batches-and-tables" class="level2 page-columns page-full">
+<h2 class="anchored" data-anchor-id="quick-recap-record-batches-and-tables">Quick recap: Record Batches and Tables</h2>
+<p>At this point I’ve written <a href="https://blog.djnavarro.net/category/apache-arrow">quite a few posts about Arrow</a>, and it’s not necessarily a good idea for me to assume that you’ve had the misfortune to read all<a href="#fn3" class="footnote-ref" id="fnref3" role="doc-noteref"><sup>3</sup></a> of them. So here’s a quick recap of some of the key Arrow data structures that I’ve talked about in other posts…</p>
+<p>Let’s start with Record Batches. A Record Batch is tabular data structure comprised of named Arrays,<a href="#fn4" class="footnote-ref" id="fnref4" role="doc-noteref"><sup>4</sup></a> and an accompanying Schema<a href="#fn5" class="footnote-ref" id="fnref5" role="doc-noteref"><sup>5</sup></a> that specifies the name and data type associated with each Array. We can create one manually using <code>record_batch()</code></p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb2"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a>rb <span class="ot">&lt;-</span> <span class="fu">record_batch</span>(</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">strs =</span> <span class="fu">c</span>(<span class="st">"hello"</span>, <span class="st">"amazing"</span>, <span class="st">"and"</span>, <span class="st">"cruel"</span>, <span class="st">"world"</span>), </span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">ints =</span> <span class="fu">c</span>(1L, <span class="cn">NA</span>, 2L, 4L, 8L),</span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">dbls =</span> <span class="fu">c</span>(<span class="fl">1.1</span>, <span class="fl">3.2</span>, <span class="fl">0.2</span>, <span class="cn">NA</span>, <span class="dv">11</span>)</span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a><span class="fu">glimpse</span>(rb)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>RecordBatch
+5 rows x 3 columns
+$ strs &lt;string&gt; "hello", "amazing", "and", "cruel", "world"
+$ ints  &lt;int32&gt; 1, NA, 2, 4, 8
+$ dbls &lt;double&gt; 1.1, 3.2, 0.2, NA, 11.0</code></pre>
+</div>
+</div>
+<p>This is a Record Batch containing 5 rows and 3 columns. The command <code>rb[1:3, 1:2]</code> extracts the first three rows and the first two columns:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb4"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="fu">glimpse</span>(rb[<span class="dv">1</span><span class="sc">:</span><span class="dv">3</span>, <span class="dv">1</span><span class="sc">:</span><span class="dv">2</span>])</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>RecordBatch
+3 rows x 2 columns
+$ strs &lt;string&gt; "hello", "amazing", "and"
+$ ints  &lt;int32&gt; 1, NA, 2</code></pre>
+</div>
+</div>
+<p>The structure of a Record Batch is shown below. In addition to the three Arrays specifying the columns, it includes an explicit Schema object containing relevant metadata:</p>
+<p><img src="./img/record_batch.png" class="img-fluid"></p>
+<p>Record Batches are a fundamental unit for data interchange in Arrow, but are not typically used for data analysis. The reason for this is that the constituent Arrays that store columns in a Record Batch are immutable: they cannot be modified or extended without creating a new object.<a href="#fn6" class="footnote-ref" id="fnref6" role="doc-noteref"><sup>6</sup></a> When data arrive sequentially Record Batches can be inconvenient, because you can’t concatenate them. For that reason Tables are usually more practical…</p>
+<p>So let’s turn to Tables next. From the user perspective a Table is very similar to a Record Batch but the constituent parts are Chunked Arrays. Chunked Arrays are flexible wrappers enclosing one or more Arrays.<a href="#fn7" class="footnote-ref" id="fnref7" role="doc-noteref"><sup>7</sup></a> This makes it possible to concatenate tables. To quickly illustrate this, let’s first convert the <code>rb</code> Record Batch to a Table using <code>arrow_table()</code>:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb6"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a>df1 <span class="ot">&lt;-</span> <span class="fu">arrow_table</span>(rb)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>Now we create a second Table with the same column names and types, again using <code>arrow_table()</code>:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb7"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a>df2 <span class="ot">&lt;-</span> <span class="fu">arrow_table</span>(</span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">strs =</span> <span class="fu">c</span>(<span class="st">"I"</span>, <span class="st">"love"</span>, <span class="st">"you"</span>), </span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">ints =</span> <span class="fu">c</span>(5L, 0L, 0L),</span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">dbls =</span> <span class="fu">c</span>(<span class="fl">7.1</span>, <span class="sc">-</span><span class="fl">0.1</span>, <span class="dv">2</span>)</span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>We can concatenate these using <code>concat_tables()</code>:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb8"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a>df <span class="ot">&lt;-</span> <span class="fu">concat_tables</span>(df1, df2)</span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="fu">glimpse</span>(df)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Table
+8 rows x 3 columns
+$ strs &lt;string&gt; "hello", "amazing", "and", "cruel", "world", "I", "love", "you"
+$ ints  &lt;int32&gt; 1, NA, 2, 4, 8, 5, 0, 0
+$ dbls &lt;double&gt; 1.1, 3.2, 0.2, NA, 11.0, 7.1, -0.1, 2.0</code></pre>
+</div>
+</div>
+<p>The structure of this Table object is similar to the structure of the Record Batch object I showed earlier, but the columns are Chunked Arrays rather than simple Arrays:</p>
+<p><img src="./img/table.png" class="img-fluid"> You can see this if we print out a single column:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb10"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a>df<span class="sc">$</span>strs</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>ChunkedArray
+&lt;string&gt;
+[
+  [
+    "hello",
+    "amazing",
+    "and",
+    "cruel",
+    "world"
+  ],
+  [
+    "I",
+    "love",
+    "you"
+  ]
+]</code></pre>
+</div>
+</div>
+<p>There’s a visual separation there between the different chunks, used to indicated where the boundaries between individual Arrays are. In practice though you actually don’t have to care about this because it’s not semantically meaningful. It’s there for purely technical reasons.</p>
+<p>But all this is background. So let’s move on, shall we?</p>
+<p><br></p>
+<div class="column-screen">
+<p><img src="./img/subdivision_08_1708.png" class="img-fluid"></p>
+</div>
+</section>
+<section id="so-datasets" class="level2 page-columns page-full">
+<h2 class="anchored" data-anchor-id="so-datasets">So… Datasets?</h2>
+<p>Okay, what about Datasets? Like Record Batch and Table objects, a Dataset is used to represent tabular data. At an abstract level, a Dataset can be viewed as an object comprised of rows and columns, and just like Record Batches and Tables, it contains an explicit Schema that specifies the name and data type associated with each column.</p>
+<p>However, where Tables and Record Batches are data explicitly represented in-memory, a Dataset is not. Instead, a Dataset is an abstraction that refers to data stored on-disk in one or more files. Reading the data takes place only as needed, and only when a query is executed against the data. In this respect Arrow Datasets are a very different kind of object to Arrow Tables, but the arrow package is written in a way that the dplyr commands used to analyze Tables can also be applied to Datasets.</p>
+<p><br></p>
+<div class="column-screen">
+<p><img src="./img/subdivision_08_1715.png" class="img-fluid"></p>
+</div>
+</section>
+<section id="what-is-a-dataset-on-disk" class="level2 page-columns page-full">
+<h2 class="anchored" data-anchor-id="what-is-a-dataset-on-disk">What is a Dataset on-disk?</h2>
+<p>Reduced to its simplest form, the on-disk structure of a Dataset is simply a collection of data files, each storing one subset of the data. These subsets are sometimes referred to as “fragments”, and the partitioning process is sometimes referred to as “sharding”. To illustrate how this works, I’ll write a multi-file dataset to disk manually, without using any of the Arrow Dataset functionality to do the work. I’ll keep it deliberately simple and use three small data frames, each containing one subset of the data we want to store:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb12"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a>df_a <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(<span class="at">id =</span> <span class="dv">1</span><span class="sc">:</span><span class="dv">5</span>, <span class="at">value =</span> <span class="fu">rnorm</span>(<span class="dv">5</span>), <span class="at">subset =</span> <span class="st">"a"</span>)</span>
+<span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a>df_b <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(<span class="at">id =</span> <span class="dv">6</span><span class="sc">:</span><span class="dv">10</span>, <span class="at">value =</span> <span class="fu">rnorm</span>(<span class="dv">5</span>), <span class="at">subset =</span> <span class="st">"b"</span>)</span>
+<span id="cb12-3"><a href="#cb12-3" aria-hidden="true" tabindex="-1"></a>df_c <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(<span class="at">id =</span> <span class="dv">11</span><span class="sc">:</span><span class="dv">15</span>, <span class="at">value =</span> <span class="fu">rnorm</span>(<span class="dv">5</span>), <span class="at">subset =</span> <span class="st">"c"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>Our intention is that each of the data frames should be stored in a separate data file. As you can see, this is a quite structured partitioning: all data where <code>subset = "a"</code> belong to one file, all data where <code>subset = "b"</code> belong to another file, and all data where <code>subset = "c"</code> belong to the third file.<a href="#fn8" class="footnote-ref" id="fnref8" role="doc-noteref"><sup>8</sup></a></p>
+<p>The first step is to define and create a folder that will hold all the files:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb13"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a>ds_dir <span class="ot">&lt;-</span> <span class="st">"mini-dataset"</span></span>
+<span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a><span class="fu">dir.create</span>(ds_dir)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>The next step is to manually create a “Hive-style”<a href="#fn9" class="footnote-ref" id="fnref9" role="doc-noteref"><sup>9</sup></a> folder structure:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb14"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a>ds_dir_a <span class="ot">&lt;-</span> <span class="fu">file.path</span>(ds_dir, <span class="st">"subset=a"</span>)</span>
+<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a>ds_dir_b <span class="ot">&lt;-</span> <span class="fu">file.path</span>(ds_dir, <span class="st">"subset=b"</span>)</span>
+<span id="cb14-3"><a href="#cb14-3" aria-hidden="true" tabindex="-1"></a>ds_dir_c <span class="ot">&lt;-</span> <span class="fu">file.path</span>(ds_dir, <span class="st">"subset=c"</span>)</span>
+<span id="cb14-4"><a href="#cb14-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-5"><a href="#cb14-5" aria-hidden="true" tabindex="-1"></a><span class="fu">dir.create</span>(ds_dir_a)</span>
+<span id="cb14-6"><a href="#cb14-6" aria-hidden="true" tabindex="-1"></a><span class="fu">dir.create</span>(ds_dir_b)</span>
+<span id="cb14-7"><a href="#cb14-7" aria-hidden="true" tabindex="-1"></a><span class="fu">dir.create</span>(ds_dir_c)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>Notice that we have named each folder in a “key=value” format that exactly describes the subset of data that will be written into that folder. This naming structure is the essence of Hive-style partitions.</p>
+<p>Now that we have the folders, we’ll use <code>write_parquet()</code> to create a single <a href="https://parquet.apache.org">parquet file</a><a href="#fn10" class="footnote-ref" id="fnref10" role="doc-noteref"><sup>10</sup></a> for each of the three subsets:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb15"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="fu">write_parquet</span>(df_a, <span class="fu">file.path</span>(ds_dir_a, <span class="st">"part-0.parquet"</span>))</span>
+<span id="cb15-2"><a href="#cb15-2" aria-hidden="true" tabindex="-1"></a><span class="fu">write_parquet</span>(df_b, <span class="fu">file.path</span>(ds_dir_b, <span class="st">"part-0.parquet"</span>))</span>
+<span id="cb15-3"><a href="#cb15-3" aria-hidden="true" tabindex="-1"></a><span class="fu">write_parquet</span>(df_c, <span class="fu">file.path</span>(ds_dir_c, <span class="st">"part-0.parquet"</span>))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>If I’d wanted to, I could have further subdivided the dataset. A folder can contain multiple files (<code>part-0.parquet</code>, <code>part-1.parquet</code>, etc) if we would like it to, though there’s no point whatsoever in doing that with such a tiny dataset. Similarly, there is no requirement to name the files <code>part-0.parquet</code> this way at all: it would have been fine to call these files <code>subset-a.parquet</code>, <code>subset-b.parquet</code>, and <code>subset-c.parquet</code> if I’d wanted to do that. I only chose <code>part-0.parquet</code> because that’s the default filename that the <code>write_dataset()</code> function in the arrow package generates!</p>
+<p>Along the same lines, it isn’t <em>necessary</em> to use Hive-style partitions to use Arrow Datasets. The default behaviour of <code>write_dataset()</code> is to construct Hive-style partitions, and the default in <code>open_dataset()</code> is to look for Hive-style partitions, but it isn’t required.</p>
+<p>In any case, I’ve created an on-disk parquet Dataset using Hive-style partitioning. My Dataset is defined by these files:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb16"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="fu">list.files</span>(ds_dir, <span class="at">recursive =</span> <span class="cn">TRUE</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] "subset=a/part-0.parquet" "subset=b/part-0.parquet"
+[3] "subset=c/part-0.parquet"</code></pre>
+</div>
+</div>
+<p>This is exciting, right? I mean, I’m excited. How could anyone not be completely enthralled by this thrilling exposition?</p>
+<p>Aaaaanyway…. to verify that everything has worked, I’ll now try to open the data with <code>open_dataset()</code> and call <code>glimpse()</code> to inspect its contents:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb18"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a>ds <span class="ot">&lt;-</span> <span class="fu">open_dataset</span>(ds_dir)</span>
+<span id="cb18-2"><a href="#cb18-2" aria-hidden="true" tabindex="-1"></a><span class="fu">glimpse</span>(ds)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>FileSystemDataset with 3 Parquet files
+15 rows x 3 columns
+$ id      &lt;int32&gt; 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
+$ value  &lt;double&gt; -0.08458607, 0.84040013, -0.46348277, -0.55083500, 0.73604043,…
+$ subset &lt;string&gt; "a", "a", "a", "a", "a", "b", "b", "b", "b", "b", "c", "c", "c…
+Call `print()` for full schema details</code></pre>
+</div>
+</div>
+<p>As you can see, the <code>ds</code> Dataset object aggregates the three separate data files. In fact, in this particular case the Dataset is so small that values from all three files appear in the output of <code>glimpse()</code>.</p>
+<p>Now, it’s pretty obvious that I wouldn’t use this workflow in my everyday life. Manually writing individual files like this is tiresome, especially when the exact same dataset can be created with the following command:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb20"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a>ds <span class="sc">|&gt;</span> </span>
+<span id="cb20-2"><a href="#cb20-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">group_by</span>(subset) <span class="sc">|&gt;</span></span>
+<span id="cb20-3"><a href="#cb20-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">write_dataset</span>(<span class="st">"mini-dataset"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>As an aside, even if <code>ds</code> happens to refer to an on-disk Dataset that is larger than memory, and you’re just wanting to rewrite it with a different file structure, this pipeline should still work without any risk of an out-of-memory error. This is thanks to the Dataset backpressure functionality<a href="#fn11" class="footnote-ref" id="fnref11" role="doc-noteref"><sup>11</sup></a> in which the reader will back off and slow down if the writer has fallen too far behind and the memory cache is filling up. Or something like that. Look, I almost managed to make myself care about the details, okay?</p>
+<p><br></p>
+<div class="column-screen">
+<p><img src="./img/subdivision_08_1730.png" class="img-fluid"></p>
+</div>
+</section>
+<section id="whats-stored-in-memory-by-the-dataset" class="level2 page-columns page-full">
+<h2 class="anchored" data-anchor-id="whats-stored-in-memory-by-the-dataset">What’s stored in-memory by the Dataset?</h2>
+<p>Assuming I have any readers left at this point in the post, I know what you’re all thinking:</p>
+<blockquote class="blockquote">
+<p>Yes okay Danielle that’s fine, I get it, a Dataset is just a bunch of files on disk. But actually I already knew that. There has to be <em>something</em> in-memory though right? What’s that thing? Tell me about that.</p>
+</blockquote>
+<p>First off, rude. I was getting to it! Second, yes you are totally right. Sorry. So okay, in the last section I created this the <code>ds</code> object. Like most objects created by the arrow package, it’s an R6 object with a bunch of fields and methods that are used to wrap bindings to the corresponding Arrow C++ dark magic… sorry, um, methods. Anyway, for our purposes there are two things of importance: the <code>ds</code> object has an active binding specifying the Schema of the Dataset, and another one specifying the paths to all the files. That’s pretty much it. Paths to these files are stored in an active binding <code>ds$files</code>:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb21"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb21-1"><a href="#cb21-1" aria-hidden="true" tabindex="-1"></a>ds<span class="sc">$</span>files </span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] "/home/danielle/GitHub/sites/quarto-blog/posts/2022-11-30_unpacking-arrow-datasets/mini-dataset/subset=a/part-0.parquet"
+[2] "/home/danielle/GitHub/sites/quarto-blog/posts/2022-11-30_unpacking-arrow-datasets/mini-dataset/subset=b/part-0.parquet"
+[3] "/home/danielle/GitHub/sites/quarto-blog/posts/2022-11-30_unpacking-arrow-datasets/mini-dataset/subset=c/part-0.parquet"</code></pre>
+</div>
+</div>
+<p>The Schema is stored as <code>ds$schema</code>:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb23"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb23-1"><a href="#cb23-1" aria-hidden="true" tabindex="-1"></a>ds<span class="sc">$</span>schema</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Schema
+id: int32
+value: double
+subset: string
+
+See $metadata for additional Schema metadata</code></pre>
+</div>
+</div>
+<p>By default this Schema is inferred by <code>open_dataset()</code> by inspecting the first file only, though it is possible to construct a unified schema after inspecting all files. To do this, set <code>unify_schemas = TRUE</code> when calling <code>open_dataset()</code>. It is also possible to use the <code>schema</code> argument to <code>open_dataset()</code> to specify the Schema explicitly (see the <code>schema()</code> function for details).</p>
+<p>In any case, in most situations I think it’s reasonable to use this as the mental model of what the <code>ds</code> object contains:</p>
+<p><img src="./img/dataset.png" class="img-fluid"></p>
+<p><br></p>
+<div class="column-screen">
+<p><img src="./img/subdivision_08_1707.png" class="img-fluid"></p>
+</div>
+</section>
+<section id="how-does-a-dataset-query-work" class="level2 page-columns page-full">
+<h2 class="anchored" data-anchor-id="how-does-a-dataset-query-work">How does a Dataset query work?</h2>
+<p>Hm. So if the Dataset object<a href="#fn12" class="footnote-ref" id="fnref12" role="doc-noteref"><sup>12</sup></a> is essentially nothing more than a Schema and a list of files, what happens at the time a query has to be evaluated? At some point the data (or at least some of it) do have to be read into memory in order to perform the compute operations! I mean, consider the following dplyr pipeline:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb25"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb25-1"><a href="#cb25-1" aria-hidden="true" tabindex="-1"></a>ds <span class="sc">|&gt;</span></span>
+<span id="cb25-2"><a href="#cb25-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(value <span class="sc">&gt;</span> <span class="dv">0</span>) <span class="sc">|&gt;</span></span>
+<span id="cb25-3"><a href="#cb25-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">new_value =</span> <span class="fu">round</span>(<span class="dv">100</span> <span class="sc">*</span> value)) <span class="sc">|&gt;</span></span>
+<span id="cb25-4"><a href="#cb25-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(id, subset, new_value) <span class="sc">|&gt;</span></span>
+<span id="cb25-5"><a href="#cb25-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">collect</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>  id subset new_value
+1  2      a        84
+2  5      a        74
+3 12      c        29
+4 13      c        42
+5 15      c         7</code></pre>
+</div>
+</div>
+<p>At some point in making this happen, data are loaded and computations are performed. At the user level we don’t really think about it much: the dplyr bindings supplied by the arrow package provide us with an abstraction layer for Datasets that completely mask this aspect of the process. That’s super cool because honestly I don’t care enough to spend my time on that sort of thing, but I also find myself curious… what happens when we strip the abstraction away? How would we do this analysis without these abstractions?</p>
+<p>When querying a Dataset, we need a strategy for reading data: this is coordinated by a <a href="https://arrow.apache.org/docs/r/reference/Scanner.html">Scanner</a> object constructed for the specific Dataset and the specific query. When analyzing a Dataset using the dplyr interface you never need to construct a Scanner manually, but for explanatory purposes I’ll create one:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb27"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb27-1"><a href="#cb27-1" aria-hidden="true" tabindex="-1"></a>scan <span class="ot">&lt;-</span> Scanner<span class="sc">$</span><span class="fu">create</span>(<span class="at">dataset =</span> ds)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>Calling the <code>ToTable()</code> method will materialise the Dataset (on-disk) as a Table (in-memory):<a href="#fn13" class="footnote-ref" id="fnref13" role="doc-noteref"><sup>13</sup></a></p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb28"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb28-1"><a href="#cb28-1" aria-hidden="true" tabindex="-1"></a>scan<span class="sc">$</span><span class="fu">ToTable</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Table
+15 rows x 3 columns
+$id &lt;int32&gt;
+$value &lt;double&gt;
+$subset &lt;string&gt;
+
+See $metadata for additional Schema metadata</code></pre>
+</div>
+</div>
+<p>You can see that this has returned 15 rows (i.e., the whole dataset). If we want to reproduce the behaviour of the dplyr pipeline using the low-level Dataset interface by creating a new scan by specifying the <code>filter</code> and <code>projection</code> arguments to <code>Scanner$create()</code>. The <code>filter</code> argument is used to modify the rows that are returned by the Scanner, and the <code>projection</code> argument is used to modify the columns. These arguments take <a href="https://arrow.apache.org/docs/r/reference/Expression.html">Arrow Expressions</a> as inputs, which is yet another topic I’ll try to write more about one of these days.</p>
+<p>Anyway, the scanner defined below mimics the dplyr pipeline shown above,</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb30"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb30-1"><a href="#cb30-1" aria-hidden="true" tabindex="-1"></a>scan <span class="ot">&lt;-</span> Scanner<span class="sc">$</span><span class="fu">create</span>(</span>
+<span id="cb30-2"><a href="#cb30-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">dataset =</span> ds, </span>
+<span id="cb30-3"><a href="#cb30-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">filter =</span> Expression<span class="sc">$</span><span class="fu">field_ref</span>(<span class="st">"value"</span>) <span class="sc">&gt;</span> <span class="dv">0</span>,</span>
+<span id="cb30-4"><a href="#cb30-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">projection =</span> <span class="fu">list</span>(</span>
+<span id="cb30-5"><a href="#cb30-5" aria-hidden="true" tabindex="-1"></a>    <span class="at">id =</span> Expression<span class="sc">$</span><span class="fu">field_ref</span>(<span class="st">"id"</span>),</span>
+<span id="cb30-6"><a href="#cb30-6" aria-hidden="true" tabindex="-1"></a>    <span class="at">subset =</span> Expression<span class="sc">$</span><span class="fu">field_ref</span>(<span class="st">"subset"</span>),</span>
+<span id="cb30-7"><a href="#cb30-7" aria-hidden="true" tabindex="-1"></a>    <span class="at">new_value =</span> Expression<span class="sc">$</span><span class="fu">create</span>(<span class="st">"round"</span>, <span class="dv">100</span> <span class="sc">*</span> Expression<span class="sc">$</span><span class="fu">field_ref</span>(<span class="st">"value"</span>))</span>
+<span id="cb30-8"><a href="#cb30-8" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb30-9"><a href="#cb30-9" aria-hidden="true" tabindex="-1"></a>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>We can check this by calling <code>scan$ToTable()</code> and then converting the result to a data frame so that we get a pretty print out:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb31"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb31-1"><a href="#cb31-1" aria-hidden="true" tabindex="-1"></a>scan<span class="sc">$</span><span class="fu">ToTable</span>() <span class="sc">|&gt;</span> <span class="fu">as.data.frame</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>  id subset new_value
+1  2      a        84
+2  5      a        74
+3 12      c        29
+4 13      c        42
+5 15      c         7</code></pre>
+</div>
+</div>
+<p>Yep, that looks about right.</p>
+<p>We can dig a little deeper though. To get a better sense of what happens when the query executes, what I’ll call <code>scan$ScanBatches()</code>. Much like the <code>ToTable()</code> method, the <code>ScanBatches()</code> method executes the query separately against each of the files, but it returns a list of Record Batches, one for each file. If we convert each one of those Record Batches to a data frame individually, we get this as a result:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb33"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb33-1"><a href="#cb33-1" aria-hidden="true" tabindex="-1"></a>scan<span class="sc">$</span><span class="fu">ScanBatches</span>() <span class="sc">|&gt;</span> <span class="fu">lapply</span>(as.data.frame)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[[1]]
+  id subset new_value
+1  2      a        84
+2  5      a        74
+
+[[2]]
+[1] id        subset    new_value
+&lt;0 rows&gt; (or 0-length row.names)
+
+[[3]]
+  id subset new_value
+1 12      c        29
+2 13      c        42
+3 15      c         7</code></pre>
+</div>
+</div>
+<p>This version of the result helps you see each part of the Dataset at work in the query. When you pass a query to a Dataset, each file is processed in a separate thread<a href="#fn14" class="footnote-ref" id="fnref14" role="doc-noteref"><sup>14</sup></a> and Record Batches will be added as they are returned. The key point here is that Datasets have no notion of row order: if you want the results returned in a particular order you must sort them explicitly.</p>
+<p>A second point to make about the the scanning process is that under the hood, Arrow keeps track of memory usage and doesn’t try to read too many files at once. It will also make use of whatever information it has about the file contents to avoid reading files that it doesn’t have to read: if I filter on <code>subset != "a"</code> then the Scanner will ensure that the files in the corresponding folder are never even read.<a href="#fn15" class="footnote-ref" id="fnref15" role="doc-noteref"><sup>15</sup></a></p>
+<p>Okay, so now let’s go back to the dplyr query we made earlier, but use <code>compute()</code> to return a Table rather use <code>collect()</code> to return a data frame.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb35"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb35-1"><a href="#cb35-1" aria-hidden="true" tabindex="-1"></a>tbl <span class="ot">&lt;-</span> ds <span class="sc">|&gt;</span></span>
+<span id="cb35-2"><a href="#cb35-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(value <span class="sc">&gt;</span> <span class="dv">0</span>) <span class="sc">|&gt;</span></span>
+<span id="cb35-3"><a href="#cb35-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">new_value =</span> <span class="fu">round</span>(<span class="dv">100</span> <span class="sc">*</span> value)) <span class="sc">|&gt;</span></span>
+<span id="cb35-4"><a href="#cb35-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(id, subset, new_value) <span class="sc">|&gt;</span></span>
+<span id="cb35-5"><a href="#cb35-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">compute</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>This Table object has been created by concatenating three Record Batches, one for each of the three data files. As a consequence of this, the Chunked Array that defines a column of the Table has the same partitioning structure present in the data files:<a href="#fn16" class="footnote-ref" id="fnref16" role="doc-noteref"><sup>16</sup></a></p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb36"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb36-1"><a href="#cb36-1" aria-hidden="true" tabindex="-1"></a>tbl<span class="sc">$</span>subset</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>ChunkedArray
+&lt;string&gt;
+[
+  [],
+  [
+    "a",
+    "a"
+  ],
+  [
+    "c",
+    "c",
+    "c"
+  ]
+]</code></pre>
+</div>
+</div>
+<p><br></p>
+<div class="column-screen">
+<p><img src="./img/subdivision_08_1797.png" class="img-fluid"></p>
+</div>
+</section>
+<section id="what-was-the-point" class="level2">
+<h2 class="anchored" data-anchor-id="what-was-the-point">What was the point?</h2>
+<p>Does any of this matter? Well. That depends, I suppose. If you’re looking to analyse a Dataset using R, you don’t really need to know much of this. Frankly you probably don’t need to know any of it. But also there’s something uncomfortable about using tools when you don’t quite know what they’re doing. It makes me happier when I know just a little bit more than I actually need to know. More importantly, it matters in the sense that it <em>works</em>. Using Datasets leads to shockingly fast performance on data that would not normally be amenable to analysis with R. Which… yeah, that does matter quite a bit!</p>
+<!--------------- appendices go here ----------------->
+
+
+</section>
+
+
+<div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document" role="doc-endnotes"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
+
+<ol>
+<li id="fn1"><p>Unbelievably, there are people out there who will start talking about predicate pushdown and not even give a girl a heads up? Rude. You don’t see me starting conversations at the pub about metric axiom violations in human similarity judgment do you? Well, okay, you might. But that’s not the point!<a href="#fnref1" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn2"><p>Okay, <em>now</em> I’m a bit sorry.<a href="#fnref2" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn3"><p>Or indeed, “any”.<a href="#fnref3" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn4"><p>For the purposes of this post we are going to pretend that Arrays behave like R vectors, which… they sort of do as long as you don’t try to push at the analogy too hard.<a href="#fnref4" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn5"><p>The Schema is the way Arrow formalises the metadata for rectangular data structures. I’m not going to dive into the details here: it’s enough for our purposes to recognise that it’s basically a list of variable names and their data types.<a href="#fnref5" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn6"><p>I mean, this is where you start asking all sort of questions about what objects are mutable in R anyway, since we’re almost never doing modify-in-place operations. But whatever. This is not the post for that, and if you try to make me talk about that here I will cry.<a href="#fnref6" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn7"><p>Again, let’s just pretend that a Chunked Array behaves just like an R vector, except for the fact that it has these weird stitches from where we’ve sewn the individual Arrays together. It’s all a bit vivisectionist in nature, sure, but this is the mechanism that allows Chunked Arrays to behave more like R vectors than simple Arrays do. Dr Frankenstein may not have been entirely wrong on all counts, I guess.<a href="#fnref7" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn8"><p>It’s probably worth doing a tiny bit of foreshadowing here: there’s really no sense in which the files are “ordered”, right? So, logically it follows there’s no sense in which the Dataset as a whole has a total ordering of rows either, right? That’s worth keeping in mind because results don’t always come back in the same order unless you explicitly sort them. I’ll talk about this a little more later.<a href="#fnref8" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn9"><p>The name comes from Apache Hive: <a href="https://hive.apache.org">hive.apache.org</a>.<a href="#fnref9" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn10"><p>One of these days I am going to write a proper blog post on parquet files for R users, I promise. I just don’t seem to have found the time yet. Not sure where all the time goes…<a href="#fnref10" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn11"><p>As usual there is esoteric knowledge buried in the C++ documentation, in this case describing <a href="https://arrow.apache.org/docs/cpp/api/compute.html#_CPPv4N5arrow7compute19BackpressureControlE">backpressure control</a>. It’s probably ancient forbidden lore and Dumbledore is going to turn me into a hobbit or something but whatever.<a href="#fnref11" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn12"><p>Strictly speaking I am assuming a FileSystemDataset and not a more esoteric kind of Dataset like an InMemoryDataset or a UnionDataset, and I am assuming that there is a one to one mapping between files and Fragments, but honestly those assumptions are usually true in everyday data analysis and if you know these distinctions already you certainly shouldn’t be using this post to learn about Datasets now should you? So the only reason you’d be bringing this up would be to correct me on the internet to show off how smart you are and that really would be just a dick move. Just saying.<a href="#fnref12" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn13"><p>The scanning process is multi-threaded by default, but if necessary threading can be disabled by setting <code>use_threads = FALSE</code> when calling <code>Scanner$create()</code>.<a href="#fnref13" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn14"><p>Okay fine, yes you can set <code>use_threads = FALSE</code> like I said above to disable this, hush.<a href="#fnref14" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn15"><p>For files formats like Parquet that include metadata for row groups and organise data column-wise, there are additional optimisations ensuring that you don’t have to read the whole file.<a href="#fnref15" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn16"><p>Notice that there is an empty chunk in there corresponding to the file that didn’t return any hits – that’s a deliberate act of seed hacking on my part! I rigged it so that one of the data subsets just happened to have all negative numbers. I wanted to highlight the fact that a scanned file that doesn’t return any rows will still return a Record Batch with zero rows, and this will still be reflected in any Table object that gets constructed. This doesn’t really matter for any practical purpose, but I think it helps get a feel for the mechanisms involved.<a href="#fnref16" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+</ol>
+</section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
+  author = {Danielle Navarro},
+  title = {Unpacking {Arrow} {Datasets}},
+  date = {2022-11-30},
+  url = {https://blog.djnavarro.net/posts/2022-11-30_unpacking-arrow-datasets},
+  langid = {en}
+}
+</code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2022" class="csl-entry quarto-appendix-citeas" role="doc-biblioentry">
+Danielle Navarro. 2022. <span>“Unpacking Arrow Datasets.”</span>
+November 30, 2022. <a href="https://blog.djnavarro.net/posts/2022-11-30_unpacking-arrow-datasets">https://blog.djnavarro.net/posts/2022-11-30_unpacking-arrow-datasets</a>.
+</div></div></section></div></main> <!-- /main -->
+<!-- plausible -->
+<script async="" defer="" data-domain="blog.djnavarro.net" src="https://plausible.io/js/plausible.js"></script>
+<script id="quarto-html-after-body" type="application/javascript">
+window.document.addEventListener("DOMContentLoaded", function (event) {
+  const toggleBodyColorMode = (bsSheetEl) => {
+    const mode = bsSheetEl.getAttribute("data-mode");
+    const bodyEl = window.document.querySelector("body");
+    if (mode === "dark") {
+      bodyEl.classList.add("quarto-dark");
+      bodyEl.classList.remove("quarto-light");
+    } else {
+      bodyEl.classList.add("quarto-light");
+      bodyEl.classList.remove("quarto-dark");
+    }
+  }
+  const toggleBodyColorPrimary = () => {
+    const bsSheetEl = window.document.querySelector("link#quarto-bootstrap");
+    if (bsSheetEl) {
+      toggleBodyColorMode(bsSheetEl);
+    }
+  }
+  toggleBodyColorPrimary();  
+  const icon = "";
+  const anchorJS = new window.AnchorJS();
+  anchorJS.options = {
+    placement: 'right',
+    icon: icon
+  };
+  anchorJS.add('.anchored');
+  const clipboard = new window.ClipboardJS('.code-copy-button', {
+    target: function(trigger) {
+      return trigger.previousElementSibling;
+    }
+  });
+  clipboard.on('success', function(e) {
+    // button target
+    const button = e.trigger;
+    // don't keep focus
+    button.blur();
+    // flash "checked"
+    button.classList.add('code-copy-button-checked');
+    var currentTitle = button.getAttribute("title");
+    button.setAttribute("title", "Copied!");
+    let tooltip;
+    if (window.bootstrap) {
+      button.setAttribute("data-bs-toggle", "tooltip");
+      button.setAttribute("data-bs-placement", "left");
+      button.setAttribute("data-bs-title", "Copied!");
+      tooltip = new bootstrap.Tooltip(button, 
+        { trigger: "manual", 
+          customClass: "code-copy-button-tooltip",
+          offset: [0, -8]});
+      tooltip.show();    
+    }
+    setTimeout(function() {
+      if (tooltip) {
+        tooltip.hide();
+        button.removeAttribute("data-bs-title");
+        button.removeAttribute("data-bs-toggle");
+        button.removeAttribute("data-bs-placement");
+      }
+      button.setAttribute("title", currentTitle);
+      button.classList.remove('code-copy-button-checked');
+    }, 1000);
+    // clear code selection
+    e.clearSelection();
+  });
+  function tippyHover(el, contentFn) {
+    const config = {
+      allowHTML: true,
+      content: contentFn,
+      maxWidth: 500,
+      delay: 100,
+      arrow: false,
+      appendTo: function(el) {
+          return el.parentElement;
+      },
+      interactive: true,
+      interactiveBorder: 10,
+      theme: 'quarto',
+      placement: 'bottom-start'
+    };
+    window.tippy(el, config); 
+  }
+  const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+  for (var i=0; i<noterefs.length; i++) {
+    const ref = noterefs[i];
+    tippyHover(ref, function() {
+      // use id or data attribute instead here
+      let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+      try { href = new URL(href).hash; } catch {}
+      const id = href.replace(/^#\/?/, "");
+      const note = window.document.getElementById(id);
+      return note.innerHTML;
+    });
+  }
+  const findCites = (el) => {
+    const parentEl = el.parentElement;
+    if (parentEl) {
+      const cites = parentEl.dataset.cites;
+      if (cites) {
+        return {
+          el,
+          cites: cites.split(' ')
+        };
+      } else {
+        return findCites(el.parentElement)
+      }
+    } else {
+      return undefined;
+    }
+  };
+  var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+  for (var i=0; i<bibliorefs.length; i++) {
+    const ref = bibliorefs[i];
+    const citeInfo = findCites(ref);
+    if (citeInfo) {
+      tippyHover(citeInfo.el, function() {
+        var popup = window.document.createElement('div');
+        citeInfo.cites.forEach(function(cite) {
+          var citeDiv = window.document.createElement('div');
+          citeDiv.classList.add('hanging-indent');
+          citeDiv.classList.add('csl-entry');
+          var biblioDiv = window.document.getElementById('ref-' + cite);
+          if (biblioDiv) {
+            citeDiv.innerHTML = biblioDiv.innerHTML;
+          }
+          popup.appendChild(citeDiv);
+        });
+        return popup.innerHTML;
+      });
+    }
+  }
+});
+</script>
+</div> <!-- /content -->
+
+
+
+</body></html>
