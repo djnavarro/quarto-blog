@@ -1,0 +1,176 @@
+---
+title: "Playing around with WebR"
+author:
+  - name: Danielle Navarro
+    url: https://djnavarro.net
+    affiliation: I'm on smoko
+    affiliation-url: https://www.youtube.com/watch?v=j58V2vC9EPc
+    orcid: 0000-0001-7648-6578
+description: "playing with webr"
+date: "2023-04-09"
+categories: [R, WebR]
+image: automaton1.png
+---
+
+<!--------------- my typical setup ----------------->
+
+```{r setup, include=FALSE}
+wide <- 136
+narrow <- 76
+options(width = narrow)
+cache_images <- TRUE
+```
+
+<!--------------- post begins here ----------------->
+
+I made a little cellular automaton using webr: [webr-automata.djnavarro.net](https://webr-automata.djnavarro.net/). The source code is on github at [https://github.com/djnavarro/webr-automata](https://github.com/djnavarro/webr-automata)
+
+:::{.column-screen-inset}
+:::{layout-ncol=3} 
+
+![](automaton1.png)
+
+![](automaton2.png)
+
+![](automaton3.png)
+
+:::
+:::
+
+## The R code
+
+It's built around an R function called `make_art()`:
+
+```{r}
+make_art <- function(str = NULL,
+                     linebreak = "<br>", 
+                     n_rows = 30,
+                     n_cols = 50,
+                     iterations = 100,
+                     symbols = c("░", "▒", "▓", "█")) {
+
+  # create random string if none is given
+  if(is.null(str)) {
+    str <- sample(symbols, n_rows * n_cols, TRUE)
+    str <- paste(str, collapse = "")
+  }
+
+  # make matrix from (possibly break-delimited) string
+  str <- gsub(
+    pattern = linebreak, 
+    replacement = "", 
+    x = str, 
+    fixed = TRUE
+  )
+  dat <- matrix(
+    data = strsplit(str, "")[[1]], 
+    nrow = n_rows, 
+    ncol = n_cols, 
+    byrow = TRUE
+  )
+
+  # run simple automaton
+  for(i in 1:iterations) {
+    r <- sample(2:(n_rows-1), 1)
+    c <- sample(2:(n_cols-1), 1)
+    h <- sample(-1:1, 1)
+    v <- sample(-1:1, 1)
+    dat[r+v, c+h] = dat[r, c]
+  }
+
+  # convert matrix to string and return 
+  str <- ""
+  for(i in 1:n_rows) {
+    row <- paste(dat[i, ], collapse="")
+    str <- paste(str, row, sep = linebreak)
+  }
+  str <- paste(str, linebreak, sep = "")
+  str
+}
+```
+
+Here's what it does:
+
+```{r, cache=TRUE}
+set.seed(1)
+str <- make_art(
+  linebreak = "\n", 
+  n_rows = 20,
+  n_cols = 60,
+  iterations = 100000
+)
+cat(str)
+```
+
+Let's imagine we have this saved to an R script called `art.R`.
+
+## The HTML
+
+The html code for the site is very simple: it creates an empty div called "grid" for the javascript to modify, and sources a cript called `webr-app.js` that does all the work:
+
+``` html
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Text Textures</title>
+  </head>
+  <body>
+    <div id="grid">webR is starting, please wait...</div>
+    <script src="./webr-app.js"></script>
+  </body>
+</html>
+```
+
+## The Javascript
+
+Here's the source code for `webr-app.js`:
+
+::: {.column-body-outset}
+
+``` javascript
+// import the webr module and then run the code
+import('https://webr.r-wasm.org/latest/webr.mjs').then(async ({WebR}) => {
+
+    // the HTML element showing the grid
+    let grid = document.getElementById("grid");
+
+    // wait for the webR session to start
+    const webr = new WebR();
+    await webr.init();
+
+    // read the R source code as a JS string
+    let art_src = fetch('art.R').then((response) => {return response.text()});
+
+    // evaluate the R source code, defining make_art() in the R environment
+    await webr.evalR(await art_src);
+
+    // initialise the state of the grid by calling make_art() with no input,
+    // pull the output into JS, and use it to update the state of the grid
+    let art_r = await webr.evalR('make_art()')
+    let art_js = await art_r.toJs();
+    grid.innerHTML = art_js.values;
+
+    // function to update the state of the grid
+    async function grid_update() {
+        await webr.objs.globalEnv.bind('str', grid.innerHTML) // copy the grid string into R
+        let art_r = await webr.evalR('make_art(str)')         // pass string to make_art()
+        let art_js = await art_r.toJs();                      // pull the output back to JS
+        grid.innerHTML = art_js.values;                       // update the grid string
+    }
+
+    // repeatedly call the update function
+    while (true) {
+        await grid_update();
+    }
+});
+```
+
+:::
+
+
+
+<!--------------- appendices go here ----------------->
+
+
+
