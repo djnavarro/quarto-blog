@@ -19,6 +19,7 @@ wide <- 136
 narrow <- 76
 options(width = narrow)
 cache_images <- TRUE
+set.seed(1)
 ```
 
 <!--------------- post begins here ----------------->
@@ -82,9 +83,15 @@ Or, to put it another way, if you're an R developer who wants to write webR code
 
 So in practice, a lot of what you need to learn if you want to jump from "localR" to webR is going to relate to those issues. It makes sense when you look at it in these terms, and feels kind of obvious in hindsight, but it wasn't until I started trying to write webR code that I realised that this is how it works.
 
+## Making a plan
+
+Okay, that's enough background. Let's start building something that tries to make these ideas a bit more concrete. To do that we'll need to write a simple R application of some kind. If you know anything about me at all, you'd guess (correctly) that the applications I like to make for fun tend to be artistic in nature. I can't help it... I like creating pretty visuals with R. Unfortunately, this is one of the trickier things to do with webR in its current state of development. It is possible, of course: if you take a look at the [webR REPL](https://webr.r-wasm.org/latest/) you'll see that the webpage has an HTML canvas to which R graphics can be drawn. That's super cool, but I'm certainly not going to *start* by trying to implement something like that myself. Instead, I'll do something simpler: I'll write an R function that takes text input and produces text output. Then, I'll do something sneaky and display that text in a way that looks like a picture. 
+
+Basically, it's ASCII art. I'm going to make ASCII art, but becuase its the 21st century I'll do it with [UTF-8](https://en.wikipedia.org/wiki/UTF-8) characters rather than literally using ASCII.
+
+
 ## The R code
 
-Okay, that's enough background. Let's start building something to make these ideas a bit more concrete. 
 
 I'll start by showing the R code. The site contains a script called `automaton.R` and it defines a function called `automaton()` that takes a single character string as input, and returns a modified string as output. The string is used as the data to define a two dimensional matrix, with one character per cell, and on each iteration of the simulation, one character is updated by copying the value of one of its neighbours in the grid. Here's the code: 
 
@@ -118,10 +125,16 @@ automaton <- function(str = NULL,
 
   # run simple automaton
   for (i in 1:iterations) {
+    
+    # choose an interior cell in the grid
     r <- sample(2:(n_rows - 1), 1)
     c <- sample(2:(n_cols - 1), 1)
+    
+    # choose one of its neighbours (sort of)
     h <- sample(-1:1, 1)
     v <- sample(-1:1, 1)
+    
+    # copy the original cell value to the neighbour cell
     dat[r + v, c + h] <- dat[r, c]
   }
 
@@ -136,12 +149,11 @@ automaton <- function(str = NULL,
 }
 ```
 
-As you can probably tell, I haven't made any efforts to optimise this code. My goal in writing it is to have something that works
+Now, for the purposes of this post I'm assuming you're already pretty familiar with writing R code, and I've deliberately written this function in a way that doesn't require a lot of explanation for an R user. It's all written in base R, I'm not using any fancy packages, and I haven't made any efforts to make it run quickly. I don't want any complexity on the R side: all I want for this post is to have some R code that works.
 
 Here's what it does:
 
 ```{r}
-set.seed(1)
 str <- automaton(
   linebreak = "\n", 
   n_rows = 20,
@@ -151,11 +163,13 @@ str <- automaton(
 cat(str)
 ```
 
-Let's imagine we have this saved to an R script called `automaton.R`.
+The output here doesn't look as pretty as the pictures shown at the start of this post, but that's mostly because the CSS styling for this blog creates white space between lines. On the [webr-automata.djnavarro.net](https://webr-automata.djnavarro.net/) site there's nothing like that so all that white space disappears and the output looks like a shaded grid.
+
+Anyway, the key thing here is that on the website I have this code saved to an R script called `automaton.R`, and it is this script that webR will need to work with.
 
 ## The HTML
 
-The html code for the site is very simple: it creates an empty div called "grid" for the javascript to modify, and uses the script contained in `webr-app.js` to do all the work:
+The next step in the process is to create a webpage. Or, more precisely, to write an HTML document. I'm going to keep this part extremely simple. The site has an `index.html` file that only does two things: it creates an div called "grid" that we can modify using javascript, and imports a script called `webr-app.js` that takes care of any such modifications:
 
 ```{html, filename="index.html", eval=FALSE}
 <!DOCTYPE html>
@@ -171,9 +185,18 @@ The html code for the site is very simple: it creates an empty div called "grid"
 </html>
 ```
 
+This HTML document provides the skeleton for the webpage, and the `webr-app.js` script will act as the intermediary between my R code and the HTML document. 
+
 ## The Javascript
 
-Here's the source code for `webr-app.js`:
+Now comes the "fun" part. I need to write some javascript that:
+
+- Imports webR itself so I can execute R code
+- Reads my R script from the `automaton.R` file
+- Uses webR to call the `automaton()` R function defined in the file
+- Updates the state of the HTML document using the output of `automaton()`
+
+How do I do this? As much as I love a good murder mystery, I don't think the mystery novel format is ideal when writing technical documents, so let's start by revealing the ending. Here's the complete source code for `webr-app.js`:
 
 ```{javascript, filename="webr-app.js", eval=FALSE}
 // import the webr module and then run the code
@@ -208,7 +231,76 @@ import('https://webr.r-wasm.org/latest/webr.mjs').then(async ({WebR}) => {
 });
 ```
 
+If you're fluent in javascript you can probably look at this and immediately work out what it does, but not every R user has had the (mis)fortune to work extensively in javascript, so I'll be kind and try to unpack it a bit! At a high level, this code has the following structure:
 
+``` javascript
+import('https://webr.r-wasm.org/latest/webr.mjs').then(async ({WebR}) => {
+
+    // use the WebR object to do a bunch of stuff
+
+});
+```
+
+For an R user some of this is a little opaque if you don't have the javascript concept of a [thenable](https://masteringjs.io/tutorials/fundamentals/thenable), but it's not too hard to see the intent. The browser is first asked to download webR from the specified URL, and then once this operation has finished proceed to execute the code that follows. More precisely, the `.then()` method executes whatever function it is passed. In this case the code uses the [`=>` notation](https://www.w3schools.com/Js/js_arrow_function.asp) to define an anonymous function that takes the `WebR` object -- the interface to webR -- as an input argument. So now let's take a look at what happens when this function is called.
+
+The code starts simple. The first thing it does is define a javascript variable `grid` that refers to the HTML element that we want our R code to manipulate:
+
+``` javascript
+let grid = document.getElementById("grid");
+```
+
+Next, we start the R session:
+
+``` javascript
+const webr = new WebR();
+await webr.init();
+```
+
+The `const` and `new` keywords aren't interesting: `new` just means we're creating a new instance from WebR, and `const` means it's a constant. We aren't going to modify the `webr` object itself. What we *are* going to do, however, is use it to initialise a new R session. That's what `webr.init()` does. The `await` keyword is used to tell javascript to wait for this code to finish executing before starting the next instruction. That's important in javascript because -- unlike R -- a lot of javascript code runs asynchronously. Javascript is perfectly happy to start a function running (returning a promise object) and moving onto the next line of code without waiting for that function to finish. When calling asynchronous functions, javascript doesn't wait for the "promise" to resolve unless you explicitly tell it to using the `await` keyword. In this case, we definitely don't want to try executing R code until we actually have an R session, so I've used `await` to tell javascript to wait until we have one.
+
+The next step in the process is to have javascript read the source code from the `automaton.R` file as a string, and then pass that to webr to evaluate. The code below does this:
+
+``` javascript
+let automaton = await fetch('automaton.R');
+await webr.evalR(await automaton.text());
+```
+
+Here, the javascript `fetch()` function takes care of the file read operation, and the `webr.evalR()` function passes the code to R for evaluation. Once this code finishes, the R session will have the `automaton()` function defined in the global workspace. 
+
+Now that the R session has access to the `automaton()` function, we can again use `webr.evalR()` to call this function. If you look back to the way I defined the `automaton()` function earlier in the post, you'll notice that if we call it without passing it a string as input, it will create a random string to use as the starting point for the cellular automaton. So that's what we do in the first line of this snippet:
+
+``` javascript
+let str = await webr.evalR('automaton()')
+grid.innerHTML = (await str.toJs()).values;
+```
+
+The second line in this javascript takes the string that the `automaton()` R function outputs, converts it to a javascript string (that's what the `str.toJs()` bit does), and then modifies the HTML document (specifically the `grid` element defined in the first line of javascript) so that the text displayed on the page corresponds to the string that the R function produced.  
+
+The rest of the javascript code is essentially the same trick repeated over and over ad infinitum:
+
+``` javascript
+// function to update the state of the grid
+async function grid_update() {
+    await webr.objs.globalEnv.bind('str', grid.innerHTML)
+    let str = await webr.evalR('automaton(str)')
+    grid.innerHTML = (await str.toJs()).values;
+}
+
+// repeatedly call the update function
+while (true) {
+    await grid_update();
+}
+```
+
+What I've done here is define a javascript function `grid_update()` that does three things:
+
+- It reads the string currently displayed on the website (i.e. `grid.innerHTML`) and uses `webr.objs.globalEnv.bind()` to create a variable called `str` in the R workspace that contains the same text.
+- Next, it uses `webr.evalR()` to call the R function `automaton()`, passing the R string `str` as input, and storing the results as a variable (also called `str` because I am lazy) on the javascript side.
+- Finally, it converts the `str` object to a native javascript string and uses it to update the text displayed on the website (i.e., it modifies `grid.innerHTML`). 
+
+Having defined this function, I now do something extraordinarily lazy: I create an infinite loop that calls `grid_update()` over and over forever, thereby creating the animation that you see on the website. 
+
+And with that we are done. Well, sort of. There are going to be a few details to sort out when we go to deploy this to the web, but that's the core of our very simple app. 
 
 <!--------------- appendices go here ----------------->
 
