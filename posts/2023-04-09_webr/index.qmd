@@ -23,7 +23,13 @@ cache_images <- TRUE
 
 <!--------------- post begins here ----------------->
 
-I made a little cellular automaton using webr: [webr-automata.djnavarro.net](https://webr-automata.djnavarro.net/). The source code is on github at [https://github.com/djnavarro/webr-automata](https://github.com/djnavarro/webr-automata)
+A little over a month ago, the tidyverse blog announced that [the 0.1 version of webR had been released](https://www.tidyverse.org/blog/2023/03/webr-0-1-0/), opening up the possibility of running R code client side within a browser. To quote from the announcement,
+
+> By compiling R to WebAssembly a user can visit a website and run R code directly within the web browser, without R installed on their device or a supporting computational R server. All that is required is a normal web server, including the type of cloud hosting service provided by Github Pages or Netlify.
+
+This is, to put it mildly, extremely cool, and unsurprisingly there was quite a bit of enthusiasm for it on Mastodon.^[I imagine it also generated excitement on Twitter, but quite frankly there is no chance of me returning to Twitter while it remains a privately held company whose owner uses the site to flirt with anti-trans conspiracy theories at the same time that governments around the world are openly passing draconian legislation targeting us. In all honesty, I've been a bit... um... disheartened... to learn that this isn't a deal-breaker for very many people. But whatever. I suppose I can't really know why other people make the choices they do.] And so, now that I find myself with an unfortunate amount of free time on my hands, I decided to play around with it -- just for fun -- to see if I could get a better sense of how it works. 
+
+I haven't dived very deep into webR yet, but I managed to get far enough to build a simple cellular automaton simulation using webR, and host it with Netlify at [webr-automata.djnavarro.net](https://webr-automata.djnavarro.net/).^[The source code is available at [github.com/djnavarro/webr-automata](https://github.com/djnavarro/webr-automata).] If you visit the site, you'll first see some text asking you to wait for WebR to load, and then a text-based grid with cells coloured in different shades of grey. Over time, the cells change colours and the boundaries between different colour blocks tend to become more coherent, as shown in the sequence of images (time runs from left to right) below:
 
 :::{.column-screen-inset}
 :::{layout-ncol=3} 
@@ -37,11 +43,52 @@ I made a little cellular automaton using webr: [webr-automata.djnavarro.net](htt
 :::
 :::
 
+If you let the simulation run long enough, eventually one colour comes to dominate the entire grid. It's not the most exciting or artistic code I've ever written, but I have to confess I find it oddly soothing to watch. 
+
+## Some background
+
+Before diving into the code, it's probably a good idea to say a little bit about how webR works. If you're at all like Danielle-from-a-month-ago, you might be approaching this with a very simple mental model. Normally when we run R code, we're using a copy of the R interpreter that has been installed on a local machine. The R code chunks on this quarto blog are all executed locally, for example: I have a copy of R installed on my laptop, the code is run using this copy of R, and the only thing that gets pushed up to my website is are the HTML documents that quarto creates. None of the R code is executed within the browser. Even when we shift to something fancier like a Shiny app or Posit Cloud, the browser does not execute R code: somewhere there is a server that has R installed, and the computational work is done using that R installation, outside of the browser. The reason for this is awfully simple: browsers don't ship with a copy of R, so they can't execute R code! 😢
+
+With that as your mental model, the concept behind webR -- in which the browser really does execute R code -- feels like dark magic. How can this be? 
+
+The answer to this question is, to reduce it to two words, [web assembly](https://webassembly.org/). I'd been vaguely aware of web assembly for a little while, but until webR came into being I hadn't paid much attention to it. The underlying idea, as described on the website, is as follows:
+
+> WebAssembly (abbreviated Wasm) is a binary instruction format for a stack-based virtual machine. Wasm is designed as a portable compilation target for programming languages, enabling deployment on the web for client and server applications.
+
+Sounds fancy, right? Again, if you're like me, there's a part of your brain that just shuts down when reading this description. Okay sure, I've written code in compiled languages like C, C++, and Rust, so I have a pretty decent sense of what "binary instruction format" refers to... I mean, if you're compiling your source code to an executable binary file that contains the instructions that a computer will execute then -- obviously -- the machine needs to understand those binary instructions. Duh. But wtf is a "stack-based virtual machine" and what does it mean to have a "portable compilation target", and why does that mean I can now write R code for the web?????
+
+Hm. 
+
+Okay, I'll be honest: I don't really understand the low-level details. But also, I don't care about them either. What I do care about are the following facts:
+
+- Web assembly is a binary format you can compile source code *to*.
+- There are existing compilers like [emscripten](https://emscripten.org/) that create web assembly binaries from C and C++ 
+- Modern browsers ship with web assembly in the same way they ship with javascript: the browser *can* execute a wasm binary
+- The R interpreter is written in C
+
+When you put these things together, you can see how webR might (and indeed does) work. It's entirely possible to take the source code for the R interpreter and use emscripten to compile R itself to web assembly. If there were a wasm version of R, your web page could import it in much the same way that it imports a javascript script, and then that "wasm-R" binary could execute an R script.
+
+What a fabulous idea. Someone should do that. Oh wait... George Stagg already did. That's precisely what [webR](https://docs.r-wasm.org/webr/latest/) does. 🤦‍♀️
+
+Of course, if you spend a bit of time thinking about the practicalities of making this work, you start to realise there are some tricky things to manage. How exactly would wasm-R read an R script? How would it interact with the [DOM](https://en.wikipedia.org/wiki/Document_Object_Model)?^[This is a problem many subs have, to be honest.] When you're writing code for the web using javascript, this isn't an issue: you just write code like this...
+
+``` javascript
+document.getElementById("the_id_for_a_div").innerHTML = "your_code_here"
+```
+
+...or whatever. Javascript has a native way of interacting with HTML. Web assembly doesn't do that, and so the web assembly version of R has that limitation. As a consequence, we have to use javascript as an intermediary. Therein lies a lot of the magic. If you dig into the documentation for webR, what you notice is that the bulk of it is devoted to describing APIs that let webR and javascript interact with each other. It has to be that way if we want a web assembly version of R to have the ability to modify the state of the web page!
+
+Or, to put it another way, if you're an R developer who wants to write webR code, you're also going to have to write some javascript that controls the interactions between your (webR interpreted) R code and the HTML document. And, because code execution on the web has a variety of security risks that browsers try hard to mitigate, you're might guess that you're going to have a lot of finicky details to manage in order to get your code to run without the browser screaming at you. 
+
+So in practice, a lot of what you need to learn if you want to jump from "localR" to webR is going to relate to those issues. It makes sense when you look at it in these terms, and feels kind of obvious in hindsight, but it wasn't until I started trying to write webR code that I realised that this is how it works.
+
 ## The R code
 
-It's built around an R function called `automaton()`:
+Okay, that's enough background. Let's start building something to make these ideas a bit more concrete. 
 
-```{r}
+I'll start by showing the R code. The site contains a script called `automaton.R` and it defines a function called `automaton()` that takes a single character string as input, and returns a modified string as output. The string is used as the data to define a two dimensional matrix, with one character per cell, and on each iteration of the simulation, one character is updated by copying the value of one of its neighbours in the grid. Here's the code: 
+
+```{r filename="automaton.R"}
 automaton <- function(str = NULL,
                       linebreak = "<br>",
                       n_rows = 30,
@@ -89,6 +136,8 @@ automaton <- function(str = NULL,
 }
 ```
 
+As you can probably tell, I haven't made any efforts to optimise this code. My goal in writing it is to have something that works
+
 Here's what it does:
 
 ```{r}
@@ -108,7 +157,7 @@ Let's imagine we have this saved to an R script called `automaton.R`.
 
 The html code for the site is very simple: it creates an empty div called "grid" for the javascript to modify, and uses the script contained in `webr-app.js` to do all the work:
 
-``` html
+```{html, filename="index.html", eval=FALSE}
 <!DOCTYPE html>
 <html lang="en">
   <head>
@@ -126,7 +175,7 @@ The html code for the site is very simple: it creates an empty div called "grid"
 
 Here's the source code for `webr-app.js`:
 
-``` javascript
+```{javascript, filename="webr-app.js", eval=FALSE}
 // import the webr module and then run the code
 import('https://webr.r-wasm.org/latest/webr.mjs').then(async ({WebR}) => {
 
