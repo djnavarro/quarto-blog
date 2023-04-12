@@ -9,6 +9,7 @@ author:
 description: "A note that I wrote for a computer science class I taught all the way back in 2010"
 date: "2023-04-12"
 categories: [Statistics, MCMC]
+image: cover.jpg
 ---
 
 <!--------------- my typical setup ----------------->
@@ -122,7 +123,7 @@ work and things that don't, to give you a bit of a feel for how it works in prac
 
 ## Some examples
 
-Firstly, let’s have a look at some R code implementing the Metropolis-Hastings algorithm for the toy problem (i.e., sample from the distribution shown in the original figure). Notice that in addition to the parameter `sigma`, we also need to specify the total number of samples that we are intending to draw `nsamp`, a start point for the chain `x0`, and two additional variables `burnin` and `lag` that I'll explain shortly. For the moment, however, let's start the chain near the middle of the distribution, but not quite there: we'll use `x0 = −1`. Then, let’s watch what happens to our sampler for three different values of `sigma`, where we run the sampler for 1000 iterations. In one case, we’ll set the value too low (`sigma = .025`) and in another we'll set it too high (`sigma = 50`), but in a third case we’ll get it about right (`sigma = 1`). 
+Firstly, let’s have a look at some R code implementing the Metropolis-Hastings algorithm for the toy problem (i.e., sample from the distribution shown in the original figure). Notice that in addition to the parameter `sigma`, we also need to specify the total number of samples that we are intending to draw `nsamp`, a start point for the chain `x0`, and two additional variables `burnin` and `lag` that I'll explain shortly. 
 
 ```{r}
 target <- function(x) {
@@ -174,7 +175,51 @@ out <- metropolis_sampler(initial_value = 0)
 out[1:10, ]
 ```
 
-The results are shown in Figure 3. For all three values of `sigma`, we have
+### The effect of proposal width
+
+```{r}
+#| code-fold: true
+#| code-summary: Source code for plots
+set.seed(1234)
+par(mar = c(4, 4, 2, 2))
+layout(matrix(1:6, nrow = 2, ncol = 3))
+sigma <- c(1, 0.025, 50)
+n <- 10000
+for(i in 1:3) {
+  out <- metropolis_sampler(
+    initial_value = -1, 
+    n = n, 
+    sigma = sigma[i]
+  )
+  hist(
+    out$value, 
+    breaks = seq(-3, 3, .05),
+    main = paste("Sample values: sigma =", sigma[i]),
+    xlab = "Value, x",
+    ylab = "Frequency"
+  )
+  x <- seq(-3, 3, .05)
+  p <- target(seq(-3, 3, .05))
+  expected <- n * p / sum(p) 
+  lines(
+    x = x, 
+    y = expected, 
+    type = "l", 
+    col = "red",
+    lwd = 2
+  )
+  plot(
+    x = out$value, 
+    y = 1:n, 
+    type = "l", 
+    xlim = c(-3, 3),
+    xlab = "Value, x",
+    ylab = "Time"
+  )
+}
+```
+
+For all three values of `sigma`, we have
 two plots. The top one shows the true target distribution, along with a histogram showing
 the distribution of samples obtained using the Metropolis sampler. The lower panel plots
 the actual Markov chain: the sequence of generated values. In the leftmost plots, we see
@@ -183,34 +228,168 @@ panel moves rapidly across the whole distribution, without getting stuck in any 
 (the acceptance rate here is 47.5%). In the far right panel, we see what happens when the
 proposal distribution is too wide: the chain gets stuck in one spot for long periods of time. 
 It does manage to make big jumps, covering the whole range, but because the acceptance
-rate is so low (2.5%) the distribution is highly irregular. Finally, in the middle panel, if we
+rate is so low (2.5%) the distribution of samples is highly irregular. Finally, in the middle panel, if we
 set the proposal distribution to be too narrow, the acceptance rate is very high (97.7%) so
 the chain doesn’t get stuck in any one spot, but it doesn’t cover a very wide range.
 This simple example should give you an intuition for why you need to "play around"
 with the choice of proposal distribution. A good proposal distribution can make a huge
-difference! However, it’s also important to realise that even if you don’t get it quite right,
-you can always solve the problem with brute force. For example, Figure 4 what happens
-when you run the same three chains for 50,000 iterations rather than just 1000.
+difference! 
+
+## The role of the burn-in period
 
 Now, at this point I haven’t really explained what the `burnin` and `lag` parameters
 are there for. I don't plan to go into details, but here's the basic idea. First, let's think
-about the burn-in issue. Suppose you started the sampler at a very bad location. In the
-examples that I’ve shown here `x0 = -1` is bad, but it's not too bad. So let's pick something
-nastier: we’ll start at `x0 = -3`. Also, to make the issue visually obvious, we’ll use a proposal
-distribution that is a bit too narrow, say `sigma = .2`. Figure 5 shows 3 runs of this sampler.
-As you can see, the sampler spends the first 200 or so iterations slowly moving towards
+about the burn-in issue. Suppose you started the sampler at a very bad location... say `x0 = -3`, and -- just so that we can exaggerate the problem -- we'll use a proposal distribution that is too narrow, say `sigma = .1`. The image below shows three runs of this sampler:
+
+```{r}
+#| code-fold: true
+#| code-summary: Source code for plots
+set.seed(1234)
+par(mar = c(4, 4, 2, 2))
+layout(matrix(1:6, nrow = 2, ncol = 3))
+n <- 1000
+for(i in 1:3) {
+  out <- metropolis_sampler(
+    initial_value = -3, 
+    n = n, 
+    sigma = .1
+  )
+  hist(
+    out$value, 
+    breaks = seq(-4, 4, .05),
+    main = NULL,
+    xlab = "Value, x",
+    ylab = "Frequency"
+  )
+  x <- seq(-4, 4, .05)
+  p <- target(seq(-4, 4, .05))
+  expected <- n * p / sum(p) 
+  lines(
+    x = x, 
+    y = expected, 
+    type = "l", 
+    col = "red",
+    lwd = 2
+  )
+  plot(
+    x = out$value, 
+    y = 1:n, 
+    type = "l", 
+    xlim = c(-4, 4),
+    xlab = "Value, x",
+    ylab = "Time"
+  )
+  abline(h = 200, lty = "dotted")
+}
+```
+
+As you can see, the sampler spends the first 200 or so iterations slowly moving rightwards towards
 the main body of the distribution. Once it gets there, the samples start to look okay, but
 notice that the histograms are biased towards the left (i.e., towards the bad start location).
 A simple way to fix this problem is to let the algorithm run for a while before starting to
-collect actual samples. The length of time that you spend doing this is called the burn in
-period. To illustrate how it helps, Figure 6 shows what happens when you use a burn in
-period of 200 iterations for the same sampler.
+collect actual samples. The length of time that you spend doing this is called the *burn in
+period*. 
+
+To illustrate how it helps, the figure below shows what would have happened if I'd used a burn in period of 200 iterations for the same sampler:
+
+```{r}
+#| code-fold: true
+#| code-summary: Source code for plots
+set.seed(1234)
+par(mar = c(4, 4, 2, 2))
+layout(matrix(1:6, nrow = 2, ncol = 3))
+n <- 1000
+for(i in 1:3) {
+  out <- metropolis_sampler(
+    initial_value = -3, 
+    burnin = 200,
+    n = n, 
+    sigma = .1
+  )
+  hist(
+    out$value, 
+    breaks = seq(-4, 4, .05),
+    main = NULL,
+    xlab = "Value, x",
+    ylab = "Frequency"
+  )
+  x <- seq(-4, 4, .05)
+  p <- target(seq(-4, 4, .05))
+  expected <- n * p / sum(p) 
+  lines(
+    x = x, 
+    y = expected, 
+    type = "l", 
+    col = "red",
+    lwd = 2
+  )
+  plot(
+    x = out$value, 
+    y = 1:n, 
+    type = "l", 
+    xlim = c(-4, 4),
+    xlab = "Value, x",
+    ylab = "Time"
+  )
+  abline(h = 200, lty = "dotted")
+}
+```
+
+It's still not ideal -- largely because we don't have many samples, we haven't set a `lag`, and the value of `sigma` isn't very well chosen -- but you can see that the bias caused by the poor choice of starting value has disappeared. 
+
+
+## The role of the lag parameter
 
 Finally, I’ll mention in passing the role played by the lag parameter. In some situa-
 tions you can be forced into using a proposal distribution that has a very low acceptance
 rate. When that happens, you’re left with an awkward Markov chain that gets stuck in one location for long periods of time. One thing that people often do in that situation is allow
 several iterations of the sampler to elapse in between successive samples. This is the `lag`
-between samples. The effect of this is illustrated in Figure 7.
+between samples. The effect of this is illustrated in below, which shows the behaviour of a  sampler with a very wide proposal distribution (`sigma = 50`) with `n = 1000` samples drawn, at `lag = 0` (left), `lag = 10` (middle) and `lag = 100` (right).
+
+
+```{r}
+#| code-fold: true
+#| code-summary: Source code for plots
+set.seed(1234)
+par(mar = c(4, 4, 2, 2))
+layout(matrix(1:6, nrow = 2, ncol = 3))
+n <- 1000
+lag <- c(0, 10, 100)
+for(i in 1:3) {
+  out <- metropolis_sampler(
+    initial_value = 0,
+    lag = lag[i],
+    n = n, 
+    sigma = 50
+  )
+  hist(
+    out$value, 
+    breaks = seq(-4, 4, .05),
+    main = paste("Lag:", lag[i]),
+    xlab = "Value, x",
+    ylab = "Frequency"
+  )
+  x <- seq(-4, 4, .05)
+  p <- target(seq(-4, 4, .05))
+  expected <- n * p / sum(p) 
+  lines(
+    x = x, 
+    y = expected, 
+    type = "l", 
+    col = "red",
+    lwd = 2
+  )
+  plot(
+    x = out$value, 
+    y = 1:n, 
+    type = "l", 
+    xlim = c(-4, 4),
+    xlab = "Value, x",
+    ylab = "Time"
+  )
+}
+```
+
 
 
 ## A word of warning
