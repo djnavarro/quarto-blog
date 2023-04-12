@@ -122,13 +122,17 @@ In essence, this is the entirety of the Metropolis-Hastings algorithm! True, the
 
 ## Implementing the sampler
 
-Let's have a look at some R code implementing the Metropolis-Hastings algorithm for the toy problem (i.e., sample from the distribution shown in the original figure). We'll define the sampler in terms of three functions. First, we have a `target()` function that calculates the probability of a given sample `x`, or -- more precisely -- calculates the numerator term:
+Okay. That's enough mathematics. Let's have a look at some R code implementing the Metropolis-Hastings algorithm for the toy problem: can we write an R function that draws samples from the weird looking probability distribution I plotted at the start of this post? 
+
+To do this, I'll define the sampler in terms of three functions. First, we have a `target()` function that calculates the probability of a given sample `x`, or -- more precisely -- calculates the numerator term in the equation describing the probability density:
 
 ```{r}
 target <- function(x) {
   exp(-x^2) * (2 + sin(5 * x) + sin(2 * x))
 }
 ```
+
+Estoy emocionada. 😐
 
 Next we define a `metropolis_step()` function that takes some value `x` corresponding to the current state of the Markov chain, and a parameter `sigma` that describes the standard deviation of the proposal distribution:
 
@@ -202,6 +206,10 @@ As you can see it returns a data frame with `n` rows and two columns. The first 
 
 ### The effect of proposal width
 
+In practice when you're implementing a Metropolis algorithm, the choice of proposal distribution matters a lot. If it's too narrow, your sampler will have an extremely high acceptance rate on average, but it will move around extremely slowly. To use the technical term, it has a very low *mixing* rate. This distorts your estimate of the target distribution. However, if it's too wide, the acceptance rate becomes too high and the chain gets stuck on specific values for long periods of time. This also distorts your estimate of the target distribution. Yes, technically, if you run your accursed sampler long enough despite it's poor choice of proposal distribution it will eventually produce the right answer... but wouldn't you prefer a sampler that gives you the right answer quickly rather than slowly? 
+
+This idea is illustrated in the plots below, in which I've run a Metropolis sampler with `n = 10000` on our toy problem three times. On the left, I've made a good choice of proposal distribution, setting `sigma = 1`. In the middle, my proposal distribution is too narrow (I set `sigma = .025` and it doesn't work). On the right, my proposal distribution is too wide: it turns out that `sigma = 50` isn't a good idea for this problem either:
+
 ```{r}
 #| code-fold: true
 #| code-summary: Source code for plots
@@ -244,15 +252,15 @@ for(i in 1:3) {
 }
 ```
 
-For all three values of `sigma`, we have two plots. The top one shows the true target distribution, along with a histogram showing the distribution of samples obtained using the Metropolis sampler. The lower panel plots the actual Markov chain: the sequence of generated values. In the leftmost plots, we see what happens when we choose a good proposal distribution: the chain shown in the lower panel moves rapidly across the whole distribution, without getting stuck in any one place (the acceptance rate here is 47.5%). In the far right panel, we see what happens when the proposal distribution is too wide: the chain gets stuck in one spot for long periods of time.  It does manage to make big jumps, covering the whole range, but because the acceptance rate is so low (2.5%) the distribution of samples is highly irregular. Finally, in the middle panel, if we set the proposal distribution to be too narrow, the acceptance rate is very high (97.7%) so the chain doesn’t get stuck in any one spot, but it doesn’t cover a very wide range. This simple example should give you an intuition for why you need to "play around"
-with the choice of proposal distribution. A good proposal distribution can make a huge
-difference! 
+The way to read these plots is as follows: for all three values of `sigma`, we have two plots. The top one shows a histogram of the samples values obtained using the Metropolis sampler (that's the black bars). Superimposed on this is a red line showing the distribution of values you'd expect to obtain when sampling from the true distribution.^[I am old and angry and unemployed and on my second glass of wine. Do not test me on whether I understand what an expectation is.] The lower panel plots the Markov chain itself: the sequence of generated values.^[This is usually referred to as a "trace plot". Eyeballing the trace plot is a useful thing to do when examining the behaviour of your MCMC algorithm, but beware... it is a very crude method. The devil is very much in the details here.]
+
+In the leftmost plots, we see what happens when we choose a good proposal distribution: the chain shown in the lower panel moves rapidly across the whole distribution, without getting stuck in any one place. In the far right panel, we see what happens when the proposal distribution is too wide: the chain gets stuck in one spot for long periods of time.  It does manage to make big jumps, covering the whole range, but because the acceptance rate is so low that the distribution of samples is highly irregular. Finally, in the middle panel, if we set the proposal distribution to be too narrow, the acceptance rate is very high so the chain doesn't get stuck in any one spot, but it doesn't cover a very wide range. This simple example should give you an intuition for why you need to "play around" with the choice of proposal distribution. A good proposal distribution can make a huge difference!^[At this point she asks herself... does she want to talk about methods for automatically choosing a good proposal? No. No she does not.] 
 
 <br>
 
-## The role of the burn-in period
+### The role of the burn-in period
 
-Now, at this point I haven't really explained what the `burnin` and `lag` parameters are there for. I don't plan to go into details, but here's the basic idea. First, let's think about the burn-in issue. Suppose you started the sampler at a very bad location... say `initial_value = -3`, and -- just so that we can exaggerate the problem -- we'll use a proposal distribution that is too narrow, say `sigma = .1`. The image below shows three runs of this sampler:
+Up to this point I haven't really explained what the `burnin` and `lag` parameters are there for. To be honest I don't plan to go into details, but here's the basic idea. First, let's think about the burn-in issue. Suppose you started the sampler at a very bad location... say `initial_value = -3`, and -- just so that we can exaggerate the problem -- we'll use a proposal distribution that is too narrow, say `sigma = .1`. The image below shows three runs of this sampler:
 
 ```{r}
 #| code-fold: true
@@ -339,7 +347,6 @@ for(i in 1:3) {
     xlab = "Value, x",
     ylab = "Time"
   )
-  abline(h = 200, lty = "dotted")
 }
 ```
 
@@ -347,9 +354,9 @@ It's still not ideal -- largely because we don't have many samples, we haven't s
 
 <br>
 
-## The role of the lag parameter
+### The role of the lag parameter
 
-Finally, I’ll mention in passing the role played by the lag parameter. In some situations you can be forced into using a proposal distribution that has a very low acceptance rate. When that happens, you’re left with an awkward Markov chain that gets stuck in one location for long periods of time. One thing that people often do in that situation is allow several iterations of the sampler to elapse in between successive samples. This is the `lag` between samples. The effect of this is illustrated in below, which shows the behaviour of a  sampler with a very wide proposal distribution (`sigma = 50`) with `n = 1000` samples drawn, at `lag = 0` (left), `lag = 10` (middle) and `lag = 100` (right).
+Finally, I’ll mention in passing the role played by the `lag` parameter.^[This is often referred to as the "thinning" rate.    ] In some situations you can be forced into using a proposal distribution that has a very low acceptance rate. When that happens, you’re left with an awkward Markov chain that gets stuck in one location for long periods of time. One thing that people often do in that situation is allow several iterations of the sampler to elapse in between successive samples. This is the `lag` between samples. The effect of this is illustrated in below, which shows the behaviour of a  sampler with a very wide proposal distribution (`sigma = 50`) with `n = 1000` samples drawn, at `lag = 0` (left), `lag = 10` (middle) and `lag = 100` (right).
 
 
 ```{r}
@@ -395,6 +402,7 @@ for(i in 1:3) {
 }
 ```
 
+Formally speaking, the thing we're trying to do here by increasing `lag` is reduce the [autocorrelation](https://en.wikipedia.org/wiki/Autocorrelation) between successive samples in our chain. In an ideal world we want our sampled values to be *independent* samples from the target distribution $p(x)$. The more our samples are correlated with each other, the more potential there is for the histogram of sampled values to depart systematically from the target distribution. Introducing a lag between successive samples is a simple way to achieve this. 
 
 <br>
 
