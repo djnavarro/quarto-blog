@@ -240,13 +240,13 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
     <h2 id="toc-title">Table of contents</h2>
    
   <ul>
-  <li><a href="#the-problem-to-be-solved" id="toc-the-problem-to-be-solved" class="nav-link active" data-scroll-target="#the-problem-to-be-solved">The problem to be solved</a></li>
+  <li><a href="#the-problem" id="toc-the-problem" class="nav-link active" data-scroll-target="#the-problem">The problem</a></li>
   <li><a href="#the-metropolis-hastings-algorithm" id="toc-the-metropolis-hastings-algorithm" class="nav-link" data-scroll-target="#the-metropolis-hastings-algorithm">The Metropolis-Hastings algorithm</a>
   <ul class="collapse">
   <li><a href="#the-proposal-step" id="toc-the-proposal-step" class="nav-link" data-scroll-target="#the-proposal-step">The proposal step</a></li>
   <li><a href="#the-accept-reject-step" id="toc-the-accept-reject-step" class="nav-link" data-scroll-target="#the-accept-reject-step">The accept-reject step</a></li>
   </ul></li>
-  <li><a href="#some-examples" id="toc-some-examples" class="nav-link" data-scroll-target="#some-examples">Some examples</a>
+  <li><a href="#implementing-the-sampler" id="toc-implementing-the-sampler" class="nav-link" data-scroll-target="#implementing-the-sampler">Implementing the sampler</a>
   <ul class="collapse">
   <li><a href="#the-effect-of-proposal-width" id="toc-the-effect-of-proposal-width" class="nav-link" data-scroll-target="#the-effect-of-proposal-width">The effect of proposal width</a></li>
   </ul></li>
@@ -268,53 +268,57 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
 <!--------------- my typical setup ----------------->
 <!--------------- post begins here ----------------->
 <p>This morning I received an email from a stranger, writing to say thank you for a document I wrote almost 13 years ago. It’s a weird feeling every time I get one of those,<a href="#fn1" class="footnote-ref" id="fnref1" role="doc-noteref"><sup>1</sup></a> but a pleasant one. This time around, the document in question was a <a href="https://compcogsci-3016.djnavarro.net/technote_metropolishastings.pdf">note on the Metropolis-Hastings algorithm</a> that I threw together in a rush for a computer science class I taught back in 2010.<a href="#fn2" class="footnote-ref" id="fnref2" role="doc-noteref"><sup>2</sup></a> While drinking my second coffee of the morning and feeling the usual sense of dread I feel when I know that today I have to put some effort into looking for a job, yet again, I arrived at an excellent procrastination strategy…</p>
-<p>Why don’t I start rescuing some of the content that I wrote all those years ago and currently have hidden away in pdf files in the dark corners of the internet, and put them up on my blog? It won’t get me a job, but it feels less demeaning than yet again trying to get tech company recruiters to believe that yes actually the middle aged lady with a psychology PhD does in fact know how to code and analyse data.</p>
-<p>Anyway. Without any further self-pity, here’s a quick primer on the <a href="https://en.wikipedia.org/wiki/Metropolis%E2%80%93Hastings_algorithm">Metropolis-Hastings algorithm</a>. The target audience for this is someone who has a little bit of probability theory, can write code in R (or similar), but doesn’t have any background in Markov chain Monte Carlo methods. It doesn’t dive deep into the mathematics (i.e., you <em>won’t</em> find any discussions of detailed balance, ergodicity etc), but it does try to go deep enough to give a beginner some formal understanding of what the algorithm is doing.</p>
-<section id="the-problem-to-be-solved" class="level2">
-<h2 class="anchored" data-anchor-id="the-problem-to-be-solved">The problem to be solved</h2>
-<p>The Metropolis-Hastings algorithm is perhaps the most popular example of a <a href="https://en.wikipedia.org/wiki/Markov_chain_Monte_Carlo">Markov chain Monte Carlo</a> (MCMC) method in statistics. The basic problem that it solves is to provide a method for sampling from some generic distribution, <span class="math inline">\(P(x)\)</span>. The idea is that in many cases, you know how to write out the equation for the probability <span class="math inline">\(P(x)\)</span>, but you don’t know how to generate a random number from this distribution, <span class="math inline">\(x \sim P(x)\)</span>. This is the situation where MCMC is handy. In fact, for the Metropolis-Hastings algorithm we don’t even need to know how to calculate <span class="math inline">\(P(x)\)</span> completely. For example, suppose I’ve become interested – for reasons known but to the gods – in the probability distribution shown below:</p>
+<p>Why don’t I start rescuing some of the content that I wrote all those years ago and currently have hidden away in pdf files in the dark corners of the internet, and put them up on my blog? Okay sure it won’t get me a job, but it feels less demeaning than yet again trying to get tech company recruiters to believe that yes actually the middle aged lady with a psychology PhD does in fact know how something about statistics and does know how to code.</p>
+<p>Anyway. Without further self-pity, here’s a quick primer on the <a href="https://en.wikipedia.org/wiki/Metropolis%E2%80%93Hastings_algorithm">Metropolis-Hastings algorithm</a>. The target audience for this is someone who has a little bit of probability theory, can write code in R (or similar), but doesn’t have any background in Markov chain Monte Carlo methods. It doesn’t dive deep into the mathematics – i.e., you won’t find any discussions of <a href="https://en.wikipedia.org/wiki/Detailed_balance">detailed balance</a>, <a href="https://en.wikipedia.org/wiki/Ergodicity">ergodicity</a>, and other things a statistics class would cover – but it does try to go deep enough to give a beginner an understanding of what the algorithm is doing.</p>
+<p><br></p>
+<section id="the-problem" class="level2">
+<h2 class="anchored" data-anchor-id="the-problem">The problem</h2>
+<p>The Metropolis-Hastings algorithm is perhaps the most popular example of a <a href="https://en.wikipedia.org/wiki/Markov_chain_Monte_Carlo">Markov chain Monte Carlo</a> (MCMC) method in statistics. The basic problem that it solves is to provide a method for sampling from some arbitrary probability distribution, which I’ll denote <span class="math inline">\(p(x)\)</span>.<a href="#fn3" class="footnote-ref" id="fnref3" role="doc-noteref"><sup>3</sup></a> The idea is that in many cases, you know how to write out the equation for the probability <span class="math inline">\(p(x)\)</span>, but you don’t know how to generate a random number from this distribution, <span class="math inline">\(x \sim p(x)\)</span>. This is the situation where MCMC is handy. For example, suppose I’ve become interested – for reasons known but to the gods – in the probability distribution shown below:</p>
 <div class="cell">
 <div class="cell-output-display">
 <p><img src="index_files/figure-html/unnamed-chunk-1-1.png" class="img-fluid" width="672"></p>
 </div>
 </div>
-<p>The probability density function<a href="#fn3" class="footnote-ref" id="fnref3" role="doc-noteref"><sup>3</sup></a> <span class="math inline">\(p(x)\)</span> for this distribution is given by the following equation:</p>
+<p>The probability density function<a href="#fn4" class="footnote-ref" id="fnref4" role="doc-noteref"><sup>4</sup></a> <span class="math inline">\(p(x)\)</span> for this distribution is given by the following equation:</p>
 <p><span class="math display">\[
 p(x) = \frac{\exp(-x^2) \left(2 + \sin(5x) + \sin(2x)\right)}{\int_{-\infty}^\infty \exp(-u^2) \left(2 + \sin(5u) + \sin(2u)\right) \ du}
 \]</span></p>
-<p>My problem is that I either don’t know <em>how</em> to solve the integral in the denominator, or (equally plausible) I’m simply too lazy to try. So this means in truth, I only know the distribution “up to some unknown constant”. That is, I know that:</p>
+<p>My problem is that I either don’t know <em>how</em> to solve the integral in the denominator, or I’m simply too lazy to try.<a href="#fn5" class="footnote-ref" id="fnref5" role="doc-noteref"><sup>5</sup></a> So this means in truth, I only know the distribution “up to some unknown constant”. That is, all I really know how to calculate is the numerator. Given this, a more realistic way to express my knowledge about the target distribution is captured by this equation:</p>
 <p><span class="math display">\[
 p(x) \propto \exp(-x^2) \left(2 + \sin(5x) + \sin(2x)\right)
 \]</span> How can I generate samples from this distribution?</p>
+<p><br></p>
 </section>
 <section id="the-metropolis-hastings-algorithm" class="level2">
 <h2 class="anchored" data-anchor-id="the-metropolis-hastings-algorithm">The Metropolis-Hastings algorithm</h2>
-<p>The basic idea behind MCMC is very simple. The idea is to define a <a href="https://en.wikipedia.org/wiki/Markov_chain">Markov chain</a><a href="#fn4" class="footnote-ref" id="fnref4" role="doc-noteref"><sup>4</sup></a> over possible <span class="math inline">\(x\)</span> values, in such a way that the stationary distribution of the Markov chain is in fact <span class="math inline">\(P(x)\)</span>. That is, what we’re going to do is use a Markov chain to generate a sequence of <span class="math inline">\(x\)</span> values, denoted <span class="math inline">\((x_0, x_1, x_2, \ldots, x_n)\)</span>, in such a way that as <span class="math inline">\(n \rightarrow \infty\)</span>, we can guarantee that <span class="math inline">\(x_n \sim P(x)\)</span>. There are many different ways of setting up a Markov chain that has this property, one of which is the Metropolis-Hastings algorithm.</p>
-<p>Here’s how it works. Suppose that the current state of the Markov chain is <span class="math inline">\(x_n\)</span>, and we want to generate <span class="math inline">\(x_{n+1}\)</span>. In the Metropolis-Hastings algorithm, the generation of <span class="math inline">\(x_{n+1}\)</span> is a two-stage process.</p>
+<p>The basic idea behind MCMC is very simple. The idea is to define a <a href="https://en.wikipedia.org/wiki/Markov_chain">Markov chain</a><a href="#fn6" class="footnote-ref" id="fnref6" role="doc-noteref"><sup>6</sup></a> over possible <span class="math inline">\(x\)</span> values, in such a way that the stationary distribution of the Markov chain is in fact <span class="math inline">\(p(x)\)</span>. That is, what we’re going to do is use a Markov chain to generate a sequence of <span class="math inline">\(x\)</span> values, denoted <span class="math inline">\((x_0, x_1, x_2, \ldots, x_n)\)</span>, in such a way that as <span class="math inline">\(n \rightarrow \infty\)</span>, we can guarantee<a href="#fn7" class="footnote-ref" id="fnref7" role="doc-noteref"><sup>7</sup></a> that <span class="math inline">\(x_n \sim p(x)\)</span>. There are many different ways of setting up a Markov chain that has this property. The Metropolis-Hastings algorithm is one of these.</p>
+<p><br></p>
 <section id="the-proposal-step" class="level3">
 <h3 class="anchored" data-anchor-id="the-proposal-step">The proposal step</h3>
-<p>The first stage is to generate a <em>candidate</em>, which we’ll denote <span class="math inline">\(x^∗\)</span>. The value of <span class="math inline">\(x^∗\)</span> is generated from the proposal distribution that we already know how to sample from. We denote this proposal distribution <span class="math inline">\(Q(x^∗ | x_n)\)</span>, and the corresponding density function as <span class="math inline">\(q(x^∗ | x_n)\)</span>. Notice that the distribution we sample from depends on the current state of the Markov chain, <span class="math inline">\(x_n\)</span>. There are some technical constraints on what you can use as a proposal distribution, but for the most part it can be anything you like. A very typical way to do this is to use a normal distribution centered on the current state <span class="math inline">\(x_n\)</span>. More formally, we write this as:</p>
+<p>Here’s how it works. Suppose that the current state of the Markov chain is <span class="math inline">\(x_n\)</span>, and we want to generate <span class="math inline">\(x_{n+1}\)</span>. In the Metropolis-Hastings algorithm, the generation of <span class="math inline">\(x_{n+1}\)</span> is a two-stage process.</p>
+<p>The first stage is to generate a <em>candidate</em>, which we’ll denote <span class="math inline">\(x^∗\)</span>. The value of <span class="math inline">\(x^∗\)</span> is generated from the proposal distribution that we already know how to sample from. We denote this proposal distribution <span class="math inline">\(q(x^∗ | x_n)\)</span>. Notice that the distribution we sample from depends on the current state of the Markov chain, <span class="math inline">\(x_n\)</span>. There are some technical constraints on what you can use as a proposal distribution, but for the most part it can be anything you like. A very typical way to do this is to use a normal distribution centered on the current state <span class="math inline">\(x_n\)</span>. More formally, we write this as:</p>
 <p><span class="math display">\[
 x^* | x_n \sim \mbox{Normal}(x_n, \sigma^2)
 \]</span> for some standard deviation <span class="math inline">\(\sigma\)</span> that we select in advance (more on this later!)</p>
+<p><br></p>
 </section>
 <section id="the-accept-reject-step" class="level3">
 <h3 class="anchored" data-anchor-id="the-accept-reject-step">The accept-reject step</h3>
-<p>The second stage is the accept-reject step. Firstly, what you need to do is calculate the <em>acceptance probability</em>, denoted <span class="math inline">\(A(x_n \rightarrow x_∗)\)</span>, which is given by:<a href="#fn5" class="footnote-ref" id="fnref5" role="doc-noteref"><sup>5</sup></a></p>
+<p>The second stage is the accept-reject step. Firstly, what you need to do is calculate the <em>acceptance probability</em>, denoted <span class="math inline">\(A(x_n \rightarrow x_∗)\)</span>, which is given by:<a href="#fn8" class="footnote-ref" id="fnref8" role="doc-noteref"><sup>8</sup></a></p>
 <p><span class="math display">\[
 A(x_n \rightarrow x_∗) = \min \left(1, \frac{p(x^*)}{p(x^n)} \times \frac{q(x_n | x^*)}{q(x^* | x_n)} \right)
-\]</span> There are two things to pay attention to here. Firstly, notice that the ratio <span class="math inline">\(\frac{p(x^*)}{p(x^n)}\)</span> doesn’t depend on the normalising constant for the distribution. Or, to put it in a more helpful way, that integral in the first equation is completely irrelevant and we can ignore it. As a consequence, for our toy problem we can write this:</p>
+\]</span> There are two things to pay attention to here. Firstly, notice that the ratio <span class="math inline">\(p(x^*) / p(x^n)\)</span> doesn’t depend on the normalising constant for the distribution. Or, to put it in a more helpful way, that integral in the first equation is completely irrelevant and we can ignore it. As a consequence, for our toy problem we can write this:</p>
 <p><span class="math display">\[
 \frac{p(x^*)}{p(x^n)} = \frac{\exp(-{x^*}^2) \left(2 + \sin(5x^*) + \sin(2x^*)\right)}{\exp(-{x_n}^2) \left(2 + \sin(5x_n) + \sin(2x_n)\right)}
 \]</span> That’s a nice simple thing to compute with no need for any numerical integration or, gods forbid, solving the integral analytically.</p>
-<p>The second thing to pay attention to is the behaviour of the other term, <span class="math inline">\(\frac{q(x_n | x^*)}{q(x^* | x_n)}\)</span>. What this term does is correct for any biases that the proposal distribution might induce. In this expression, the denominator <span class="math inline">\(q(x^∗ | x_n)\)</span> describes the probability with which you’d choose <span class="math inline">\(x^*\)</span> as the candidate if the current state of the Markov chain is <span class="math inline">\(x_n\)</span>. The numerator, however, describes the probability of a transition that goes the other way: that is, if the current state had actually been <span class="math inline">\(x^∗\)</span>, what is the probability that you would have generated <span class="math inline">\(x^n\)</span> as the candidate value? If the proposal distribution is symmetric, then these two probabilities will turn out to be equal. For example, if the proposal distribution is normal, then:</p>
+<p>The second thing to pay attention to is the behaviour of the other term, <span class="math inline">\(q(x_n | x^*) / q(x^* | x_n)\)</span>. What this term does is correct for any biases that the proposal distribution might induce. In this expression, the denominator <span class="math inline">\(q(x^∗ | x_n)\)</span> describes the probability with which you’d choose <span class="math inline">\(x^*\)</span> as the candidate if the current state of the Markov chain is <span class="math inline">\(x_n\)</span>. The numerator, however, describes the probability of a transition that goes the other way: that is, if the current state had actually been <span class="math inline">\(x^∗\)</span>, what is the probability that you would have generated <span class="math inline">\(x^n\)</span> as the candidate value? If the proposal distribution is symmetric, then these two probabilities will turn out to be equal. For example, if the proposal distribution is normal, then:</p>
 <p><span class="math display">\[
 \begin{array}{rcl}
 q(x^* | x_n) &amp; = &amp; \frac{1}{\sqrt{2 \pi} \sigma} \exp \left( -\frac{1}{2 \sigma^2} \left(x_n - x^*\right)^2 \right) \\
 q(x_n | x^*) &amp; = &amp; \frac{1}{\sqrt{2 \pi} \sigma} \exp \left( -\frac{1}{2 \sigma^2} \left(x^* - x_n \right)^2 \right)
 \end{array}
 \]</span></p>
-<p>Clearly, <span class="math inline">\(q(x^* | x_n) = q(x_n | x^*)\)</span> for all choices of <span class="math inline">\(x_n\)</span> and <span class="math inline">\(x^*\)</span>, and as a consequence the ratio <span class="math inline">\(\frac{q(x_n | x^*)}{q(x^* | x_n)}\)</span> is always 1 in this case.</p>
+<p>Clearly, <span class="math inline">\(q(x^* | x_n) = q(x_n | x^*)\)</span> for all choices of <span class="math inline">\(x_n\)</span> and <span class="math inline">\(x^*\)</span>, and as a consequence the ratio <span class="math inline">\(q(x_n | x^*) / q(x^* | x_n)\)</span> is always 1 in this case.</p>
 <p>This special case of the Metropolis-Hastings algorithm, in which the proposal distribution is symmetric, is referred to as the <em>Metropolis algorithm</em>.</p>
 <p>Okay. Having proposed the candidate <span class="math inline">\(x^∗\)</span> and calculated the acceptance probability, <span class="math inline">\(A(x_n \rightarrow x^∗)\)</span>, we now either decide to “accept” the candidate and set <span class="math inline">\(x_{n+1} = x^∗\)</span> or we “reject” the candidate and set <span class="math inline">\(x_{n+1} = x_n\)</span>. To make this decision, we generate a uniformly distributed random number between 0 and 1, denoted <span class="math inline">\(u\)</span>. Then:</p>
 <p><span class="math display">\[
@@ -325,58 +329,75 @@ x_n &amp; \mbox{ otherwise}
 \end{array}
 \right.
 \]</span> In essence, this is the entirety of the Metropolis-Hastings algorithm! True, there are quite a few technical issues that attach to this, and if you’re interested in using the algorithm for practical purposes I strongly encourage you to do some further reading to make sure you understand the traps in detail, but for now I’ll just give you some examples of things that work and things that don’t, to give you a bit of a feel for how it works in practice.</p>
+<p><br></p>
 </section>
 </section>
-<section id="some-examples" class="level2">
-<h2 class="anchored" data-anchor-id="some-examples">Some examples</h2>
-<p>Firstly, let’s have a look at some R code implementing the Metropolis-Hastings algorithm for the toy problem (i.e., sample from the distribution shown in the original figure). Notice that in addition to the parameter <code>sigma</code>, we also need to specify the total number of samples that we are intending to draw <code>nsamp</code>, a start point for the chain <code>x0</code>, and two additional variables <code>burnin</code> and <code>lag</code> that I’ll explain shortly.</p>
+<section id="implementing-the-sampler" class="level2">
+<h2 class="anchored" data-anchor-id="implementing-the-sampler">Implementing the sampler</h2>
+<p>Let’s have a look at some R code implementing the Metropolis-Hastings algorithm for the toy problem (i.e., sample from the distribution shown in the original figure). We’ll define the sampler in terms of three functions. First, we have a <code>target()</code> function that calculates the probability of a given sample <code>x</code>, or – more precisely – calculates the numerator term:</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb1"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a>target <span class="ot">&lt;-</span> <span class="cf">function</span>(x) {</span>
 <span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">exp</span>(<span class="sc">-</span>x<span class="sc">^</span><span class="dv">2</span>) <span class="sc">*</span> (<span class="dv">2</span> <span class="sc">+</span> <span class="fu">sin</span>(<span class="dv">5</span> <span class="sc">*</span> x) <span class="sc">+</span> <span class="fu">sin</span>(<span class="dv">2</span> <span class="sc">*</span> x))</span>
-<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>}</span>
-<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>metropolis_step <span class="ot">&lt;-</span> <span class="cf">function</span>(x, sigma) {</span>
-<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a>  proposed_x <span class="ot">&lt;-</span> <span class="fu">rnorm</span>(<span class="dv">1</span>, <span class="at">mean =</span> x, <span class="at">sd =</span> sigma)</span>
-<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>  accept_prob <span class="ot">&lt;-</span> <span class="fu">min</span>(<span class="dv">1</span>, <span class="fu">target</span>(proposed_x) <span class="sc">/</span> <span class="fu">target</span>(x))</span>
-<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>  u <span class="ot">&lt;-</span> <span class="fu">runif</span>(<span class="dv">1</span>)</span>
-<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span>(u <span class="sc">&lt;=</span> accept_prob) {</span>
-<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a>    value <span class="ot">&lt;-</span> proposed_x</span>
-<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a>    accepted <span class="ot">&lt;-</span> <span class="cn">TRUE</span></span>
-<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a>  } <span class="cf">else</span> {</span>
-<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a>    value <span class="ot">&lt;-</span> x</span>
-<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a>    accepted <span class="ot">&lt;-</span> <span class="cn">FALSE</span></span>
-<span id="cb1-15"><a href="#cb1-15" aria-hidden="true" tabindex="-1"></a>  }</span>
-<span id="cb1-16"><a href="#cb1-16" aria-hidden="true" tabindex="-1"></a>  out <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(<span class="at">value =</span> value, <span class="at">accepted =</span> accepted)</span>
-<span id="cb1-17"><a href="#cb1-17" aria-hidden="true" tabindex="-1"></a>  out</span>
-<span id="cb1-18"><a href="#cb1-18" aria-hidden="true" tabindex="-1"></a>}</span>
-<span id="cb1-19"><a href="#cb1-19" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-20"><a href="#cb1-20" aria-hidden="true" tabindex="-1"></a>metropolis_sampler <span class="ot">&lt;-</span> <span class="cf">function</span>(initial_value, </span>
-<span id="cb1-21"><a href="#cb1-21" aria-hidden="true" tabindex="-1"></a>                               <span class="at">n =</span> <span class="dv">1000</span>, </span>
-<span id="cb1-22"><a href="#cb1-22" aria-hidden="true" tabindex="-1"></a>                               <span class="at">sigma =</span> <span class="dv">1</span>, </span>
-<span id="cb1-23"><a href="#cb1-23" aria-hidden="true" tabindex="-1"></a>                               <span class="at">burnin =</span> <span class="dv">0</span>, </span>
-<span id="cb1-24"><a href="#cb1-24" aria-hidden="true" tabindex="-1"></a>                               <span class="at">lag =</span> <span class="dv">1</span>) {</span>
-<span id="cb1-25"><a href="#cb1-25" aria-hidden="true" tabindex="-1"></a>  </span>
-<span id="cb1-26"><a href="#cb1-26" aria-hidden="true" tabindex="-1"></a>  results <span class="ot">&lt;-</span> <span class="fu">list</span>()</span>
-<span id="cb1-27"><a href="#cb1-27" aria-hidden="true" tabindex="-1"></a>  current_state <span class="ot">&lt;-</span> initial_value</span>
-<span id="cb1-28"><a href="#cb1-28" aria-hidden="true" tabindex="-1"></a>  <span class="cf">for</span>(i <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span>burnin) {</span>
-<span id="cb1-29"><a href="#cb1-29" aria-hidden="true" tabindex="-1"></a>    out <span class="ot">&lt;-</span> <span class="fu">metropolis_step</span>(current_state, sigma)</span>
-<span id="cb1-30"><a href="#cb1-30" aria-hidden="true" tabindex="-1"></a>    current_state <span class="ot">&lt;-</span> out<span class="sc">$</span>value</span>
-<span id="cb1-31"><a href="#cb1-31" aria-hidden="true" tabindex="-1"></a>  }</span>
-<span id="cb1-32"><a href="#cb1-32" aria-hidden="true" tabindex="-1"></a>  <span class="cf">for</span>(i <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span>n) {</span>
-<span id="cb1-33"><a href="#cb1-33" aria-hidden="true" tabindex="-1"></a>    <span class="cf">for</span>(j <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span>lag) {</span>
-<span id="cb1-34"><a href="#cb1-34" aria-hidden="true" tabindex="-1"></a>      out <span class="ot">&lt;-</span> <span class="fu">metropolis_step</span>(current_state, sigma)</span>
-<span id="cb1-35"><a href="#cb1-35" aria-hidden="true" tabindex="-1"></a>      current_state <span class="ot">&lt;-</span> out<span class="sc">$</span>value</span>
-<span id="cb1-36"><a href="#cb1-36" aria-hidden="true" tabindex="-1"></a>    }</span>
-<span id="cb1-37"><a href="#cb1-37" aria-hidden="true" tabindex="-1"></a>    results[[i]] <span class="ot">&lt;-</span> out</span>
-<span id="cb1-38"><a href="#cb1-38" aria-hidden="true" tabindex="-1"></a>  }</span>
-<span id="cb1-39"><a href="#cb1-39" aria-hidden="true" tabindex="-1"></a>  results <span class="ot">&lt;-</span> <span class="fu">do.call</span>(rbind, results)</span>
-<span id="cb1-40"><a href="#cb1-40" aria-hidden="true" tabindex="-1"></a>  results</span>
-<span id="cb1-41"><a href="#cb1-41" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
+<p>Next we define a <code>metropolis_step()</code> function that takes some value <code>x</code> corresponding to the current state of the Markov chain, and a parameter <code>sigma</code> that describes the standard deviation of the proposal distribution:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb2"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">1234</span>)</span>
-<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>out <span class="ot">&lt;-</span> <span class="fu">metropolis_sampler</span>(<span class="at">initial_value =</span> <span class="dv">0</span>)</span>
-<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>out[<span class="dv">1</span><span class="sc">:</span><span class="dv">10</span>, ]</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb2"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a>metropolis_step <span class="ot">&lt;-</span> <span class="cf">function</span>(x, sigma) {</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>  proposed_x <span class="ot">&lt;-</span> <span class="fu">rnorm</span>(<span class="dv">1</span>, <span class="at">mean =</span> x, <span class="at">sd =</span> sigma)</span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>  accept_prob <span class="ot">&lt;-</span> <span class="fu">min</span>(<span class="dv">1</span>, <span class="fu">target</span>(proposed_x) <span class="sc">/</span> <span class="fu">target</span>(x))</span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>  u <span class="ot">&lt;-</span> <span class="fu">runif</span>(<span class="dv">1</span>)</span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span>(u <span class="sc">&lt;=</span> accept_prob) {</span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>    value <span class="ot">&lt;-</span> proposed_x</span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>    accepted <span class="ot">&lt;-</span> <span class="cn">TRUE</span></span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>  } <span class="cf">else</span> {</span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a>    value <span class="ot">&lt;-</span> x</span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a>    accepted <span class="ot">&lt;-</span> <span class="cn">FALSE</span></span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a>  out <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(<span class="at">value =</span> value, <span class="at">accepted =</span> accepted)</span>
+<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a>  out</span>
+<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>Finally we can write a <code>metropolis_sampler()</code> function that runs the Metropolis algorithm for some number of steps:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb3"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a>metropolis_sampler <span class="ot">&lt;-</span> <span class="cf">function</span>(initial_value, </span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>                               <span class="at">n =</span> <span class="dv">1000</span>, </span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>                               <span class="at">sigma =</span> <span class="dv">1</span>, </span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>                               <span class="at">burnin =</span> <span class="dv">0</span>, </span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>                               <span class="at">lag =</span> <span class="dv">1</span>) {</span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>  </span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a>  results <span class="ot">&lt;-</span> <span class="fu">list</span>()</span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a>  current_state <span class="ot">&lt;-</span> initial_value</span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a>  <span class="cf">for</span>(i <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span>burnin) {</span>
+<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a>    out <span class="ot">&lt;-</span> <span class="fu">metropolis_step</span>(current_state, sigma)</span>
+<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a>    current_state <span class="ot">&lt;-</span> out<span class="sc">$</span>value</span>
+<span id="cb3-12"><a href="#cb3-12" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb3-13"><a href="#cb3-13" aria-hidden="true" tabindex="-1"></a>  <span class="cf">for</span>(i <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span>n) {</span>
+<span id="cb3-14"><a href="#cb3-14" aria-hidden="true" tabindex="-1"></a>    <span class="cf">for</span>(j <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span>lag) {</span>
+<span id="cb3-15"><a href="#cb3-15" aria-hidden="true" tabindex="-1"></a>      out <span class="ot">&lt;-</span> <span class="fu">metropolis_step</span>(current_state, sigma)</span>
+<span id="cb3-16"><a href="#cb3-16" aria-hidden="true" tabindex="-1"></a>      current_state <span class="ot">&lt;-</span> out<span class="sc">$</span>value</span>
+<span id="cb3-17"><a href="#cb3-17" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="cb3-18"><a href="#cb3-18" aria-hidden="true" tabindex="-1"></a>    results[[i]] <span class="ot">&lt;-</span> out</span>
+<span id="cb3-19"><a href="#cb3-19" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb3-20"><a href="#cb3-20" aria-hidden="true" tabindex="-1"></a>  results <span class="ot">&lt;-</span> <span class="fu">do.call</span>(rbind, results)</span>
+<span id="cb3-21"><a href="#cb3-21" aria-hidden="true" tabindex="-1"></a>  results</span>
+<span id="cb3-22"><a href="#cb3-22" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>We have several arguments here. Three of them follow intuitively from the mathematical description I gave in the last section:</p>
+<ul>
+<li><code>initial_value</code> is the start point for the Markov chain</li>
+<li><code>n</code> is the number of samples we want to draw from the target distribution</li>
+<li><code>sigma</code> is the standard deviation of the normal distribution we use to propose candidate values at each step</li>
+</ul>
+<p>The other two are:</p>
+<ul>
+<li><code>burnin</code> is the number of iterations we run the sampler for before recording results</li>
+<li><code>lag</code> is the number of iterations we run the sampler for between successive samples</li>
+</ul>
+<p>I’ll talk more about these input arguments later, but for now let’s take a look at what happens when we call our <code>metropolis_sampler()</code> function:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb4"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">1234</span>)</span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>out <span class="ot">&lt;-</span> <span class="fu">metropolis_sampler</span>(<span class="at">initial_value =</span> <span class="dv">0</span>)</span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>out[<span class="dv">1</span><span class="sc">:</span><span class="dv">10</span>, ]</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>        value accepted
 1   0.3143686    FALSE
@@ -391,129 +412,33 @@ x_n &amp; \mbox{ otherwise}
 10  0.3352164     TRUE</code></pre>
 </div>
 </div>
+<p>As you can see it returns a data frame with <code>n</code> rows and two columns. The first column records the numeric <code>value</code> that was sampled, and <code>accepted</code> is a logical variable indicating whether this value arose from accepting the proposal (rather than rejecting it).</p>
+<p><br></p>
 <section id="the-effect-of-proposal-width" class="level3">
 <h3 class="anchored" data-anchor-id="the-effect-of-proposal-width">The effect of proposal width</h3>
-<div class="cell">
-<details>
-<summary>Source code for plots</summary>
-<div class="sourceCode cell-code" id="cb4"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">1234</span>)</span>
-<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="fu">par</span>(<span class="at">mar =</span> <span class="fu">c</span>(<span class="dv">4</span>, <span class="dv">4</span>, <span class="dv">2</span>, <span class="dv">2</span>))</span>
-<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a><span class="fu">layout</span>(<span class="fu">matrix</span>(<span class="dv">1</span><span class="sc">:</span><span class="dv">6</span>, <span class="at">nrow =</span> <span class="dv">2</span>, <span class="at">ncol =</span> <span class="dv">3</span>))</span>
-<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>sigma <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="dv">1</span>, <span class="fl">0.025</span>, <span class="dv">50</span>)</span>
-<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a>n <span class="ot">&lt;-</span> <span class="dv">10000</span></span>
-<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span>(i <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span><span class="dv">3</span>) {</span>
-<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a>  out <span class="ot">&lt;-</span> <span class="fu">metropolis_sampler</span>(</span>
-<span id="cb4-8"><a href="#cb4-8" aria-hidden="true" tabindex="-1"></a>    <span class="at">initial_value =</span> <span class="sc">-</span><span class="dv">1</span>, </span>
-<span id="cb4-9"><a href="#cb4-9" aria-hidden="true" tabindex="-1"></a>    <span class="at">n =</span> n, </span>
-<span id="cb4-10"><a href="#cb4-10" aria-hidden="true" tabindex="-1"></a>    <span class="at">sigma =</span> sigma[i]</span>
-<span id="cb4-11"><a href="#cb4-11" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb4-12"><a href="#cb4-12" aria-hidden="true" tabindex="-1"></a>  <span class="fu">hist</span>(</span>
-<span id="cb4-13"><a href="#cb4-13" aria-hidden="true" tabindex="-1"></a>    out<span class="sc">$</span>value, </span>
-<span id="cb4-14"><a href="#cb4-14" aria-hidden="true" tabindex="-1"></a>    <span class="at">breaks =</span> <span class="fu">seq</span>(<span class="sc">-</span><span class="dv">3</span>, <span class="dv">3</span>, .<span class="dv">05</span>),</span>
-<span id="cb4-15"><a href="#cb4-15" aria-hidden="true" tabindex="-1"></a>    <span class="at">main =</span> <span class="fu">paste</span>(<span class="st">"Sample values: sigma ="</span>, sigma[i]),</span>
-<span id="cb4-16"><a href="#cb4-16" aria-hidden="true" tabindex="-1"></a>    <span class="at">xlab =</span> <span class="st">"Value, x"</span>,</span>
-<span id="cb4-17"><a href="#cb4-17" aria-hidden="true" tabindex="-1"></a>    <span class="at">ylab =</span> <span class="st">"Frequency"</span></span>
-<span id="cb4-18"><a href="#cb4-18" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb4-19"><a href="#cb4-19" aria-hidden="true" tabindex="-1"></a>  x <span class="ot">&lt;-</span> <span class="fu">seq</span>(<span class="sc">-</span><span class="dv">3</span>, <span class="dv">3</span>, .<span class="dv">05</span>)</span>
-<span id="cb4-20"><a href="#cb4-20" aria-hidden="true" tabindex="-1"></a>  p <span class="ot">&lt;-</span> <span class="fu">target</span>(<span class="fu">seq</span>(<span class="sc">-</span><span class="dv">3</span>, <span class="dv">3</span>, .<span class="dv">05</span>))</span>
-<span id="cb4-21"><a href="#cb4-21" aria-hidden="true" tabindex="-1"></a>  expected <span class="ot">&lt;-</span> n <span class="sc">*</span> p <span class="sc">/</span> <span class="fu">sum</span>(p) </span>
-<span id="cb4-22"><a href="#cb4-22" aria-hidden="true" tabindex="-1"></a>  <span class="fu">lines</span>(</span>
-<span id="cb4-23"><a href="#cb4-23" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> x, </span>
-<span id="cb4-24"><a href="#cb4-24" aria-hidden="true" tabindex="-1"></a>    <span class="at">y =</span> expected, </span>
-<span id="cb4-25"><a href="#cb4-25" aria-hidden="true" tabindex="-1"></a>    <span class="at">type =</span> <span class="st">"l"</span>, </span>
-<span id="cb4-26"><a href="#cb4-26" aria-hidden="true" tabindex="-1"></a>    <span class="at">col =</span> <span class="st">"red"</span>,</span>
-<span id="cb4-27"><a href="#cb4-27" aria-hidden="true" tabindex="-1"></a>    <span class="at">lwd =</span> <span class="dv">2</span></span>
-<span id="cb4-28"><a href="#cb4-28" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb4-29"><a href="#cb4-29" aria-hidden="true" tabindex="-1"></a>  <span class="fu">plot</span>(</span>
-<span id="cb4-30"><a href="#cb4-30" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> out<span class="sc">$</span>value, </span>
-<span id="cb4-31"><a href="#cb4-31" aria-hidden="true" tabindex="-1"></a>    <span class="at">y =</span> <span class="dv">1</span><span class="sc">:</span>n, </span>
-<span id="cb4-32"><a href="#cb4-32" aria-hidden="true" tabindex="-1"></a>    <span class="at">type =</span> <span class="st">"l"</span>, </span>
-<span id="cb4-33"><a href="#cb4-33" aria-hidden="true" tabindex="-1"></a>    <span class="at">xlim =</span> <span class="fu">c</span>(<span class="sc">-</span><span class="dv">3</span>, <span class="dv">3</span>),</span>
-<span id="cb4-34"><a href="#cb4-34" aria-hidden="true" tabindex="-1"></a>    <span class="at">xlab =</span> <span class="st">"Value, x"</span>,</span>
-<span id="cb4-35"><a href="#cb4-35" aria-hidden="true" tabindex="-1"></a>    <span class="at">ylab =</span> <span class="st">"Time"</span></span>
-<span id="cb4-36"><a href="#cb4-36" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb4-37"><a href="#cb4-37" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-</details>
-<div class="cell-output-display">
-<p><img src="index_files/figure-html/unnamed-chunk-4-1.png" class="img-fluid" width="672"></p>
-</div>
-</div>
-<p>For all three values of <code>sigma</code>, we have two plots. The top one shows the true target distribution, along with a histogram showing the distribution of samples obtained using the Metropolis sampler. The lower panel plots the actual Markov chain: the sequence of generated values. In the leftmost plots, we see what happens when we choose a good proposal distribution: the chain shown in the lower panel moves rapidly across the whole distribution, without getting stuck in any one place (the acceptance rate here is 47.5%). In the far right panel, we see what happens when the proposal distribution is too wide: the chain gets stuck in one spot for long periods of time. It does manage to make big jumps, covering the whole range, but because the acceptance rate is so low (2.5%) the distribution of samples is highly irregular. Finally, in the middle panel, if we set the proposal distribution to be too narrow, the acceptance rate is very high (97.7%) so the chain doesn’t get stuck in any one spot, but it doesn’t cover a very wide range. This simple example should give you an intuition for why you need to “play around” with the choice of proposal distribution. A good proposal distribution can make a huge difference!</p>
-</section>
-</section>
-<section id="the-role-of-the-burn-in-period" class="level2">
-<h2 class="anchored" data-anchor-id="the-role-of-the-burn-in-period">The role of the burn-in period</h2>
-<p>Now, at this point I haven’t really explained what the <code>burnin</code> and <code>lag</code> parameters are there for. I don’t plan to go into details, but here’s the basic idea. First, let’s think about the burn-in issue. Suppose you started the sampler at a very bad location… say <code>x0 = -3</code>, and – just so that we can exaggerate the problem – we’ll use a proposal distribution that is too narrow, say <code>sigma = .1</code>. The image below shows three runs of this sampler:</p>
-<div class="cell">
-<details>
-<summary>Source code for plots</summary>
-<div class="sourceCode cell-code" id="cb5"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">1234</span>)</span>
-<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="fu">par</span>(<span class="at">mar =</span> <span class="fu">c</span>(<span class="dv">4</span>, <span class="dv">4</span>, <span class="dv">2</span>, <span class="dv">2</span>))</span>
-<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a><span class="fu">layout</span>(<span class="fu">matrix</span>(<span class="dv">1</span><span class="sc">:</span><span class="dv">6</span>, <span class="at">nrow =</span> <span class="dv">2</span>, <span class="at">ncol =</span> <span class="dv">3</span>))</span>
-<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>n <span class="ot">&lt;-</span> <span class="dv">1000</span></span>
-<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span>(i <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span><span class="dv">3</span>) {</span>
-<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a>  out <span class="ot">&lt;-</span> <span class="fu">metropolis_sampler</span>(</span>
-<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a>    <span class="at">initial_value =</span> <span class="sc">-</span><span class="dv">3</span>, </span>
-<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a>    <span class="at">n =</span> n, </span>
-<span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a>    <span class="at">sigma =</span> .<span class="dv">1</span></span>
-<span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb5-11"><a href="#cb5-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">hist</span>(</span>
-<span id="cb5-12"><a href="#cb5-12" aria-hidden="true" tabindex="-1"></a>    out<span class="sc">$</span>value, </span>
-<span id="cb5-13"><a href="#cb5-13" aria-hidden="true" tabindex="-1"></a>    <span class="at">breaks =</span> <span class="fu">seq</span>(<span class="sc">-</span><span class="dv">4</span>, <span class="dv">4</span>, .<span class="dv">05</span>),</span>
-<span id="cb5-14"><a href="#cb5-14" aria-hidden="true" tabindex="-1"></a>    <span class="at">main =</span> <span class="cn">NULL</span>,</span>
-<span id="cb5-15"><a href="#cb5-15" aria-hidden="true" tabindex="-1"></a>    <span class="at">xlab =</span> <span class="st">"Value, x"</span>,</span>
-<span id="cb5-16"><a href="#cb5-16" aria-hidden="true" tabindex="-1"></a>    <span class="at">ylab =</span> <span class="st">"Frequency"</span></span>
-<span id="cb5-17"><a href="#cb5-17" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb5-18"><a href="#cb5-18" aria-hidden="true" tabindex="-1"></a>  x <span class="ot">&lt;-</span> <span class="fu">seq</span>(<span class="sc">-</span><span class="dv">4</span>, <span class="dv">4</span>, .<span class="dv">05</span>)</span>
-<span id="cb5-19"><a href="#cb5-19" aria-hidden="true" tabindex="-1"></a>  p <span class="ot">&lt;-</span> <span class="fu">target</span>(<span class="fu">seq</span>(<span class="sc">-</span><span class="dv">4</span>, <span class="dv">4</span>, .<span class="dv">05</span>))</span>
-<span id="cb5-20"><a href="#cb5-20" aria-hidden="true" tabindex="-1"></a>  expected <span class="ot">&lt;-</span> n <span class="sc">*</span> p <span class="sc">/</span> <span class="fu">sum</span>(p) </span>
-<span id="cb5-21"><a href="#cb5-21" aria-hidden="true" tabindex="-1"></a>  <span class="fu">lines</span>(</span>
-<span id="cb5-22"><a href="#cb5-22" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> x, </span>
-<span id="cb5-23"><a href="#cb5-23" aria-hidden="true" tabindex="-1"></a>    <span class="at">y =</span> expected, </span>
-<span id="cb5-24"><a href="#cb5-24" aria-hidden="true" tabindex="-1"></a>    <span class="at">type =</span> <span class="st">"l"</span>, </span>
-<span id="cb5-25"><a href="#cb5-25" aria-hidden="true" tabindex="-1"></a>    <span class="at">col =</span> <span class="st">"red"</span>,</span>
-<span id="cb5-26"><a href="#cb5-26" aria-hidden="true" tabindex="-1"></a>    <span class="at">lwd =</span> <span class="dv">2</span></span>
-<span id="cb5-27"><a href="#cb5-27" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb5-28"><a href="#cb5-28" aria-hidden="true" tabindex="-1"></a>  <span class="fu">plot</span>(</span>
-<span id="cb5-29"><a href="#cb5-29" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> out<span class="sc">$</span>value, </span>
-<span id="cb5-30"><a href="#cb5-30" aria-hidden="true" tabindex="-1"></a>    <span class="at">y =</span> <span class="dv">1</span><span class="sc">:</span>n, </span>
-<span id="cb5-31"><a href="#cb5-31" aria-hidden="true" tabindex="-1"></a>    <span class="at">type =</span> <span class="st">"l"</span>, </span>
-<span id="cb5-32"><a href="#cb5-32" aria-hidden="true" tabindex="-1"></a>    <span class="at">xlim =</span> <span class="fu">c</span>(<span class="sc">-</span><span class="dv">4</span>, <span class="dv">4</span>),</span>
-<span id="cb5-33"><a href="#cb5-33" aria-hidden="true" tabindex="-1"></a>    <span class="at">xlab =</span> <span class="st">"Value, x"</span>,</span>
-<span id="cb5-34"><a href="#cb5-34" aria-hidden="true" tabindex="-1"></a>    <span class="at">ylab =</span> <span class="st">"Time"</span></span>
-<span id="cb5-35"><a href="#cb5-35" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb5-36"><a href="#cb5-36" aria-hidden="true" tabindex="-1"></a>  <span class="fu">abline</span>(<span class="at">h =</span> <span class="dv">200</span>, <span class="at">lty =</span> <span class="st">"dotted"</span>)</span>
-<span id="cb5-37"><a href="#cb5-37" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-</details>
-<div class="cell-output-display">
-<p><img src="index_files/figure-html/unnamed-chunk-5-1.png" class="img-fluid" width="672"></p>
-</div>
-</div>
-<p>As you can see, the sampler spends the first 200 or so iterations slowly moving rightwards towards the main body of the distribution. Once it gets there, the samples start to look okay, but notice that the histograms are biased towards the left (i.e., towards the bad start location). A simple way to fix this problem is to let the algorithm run for a while before starting to collect actual samples. The length of time that you spend doing this is called the <em>burn in period</em>.</p>
-<p>To illustrate how it helps, the figure below shows what would have happened if I’d used a burn in period of 200 iterations for the same sampler:</p>
 <div class="cell">
 <details>
 <summary>Source code for plots</summary>
 <div class="sourceCode cell-code" id="cb6"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">1234</span>)</span>
 <span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="fu">par</span>(<span class="at">mar =</span> <span class="fu">c</span>(<span class="dv">4</span>, <span class="dv">4</span>, <span class="dv">2</span>, <span class="dv">2</span>))</span>
 <span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a><span class="fu">layout</span>(<span class="fu">matrix</span>(<span class="dv">1</span><span class="sc">:</span><span class="dv">6</span>, <span class="at">nrow =</span> <span class="dv">2</span>, <span class="at">ncol =</span> <span class="dv">3</span>))</span>
-<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a>n <span class="ot">&lt;-</span> <span class="dv">1000</span></span>
-<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span>(i <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span><span class="dv">3</span>) {</span>
-<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a>  out <span class="ot">&lt;-</span> <span class="fu">metropolis_sampler</span>(</span>
-<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a>    <span class="at">initial_value =</span> <span class="sc">-</span><span class="dv">3</span>, </span>
-<span id="cb6-8"><a href="#cb6-8" aria-hidden="true" tabindex="-1"></a>    <span class="at">burnin =</span> <span class="dv">200</span>,</span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a>sigma <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="dv">1</span>, <span class="fl">0.025</span>, <span class="dv">50</span>)</span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a>n <span class="ot">&lt;-</span> <span class="dv">10000</span></span>
+<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span>(i <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span><span class="dv">3</span>) {</span>
+<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a>  out <span class="ot">&lt;-</span> <span class="fu">metropolis_sampler</span>(</span>
+<span id="cb6-8"><a href="#cb6-8" aria-hidden="true" tabindex="-1"></a>    <span class="at">initial_value =</span> <span class="sc">-</span><span class="dv">1</span>, </span>
 <span id="cb6-9"><a href="#cb6-9" aria-hidden="true" tabindex="-1"></a>    <span class="at">n =</span> n, </span>
-<span id="cb6-10"><a href="#cb6-10" aria-hidden="true" tabindex="-1"></a>    <span class="at">sigma =</span> .<span class="dv">1</span></span>
+<span id="cb6-10"><a href="#cb6-10" aria-hidden="true" tabindex="-1"></a>    <span class="at">sigma =</span> sigma[i]</span>
 <span id="cb6-11"><a href="#cb6-11" aria-hidden="true" tabindex="-1"></a>  )</span>
 <span id="cb6-12"><a href="#cb6-12" aria-hidden="true" tabindex="-1"></a>  <span class="fu">hist</span>(</span>
 <span id="cb6-13"><a href="#cb6-13" aria-hidden="true" tabindex="-1"></a>    out<span class="sc">$</span>value, </span>
-<span id="cb6-14"><a href="#cb6-14" aria-hidden="true" tabindex="-1"></a>    <span class="at">breaks =</span> <span class="fu">seq</span>(<span class="sc">-</span><span class="dv">4</span>, <span class="dv">4</span>, .<span class="dv">05</span>),</span>
-<span id="cb6-15"><a href="#cb6-15" aria-hidden="true" tabindex="-1"></a>    <span class="at">main =</span> <span class="cn">NULL</span>,</span>
+<span id="cb6-14"><a href="#cb6-14" aria-hidden="true" tabindex="-1"></a>    <span class="at">breaks =</span> <span class="fu">seq</span>(<span class="sc">-</span><span class="dv">3</span>, <span class="dv">3</span>, .<span class="dv">05</span>),</span>
+<span id="cb6-15"><a href="#cb6-15" aria-hidden="true" tabindex="-1"></a>    <span class="at">main =</span> <span class="fu">paste</span>(<span class="st">"Sample values: sigma ="</span>, sigma[i]),</span>
 <span id="cb6-16"><a href="#cb6-16" aria-hidden="true" tabindex="-1"></a>    <span class="at">xlab =</span> <span class="st">"Value, x"</span>,</span>
 <span id="cb6-17"><a href="#cb6-17" aria-hidden="true" tabindex="-1"></a>    <span class="at">ylab =</span> <span class="st">"Frequency"</span></span>
 <span id="cb6-18"><a href="#cb6-18" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb6-19"><a href="#cb6-19" aria-hidden="true" tabindex="-1"></a>  x <span class="ot">&lt;-</span> <span class="fu">seq</span>(<span class="sc">-</span><span class="dv">4</span>, <span class="dv">4</span>, .<span class="dv">05</span>)</span>
-<span id="cb6-20"><a href="#cb6-20" aria-hidden="true" tabindex="-1"></a>  p <span class="ot">&lt;-</span> <span class="fu">target</span>(<span class="fu">seq</span>(<span class="sc">-</span><span class="dv">4</span>, <span class="dv">4</span>, .<span class="dv">05</span>))</span>
+<span id="cb6-19"><a href="#cb6-19" aria-hidden="true" tabindex="-1"></a>  x <span class="ot">&lt;-</span> <span class="fu">seq</span>(<span class="sc">-</span><span class="dv">3</span>, <span class="dv">3</span>, .<span class="dv">05</span>)</span>
+<span id="cb6-20"><a href="#cb6-20" aria-hidden="true" tabindex="-1"></a>  p <span class="ot">&lt;-</span> <span class="fu">target</span>(<span class="fu">seq</span>(<span class="sc">-</span><span class="dv">3</span>, <span class="dv">3</span>, .<span class="dv">05</span>))</span>
 <span id="cb6-21"><a href="#cb6-21" aria-hidden="true" tabindex="-1"></a>  expected <span class="ot">&lt;-</span> n <span class="sc">*</span> p <span class="sc">/</span> <span class="fu">sum</span>(p) </span>
 <span id="cb6-22"><a href="#cb6-22" aria-hidden="true" tabindex="-1"></a>  <span class="fu">lines</span>(</span>
 <span id="cb6-23"><a href="#cb6-23" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> x, </span>
@@ -526,22 +451,23 @@ x_n &amp; \mbox{ otherwise}
 <span id="cb6-30"><a href="#cb6-30" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> out<span class="sc">$</span>value, </span>
 <span id="cb6-31"><a href="#cb6-31" aria-hidden="true" tabindex="-1"></a>    <span class="at">y =</span> <span class="dv">1</span><span class="sc">:</span>n, </span>
 <span id="cb6-32"><a href="#cb6-32" aria-hidden="true" tabindex="-1"></a>    <span class="at">type =</span> <span class="st">"l"</span>, </span>
-<span id="cb6-33"><a href="#cb6-33" aria-hidden="true" tabindex="-1"></a>    <span class="at">xlim =</span> <span class="fu">c</span>(<span class="sc">-</span><span class="dv">4</span>, <span class="dv">4</span>),</span>
+<span id="cb6-33"><a href="#cb6-33" aria-hidden="true" tabindex="-1"></a>    <span class="at">xlim =</span> <span class="fu">c</span>(<span class="sc">-</span><span class="dv">3</span>, <span class="dv">3</span>),</span>
 <span id="cb6-34"><a href="#cb6-34" aria-hidden="true" tabindex="-1"></a>    <span class="at">xlab =</span> <span class="st">"Value, x"</span>,</span>
 <span id="cb6-35"><a href="#cb6-35" aria-hidden="true" tabindex="-1"></a>    <span class="at">ylab =</span> <span class="st">"Time"</span></span>
 <span id="cb6-36"><a href="#cb6-36" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb6-37"><a href="#cb6-37" aria-hidden="true" tabindex="-1"></a>  <span class="fu">abline</span>(<span class="at">h =</span> <span class="dv">200</span>, <span class="at">lty =</span> <span class="st">"dotted"</span>)</span>
-<span id="cb6-38"><a href="#cb6-38" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<span id="cb6-37"><a href="#cb6-37" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </details>
 <div class="cell-output-display">
 <p><img src="index_files/figure-html/unnamed-chunk-6-1.png" class="img-fluid" width="672"></p>
 </div>
 </div>
-<p>It’s still not ideal – largely because we don’t have many samples, we haven’t set a <code>lag</code>, and the value of <code>sigma</code> isn’t very well chosen – but you can see that the bias caused by the poor choice of starting value has disappeared.</p>
+<p>For all three values of <code>sigma</code>, we have two plots. The top one shows the true target distribution, along with a histogram showing the distribution of samples obtained using the Metropolis sampler. The lower panel plots the actual Markov chain: the sequence of generated values. In the leftmost plots, we see what happens when we choose a good proposal distribution: the chain shown in the lower panel moves rapidly across the whole distribution, without getting stuck in any one place (the acceptance rate here is 47.5%). In the far right panel, we see what happens when the proposal distribution is too wide: the chain gets stuck in one spot for long periods of time. It does manage to make big jumps, covering the whole range, but because the acceptance rate is so low (2.5%) the distribution of samples is highly irregular. Finally, in the middle panel, if we set the proposal distribution to be too narrow, the acceptance rate is very high (97.7%) so the chain doesn’t get stuck in any one spot, but it doesn’t cover a very wide range. This simple example should give you an intuition for why you need to “play around” with the choice of proposal distribution. A good proposal distribution can make a huge difference!</p>
+<p><br></p>
 </section>
-<section id="the-role-of-the-lag-parameter" class="level2">
-<h2 class="anchored" data-anchor-id="the-role-of-the-lag-parameter">The role of the lag parameter</h2>
-<p>Finally, I’ll mention in passing the role played by the lag parameter. In some situa- tions you can be forced into using a proposal distribution that has a very low acceptance rate. When that happens, you’re left with an awkward Markov chain that gets stuck in one location for long periods of time. One thing that people often do in that situation is allow several iterations of the sampler to elapse in between successive samples. This is the <code>lag</code> between samples. The effect of this is illustrated in below, which shows the behaviour of a sampler with a very wide proposal distribution (<code>sigma = 50</code>) with <code>n = 1000</code> samples drawn, at <code>lag = 0</code> (left), <code>lag = 10</code> (middle) and <code>lag = 100</code> (right).</p>
+</section>
+<section id="the-role-of-the-burn-in-period" class="level2">
+<h2 class="anchored" data-anchor-id="the-role-of-the-burn-in-period">The role of the burn-in period</h2>
+<p>Now, at this point I haven’t really explained what the <code>burnin</code> and <code>lag</code> parameters are there for. I don’t plan to go into details, but here’s the basic idea. First, let’s think about the burn-in issue. Suppose you started the sampler at a very bad location… say <code>initial_value = -3</code>, and – just so that we can exaggerate the problem – we’ll use a proposal distribution that is too narrow, say <code>sigma = .1</code>. The image below shows three runs of this sampler:</p>
 <div class="cell">
 <details>
 <summary>Source code for plots</summary>
@@ -549,49 +475,149 @@ x_n &amp; \mbox{ otherwise}
 <span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a><span class="fu">par</span>(<span class="at">mar =</span> <span class="fu">c</span>(<span class="dv">4</span>, <span class="dv">4</span>, <span class="dv">2</span>, <span class="dv">2</span>))</span>
 <span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a><span class="fu">layout</span>(<span class="fu">matrix</span>(<span class="dv">1</span><span class="sc">:</span><span class="dv">6</span>, <span class="at">nrow =</span> <span class="dv">2</span>, <span class="at">ncol =</span> <span class="dv">3</span>))</span>
 <span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>n <span class="ot">&lt;-</span> <span class="dv">1000</span></span>
-<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a>lag <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="dv">0</span>, <span class="dv">10</span>, <span class="dv">100</span>)</span>
-<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span>(i <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span><span class="dv">3</span>) {</span>
-<span id="cb7-7"><a href="#cb7-7" aria-hidden="true" tabindex="-1"></a>  out <span class="ot">&lt;-</span> <span class="fu">metropolis_sampler</span>(</span>
-<span id="cb7-8"><a href="#cb7-8" aria-hidden="true" tabindex="-1"></a>    <span class="at">initial_value =</span> <span class="dv">0</span>,</span>
-<span id="cb7-9"><a href="#cb7-9" aria-hidden="true" tabindex="-1"></a>    <span class="at">lag =</span> lag[i],</span>
-<span id="cb7-10"><a href="#cb7-10" aria-hidden="true" tabindex="-1"></a>    <span class="at">n =</span> n, </span>
-<span id="cb7-11"><a href="#cb7-11" aria-hidden="true" tabindex="-1"></a>    <span class="at">sigma =</span> <span class="dv">50</span></span>
-<span id="cb7-12"><a href="#cb7-12" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb7-13"><a href="#cb7-13" aria-hidden="true" tabindex="-1"></a>  <span class="fu">hist</span>(</span>
-<span id="cb7-14"><a href="#cb7-14" aria-hidden="true" tabindex="-1"></a>    out<span class="sc">$</span>value, </span>
-<span id="cb7-15"><a href="#cb7-15" aria-hidden="true" tabindex="-1"></a>    <span class="at">breaks =</span> <span class="fu">seq</span>(<span class="sc">-</span><span class="dv">4</span>, <span class="dv">4</span>, .<span class="dv">05</span>),</span>
-<span id="cb7-16"><a href="#cb7-16" aria-hidden="true" tabindex="-1"></a>    <span class="at">main =</span> <span class="fu">paste</span>(<span class="st">"Lag:"</span>, lag[i]),</span>
-<span id="cb7-17"><a href="#cb7-17" aria-hidden="true" tabindex="-1"></a>    <span class="at">xlab =</span> <span class="st">"Value, x"</span>,</span>
-<span id="cb7-18"><a href="#cb7-18" aria-hidden="true" tabindex="-1"></a>    <span class="at">ylab =</span> <span class="st">"Frequency"</span></span>
-<span id="cb7-19"><a href="#cb7-19" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb7-20"><a href="#cb7-20" aria-hidden="true" tabindex="-1"></a>  x <span class="ot">&lt;-</span> <span class="fu">seq</span>(<span class="sc">-</span><span class="dv">4</span>, <span class="dv">4</span>, .<span class="dv">05</span>)</span>
-<span id="cb7-21"><a href="#cb7-21" aria-hidden="true" tabindex="-1"></a>  p <span class="ot">&lt;-</span> <span class="fu">target</span>(<span class="fu">seq</span>(<span class="sc">-</span><span class="dv">4</span>, <span class="dv">4</span>, .<span class="dv">05</span>))</span>
-<span id="cb7-22"><a href="#cb7-22" aria-hidden="true" tabindex="-1"></a>  expected <span class="ot">&lt;-</span> n <span class="sc">*</span> p <span class="sc">/</span> <span class="fu">sum</span>(p) </span>
-<span id="cb7-23"><a href="#cb7-23" aria-hidden="true" tabindex="-1"></a>  <span class="fu">lines</span>(</span>
-<span id="cb7-24"><a href="#cb7-24" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> x, </span>
-<span id="cb7-25"><a href="#cb7-25" aria-hidden="true" tabindex="-1"></a>    <span class="at">y =</span> expected, </span>
-<span id="cb7-26"><a href="#cb7-26" aria-hidden="true" tabindex="-1"></a>    <span class="at">type =</span> <span class="st">"l"</span>, </span>
-<span id="cb7-27"><a href="#cb7-27" aria-hidden="true" tabindex="-1"></a>    <span class="at">col =</span> <span class="st">"red"</span>,</span>
-<span id="cb7-28"><a href="#cb7-28" aria-hidden="true" tabindex="-1"></a>    <span class="at">lwd =</span> <span class="dv">2</span></span>
-<span id="cb7-29"><a href="#cb7-29" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb7-30"><a href="#cb7-30" aria-hidden="true" tabindex="-1"></a>  <span class="fu">plot</span>(</span>
-<span id="cb7-31"><a href="#cb7-31" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> out<span class="sc">$</span>value, </span>
-<span id="cb7-32"><a href="#cb7-32" aria-hidden="true" tabindex="-1"></a>    <span class="at">y =</span> <span class="dv">1</span><span class="sc">:</span>n, </span>
-<span id="cb7-33"><a href="#cb7-33" aria-hidden="true" tabindex="-1"></a>    <span class="at">type =</span> <span class="st">"l"</span>, </span>
-<span id="cb7-34"><a href="#cb7-34" aria-hidden="true" tabindex="-1"></a>    <span class="at">xlim =</span> <span class="fu">c</span>(<span class="sc">-</span><span class="dv">4</span>, <span class="dv">4</span>),</span>
-<span id="cb7-35"><a href="#cb7-35" aria-hidden="true" tabindex="-1"></a>    <span class="at">xlab =</span> <span class="st">"Value, x"</span>,</span>
-<span id="cb7-36"><a href="#cb7-36" aria-hidden="true" tabindex="-1"></a>    <span class="at">ylab =</span> <span class="st">"Time"</span></span>
-<span id="cb7-37"><a href="#cb7-37" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb7-38"><a href="#cb7-38" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span>(i <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span><span class="dv">3</span>) {</span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a>  out <span class="ot">&lt;-</span> <span class="fu">metropolis_sampler</span>(</span>
+<span id="cb7-7"><a href="#cb7-7" aria-hidden="true" tabindex="-1"></a>    <span class="at">initial_value =</span> <span class="sc">-</span><span class="dv">3</span>, </span>
+<span id="cb7-8"><a href="#cb7-8" aria-hidden="true" tabindex="-1"></a>    <span class="at">n =</span> n, </span>
+<span id="cb7-9"><a href="#cb7-9" aria-hidden="true" tabindex="-1"></a>    <span class="at">sigma =</span> .<span class="dv">1</span></span>
+<span id="cb7-10"><a href="#cb7-10" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb7-11"><a href="#cb7-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">hist</span>(</span>
+<span id="cb7-12"><a href="#cb7-12" aria-hidden="true" tabindex="-1"></a>    out<span class="sc">$</span>value, </span>
+<span id="cb7-13"><a href="#cb7-13" aria-hidden="true" tabindex="-1"></a>    <span class="at">breaks =</span> <span class="fu">seq</span>(<span class="sc">-</span><span class="dv">4</span>, <span class="dv">4</span>, .<span class="dv">05</span>),</span>
+<span id="cb7-14"><a href="#cb7-14" aria-hidden="true" tabindex="-1"></a>    <span class="at">main =</span> <span class="cn">NULL</span>,</span>
+<span id="cb7-15"><a href="#cb7-15" aria-hidden="true" tabindex="-1"></a>    <span class="at">xlab =</span> <span class="st">"Value, x"</span>,</span>
+<span id="cb7-16"><a href="#cb7-16" aria-hidden="true" tabindex="-1"></a>    <span class="at">ylab =</span> <span class="st">"Frequency"</span></span>
+<span id="cb7-17"><a href="#cb7-17" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb7-18"><a href="#cb7-18" aria-hidden="true" tabindex="-1"></a>  x <span class="ot">&lt;-</span> <span class="fu">seq</span>(<span class="sc">-</span><span class="dv">4</span>, <span class="dv">4</span>, .<span class="dv">05</span>)</span>
+<span id="cb7-19"><a href="#cb7-19" aria-hidden="true" tabindex="-1"></a>  p <span class="ot">&lt;-</span> <span class="fu">target</span>(<span class="fu">seq</span>(<span class="sc">-</span><span class="dv">4</span>, <span class="dv">4</span>, .<span class="dv">05</span>))</span>
+<span id="cb7-20"><a href="#cb7-20" aria-hidden="true" tabindex="-1"></a>  expected <span class="ot">&lt;-</span> n <span class="sc">*</span> p <span class="sc">/</span> <span class="fu">sum</span>(p) </span>
+<span id="cb7-21"><a href="#cb7-21" aria-hidden="true" tabindex="-1"></a>  <span class="fu">lines</span>(</span>
+<span id="cb7-22"><a href="#cb7-22" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> x, </span>
+<span id="cb7-23"><a href="#cb7-23" aria-hidden="true" tabindex="-1"></a>    <span class="at">y =</span> expected, </span>
+<span id="cb7-24"><a href="#cb7-24" aria-hidden="true" tabindex="-1"></a>    <span class="at">type =</span> <span class="st">"l"</span>, </span>
+<span id="cb7-25"><a href="#cb7-25" aria-hidden="true" tabindex="-1"></a>    <span class="at">col =</span> <span class="st">"red"</span>,</span>
+<span id="cb7-26"><a href="#cb7-26" aria-hidden="true" tabindex="-1"></a>    <span class="at">lwd =</span> <span class="dv">2</span></span>
+<span id="cb7-27"><a href="#cb7-27" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb7-28"><a href="#cb7-28" aria-hidden="true" tabindex="-1"></a>  <span class="fu">plot</span>(</span>
+<span id="cb7-29"><a href="#cb7-29" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> out<span class="sc">$</span>value, </span>
+<span id="cb7-30"><a href="#cb7-30" aria-hidden="true" tabindex="-1"></a>    <span class="at">y =</span> <span class="dv">1</span><span class="sc">:</span>n, </span>
+<span id="cb7-31"><a href="#cb7-31" aria-hidden="true" tabindex="-1"></a>    <span class="at">type =</span> <span class="st">"l"</span>, </span>
+<span id="cb7-32"><a href="#cb7-32" aria-hidden="true" tabindex="-1"></a>    <span class="at">xlim =</span> <span class="fu">c</span>(<span class="sc">-</span><span class="dv">4</span>, <span class="dv">4</span>),</span>
+<span id="cb7-33"><a href="#cb7-33" aria-hidden="true" tabindex="-1"></a>    <span class="at">xlab =</span> <span class="st">"Value, x"</span>,</span>
+<span id="cb7-34"><a href="#cb7-34" aria-hidden="true" tabindex="-1"></a>    <span class="at">ylab =</span> <span class="st">"Time"</span></span>
+<span id="cb7-35"><a href="#cb7-35" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb7-36"><a href="#cb7-36" aria-hidden="true" tabindex="-1"></a>  <span class="fu">abline</span>(<span class="at">h =</span> <span class="dv">200</span>, <span class="at">lty =</span> <span class="st">"dotted"</span>)</span>
+<span id="cb7-37"><a href="#cb7-37" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </details>
 <div class="cell-output-display">
 <p><img src="index_files/figure-html/unnamed-chunk-7-1.png" class="img-fluid" width="672"></p>
 </div>
 </div>
+<p>As you can see, the sampler spends the first 200 or so iterations slowly moving rightwards towards the main body of the distribution. Once it gets there, the samples start to look okay, but notice that the histograms are biased towards the left (i.e., towards the bad start location). A simple way to fix this problem is to let the algorithm run for a while before starting to collect actual samples. The length of time that you spend doing this is called the <em>burn in period</em>.</p>
+<p>To illustrate how it helps, the figure below shows what would have happened if I’d used a burn in period of 200 iterations for the same sampler:</p>
+<div class="cell">
+<details>
+<summary>Source code for plots</summary>
+<div class="sourceCode cell-code" id="cb8"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">1234</span>)</span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="fu">par</span>(<span class="at">mar =</span> <span class="fu">c</span>(<span class="dv">4</span>, <span class="dv">4</span>, <span class="dv">2</span>, <span class="dv">2</span>))</span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a><span class="fu">layout</span>(<span class="fu">matrix</span>(<span class="dv">1</span><span class="sc">:</span><span class="dv">6</span>, <span class="at">nrow =</span> <span class="dv">2</span>, <span class="at">ncol =</span> <span class="dv">3</span>))</span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a>n <span class="ot">&lt;-</span> <span class="dv">1000</span></span>
+<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span>(i <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span><span class="dv">3</span>) {</span>
+<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a>  out <span class="ot">&lt;-</span> <span class="fu">metropolis_sampler</span>(</span>
+<span id="cb8-7"><a href="#cb8-7" aria-hidden="true" tabindex="-1"></a>    <span class="at">initial_value =</span> <span class="sc">-</span><span class="dv">3</span>, </span>
+<span id="cb8-8"><a href="#cb8-8" aria-hidden="true" tabindex="-1"></a>    <span class="at">burnin =</span> <span class="dv">200</span>,</span>
+<span id="cb8-9"><a href="#cb8-9" aria-hidden="true" tabindex="-1"></a>    <span class="at">n =</span> n, </span>
+<span id="cb8-10"><a href="#cb8-10" aria-hidden="true" tabindex="-1"></a>    <span class="at">sigma =</span> .<span class="dv">1</span></span>
+<span id="cb8-11"><a href="#cb8-11" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb8-12"><a href="#cb8-12" aria-hidden="true" tabindex="-1"></a>  <span class="fu">hist</span>(</span>
+<span id="cb8-13"><a href="#cb8-13" aria-hidden="true" tabindex="-1"></a>    out<span class="sc">$</span>value, </span>
+<span id="cb8-14"><a href="#cb8-14" aria-hidden="true" tabindex="-1"></a>    <span class="at">breaks =</span> <span class="fu">seq</span>(<span class="sc">-</span><span class="dv">4</span>, <span class="dv">4</span>, .<span class="dv">05</span>),</span>
+<span id="cb8-15"><a href="#cb8-15" aria-hidden="true" tabindex="-1"></a>    <span class="at">main =</span> <span class="cn">NULL</span>,</span>
+<span id="cb8-16"><a href="#cb8-16" aria-hidden="true" tabindex="-1"></a>    <span class="at">xlab =</span> <span class="st">"Value, x"</span>,</span>
+<span id="cb8-17"><a href="#cb8-17" aria-hidden="true" tabindex="-1"></a>    <span class="at">ylab =</span> <span class="st">"Frequency"</span></span>
+<span id="cb8-18"><a href="#cb8-18" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb8-19"><a href="#cb8-19" aria-hidden="true" tabindex="-1"></a>  x <span class="ot">&lt;-</span> <span class="fu">seq</span>(<span class="sc">-</span><span class="dv">4</span>, <span class="dv">4</span>, .<span class="dv">05</span>)</span>
+<span id="cb8-20"><a href="#cb8-20" aria-hidden="true" tabindex="-1"></a>  p <span class="ot">&lt;-</span> <span class="fu">target</span>(<span class="fu">seq</span>(<span class="sc">-</span><span class="dv">4</span>, <span class="dv">4</span>, .<span class="dv">05</span>))</span>
+<span id="cb8-21"><a href="#cb8-21" aria-hidden="true" tabindex="-1"></a>  expected <span class="ot">&lt;-</span> n <span class="sc">*</span> p <span class="sc">/</span> <span class="fu">sum</span>(p) </span>
+<span id="cb8-22"><a href="#cb8-22" aria-hidden="true" tabindex="-1"></a>  <span class="fu">lines</span>(</span>
+<span id="cb8-23"><a href="#cb8-23" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> x, </span>
+<span id="cb8-24"><a href="#cb8-24" aria-hidden="true" tabindex="-1"></a>    <span class="at">y =</span> expected, </span>
+<span id="cb8-25"><a href="#cb8-25" aria-hidden="true" tabindex="-1"></a>    <span class="at">type =</span> <span class="st">"l"</span>, </span>
+<span id="cb8-26"><a href="#cb8-26" aria-hidden="true" tabindex="-1"></a>    <span class="at">col =</span> <span class="st">"red"</span>,</span>
+<span id="cb8-27"><a href="#cb8-27" aria-hidden="true" tabindex="-1"></a>    <span class="at">lwd =</span> <span class="dv">2</span></span>
+<span id="cb8-28"><a href="#cb8-28" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb8-29"><a href="#cb8-29" aria-hidden="true" tabindex="-1"></a>  <span class="fu">plot</span>(</span>
+<span id="cb8-30"><a href="#cb8-30" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> out<span class="sc">$</span>value, </span>
+<span id="cb8-31"><a href="#cb8-31" aria-hidden="true" tabindex="-1"></a>    <span class="at">y =</span> <span class="dv">1</span><span class="sc">:</span>n, </span>
+<span id="cb8-32"><a href="#cb8-32" aria-hidden="true" tabindex="-1"></a>    <span class="at">type =</span> <span class="st">"l"</span>, </span>
+<span id="cb8-33"><a href="#cb8-33" aria-hidden="true" tabindex="-1"></a>    <span class="at">xlim =</span> <span class="fu">c</span>(<span class="sc">-</span><span class="dv">4</span>, <span class="dv">4</span>),</span>
+<span id="cb8-34"><a href="#cb8-34" aria-hidden="true" tabindex="-1"></a>    <span class="at">xlab =</span> <span class="st">"Value, x"</span>,</span>
+<span id="cb8-35"><a href="#cb8-35" aria-hidden="true" tabindex="-1"></a>    <span class="at">ylab =</span> <span class="st">"Time"</span></span>
+<span id="cb8-36"><a href="#cb8-36" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb8-37"><a href="#cb8-37" aria-hidden="true" tabindex="-1"></a>  <span class="fu">abline</span>(<span class="at">h =</span> <span class="dv">200</span>, <span class="at">lty =</span> <span class="st">"dotted"</span>)</span>
+<span id="cb8-38"><a href="#cb8-38" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</details>
+<div class="cell-output-display">
+<p><img src="index_files/figure-html/unnamed-chunk-8-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>It’s still not ideal – largely because we don’t have many samples, we haven’t set a <code>lag</code>, and the value of <code>sigma</code> isn’t very well chosen – but you can see that the bias caused by the poor choice of starting value has disappeared.</p>
+<p><br></p>
+</section>
+<section id="the-role-of-the-lag-parameter" class="level2">
+<h2 class="anchored" data-anchor-id="the-role-of-the-lag-parameter">The role of the lag parameter</h2>
+<p>Finally, I’ll mention in passing the role played by the lag parameter. In some situations you can be forced into using a proposal distribution that has a very low acceptance rate. When that happens, you’re left with an awkward Markov chain that gets stuck in one location for long periods of time. One thing that people often do in that situation is allow several iterations of the sampler to elapse in between successive samples. This is the <code>lag</code> between samples. The effect of this is illustrated in below, which shows the behaviour of a sampler with a very wide proposal distribution (<code>sigma = 50</code>) with <code>n = 1000</code> samples drawn, at <code>lag = 0</code> (left), <code>lag = 10</code> (middle) and <code>lag = 100</code> (right).</p>
+<div class="cell">
+<details>
+<summary>Source code for plots</summary>
+<div class="sourceCode cell-code" id="cb9"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">1234</span>)</span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a><span class="fu">par</span>(<span class="at">mar =</span> <span class="fu">c</span>(<span class="dv">4</span>, <span class="dv">4</span>, <span class="dv">2</span>, <span class="dv">2</span>))</span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a><span class="fu">layout</span>(<span class="fu">matrix</span>(<span class="dv">1</span><span class="sc">:</span><span class="dv">6</span>, <span class="at">nrow =</span> <span class="dv">2</span>, <span class="at">ncol =</span> <span class="dv">3</span>))</span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a>n <span class="ot">&lt;-</span> <span class="dv">1000</span></span>
+<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a>lag <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="dv">0</span>, <span class="dv">10</span>, <span class="dv">100</span>)</span>
+<span id="cb9-6"><a href="#cb9-6" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span>(i <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span><span class="dv">3</span>) {</span>
+<span id="cb9-7"><a href="#cb9-7" aria-hidden="true" tabindex="-1"></a>  out <span class="ot">&lt;-</span> <span class="fu">metropolis_sampler</span>(</span>
+<span id="cb9-8"><a href="#cb9-8" aria-hidden="true" tabindex="-1"></a>    <span class="at">initial_value =</span> <span class="dv">0</span>,</span>
+<span id="cb9-9"><a href="#cb9-9" aria-hidden="true" tabindex="-1"></a>    <span class="at">lag =</span> lag[i],</span>
+<span id="cb9-10"><a href="#cb9-10" aria-hidden="true" tabindex="-1"></a>    <span class="at">n =</span> n, </span>
+<span id="cb9-11"><a href="#cb9-11" aria-hidden="true" tabindex="-1"></a>    <span class="at">sigma =</span> <span class="dv">50</span></span>
+<span id="cb9-12"><a href="#cb9-12" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb9-13"><a href="#cb9-13" aria-hidden="true" tabindex="-1"></a>  <span class="fu">hist</span>(</span>
+<span id="cb9-14"><a href="#cb9-14" aria-hidden="true" tabindex="-1"></a>    out<span class="sc">$</span>value, </span>
+<span id="cb9-15"><a href="#cb9-15" aria-hidden="true" tabindex="-1"></a>    <span class="at">breaks =</span> <span class="fu">seq</span>(<span class="sc">-</span><span class="dv">4</span>, <span class="dv">4</span>, .<span class="dv">05</span>),</span>
+<span id="cb9-16"><a href="#cb9-16" aria-hidden="true" tabindex="-1"></a>    <span class="at">main =</span> <span class="fu">paste</span>(<span class="st">"Lag:"</span>, lag[i]),</span>
+<span id="cb9-17"><a href="#cb9-17" aria-hidden="true" tabindex="-1"></a>    <span class="at">xlab =</span> <span class="st">"Value, x"</span>,</span>
+<span id="cb9-18"><a href="#cb9-18" aria-hidden="true" tabindex="-1"></a>    <span class="at">ylab =</span> <span class="st">"Frequency"</span></span>
+<span id="cb9-19"><a href="#cb9-19" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb9-20"><a href="#cb9-20" aria-hidden="true" tabindex="-1"></a>  x <span class="ot">&lt;-</span> <span class="fu">seq</span>(<span class="sc">-</span><span class="dv">4</span>, <span class="dv">4</span>, .<span class="dv">05</span>)</span>
+<span id="cb9-21"><a href="#cb9-21" aria-hidden="true" tabindex="-1"></a>  p <span class="ot">&lt;-</span> <span class="fu">target</span>(<span class="fu">seq</span>(<span class="sc">-</span><span class="dv">4</span>, <span class="dv">4</span>, .<span class="dv">05</span>))</span>
+<span id="cb9-22"><a href="#cb9-22" aria-hidden="true" tabindex="-1"></a>  expected <span class="ot">&lt;-</span> n <span class="sc">*</span> p <span class="sc">/</span> <span class="fu">sum</span>(p) </span>
+<span id="cb9-23"><a href="#cb9-23" aria-hidden="true" tabindex="-1"></a>  <span class="fu">lines</span>(</span>
+<span id="cb9-24"><a href="#cb9-24" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> x, </span>
+<span id="cb9-25"><a href="#cb9-25" aria-hidden="true" tabindex="-1"></a>    <span class="at">y =</span> expected, </span>
+<span id="cb9-26"><a href="#cb9-26" aria-hidden="true" tabindex="-1"></a>    <span class="at">type =</span> <span class="st">"l"</span>, </span>
+<span id="cb9-27"><a href="#cb9-27" aria-hidden="true" tabindex="-1"></a>    <span class="at">col =</span> <span class="st">"red"</span>,</span>
+<span id="cb9-28"><a href="#cb9-28" aria-hidden="true" tabindex="-1"></a>    <span class="at">lwd =</span> <span class="dv">2</span></span>
+<span id="cb9-29"><a href="#cb9-29" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb9-30"><a href="#cb9-30" aria-hidden="true" tabindex="-1"></a>  <span class="fu">plot</span>(</span>
+<span id="cb9-31"><a href="#cb9-31" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> out<span class="sc">$</span>value, </span>
+<span id="cb9-32"><a href="#cb9-32" aria-hidden="true" tabindex="-1"></a>    <span class="at">y =</span> <span class="dv">1</span><span class="sc">:</span>n, </span>
+<span id="cb9-33"><a href="#cb9-33" aria-hidden="true" tabindex="-1"></a>    <span class="at">type =</span> <span class="st">"l"</span>, </span>
+<span id="cb9-34"><a href="#cb9-34" aria-hidden="true" tabindex="-1"></a>    <span class="at">xlim =</span> <span class="fu">c</span>(<span class="sc">-</span><span class="dv">4</span>, <span class="dv">4</span>),</span>
+<span id="cb9-35"><a href="#cb9-35" aria-hidden="true" tabindex="-1"></a>    <span class="at">xlab =</span> <span class="st">"Value, x"</span>,</span>
+<span id="cb9-36"><a href="#cb9-36" aria-hidden="true" tabindex="-1"></a>    <span class="at">ylab =</span> <span class="st">"Time"</span></span>
+<span id="cb9-37"><a href="#cb9-37" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb9-38"><a href="#cb9-38" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</details>
+<div class="cell-output-display">
+<p><img src="index_files/figure-html/unnamed-chunk-9-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p><br></p>
 </section>
 <section id="a-word-of-warning" class="level2">
 <h2 class="anchored" data-anchor-id="a-word-of-warning">A word of warning</h2>
-<p>The discussion in this note is <em>heavily</em> oversimplified. There are a lot of subtle issues associated with MCMC methods, and my original plan when teaching this class was to gradually write a series of notes that expanded on this simplified discussion. Sadly, that never actually happened. I ended up too busy every year and never really had the time to write it up. Maybe one day!</p>
+<p>The discussion in this post is <em>heavily</em> oversimplified. It doesn’t talk at all about the conditions required to make Metropolis sampling work, it doesn’t talk about diagnostics, and it certainly doesn’t talk about what happens when we move this into higher dimensional problems. I haven’t made any attempt to implement this efficiently, either: there’s little point in me doing that when there are already many very efficient tools already in existence. My goal when I wrote this was so that my class could have an example that was simple enough that they could implement it themselves and get a sense of what MCMC algorithms do. At one point I had this idea that I’d gradually expand on these materials so that students could work their way up from introductory materials like this to more realistic examples, but I never really found the time to do that. Maybe one day!</p>
 <!--------------- appendices go here ----------------->
 
 
@@ -603,9 +629,12 @@ x_n &amp; \mbox{ otherwise}
 <ol>
 <li id="fn1"><p>Bizarrely, this actually happens to me a lot. It’s totally surreal.<a href="#fnref1" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
 <li id="fn2"><p>Another surreal experience that I’ve had quite a bit lately is getting rejected from data science jobs because I don’t have a computer science degree and my qualifications are technically in psychology. Apparently I’m considered skilled enough to <em>teach</em> computational statistics to university computer science students, but still considered less skilled at those tools than the students that I taught? I mean, it’s either that or tech company recruiters don’t actually read the résumés that they get sent… but that couldn’t possibly be true, right? Efficient market hypothesis and all that…<a href="#fnref2" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
-<li id="fn3"><p>Some asides: my experience teaching this class is that it’s quite common for people new to statistics to struggle with the concept of <a href="https://en.wikipedia.org/wiki/Probability_density_function">probability density</a>. It’s not super important for the purposes of this post, and to a first approximation it’s totally okay to think of <span class="math inline">\(p(x)\)</span> as “the probability of observing <span class="math inline">\(x\)</span> (sort of)”, and the <a href="https://en.wikipedia.org/wiki/Cumulative_distribution_function">distribution function</a> <span class="math inline">\(P(x)\)</span> as “the probability of observing a value no larger than <span class="math inline">\(x\)</span>”. These sorts of notational and technical details do matter once you start doing mathematical statistics, but this post is absolutely not that! I promise I was never so cruel as to inflict that stuff on my undergraduate computer science students! Never did I ever refer to sigma algebras in my undergrad teaching, honest. Though I did once inflict Kolmogorov complexity on a class, and apologised profusely for my error.<a href="#fnref3" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
-<li id="fn4"><p>At this point in the class students had most certainly encountered Markov chains!<a href="#fnref4" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
-<li id="fn5"><p>Okay yeah I suppose I could have denoted the acceptance probability as <span class="math inline">\(P(x_{n+1} = x^* | x_{n}, x^*)\)</span> to properly capture the dependency on the current state and the proposal value, be clear about the position in the sequence and the fact that this is a probability mass function not a probability density function, but honestly does all that notation actually help anyone? If I follow this line of thought to its conclusion I’ll end up talking about measures defined on Borel sets or something equally unhelpful to new learners.<a href="#fnref5" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn3"><p>Okay. So, I just know that a serious statistician will read this at some point, and – from bitter experience – I’ve learned that when a lady person writes about mathematics and is unclear on even the smallest thing her credibility is immediately subject to question. So, in an attempt to forestall any misapprehensions, I most certainly understand the difference between a density function and a distribution function, and equally I know that it is conventional to use lower case to refer to densities and upper case to refer to distributions and probability mass functions. However, I wrote this note for undergraduate computer science students, and accordingly I chose to keep my notation simple, even if it is a little imprecise.<a href="#fnref3" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn4"><p>Some asides: my experience teaching this class is that it’s quite common for people new to statistics to struggle with the concept of <a href="https://en.wikipedia.org/wiki/Probability_density_function">probability density</a>. It’s not super important for the purposes of this post, and to a first approximation it’s totally okay to think of <span class="math inline">\(p(x)\)</span> as “the probability of observing <span class="math inline">\(x\)</span> (sort of)”. It is of course the case that the difference between a pdf, a pmf, and a cdf matters when you start doing mathematical statistics, but I would never be so cruel as to inflict that stuff on my undergraduate computer science students! Not once did refer to sigma algebras in my undergrad teaching, honest. Though, looking back, I did once inflict Kolmogorov complexity on a class. It was… not a good decision.<a href="#fnref4" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn5"><p>It’s worth mentioning that, at this point in the class my students had all been shown several examples of the <a href="https://en.wikipedia.org/wiki/Curse_of_dimensionality">curse of dimensionality</a> problem. So even though yes, of course it’s easy to solve this problem in one-dimension, they were all acutely aware that using brute force numerical integration methods to compute the denominator isn’t going to work we started trying to do something more realistic than my toy example.<a href="#fnref5" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn6"><p>At this point in the class students had most certainly encountered Markov chains!<a href="#fnref6" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn7"><p>No, I don’t particularly feel like discussing what <em>precisely</em> is meant by the word “guarantee” in this context. I wrote this originally for undergraduate computer science students who really did not care for convergence proofs. In the original context it was quite appropriate and sensible to handwave any detaild discussions of stationarity and convergence. I may be a masochist, but I am certainly not a sadist.<a href="#fnref7" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn8"><p>Okay yeah I suppose I could have denoted the acceptance probability as <span class="math inline">\(P(x_{n+1} = x^* | x_{n}, x^*)\)</span> to properly capture the dependency on the current state and the proposal value, be clear about the position in the sequence and the fact that this is a probability mass function not a probability density function, but… honestly does all that notation actually help anyone? If I follow this line of thought to its conclusion I’ll end up talking about measures defined on Borel sets or something equally cruel to compsci students.<a href="#fnref8" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
 </ol>
 </section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2023,
   author = {Danielle Navarro},
