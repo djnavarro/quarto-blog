@@ -15,7 +15,391 @@
 <link>https://blog.djnavarro.net/index.html</link>
 </image>
 <generator>quarto-1.2.335</generator>
-<lastBuildDate>Sat, 08 Apr 2023 14:00:00 GMT</lastBuildDate>
+<lastBuildDate>Tue, 11 Apr 2023 14:00:00 GMT</lastBuildDate>
+<item>
+  <title>The Metropolis-Hastings algorithm</title>
+  <dc:creator>Danielle Navarro</dc:creator>
+  <link>https://blog.djnavarro.net/posts/2023-04-12_metropolis-hastings/index.html</link>
+  <description><![CDATA[ 
+
+
+
+
+<!--------------- my typical setup ----------------->
+<!--------------- post begins here ----------------->
+<p>This morning I received an email from a stranger, writing to say thank you for a document I wrote almost 13 years ago. It’s a weird feeling every time I get one of those,<sup>1</sup> but a pleasant one. This time around, the document in question was a <a href="https://compcogsci-3016.djnavarro.net/technote_metropolishastings.pdf">note on the Metropolis-Hastings algorithm</a> that I threw together in a rush for a computer science class I taught back in 2010.<sup>2</sup> While drinking my second coffee of the morning and feeling the usual sense of dread I feel when I know that today I have to put some effort into looking for a job, yet again, I arrived at an excellent procrastination strategy…</p>
+<p>Why don’t I start rescuing some of the content that I wrote all those years ago and currently have hidden away in pdf files in the dark corners of the internet, and put them up on my blog? Okay sure it won’t get me a job, but it feels less demeaning than yet again trying to get tech company recruiters to believe that yes actually the middle aged lady with a psychology PhD does in fact know how something about statistics and does know how to code.</p>
+<p>Anyway. Without further self-pity, here’s a quick primer on the <a href="https://en.wikipedia.org/wiki/Metropolis%E2%80%93Hastings_algorithm">Metropolis-Hastings algorithm</a>. The target audience for this is someone who has a little bit of probability theory, can write code in R (or similar), but doesn’t have any background in Markov chain Monte Carlo methods. It doesn’t dive deep into the mathematics – i.e., you won’t find any discussions of <a href="https://en.wikipedia.org/wiki/Detailed_balance">detailed balance</a>, <a href="https://en.wikipedia.org/wiki/Ergodicity">ergodicity</a>, and other things a statistics class would cover – but it does try to go deep enough to give a beginner an understanding of what the algorithm is doing.</p>
+<p><br></p>
+<section id="the-problem" class="level2">
+<h2 class="anchored" data-anchor-id="the-problem">The problem</h2>
+<p>The Metropolis-Hastings algorithm is perhaps the most popular example of a <a href="https://en.wikipedia.org/wiki/Markov_chain_Monte_Carlo">Markov chain Monte Carlo</a> (MCMC) method in statistics. The basic problem that it solves is to provide a method for sampling from some arbitrary probability distribution, which I’ll denote <img src="https://latex.codecogs.com/png.latex?p(x)">.<sup>3</sup> The idea is that in many cases, you know how to write out the equation for the probability <img src="https://latex.codecogs.com/png.latex?p(x)">, but you don’t know how to generate a random number from this distribution, <img src="https://latex.codecogs.com/png.latex?x%20%5Csim%20p(x)">. This is the situation where MCMC is handy. For example, suppose I’ve become interested – for reasons known but to the gods – in the probability distribution shown below:</p>
+<div class="cell">
+<div class="cell-output-display">
+<p><img src="https://blog.djnavarro.net/posts/2023-04-12_metropolis-hastings/index_files/figure-html/unnamed-chunk-1-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>The probability density function<sup>4</sup> <img src="https://latex.codecogs.com/png.latex?p(x)"> for this distribution is given by the following equation:</p>
+<p><img src="https://latex.codecogs.com/png.latex?%0Ap(x)%20=%20%5Cfrac%7B%5Cexp(-x%5E2)%20%5Cleft(2%20+%20%5Csin(5x)%20+%20%5Csin(2x)%5Cright)%7D%7B%5Cint_%7B-%5Cinfty%7D%5E%5Cinfty%20%5Cexp(-u%5E2)%20%5Cleft(2%20+%20%5Csin(5u)%20+%20%5Csin(2u)%5Cright)%20%5C%20du%7D%0A"></p>
+<p>My problem is that I either don’t know <em>how</em> to solve the integral in the denominator, or I’m simply too lazy to try.<sup>5</sup> So this means in truth, I only know the distribution “up to some unknown constant”. That is, all I really know how to calculate is the numerator. Given this, a more realistic way to express my knowledge about the target distribution is captured by this equation:</p>
+<p><img src="https://latex.codecogs.com/png.latex?%0Ap(x)%20%5Cpropto%20%5Cexp(-x%5E2)%20%5Cleft(2%20+%20%5Csin(5x)%20+%20%5Csin(2x)%5Cright)%0A"> How can I generate samples from this distribution?</p>
+<p><br></p>
+</section>
+<section id="the-metropolis-hastings-algorithm" class="level2">
+<h2 class="anchored" data-anchor-id="the-metropolis-hastings-algorithm">The Metropolis-Hastings algorithm</h2>
+<p>The basic idea behind MCMC is very simple. The idea is to define a <a href="https://en.wikipedia.org/wiki/Markov_chain">Markov chain</a><sup>6</sup> over possible <img src="https://latex.codecogs.com/png.latex?x"> values, in such a way that the stationary distribution of the Markov chain is in fact <img src="https://latex.codecogs.com/png.latex?p(x)">. That is, what we’re going to do is use a Markov chain to generate a sequence of <img src="https://latex.codecogs.com/png.latex?x"> values, denoted <img src="https://latex.codecogs.com/png.latex?(x_0,%20x_1,%20x_2,%20%5Cldots,%20x_n)">, in such a way that as <img src="https://latex.codecogs.com/png.latex?n%20%5Crightarrow%20%5Cinfty">, we can guarantee<sup>7</sup> that <img src="https://latex.codecogs.com/png.latex?x_n%20%5Csim%20p(x)">. There are many different ways of setting up a Markov chain that has this property. The Metropolis-Hastings algorithm is one of these.</p>
+<p><br></p>
+<section id="the-proposal-step" class="level3">
+<h3 class="anchored" data-anchor-id="the-proposal-step">The proposal step</h3>
+<p>Here’s how it works. Suppose that the current state of the Markov chain is <img src="https://latex.codecogs.com/png.latex?x_n">, and we want to generate <img src="https://latex.codecogs.com/png.latex?x_%7Bn+1%7D">. In the Metropolis-Hastings algorithm, the generation of <img src="https://latex.codecogs.com/png.latex?x_%7Bn+1%7D"> is a two-stage process.</p>
+<p>The first stage is to generate a <em>candidate</em>, which we’ll denote <img src="https://latex.codecogs.com/png.latex?x%5E%E2%88%97">. The value of <img src="https://latex.codecogs.com/png.latex?x%5E%E2%88%97"> is generated from the proposal distribution that we already know how to sample from. We denote this proposal distribution <img src="https://latex.codecogs.com/png.latex?q(x%5E%E2%88%97%20%7C%20x_n)">. Notice that the distribution we sample from depends on the current state of the Markov chain, <img src="https://latex.codecogs.com/png.latex?x_n">. There are some technical constraints on what you can use as a proposal distribution, but for the most part it can be anything you like. A very typical way to do this is to use a normal distribution centered on the current state <img src="https://latex.codecogs.com/png.latex?x_n">. More formally, we write this as:</p>
+<p><img src="https://latex.codecogs.com/png.latex?%0Ax%5E*%20%7C%20x_n%20%5Csim%20%5Cmbox%7BNormal%7D(x_n,%20%5Csigma%5E2)%0A"> for some standard deviation <img src="https://latex.codecogs.com/png.latex?%5Csigma"> that we select in advance (more on this later!)</p>
+<p><br></p>
+</section>
+<section id="the-accept-reject-step" class="level3">
+<h3 class="anchored" data-anchor-id="the-accept-reject-step">The accept-reject step</h3>
+<p>The second stage is the accept-reject step. Firstly, what you need to do is calculate the <em>acceptance probability</em>, denoted <img src="https://latex.codecogs.com/png.latex?A(x_n%20%5Crightarrow%20x_%E2%88%97)">, which is given by:<sup>8</sup></p>
+<p><img src="https://latex.codecogs.com/png.latex?%0AA(x_n%20%5Crightarrow%20x_%E2%88%97)%20=%20%5Cmin%20%5Cleft(1,%20%5Cfrac%7Bp(x%5E*)%7D%7Bp(x%5En)%7D%20%5Ctimes%20%5Cfrac%7Bq(x_n%20%7C%20x%5E*)%7D%7Bq(x%5E*%20%7C%20x_n)%7D%20%5Cright)%0A"> There are two things to pay attention to here. Firstly, notice that the ratio <img src="https://latex.codecogs.com/png.latex?p(x%5E*)%20/%20p(x%5En)"> doesn’t depend on the normalising constant for the distribution. Or, to put it in a more helpful way, that integral in the first equation is completely irrelevant and we can ignore it. As a consequence, for our toy problem we can write this:</p>
+<p><img src="https://latex.codecogs.com/png.latex?%0A%5Cfrac%7Bp(x%5E*)%7D%7Bp(x%5En)%7D%20=%20%5Cfrac%7B%5Cexp(-%7Bx%5E*%7D%5E2)%20%5Cleft(2%20+%20%5Csin(5x%5E*)%20+%20%5Csin(2x%5E*)%5Cright)%7D%7B%5Cexp(-%7Bx_n%7D%5E2)%20%5Cleft(2%20+%20%5Csin(5x_n)%20+%20%5Csin(2x_n)%5Cright)%7D%0A"> That’s a nice simple thing to compute with no need for any numerical integration or, gods forbid, solving the integral analytically.</p>
+<p>The second thing to pay attention to is the behaviour of the other term, <img src="https://latex.codecogs.com/png.latex?q(x_n%20%7C%20x%5E*)%20/%20q(x%5E*%20%7C%20x_n)">. What this term does is correct for any biases that the proposal distribution might induce. In this expression, the denominator <img src="https://latex.codecogs.com/png.latex?q(x%5E%E2%88%97%20%7C%20x_n)"> describes the probability with which you’d choose <img src="https://latex.codecogs.com/png.latex?x%5E*"> as the candidate if the current state of the Markov chain is <img src="https://latex.codecogs.com/png.latex?x_n">. The numerator, however, describes the probability of a transition that goes the other way: that is, if the current state had actually been <img src="https://latex.codecogs.com/png.latex?x%5E%E2%88%97">, what is the probability that you would have generated <img src="https://latex.codecogs.com/png.latex?x%5En"> as the candidate value? If the proposal distribution is symmetric, then these two probabilities will turn out to be equal. For example, if the proposal distribution is normal, then:</p>
+<p><img src="https://latex.codecogs.com/png.latex?%0A%5Cbegin%7Barray%7D%7Brcl%7D%0Aq(x%5E*%20%7C%20x_n)%20&amp;%20=%20&amp;%20%5Cfrac%7B1%7D%7B%5Csqrt%7B2%20%5Cpi%7D%20%5Csigma%7D%20%5Cexp%20%5Cleft(%20-%5Cfrac%7B1%7D%7B2%20%5Csigma%5E2%7D%20%5Cleft(x_n%20-%20x%5E*%5Cright)%5E2%20%5Cright)%20%5C%5C%0Aq(x_n%20%7C%20x%5E*)%20&amp;%20=%20&amp;%20%5Cfrac%7B1%7D%7B%5Csqrt%7B2%20%5Cpi%7D%20%5Csigma%7D%20%5Cexp%20%5Cleft(%20-%5Cfrac%7B1%7D%7B2%20%5Csigma%5E2%7D%20%5Cleft(x%5E*%20-%20x_n%20%5Cright)%5E2%20%5Cright)%0A%5Cend%7Barray%7D%0A"></p>
+<p>Clearly, <img src="https://latex.codecogs.com/png.latex?q(x%5E*%20%7C%20x_n)%20=%20q(x_n%20%7C%20x%5E*)"> for all choices of <img src="https://latex.codecogs.com/png.latex?x_n"> and <img src="https://latex.codecogs.com/png.latex?x%5E*">, and as a consequence the ratio <img src="https://latex.codecogs.com/png.latex?q(x_n%20%7C%20x%5E*)%20/%20q(x%5E*%20%7C%20x_n)"> is always 1 in this case.</p>
+<p>This special case of the Metropolis-Hastings algorithm, in which the proposal distribution is symmetric, is referred to as the <em>Metropolis algorithm</em>.</p>
+<p>Okay. Having proposed the candidate <img src="https://latex.codecogs.com/png.latex?x%5E%E2%88%97"> and calculated the acceptance probability, <img src="https://latex.codecogs.com/png.latex?A(x_n%20%5Crightarrow%20x%5E%E2%88%97)">, we now either decide to “accept” the candidate and set <img src="https://latex.codecogs.com/png.latex?x_%7Bn+1%7D%20=%20x%5E%E2%88%97"> or we “reject” the candidate and set <img src="https://latex.codecogs.com/png.latex?x_%7Bn+1%7D%20=%20x_n">. To make this decision, we generate a uniformly distributed random number between 0 and 1, denoted <img src="https://latex.codecogs.com/png.latex?u">. Then:</p>
+<p><img src="https://latex.codecogs.com/png.latex?%0Ax_%7Bn+1%7D%20=%20%5Cleft%5C%7B%0A%5Cbegin%7Barray%7D%7Brl%7D%0Ax%5E*%20&amp;%20%5Cmbox%7B%20if%20%7D%20u%20%5Cleq%20A(x_n%20%5Crightarrow%20x%5E%E2%88%97)%20%5C%5C%0Ax_n%20&amp;%20%5Cmbox%7B%20otherwise%7D%0A%5Cend%7Barray%7D%0A%5Cright.%0A"> In essence, this is the entirety of the Metropolis-Hastings algorithm! True, there are quite a few technical issues that attach to this, and if you’re interested in using the algorithm for practical purposes I strongly encourage you to do some further reading to make sure you understand the traps in detail, but for now I’ll just give you some examples of things that work and things that don’t, to give you a bit of a feel for how it works in practice.</p>
+<p><br></p>
+</section>
+</section>
+<section id="implementing-the-sampler" class="level2">
+<h2 class="anchored" data-anchor-id="implementing-the-sampler">Implementing the sampler</h2>
+<p>Okay. That’s enough mathematics. Let’s have a look at some R code implementing the Metropolis-Hastings algorithm for the toy problem: can we write an R function that draws samples from the weird looking probability distribution I plotted at the start of this post?</p>
+<p>To do this, I’ll define the sampler in terms of three functions. First, we have a <code>target()</code> function that calculates the probability of a given sample <code>x</code>, or – more precisely – calculates the numerator term in the equation describing the probability density:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1">target <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>(x) {</span>
+<span id="cb1-2">  <span class="fu" style="color: #4758AB;">exp</span>(<span class="sc" style="color: #5E5E5E;">-</span>x<span class="sc" style="color: #5E5E5E;">^</span><span class="dv" style="color: #AD0000;">2</span>) <span class="sc" style="color: #5E5E5E;">*</span> (<span class="dv" style="color: #AD0000;">2</span> <span class="sc" style="color: #5E5E5E;">+</span> <span class="fu" style="color: #4758AB;">sin</span>(<span class="dv" style="color: #AD0000;">5</span> <span class="sc" style="color: #5E5E5E;">*</span> x) <span class="sc" style="color: #5E5E5E;">+</span> <span class="fu" style="color: #4758AB;">sin</span>(<span class="dv" style="color: #AD0000;">2</span> <span class="sc" style="color: #5E5E5E;">*</span> x))</span>
+<span id="cb1-3">}</span></code></pre></div>
+</div>
+<p>Estoy emocionada. 😐</p>
+<p>Next we define a <code>metropolis_step()</code> function that takes some value <code>x</code> corresponding to the current state of the Markov chain, and a parameter <code>sigma</code> that describes the standard deviation of the proposal distribution:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb2" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1">metropolis_step <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>(x, sigma) {</span>
+<span id="cb2-2">  proposed_x <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">rnorm</span>(<span class="dv" style="color: #AD0000;">1</span>, <span class="at" style="color: #657422;">mean =</span> x, <span class="at" style="color: #657422;">sd =</span> sigma)</span>
+<span id="cb2-3">  accept_prob <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">min</span>(<span class="dv" style="color: #AD0000;">1</span>, <span class="fu" style="color: #4758AB;">target</span>(proposed_x) <span class="sc" style="color: #5E5E5E;">/</span> <span class="fu" style="color: #4758AB;">target</span>(x))</span>
+<span id="cb2-4">  u <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">runif</span>(<span class="dv" style="color: #AD0000;">1</span>)</span>
+<span id="cb2-5">  <span class="cf" style="color: #003B4F;">if</span>(u <span class="sc" style="color: #5E5E5E;">&lt;=</span> accept_prob) {</span>
+<span id="cb2-6">    value <span class="ot" style="color: #003B4F;">&lt;-</span> proposed_x</span>
+<span id="cb2-7">    accepted <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cn" style="color: #8f5902;">TRUE</span></span>
+<span id="cb2-8">  } <span class="cf" style="color: #003B4F;">else</span> {</span>
+<span id="cb2-9">    value <span class="ot" style="color: #003B4F;">&lt;-</span> x</span>
+<span id="cb2-10">    accepted <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cn" style="color: #8f5902;">FALSE</span></span>
+<span id="cb2-11">  }</span>
+<span id="cb2-12">  out <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">data.frame</span>(<span class="at" style="color: #657422;">value =</span> value, <span class="at" style="color: #657422;">accepted =</span> accepted)</span>
+<span id="cb2-13">  out</span>
+<span id="cb2-14">}</span></code></pre></div>
+</div>
+<p>Finally we can write a <code>metropolis_sampler()</code> function that runs the Metropolis algorithm for some number of steps:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb3" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1">metropolis_sampler <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>(initial_value, </span>
+<span id="cb3-2">                               <span class="at" style="color: #657422;">n =</span> <span class="dv" style="color: #AD0000;">1000</span>, </span>
+<span id="cb3-3">                               <span class="at" style="color: #657422;">sigma =</span> <span class="dv" style="color: #AD0000;">1</span>, </span>
+<span id="cb3-4">                               <span class="at" style="color: #657422;">burnin =</span> <span class="dv" style="color: #AD0000;">0</span>, </span>
+<span id="cb3-5">                               <span class="at" style="color: #657422;">lag =</span> <span class="dv" style="color: #AD0000;">1</span>) {</span>
+<span id="cb3-6">  </span>
+<span id="cb3-7">  results <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">list</span>()</span>
+<span id="cb3-8">  current_state <span class="ot" style="color: #003B4F;">&lt;-</span> initial_value</span>
+<span id="cb3-9">  <span class="cf" style="color: #003B4F;">for</span>(i <span class="cf" style="color: #003B4F;">in</span> <span class="dv" style="color: #AD0000;">1</span><span class="sc" style="color: #5E5E5E;">:</span>burnin) {</span>
+<span id="cb3-10">    out <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">metropolis_step</span>(current_state, sigma)</span>
+<span id="cb3-11">    current_state <span class="ot" style="color: #003B4F;">&lt;-</span> out<span class="sc" style="color: #5E5E5E;">$</span>value</span>
+<span id="cb3-12">  }</span>
+<span id="cb3-13">  <span class="cf" style="color: #003B4F;">for</span>(i <span class="cf" style="color: #003B4F;">in</span> <span class="dv" style="color: #AD0000;">1</span><span class="sc" style="color: #5E5E5E;">:</span>n) {</span>
+<span id="cb3-14">    <span class="cf" style="color: #003B4F;">for</span>(j <span class="cf" style="color: #003B4F;">in</span> <span class="dv" style="color: #AD0000;">1</span><span class="sc" style="color: #5E5E5E;">:</span>lag) {</span>
+<span id="cb3-15">      out <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">metropolis_step</span>(current_state, sigma)</span>
+<span id="cb3-16">      current_state <span class="ot" style="color: #003B4F;">&lt;-</span> out<span class="sc" style="color: #5E5E5E;">$</span>value</span>
+<span id="cb3-17">    }</span>
+<span id="cb3-18">    results[[i]] <span class="ot" style="color: #003B4F;">&lt;-</span> out</span>
+<span id="cb3-19">  }</span>
+<span id="cb3-20">  results <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">do.call</span>(rbind, results)</span>
+<span id="cb3-21">  results</span>
+<span id="cb3-22">}</span></code></pre></div>
+</div>
+<p>We have several arguments here. Three of them follow intuitively from the mathematical description I gave in the last section:</p>
+<ul>
+<li><code>initial_value</code> is the start point for the Markov chain</li>
+<li><code>n</code> is the number of samples we want to draw from the target distribution</li>
+<li><code>sigma</code> is the standard deviation of the normal distribution we use to propose candidate values at each step</li>
+</ul>
+<p>The other two are:</p>
+<ul>
+<li><code>burnin</code> is the number of iterations we run the sampler for before recording results</li>
+<li><code>lag</code> is the number of iterations we run the sampler for between successive samples</li>
+</ul>
+<p>I’ll talk more about these input arguments later, but for now let’s take a look at what happens when we call our <code>metropolis_sampler()</code> function:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb4" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><span class="fu" style="color: #4758AB;">set.seed</span>(<span class="dv" style="color: #AD0000;">1234</span>)</span>
+<span id="cb4-2">out <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">metropolis_sampler</span>(<span class="at" style="color: #657422;">initial_value =</span> <span class="dv" style="color: #AD0000;">0</span>)</span>
+<span id="cb4-3">out[<span class="dv" style="color: #AD0000;">1</span><span class="sc" style="color: #5E5E5E;">:</span><span class="dv" style="color: #AD0000;">10</span>, ]</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>        value accepted
+1   0.3143686    FALSE
+2   0.3500985     TRUE
+3   0.3500985    FALSE
+4   0.3500985    FALSE
+5   0.3500985    FALSE
+6  -0.1665712     TRUE
+7  -0.9428251     TRUE
+8   0.4271852     TRUE
+9   0.3168997     TRUE
+10  0.3352164     TRUE</code></pre>
+</div>
+</div>
+<p>As you can see it returns a data frame with <code>n</code> rows and two columns. The first column records the numeric <code>value</code> that was sampled, and <code>accepted</code> is a logical variable indicating whether this value arose from accepting the proposal (rather than rejecting it).</p>
+<p><br></p>
+<section id="the-effect-of-proposal-width" class="level3">
+<h3 class="anchored" data-anchor-id="the-effect-of-proposal-width">The effect of proposal width</h3>
+<p>In practice when you’re implementing a Metropolis algorithm, the choice of proposal distribution matters a lot. If it’s too narrow, your sampler will have an extremely high acceptance rate on average, but it will move around extremely slowly. To use the technical term, it has a very low <em>mixing</em> rate. This distorts your estimate of the target distribution. However, if it’s too wide, the acceptance rate becomes too high and the chain gets stuck on specific values for long periods of time. This also distorts your estimate of the target distribution. Yes, technically, if you run your accursed sampler long enough despite it’s poor choice of proposal distribution it will eventually produce the right answer… but wouldn’t you prefer a sampler that gives you the right answer quickly rather than slowly?</p>
+<p>This idea is illustrated in the plots below, in which I’ve run a Metropolis sampler with <code>n = 10000</code> on our toy problem three times. On the left, I’ve made a good choice of proposal distribution, setting <code>sigma = 1</code>. In the middle, my proposal distribution is too narrow (I set <code>sigma = .025</code> and it doesn’t work). On the right, my proposal distribution is too wide: it turns out that <code>sigma = 50</code> isn’t a good idea for this problem either:</p>
+<div class="cell">
+<details>
+<summary>Source code for plots</summary>
+<div class="sourceCode cell-code" id="cb6" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1"><span class="fu" style="color: #4758AB;">set.seed</span>(<span class="dv" style="color: #AD0000;">1234</span>)</span>
+<span id="cb6-2"><span class="fu" style="color: #4758AB;">par</span>(<span class="at" style="color: #657422;">mar =</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="dv" style="color: #AD0000;">4</span>, <span class="dv" style="color: #AD0000;">4</span>, <span class="dv" style="color: #AD0000;">2</span>, <span class="dv" style="color: #AD0000;">2</span>))</span>
+<span id="cb6-3"><span class="fu" style="color: #4758AB;">layout</span>(<span class="fu" style="color: #4758AB;">matrix</span>(<span class="dv" style="color: #AD0000;">1</span><span class="sc" style="color: #5E5E5E;">:</span><span class="dv" style="color: #AD0000;">6</span>, <span class="at" style="color: #657422;">nrow =</span> <span class="dv" style="color: #AD0000;">2</span>, <span class="at" style="color: #657422;">ncol =</span> <span class="dv" style="color: #AD0000;">3</span>))</span>
+<span id="cb6-4">sigma <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="dv" style="color: #AD0000;">1</span>, <span class="fl" style="color: #AD0000;">0.025</span>, <span class="dv" style="color: #AD0000;">50</span>)</span>
+<span id="cb6-5">n <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="dv" style="color: #AD0000;">10000</span></span>
+<span id="cb6-6"><span class="cf" style="color: #003B4F;">for</span>(i <span class="cf" style="color: #003B4F;">in</span> <span class="dv" style="color: #AD0000;">1</span><span class="sc" style="color: #5E5E5E;">:</span><span class="dv" style="color: #AD0000;">3</span>) {</span>
+<span id="cb6-7">  out <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">metropolis_sampler</span>(</span>
+<span id="cb6-8">    <span class="at" style="color: #657422;">initial_value =</span> <span class="sc" style="color: #5E5E5E;">-</span><span class="dv" style="color: #AD0000;">1</span>, </span>
+<span id="cb6-9">    <span class="at" style="color: #657422;">n =</span> n, </span>
+<span id="cb6-10">    <span class="at" style="color: #657422;">sigma =</span> sigma[i]</span>
+<span id="cb6-11">  )</span>
+<span id="cb6-12">  <span class="fu" style="color: #4758AB;">hist</span>(</span>
+<span id="cb6-13">    out<span class="sc" style="color: #5E5E5E;">$</span>value, </span>
+<span id="cb6-14">    <span class="at" style="color: #657422;">breaks =</span> <span class="fu" style="color: #4758AB;">seq</span>(<span class="sc" style="color: #5E5E5E;">-</span><span class="dv" style="color: #AD0000;">3</span>, <span class="dv" style="color: #AD0000;">3</span>, .<span class="dv" style="color: #AD0000;">05</span>),</span>
+<span id="cb6-15">    <span class="at" style="color: #657422;">main =</span> <span class="fu" style="color: #4758AB;">paste</span>(<span class="st" style="color: #20794D;">"Sample values: sigma ="</span>, sigma[i]),</span>
+<span id="cb6-16">    <span class="at" style="color: #657422;">xlab =</span> <span class="st" style="color: #20794D;">"Value, x"</span>,</span>
+<span id="cb6-17">    <span class="at" style="color: #657422;">ylab =</span> <span class="st" style="color: #20794D;">"Frequency"</span></span>
+<span id="cb6-18">  )</span>
+<span id="cb6-19">  x <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">seq</span>(<span class="sc" style="color: #5E5E5E;">-</span><span class="dv" style="color: #AD0000;">3</span>, <span class="dv" style="color: #AD0000;">3</span>, .<span class="dv" style="color: #AD0000;">05</span>)</span>
+<span id="cb6-20">  p <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">target</span>(<span class="fu" style="color: #4758AB;">seq</span>(<span class="sc" style="color: #5E5E5E;">-</span><span class="dv" style="color: #AD0000;">3</span>, <span class="dv" style="color: #AD0000;">3</span>, .<span class="dv" style="color: #AD0000;">05</span>))</span>
+<span id="cb6-21">  expected <span class="ot" style="color: #003B4F;">&lt;-</span> n <span class="sc" style="color: #5E5E5E;">*</span> p <span class="sc" style="color: #5E5E5E;">/</span> <span class="fu" style="color: #4758AB;">sum</span>(p) </span>
+<span id="cb6-22">  <span class="fu" style="color: #4758AB;">lines</span>(</span>
+<span id="cb6-23">    <span class="at" style="color: #657422;">x =</span> x, </span>
+<span id="cb6-24">    <span class="at" style="color: #657422;">y =</span> expected, </span>
+<span id="cb6-25">    <span class="at" style="color: #657422;">type =</span> <span class="st" style="color: #20794D;">"l"</span>, </span>
+<span id="cb6-26">    <span class="at" style="color: #657422;">col =</span> <span class="st" style="color: #20794D;">"red"</span>,</span>
+<span id="cb6-27">    <span class="at" style="color: #657422;">lwd =</span> <span class="dv" style="color: #AD0000;">2</span></span>
+<span id="cb6-28">  )</span>
+<span id="cb6-29">  <span class="fu" style="color: #4758AB;">plot</span>(</span>
+<span id="cb6-30">    <span class="at" style="color: #657422;">x =</span> out<span class="sc" style="color: #5E5E5E;">$</span>value, </span>
+<span id="cb6-31">    <span class="at" style="color: #657422;">y =</span> <span class="dv" style="color: #AD0000;">1</span><span class="sc" style="color: #5E5E5E;">:</span>n, </span>
+<span id="cb6-32">    <span class="at" style="color: #657422;">type =</span> <span class="st" style="color: #20794D;">"l"</span>, </span>
+<span id="cb6-33">    <span class="at" style="color: #657422;">xlim =</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="sc" style="color: #5E5E5E;">-</span><span class="dv" style="color: #AD0000;">3</span>, <span class="dv" style="color: #AD0000;">3</span>),</span>
+<span id="cb6-34">    <span class="at" style="color: #657422;">xlab =</span> <span class="st" style="color: #20794D;">"Value, x"</span>,</span>
+<span id="cb6-35">    <span class="at" style="color: #657422;">ylab =</span> <span class="st" style="color: #20794D;">"Time"</span></span>
+<span id="cb6-36">  )</span>
+<span id="cb6-37">}</span></code></pre></div>
+</details>
+<div class="cell-output-display">
+<p><img src="https://blog.djnavarro.net/posts/2023-04-12_metropolis-hastings/index_files/figure-html/unnamed-chunk-6-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>The way to read these plots is as follows: for all three values of <code>sigma</code>, we have two plots. The top one shows a histogram of the samples values obtained using the Metropolis sampler (that’s the black bars). Superimposed on this is a red line showing the distribution of values you’d expect to obtain when sampling from the true distribution.<sup>9</sup> The lower panel plots the Markov chain itself: the sequence of generated values.<sup>10</sup></p>
+<p>In the leftmost plots, we see what happens when we choose a good proposal distribution: the chain shown in the lower panel moves rapidly across the whole distribution, without getting stuck in any one place. In the far right panel, we see what happens when the proposal distribution is too wide: the chain gets stuck in one spot for long periods of time. It does manage to make big jumps, covering the whole range, but because the acceptance rate is so low that the distribution of samples is highly irregular. Finally, in the middle panel, if we set the proposal distribution to be too narrow, the acceptance rate is very high so the chain doesn’t get stuck in any one spot, but it doesn’t cover a very wide range. This simple example should give you an intuition for why you need to “play around” with the choice of proposal distribution. A good proposal distribution can make a huge difference!<sup>11</sup></p>
+<p><br></p>
+</section>
+<section id="the-role-of-the-burn-in-period" class="level3">
+<h3 class="anchored" data-anchor-id="the-role-of-the-burn-in-period">The role of the burn-in period</h3>
+<p>Up to this point I haven’t really explained what the <code>burnin</code> and <code>lag</code> parameters are there for. To be honest I don’t plan to go into details, but here’s the basic idea. First, let’s think about the burn-in issue. Suppose you started the sampler at a very bad location… say <code>initial_value = -3</code>, and – just so that we can exaggerate the problem – we’ll use a proposal distribution that is too narrow, say <code>sigma = .1</code>. The image below shows three runs of this sampler:</p>
+<div class="cell">
+<details>
+<summary>Source code for plots</summary>
+<div class="sourceCode cell-code" id="cb7" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1"><span class="fu" style="color: #4758AB;">set.seed</span>(<span class="dv" style="color: #AD0000;">1234</span>)</span>
+<span id="cb7-2"><span class="fu" style="color: #4758AB;">par</span>(<span class="at" style="color: #657422;">mar =</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="dv" style="color: #AD0000;">4</span>, <span class="dv" style="color: #AD0000;">4</span>, <span class="dv" style="color: #AD0000;">2</span>, <span class="dv" style="color: #AD0000;">2</span>))</span>
+<span id="cb7-3"><span class="fu" style="color: #4758AB;">layout</span>(<span class="fu" style="color: #4758AB;">matrix</span>(<span class="dv" style="color: #AD0000;">1</span><span class="sc" style="color: #5E5E5E;">:</span><span class="dv" style="color: #AD0000;">6</span>, <span class="at" style="color: #657422;">nrow =</span> <span class="dv" style="color: #AD0000;">2</span>, <span class="at" style="color: #657422;">ncol =</span> <span class="dv" style="color: #AD0000;">3</span>))</span>
+<span id="cb7-4">n <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="dv" style="color: #AD0000;">1000</span></span>
+<span id="cb7-5"><span class="cf" style="color: #003B4F;">for</span>(i <span class="cf" style="color: #003B4F;">in</span> <span class="dv" style="color: #AD0000;">1</span><span class="sc" style="color: #5E5E5E;">:</span><span class="dv" style="color: #AD0000;">3</span>) {</span>
+<span id="cb7-6">  out <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">metropolis_sampler</span>(</span>
+<span id="cb7-7">    <span class="at" style="color: #657422;">initial_value =</span> <span class="sc" style="color: #5E5E5E;">-</span><span class="dv" style="color: #AD0000;">3</span>, </span>
+<span id="cb7-8">    <span class="at" style="color: #657422;">n =</span> n, </span>
+<span id="cb7-9">    <span class="at" style="color: #657422;">sigma =</span> .<span class="dv" style="color: #AD0000;">1</span></span>
+<span id="cb7-10">  )</span>
+<span id="cb7-11">  <span class="fu" style="color: #4758AB;">hist</span>(</span>
+<span id="cb7-12">    out<span class="sc" style="color: #5E5E5E;">$</span>value, </span>
+<span id="cb7-13">    <span class="at" style="color: #657422;">breaks =</span> <span class="fu" style="color: #4758AB;">seq</span>(<span class="sc" style="color: #5E5E5E;">-</span><span class="dv" style="color: #AD0000;">4</span>, <span class="dv" style="color: #AD0000;">4</span>, .<span class="dv" style="color: #AD0000;">05</span>),</span>
+<span id="cb7-14">    <span class="at" style="color: #657422;">main =</span> <span class="cn" style="color: #8f5902;">NULL</span>,</span>
+<span id="cb7-15">    <span class="at" style="color: #657422;">xlab =</span> <span class="st" style="color: #20794D;">"Value, x"</span>,</span>
+<span id="cb7-16">    <span class="at" style="color: #657422;">ylab =</span> <span class="st" style="color: #20794D;">"Frequency"</span></span>
+<span id="cb7-17">  )</span>
+<span id="cb7-18">  x <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">seq</span>(<span class="sc" style="color: #5E5E5E;">-</span><span class="dv" style="color: #AD0000;">4</span>, <span class="dv" style="color: #AD0000;">4</span>, .<span class="dv" style="color: #AD0000;">05</span>)</span>
+<span id="cb7-19">  p <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">target</span>(<span class="fu" style="color: #4758AB;">seq</span>(<span class="sc" style="color: #5E5E5E;">-</span><span class="dv" style="color: #AD0000;">4</span>, <span class="dv" style="color: #AD0000;">4</span>, .<span class="dv" style="color: #AD0000;">05</span>))</span>
+<span id="cb7-20">  expected <span class="ot" style="color: #003B4F;">&lt;-</span> n <span class="sc" style="color: #5E5E5E;">*</span> p <span class="sc" style="color: #5E5E5E;">/</span> <span class="fu" style="color: #4758AB;">sum</span>(p) </span>
+<span id="cb7-21">  <span class="fu" style="color: #4758AB;">lines</span>(</span>
+<span id="cb7-22">    <span class="at" style="color: #657422;">x =</span> x, </span>
+<span id="cb7-23">    <span class="at" style="color: #657422;">y =</span> expected, </span>
+<span id="cb7-24">    <span class="at" style="color: #657422;">type =</span> <span class="st" style="color: #20794D;">"l"</span>, </span>
+<span id="cb7-25">    <span class="at" style="color: #657422;">col =</span> <span class="st" style="color: #20794D;">"red"</span>,</span>
+<span id="cb7-26">    <span class="at" style="color: #657422;">lwd =</span> <span class="dv" style="color: #AD0000;">2</span></span>
+<span id="cb7-27">  )</span>
+<span id="cb7-28">  <span class="fu" style="color: #4758AB;">plot</span>(</span>
+<span id="cb7-29">    <span class="at" style="color: #657422;">x =</span> out<span class="sc" style="color: #5E5E5E;">$</span>value, </span>
+<span id="cb7-30">    <span class="at" style="color: #657422;">y =</span> <span class="dv" style="color: #AD0000;">1</span><span class="sc" style="color: #5E5E5E;">:</span>n, </span>
+<span id="cb7-31">    <span class="at" style="color: #657422;">type =</span> <span class="st" style="color: #20794D;">"l"</span>, </span>
+<span id="cb7-32">    <span class="at" style="color: #657422;">xlim =</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="sc" style="color: #5E5E5E;">-</span><span class="dv" style="color: #AD0000;">4</span>, <span class="dv" style="color: #AD0000;">4</span>),</span>
+<span id="cb7-33">    <span class="at" style="color: #657422;">xlab =</span> <span class="st" style="color: #20794D;">"Value, x"</span>,</span>
+<span id="cb7-34">    <span class="at" style="color: #657422;">ylab =</span> <span class="st" style="color: #20794D;">"Time"</span></span>
+<span id="cb7-35">  )</span>
+<span id="cb7-36">  <span class="fu" style="color: #4758AB;">abline</span>(<span class="at" style="color: #657422;">h =</span> <span class="dv" style="color: #AD0000;">200</span>, <span class="at" style="color: #657422;">lty =</span> <span class="st" style="color: #20794D;">"dotted"</span>)</span>
+<span id="cb7-37">}</span></code></pre></div>
+</details>
+<div class="cell-output-display">
+<p><img src="https://blog.djnavarro.net/posts/2023-04-12_metropolis-hastings/index_files/figure-html/unnamed-chunk-7-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>As you can see, the sampler spends the first 200 or so iterations slowly moving rightwards towards the main body of the distribution. Once it gets there, the samples start to look okay, but notice that the histograms are biased towards the left (i.e., towards the bad start location). A simple way to fix this problem is to let the algorithm run for a while before starting to collect actual samples. The length of time that you spend doing this is called the <em>burn in period</em>.</p>
+<p>To illustrate how it helps, the figure below shows what would have happened if I’d used a burn in period of 200 iterations for the same sampler:</p>
+<div class="cell">
+<details>
+<summary>Source code for plots</summary>
+<div class="sourceCode cell-code" id="cb8" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1"><span class="fu" style="color: #4758AB;">set.seed</span>(<span class="dv" style="color: #AD0000;">1234</span>)</span>
+<span id="cb8-2"><span class="fu" style="color: #4758AB;">par</span>(<span class="at" style="color: #657422;">mar =</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="dv" style="color: #AD0000;">4</span>, <span class="dv" style="color: #AD0000;">4</span>, <span class="dv" style="color: #AD0000;">2</span>, <span class="dv" style="color: #AD0000;">2</span>))</span>
+<span id="cb8-3"><span class="fu" style="color: #4758AB;">layout</span>(<span class="fu" style="color: #4758AB;">matrix</span>(<span class="dv" style="color: #AD0000;">1</span><span class="sc" style="color: #5E5E5E;">:</span><span class="dv" style="color: #AD0000;">6</span>, <span class="at" style="color: #657422;">nrow =</span> <span class="dv" style="color: #AD0000;">2</span>, <span class="at" style="color: #657422;">ncol =</span> <span class="dv" style="color: #AD0000;">3</span>))</span>
+<span id="cb8-4">n <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="dv" style="color: #AD0000;">1000</span></span>
+<span id="cb8-5"><span class="cf" style="color: #003B4F;">for</span>(i <span class="cf" style="color: #003B4F;">in</span> <span class="dv" style="color: #AD0000;">1</span><span class="sc" style="color: #5E5E5E;">:</span><span class="dv" style="color: #AD0000;">3</span>) {</span>
+<span id="cb8-6">  out <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">metropolis_sampler</span>(</span>
+<span id="cb8-7">    <span class="at" style="color: #657422;">initial_value =</span> <span class="sc" style="color: #5E5E5E;">-</span><span class="dv" style="color: #AD0000;">3</span>, </span>
+<span id="cb8-8">    <span class="at" style="color: #657422;">burnin =</span> <span class="dv" style="color: #AD0000;">200</span>,</span>
+<span id="cb8-9">    <span class="at" style="color: #657422;">n =</span> n, </span>
+<span id="cb8-10">    <span class="at" style="color: #657422;">sigma =</span> .<span class="dv" style="color: #AD0000;">1</span></span>
+<span id="cb8-11">  )</span>
+<span id="cb8-12">  <span class="fu" style="color: #4758AB;">hist</span>(</span>
+<span id="cb8-13">    out<span class="sc" style="color: #5E5E5E;">$</span>value, </span>
+<span id="cb8-14">    <span class="at" style="color: #657422;">breaks =</span> <span class="fu" style="color: #4758AB;">seq</span>(<span class="sc" style="color: #5E5E5E;">-</span><span class="dv" style="color: #AD0000;">4</span>, <span class="dv" style="color: #AD0000;">4</span>, .<span class="dv" style="color: #AD0000;">05</span>),</span>
+<span id="cb8-15">    <span class="at" style="color: #657422;">main =</span> <span class="cn" style="color: #8f5902;">NULL</span>,</span>
+<span id="cb8-16">    <span class="at" style="color: #657422;">xlab =</span> <span class="st" style="color: #20794D;">"Value, x"</span>,</span>
+<span id="cb8-17">    <span class="at" style="color: #657422;">ylab =</span> <span class="st" style="color: #20794D;">"Frequency"</span></span>
+<span id="cb8-18">  )</span>
+<span id="cb8-19">  x <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">seq</span>(<span class="sc" style="color: #5E5E5E;">-</span><span class="dv" style="color: #AD0000;">4</span>, <span class="dv" style="color: #AD0000;">4</span>, .<span class="dv" style="color: #AD0000;">05</span>)</span>
+<span id="cb8-20">  p <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">target</span>(<span class="fu" style="color: #4758AB;">seq</span>(<span class="sc" style="color: #5E5E5E;">-</span><span class="dv" style="color: #AD0000;">4</span>, <span class="dv" style="color: #AD0000;">4</span>, .<span class="dv" style="color: #AD0000;">05</span>))</span>
+<span id="cb8-21">  expected <span class="ot" style="color: #003B4F;">&lt;-</span> n <span class="sc" style="color: #5E5E5E;">*</span> p <span class="sc" style="color: #5E5E5E;">/</span> <span class="fu" style="color: #4758AB;">sum</span>(p) </span>
+<span id="cb8-22">  <span class="fu" style="color: #4758AB;">lines</span>(</span>
+<span id="cb8-23">    <span class="at" style="color: #657422;">x =</span> x, </span>
+<span id="cb8-24">    <span class="at" style="color: #657422;">y =</span> expected, </span>
+<span id="cb8-25">    <span class="at" style="color: #657422;">type =</span> <span class="st" style="color: #20794D;">"l"</span>, </span>
+<span id="cb8-26">    <span class="at" style="color: #657422;">col =</span> <span class="st" style="color: #20794D;">"red"</span>,</span>
+<span id="cb8-27">    <span class="at" style="color: #657422;">lwd =</span> <span class="dv" style="color: #AD0000;">2</span></span>
+<span id="cb8-28">  )</span>
+<span id="cb8-29">  <span class="fu" style="color: #4758AB;">plot</span>(</span>
+<span id="cb8-30">    <span class="at" style="color: #657422;">x =</span> out<span class="sc" style="color: #5E5E5E;">$</span>value, </span>
+<span id="cb8-31">    <span class="at" style="color: #657422;">y =</span> <span class="dv" style="color: #AD0000;">1</span><span class="sc" style="color: #5E5E5E;">:</span>n, </span>
+<span id="cb8-32">    <span class="at" style="color: #657422;">type =</span> <span class="st" style="color: #20794D;">"l"</span>, </span>
+<span id="cb8-33">    <span class="at" style="color: #657422;">xlim =</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="sc" style="color: #5E5E5E;">-</span><span class="dv" style="color: #AD0000;">4</span>, <span class="dv" style="color: #AD0000;">4</span>),</span>
+<span id="cb8-34">    <span class="at" style="color: #657422;">xlab =</span> <span class="st" style="color: #20794D;">"Value, x"</span>,</span>
+<span id="cb8-35">    <span class="at" style="color: #657422;">ylab =</span> <span class="st" style="color: #20794D;">"Time"</span></span>
+<span id="cb8-36">  )</span>
+<span id="cb8-37">}</span></code></pre></div>
+</details>
+<div class="cell-output-display">
+<p><img src="https://blog.djnavarro.net/posts/2023-04-12_metropolis-hastings/index_files/figure-html/unnamed-chunk-8-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>It’s still not ideal – largely because we don’t have many samples, we haven’t set a <code>lag</code>, and the value of <code>sigma</code> isn’t very well chosen – but you can see that the bias caused by the poor choice of starting value has disappeared.</p>
+<p><br></p>
+</section>
+<section id="the-role-of-the-lag-parameter" class="level3">
+<h3 class="anchored" data-anchor-id="the-role-of-the-lag-parameter">The role of the lag parameter</h3>
+<p>Finally, I’ll mention in passing the role played by the <code>lag</code> parameter.<sup>12</sup> In some situations you can be forced into using a proposal distribution that has a very low acceptance rate. When that happens, you’re left with an awkward Markov chain that gets stuck in one location for long periods of time. One thing that people often do in that situation is allow several iterations of the sampler to elapse in between successive samples. This is the <code>lag</code> between samples. The effect of this is illustrated in below, which shows the behaviour of a sampler with a very wide proposal distribution (<code>sigma = 50</code>) with <code>n = 1000</code> samples drawn, at <code>lag = 0</code> (left), <code>lag = 10</code> (middle) and <code>lag = 100</code> (right).</p>
+<div class="cell">
+<details>
+<summary>Source code for plots</summary>
+<div class="sourceCode cell-code" id="cb9" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1"><span class="fu" style="color: #4758AB;">set.seed</span>(<span class="dv" style="color: #AD0000;">1234</span>)</span>
+<span id="cb9-2"><span class="fu" style="color: #4758AB;">par</span>(<span class="at" style="color: #657422;">mar =</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="dv" style="color: #AD0000;">4</span>, <span class="dv" style="color: #AD0000;">4</span>, <span class="dv" style="color: #AD0000;">2</span>, <span class="dv" style="color: #AD0000;">2</span>))</span>
+<span id="cb9-3"><span class="fu" style="color: #4758AB;">layout</span>(<span class="fu" style="color: #4758AB;">matrix</span>(<span class="dv" style="color: #AD0000;">1</span><span class="sc" style="color: #5E5E5E;">:</span><span class="dv" style="color: #AD0000;">6</span>, <span class="at" style="color: #657422;">nrow =</span> <span class="dv" style="color: #AD0000;">2</span>, <span class="at" style="color: #657422;">ncol =</span> <span class="dv" style="color: #AD0000;">3</span>))</span>
+<span id="cb9-4">n <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="dv" style="color: #AD0000;">1000</span></span>
+<span id="cb9-5">lag <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="dv" style="color: #AD0000;">0</span>, <span class="dv" style="color: #AD0000;">10</span>, <span class="dv" style="color: #AD0000;">100</span>)</span>
+<span id="cb9-6"><span class="cf" style="color: #003B4F;">for</span>(i <span class="cf" style="color: #003B4F;">in</span> <span class="dv" style="color: #AD0000;">1</span><span class="sc" style="color: #5E5E5E;">:</span><span class="dv" style="color: #AD0000;">3</span>) {</span>
+<span id="cb9-7">  out <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">metropolis_sampler</span>(</span>
+<span id="cb9-8">    <span class="at" style="color: #657422;">initial_value =</span> <span class="dv" style="color: #AD0000;">0</span>,</span>
+<span id="cb9-9">    <span class="at" style="color: #657422;">lag =</span> lag[i],</span>
+<span id="cb9-10">    <span class="at" style="color: #657422;">n =</span> n, </span>
+<span id="cb9-11">    <span class="at" style="color: #657422;">sigma =</span> <span class="dv" style="color: #AD0000;">50</span></span>
+<span id="cb9-12">  )</span>
+<span id="cb9-13">  <span class="fu" style="color: #4758AB;">hist</span>(</span>
+<span id="cb9-14">    out<span class="sc" style="color: #5E5E5E;">$</span>value, </span>
+<span id="cb9-15">    <span class="at" style="color: #657422;">breaks =</span> <span class="fu" style="color: #4758AB;">seq</span>(<span class="sc" style="color: #5E5E5E;">-</span><span class="dv" style="color: #AD0000;">4</span>, <span class="dv" style="color: #AD0000;">4</span>, .<span class="dv" style="color: #AD0000;">05</span>),</span>
+<span id="cb9-16">    <span class="at" style="color: #657422;">main =</span> <span class="fu" style="color: #4758AB;">paste</span>(<span class="st" style="color: #20794D;">"Lag:"</span>, lag[i]),</span>
+<span id="cb9-17">    <span class="at" style="color: #657422;">xlab =</span> <span class="st" style="color: #20794D;">"Value, x"</span>,</span>
+<span id="cb9-18">    <span class="at" style="color: #657422;">ylab =</span> <span class="st" style="color: #20794D;">"Frequency"</span></span>
+<span id="cb9-19">  )</span>
+<span id="cb9-20">  x <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">seq</span>(<span class="sc" style="color: #5E5E5E;">-</span><span class="dv" style="color: #AD0000;">4</span>, <span class="dv" style="color: #AD0000;">4</span>, .<span class="dv" style="color: #AD0000;">05</span>)</span>
+<span id="cb9-21">  p <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">target</span>(<span class="fu" style="color: #4758AB;">seq</span>(<span class="sc" style="color: #5E5E5E;">-</span><span class="dv" style="color: #AD0000;">4</span>, <span class="dv" style="color: #AD0000;">4</span>, .<span class="dv" style="color: #AD0000;">05</span>))</span>
+<span id="cb9-22">  expected <span class="ot" style="color: #003B4F;">&lt;-</span> n <span class="sc" style="color: #5E5E5E;">*</span> p <span class="sc" style="color: #5E5E5E;">/</span> <span class="fu" style="color: #4758AB;">sum</span>(p) </span>
+<span id="cb9-23">  <span class="fu" style="color: #4758AB;">lines</span>(</span>
+<span id="cb9-24">    <span class="at" style="color: #657422;">x =</span> x, </span>
+<span id="cb9-25">    <span class="at" style="color: #657422;">y =</span> expected, </span>
+<span id="cb9-26">    <span class="at" style="color: #657422;">type =</span> <span class="st" style="color: #20794D;">"l"</span>, </span>
+<span id="cb9-27">    <span class="at" style="color: #657422;">col =</span> <span class="st" style="color: #20794D;">"red"</span>,</span>
+<span id="cb9-28">    <span class="at" style="color: #657422;">lwd =</span> <span class="dv" style="color: #AD0000;">2</span></span>
+<span id="cb9-29">  )</span>
+<span id="cb9-30">  <span class="fu" style="color: #4758AB;">plot</span>(</span>
+<span id="cb9-31">    <span class="at" style="color: #657422;">x =</span> out<span class="sc" style="color: #5E5E5E;">$</span>value, </span>
+<span id="cb9-32">    <span class="at" style="color: #657422;">y =</span> <span class="dv" style="color: #AD0000;">1</span><span class="sc" style="color: #5E5E5E;">:</span>n, </span>
+<span id="cb9-33">    <span class="at" style="color: #657422;">type =</span> <span class="st" style="color: #20794D;">"l"</span>, </span>
+<span id="cb9-34">    <span class="at" style="color: #657422;">xlim =</span> <span class="fu" style="color: #4758AB;">c</span>(<span class="sc" style="color: #5E5E5E;">-</span><span class="dv" style="color: #AD0000;">4</span>, <span class="dv" style="color: #AD0000;">4</span>),</span>
+<span id="cb9-35">    <span class="at" style="color: #657422;">xlab =</span> <span class="st" style="color: #20794D;">"Value, x"</span>,</span>
+<span id="cb9-36">    <span class="at" style="color: #657422;">ylab =</span> <span class="st" style="color: #20794D;">"Time"</span></span>
+<span id="cb9-37">  )</span>
+<span id="cb9-38">}</span></code></pre></div>
+</details>
+<div class="cell-output-display">
+<p><img src="https://blog.djnavarro.net/posts/2023-04-12_metropolis-hastings/index_files/figure-html/unnamed-chunk-9-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>Formally speaking, the thing we’re trying to do here by increasing <code>lag</code> is reduce the <a href="https://en.wikipedia.org/wiki/Autocorrelation">autocorrelation</a> between successive samples in our chain. In an ideal world we want our sampled values to be <em>independent</em> samples from the target distribution <img src="https://latex.codecogs.com/png.latex?p(x)">. The more our samples are correlated with each other, the more potential there is for the histogram of sampled values to depart systematically from the target distribution. Introducing a lag between successive samples is a simple way to achieve this.</p>
+<p><br></p>
+</section>
+</section>
+<section id="a-word-of-warning" class="level2">
+<h2 class="anchored" data-anchor-id="a-word-of-warning">A word of warning</h2>
+<p>The discussion in this post is <em>heavily</em> oversimplified. It doesn’t talk at all about the conditions required to make Metropolis sampling work, it doesn’t talk about diagnostics, and it certainly doesn’t talk about what happens when we move this into higher dimensional problems. I haven’t made any attempt to implement this efficiently, either: there’s little point in me doing that when there are already many very efficient tools already in existence. My goal when I wrote this was so that my class could have an example that was simple enough that they could implement it themselves and get a sense of what MCMC algorithms do. At one point I had this idea that I’d gradually expand on these materials so that students could work their way up from introductory materials like this to more realistic examples, but I never really found the time to do that. Maybe one day!</p>
+<!--------------- appendices go here ----------------->
+
+
+</section>
+
+
+<div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
+
+<ol>
+<li id="fn1"><p>Bizarrely, this actually happens to me a lot. It’s totally surreal.↩︎</p></li>
+<li id="fn2"><p>Another surreal experience that I’ve had quite a bit lately is getting rejected from data science jobs because I don’t have a computer science degree and my qualifications are technically in psychology. Apparently I’m considered skilled enough to <em>teach</em> computational statistics to university computer science students, but still considered less skilled at those tools than the students that I taught? I mean, it’s either that or tech company recruiters don’t actually read the résumés that they get sent… but that couldn’t possibly be true, right? Efficient market hypothesis and all that…↩︎</p></li>
+<li id="fn3"><p>Okay. So, I just know that a serious statistician will read this at some point, and – from bitter experience – I’ve learned that when a lady person writes about mathematics and is unclear on even the smallest thing her credibility is immediately subject to question. So, in an attempt to forestall any misapprehensions, I most certainly understand the difference between a density function and a distribution function, and equally I know that it is conventional to use lower case to refer to densities and upper case to refer to distributions and probability mass functions. However, I wrote this note for undergraduate computer science students, and accordingly I chose to keep my notation simple, even if it is a little imprecise.↩︎</p></li>
+<li id="fn4"><p>Some asides: my experience teaching this class is that it’s quite common for people new to statistics to struggle with the concept of <a href="https://en.wikipedia.org/wiki/Probability_density_function">probability density</a>. It’s not super important for the purposes of this post, and to a first approximation it’s totally okay to think of <img src="https://latex.codecogs.com/png.latex?p(x)"> as “the probability of observing <img src="https://latex.codecogs.com/png.latex?x"> (sort of)”. It is of course the case that the difference between a pdf, a pmf, and a cdf matters when you start doing mathematical statistics, but I would never be so cruel as to inflict that stuff on my undergraduate computer science students! Not once did refer to sigma algebras in my undergrad teaching, honest. Though, looking back, I did once inflict Kolmogorov complexity on a class. It was… not a good decision.↩︎</p></li>
+<li id="fn5"><p>It’s worth mentioning that, at this point in the class my students had all been shown several examples of the <a href="https://en.wikipedia.org/wiki/Curse_of_dimensionality">curse of dimensionality</a> problem. So even though yes, of course it’s easy to solve this problem in one-dimension, they were all acutely aware that using brute force numerical integration methods to compute the denominator isn’t going to work we started trying to do something more realistic than my toy example.↩︎</p></li>
+<li id="fn6"><p>At this point in the class students had most certainly encountered Markov chains!↩︎</p></li>
+<li id="fn7"><p>No, I don’t particularly feel like discussing what <em>precisely</em> is meant by the word “guarantee” in this context. I wrote this originally for undergraduate computer science students who really did not care for convergence proofs. In the original context it was quite appropriate and sensible to handwave any detaild discussions of stationarity and convergence. I may be a masochist, but I am certainly not a sadist.↩︎</p></li>
+<li id="fn8"><p>Okay yeah I suppose I could have denoted the acceptance probability as <img src="https://latex.codecogs.com/png.latex?P(x_%7Bn+1%7D%20=%20x%5E*%20%7C%20x_%7Bn%7D,%20x%5E*)"> to properly capture the dependency on the current state and the proposal value, be clear about the position in the sequence and the fact that this is a probability mass function not a probability density function, but… honestly does all that notation actually help anyone? If I follow this line of thought to its conclusion I’ll end up talking about measures defined on Borel sets or something equally cruel to compsci students.↩︎</p></li>
+<li id="fn9"><p>I am old and angry and unemployed and on my second glass of wine. Do not test me on whether I understand what an expectation is.↩︎</p></li>
+<li id="fn10"><p>This is usually referred to as a “trace plot”. Eyeballing the trace plot is a useful thing to do when examining the behaviour of your MCMC algorithm, but beware… it is a very crude method. The devil is very much in the details here.↩︎</p></li>
+<li id="fn11"><p>At this point she asks herself… does she want to talk about methods for automatically choosing a good proposal? No.&nbsp;No she does not.↩︎</p></li>
+<li id="fn12"><p>This is often referred to as the “thinning” rate. ↩︎</p></li>
+</ol>
+</section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2023,
+  author = {Danielle Navarro},
+  title = {The {Metropolis-Hastings} Algorithm},
+  date = {2023-04-12},
+  url = {https://blog.djnavarro.net/posts/2023-04-12_metropolis-hastings},
+  langid = {en}
+}
+</code></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2023" class="csl-entry quarto-appendix-citeas">
+Danielle Navarro. 2023. <span>“The Metropolis-Hastings
+Algorithm.”</span> April 12, 2023. <a href="https://blog.djnavarro.net/posts/2023-04-12_metropolis-hastings">https://blog.djnavarro.net/posts/2023-04-12_metropolis-hastings</a>.
+</div></div></section></div> ]]></description>
+  <category>Statistics</category>
+  <category>MCMC</category>
+  <guid>https://blog.djnavarro.net/posts/2023-04-12_metropolis-hastings/index.html</guid>
+  <pubDate>Tue, 11 Apr 2023 14:00:00 GMT</pubDate>
+  <media:content url="https://blog.djnavarro.net/posts/2023-04-12_metropolis-hastings/cover.jpg" medium="image" type="image/jpeg"/>
+</item>
 <item>
   <title>How to run R code in the browser with webR</title>
   <dc:creator>Danielle Navarro</dc:creator>
@@ -9965,827 +10349,6 @@ April 20, 2022. <a href="https://blog.djnavarro.net/posts/2022-04-20_porting-to-
   <guid>https://blog.djnavarro.net/posts/2022-04-20_porting-to-quarto/index.html</guid>
   <pubDate>Tue, 19 Apr 2022 14:00:00 GMT</pubDate>
   <media:content url="https://blog.djnavarro.net/posts/2022-04-20_porting-to-quarto/img/preview.jpg" medium="image" type="image/jpeg"/>
-</item>
-<item>
-  <title>Using Amazon S3 with R</title>
-  <dc:creator>Danielle Navarro</dc:creator>
-  <link>https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/index.html</link>
-  <description><![CDATA[ 
-
-
-
-
-<!--------------- setup post ----------------->
-<!--------------- post ----------------->
-<p>I have a shameful confession to make, one that may shock and surprise you. Although I am an R user, data scientist, and developer of many years experience, I’ve never used Amazon Web Services.</p>
-<p>It’s hard to believe, I know, but I’ve never spun up a virtual machine on “Amazon EC2” (…whatever <em>that</em> is), I don’t know what “AWS Lambda” is, and the only thing I know about “Amazon S3” is that fancy data science people use it to store data. Or something along those lines. Honestly, I really haven’t been paying attention. Every time people start talking about it my eyes glaze over and my impostor syndrome arrives to berate me. A <em>true</em> data scientist is born knowing how to spin up EC2 instances, and if baby doesn’t post her drawings on S3 then she’s already falling behind, etc etc. It’s terribly stressful.</p>
-<p>My dark and terrible personal tragedy notwithstanding,<sup>1</sup> I suspect my situation is not entirely uncommon. Back in my academic days, I knew very few people who used Amazon Web Services (a.k.a. AWS) for much of anything. It wasn’t needed, so it wasn’t knowledge that people acquired. Now that I’m working in an industry setting I’m finding that it’s <em>so</em> widely used that it’s almost assumed knowledge. <em>Everyone</em> knows this stuff, so there’s not a lot said about why you might care, or how to get started using these tools if you decide that you do care.</p>
-<p>Today I decided to do something about this, starting by teaching myself how to use Amazon’s Simple Storage Service (a.k.a S3). With the help of the <a href="https://github.com/cloudyr/aws.s3"><strong>aws.s3</strong></a> package authored by Thomas Leeper and currently maintained by Simon Urbanek, it’s surprisingly easy to do.</p>
-<p>In this post I’ll walk you through the process.</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><span class="fu" style="color: #4758AB;">library</span>(dplyr)</span>
-<span id="cb1-2"><span class="fu" style="color: #4758AB;">library</span>(readr)</span>
-<span id="cb1-3"><span class="fu" style="color: #4758AB;">library</span>(purrr)</span>
-<span id="cb1-4"><span class="fu" style="color: #4758AB;">library</span>(stringr)</span>
-<span id="cb1-5"><span class="fu" style="color: #4758AB;">library</span>(tibble)</span>
-<span id="cb1-6"><span class="fu" style="color: #4758AB;">library</span>(magick)</span>
-<span id="cb1-7"><span class="fu" style="color: #4758AB;">library</span>(aws.s3)</span></code></pre></div>
-</div>
-<div class="cell">
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/https:/tiny-herbs.s3-ap-southeast-2.amazonaws.com/NSW687458.jpg" class="img-fluid"></p>
-</div>
-</div>
-<p><br></p>
-<section id="what-is-s3-and-why-do-i-care" class="level2">
-<h2 class="anchored" data-anchor-id="what-is-s3-and-why-do-i-care">What is S3 and why do I care?</h2>
-<p>Let’s get started. As with everything else in life, the place to start is asking yourself if you even care. I mean, if we don’t care what S3 is or what it does, why even bother? Just let your eyes glaze over as the nerd keeps talking and wonder if there’s anything good on TV…</p>
-<p>Still here? Cool.</p>
-<p>From the user perspective, Amazon’s “Simple Storage Service” isn’t particularly complicated. It’s just a remote storage system that you can dump files into, kind of like a programmable Dropbox. Each file (and its accompanying metadata) is stored as an <em>object</em>, and collections of objects are grouped together into a <em>bucket</em>. If you want to store files on S3, all you need to do is open an account, create a new bucket, and upload your files. It’s exactly that boring, and the only reason anyone cares (as far as I know) is that Amazon designed this to work at scale and it’s fairly easy to write scripts that allow you to control the whole thing programmatically. Which is actually a pretty handy service, now that I think about it!</p>
-<p><br></p>
-</section>
-<section id="downloading-public-data-from-s3" class="level2">
-<h2 class="anchored" data-anchor-id="downloading-public-data-from-s3">Downloading public data from S3</h2>
-<p>The first thing to understand about S3 is that there’s many different ways of using it. Very often, you’re not interested in storing your own data on S3. You might just want to download data that someone else has stored, and if that data has been made publicly accessible, then you don’t even need an Amazon Web Services (AWS) account at all. You can download to your hearts content. For a data scientist it’s a fun way to start, because you get to dive straight into playing with data insted of fiddling about with accounts and credentials and all those dull things.</p>
-<p>So let’s find a public data set to play with. While browsing through the registry of open data sets listed on the S3 website I came across the <a href="https://registry.opendata.aws/nsw-herbarium/">National Herbarium of NSW data set</a>. As described on the website:</p>
-<blockquote class="blockquote">
-<p>The National Herbarium of New South Wales is one of the most significant scientific, cultural and historical botanical resources in the Southern hemisphere. The 1.43 million preserved plant specimens have been captured as high-resolution images and the biodiversity metadata associated with each of the images captured in digital form. Botanical specimens date from year 1770 to today, and form voucher collections that document the distribution and diversity of the world’s flora through time, particularly that of NSW, Austalia and the Pacific. The data is used in biodiversity assessment, systematic botanical research, ecosystem conservation and policy development. The data is used by scientists, students and the public.</p>
-</blockquote>
-<p>As an example, here’s one of the images stored in the data set, of a plant specimen collected quite close to where I currently live, albeit quite a long time ago:</p>
-<p><br></p>
-<div class="cell">
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/https:/tiny-herbs.s3-ap-southeast-2.amazonaws.com/NSW29246.jpg" class="img-fluid"></p>
-</div>
-</div>
-<p><br></p>
-<p>So yeah, I love this data set already and I want to play with it. But how do I do that? I’ve never done anything with S3 before and it’s all a bit new to me. Well, on the right hand side of the listing page for the National Herbarium data, there’s a section that contains the following metadata:</p>
-<pre><code>Description
-Herbarium Collection Image files
-
-Resource type
-S3 Bucket
-
-Amazon Resource Name (ARN)
-arn:aws:s3:::herbariumnsw-pds
-
-AWS Region
-ap-southeast-2</code></pre>
-<p>Using this information, I can get started. I know <em>what</em> the data is (an S3 bucket), I know <em>where</em> the data is (in the <code>"ap-southeast-2"</code> region), and on top of that I know the <em>name</em> of the data (<code>"herbariumnsw-pds"</code>). This should be enough for me to find what I’m looking for!</p>
-<section id="finding-the-bucket" class="level3">
-<h3 class="anchored" data-anchor-id="finding-the-bucket">Finding the bucket</h3>
-<p>Okay, so let’s see if we can find this bucket using R code. The <strong>aws.s3</strong> package contains a handy function called <code>bucket_exists()</code>, which returns <code>TRUE</code> when it finds an S3 bucket at the specified location (and using whatever credentials you currently have available), and <code>FALSE</code> when it does not. That seems relatively easy. We know the name of our bucket, specified more precisely as <code>"s3://herbariumnsw-pds/"</code>, and we can verify that it exists. And of course when we do this it turns out that there…</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb3" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1"><span class="fu" style="color: #4758AB;">bucket_exists</span>(<span class="st" style="color: #20794D;">"s3://herbariumnsw-pds/"</span>)</span></code></pre></div>
-</div>
-<div class="cell" data-hash="index_cache/html/unnamed-chunk-5_e3a69ca1254b73a8dd7425663cec9545">
-<div class="cell-output cell-output-stdout">
-<pre><code>[1] FALSE</code></pre>
-</div>
-</div>
-<p>…isn’t? Wait, what????</p>
-<p>I’ve made a very common mistake here, and forgotten to specify the region. S3 is very picky about regions and you need to tell it explicitly which one to use. The National Herbarium is an Australian institution and the data are stored in Amazon’s Sydney data center. In Amazon parlance, that’s the <code>"ap-southeast-2"</code> region, but unless you’ve done something to set a different default (more on that later), everything you do will probably default to the <code>"us-east-1"</code> region. To override this default, we can explicitly specify the <code>region</code> that <code>bucket_exists()</code> should look in. So now let’s try that again:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb5" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1"><span class="fu" style="color: #4758AB;">bucket_exists</span>(</span>
-<span id="cb5-2">  <span class="at" style="color: #657422;">bucket =</span> <span class="st" style="color: #20794D;">"s3://herbariumnsw-pds/"</span>, </span>
-<span id="cb5-3">  <span class="at" style="color: #657422;">region =</span> <span class="st" style="color: #20794D;">"ap-southeast-2"</span></span>
-<span id="cb5-4">)</span></code></pre></div>
-</div>
-<div class="cell" data-hash="index_cache/html/unnamed-chunk-7_1a73c4405d3c9ae480adf7547d5a3572">
-<div class="cell-output cell-output-stdout">
-<pre><code>[1] TRUE</code></pre>
-</div>
-</div>
-<p>Much better!</p>
-</section>
-<section id="okay-okay-i-lied" class="level3">
-<h3 class="anchored" data-anchor-id="okay-okay-i-lied">Okay, okay, I lied…</h3>
-<p>One more thing. If you’ve been following along at home and trying out these commands, you’ve probably noticed that the output you’re getting is a little more verbose than simply returning <code>TRUE</code> or <code>FALSE</code>. The actual output comes with a lot of additional metadata, stored as attributes. I didn’t really want to clutter the output by showing all that stuff, so the examples above secretly removed the attributes before printing the results. What you’ll <em>actually</em> see is something like this:</p>
-<div class="cell" data-hash="index_cache/html/unnamed-chunk-8_c8eaf366e80a13f6dff792ad65ab801d">
-<div class="sourceCode cell-code" id="cb7" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1"><span class="fu" style="color: #4758AB;">bucket_exists</span>(</span>
-<span id="cb7-2">  <span class="at" style="color: #657422;">bucket =</span> <span class="st" style="color: #20794D;">"s3://herbariumnsw-pds/"</span>, </span>
-<span id="cb7-3">  <span class="at" style="color: #657422;">region =</span> <span class="st" style="color: #20794D;">"ap-southeast-2"</span></span>
-<span id="cb7-4">)</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>[1] TRUE
-attr(,"x-amz-id-2")
-[1] "cr7uaPSaKx4B5BJNRCDIU+Cpns0menZBjxjT5OltIViGFUlStJxSqI5rT1lZfN3ASVz+p4XMalE="
-attr(,"x-amz-request-id")
-[1] "AE47G6MWJA7NRMYJ"
-attr(,"date")
-[1] "Fri, 22 Apr 2022 09:04:11 GMT"
-attr(,"x-amz-bucket-region")
-[1] "ap-southeast-2"
-attr(,"x-amz-access-point-alias")
-[1] "false"
-attr(,"content-type")
-[1] "application/xml"
-attr(,"server")
-[1] "AmazonS3"</code></pre>
-</div>
-</div>
-<p>If you stare at this long enough this metadata all starts to make sense, especially after you’ve been playing around with S3 for a while. There’s a timestamp, there’s some information about which region the data came from, and so on. Nothing particularly special or interesting here, so let’s move on to something more fun.</p>
-</section>
-<section id="listing-bucket-contents" class="level3">
-<h3 class="anchored" data-anchor-id="listing-bucket-contents">Listing bucket contents</h3>
-<p>At this point in the journey we’ve located the bucket, but we have no idea what it contains. To get a list of the bucket contents, the <code>get_bucket_df()</code> function from <strong>aws.s3</strong> is our friend. The National Herbarium data set contains a lot of objects, so I’ll be “frugal” and restrict myself to merely downloading <code>max = 20000</code> records:</p>
-<div class="cell" data-hash="index_cache/html/get-bucket_29edbad137ee1cabf7490a6fdc5a38a5">
-<div class="sourceCode cell-code" id="cb9" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1">herbarium_files <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">get_bucket_df</span>(</span>
-<span id="cb9-2">  <span class="at" style="color: #657422;">bucket =</span> <span class="st" style="color: #20794D;">"s3://herbariumnsw-pds/"</span>, </span>
-<span id="cb9-3">  <span class="at" style="color: #657422;">region =</span> <span class="st" style="color: #20794D;">"ap-southeast-2"</span>, </span>
-<span id="cb9-4">  <span class="at" style="color: #657422;">max =</span> <span class="dv" style="color: #AD0000;">20000</span></span>
-<span id="cb9-5">) <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb9-6">  <span class="fu" style="color: #4758AB;">as_tibble</span>()</span></code></pre></div>
-</div>
-<p>Now that we’ve downloaded a list of the bucket contents, let’s have a look and see what we’ve got:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb10" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1">herbarium_files</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code># A tibble: 20,000 × 8
-   Key                        LastM…¹ ETag  Size  Owner…² Owner…³ Stora…⁴ Bucket
-   &lt;chr&gt;                      &lt;chr&gt;   &lt;chr&gt; &lt;chr&gt; &lt;chr&gt;   &lt;chr&gt;   &lt;chr&gt;   &lt;chr&gt; 
- 1 ReadMe.txt                 2020-0… "\"5… 2729  97c09b… herbar… STANDA… herba…
- 2 dwca-nsw_avh-v1.0.zip      2019-1… "\"2… 8231… 97c09b… herbar… STANDA… herba…
- 3 herbariumnsw-pds/PublicDa… 2021-0… "\"3… 33    &lt;NA&gt;    &lt;NA&gt;    STANDA… herba…
- 4 herbariumnsw-pds/PublicDa… 2021-0… "\"5… 433   &lt;NA&gt;    &lt;NA&gt;    STANDA… herba…
- 5 herbariumnsw-pds/PublicDa… 2021-0… "\"5… 33    &lt;NA&gt;    &lt;NA&gt;    STANDA… herba…
- 6 herbariumnsw-pds/PublicDa… 2021-0… "\"f… 433   &lt;NA&gt;    &lt;NA&gt;    STANDA… herba…
- 7 herbariumnsw-pds/PublicDa… 2021-0… "\"b… 33    &lt;NA&gt;    &lt;NA&gt;    STANDA… herba…
- 8 herbariumnsw-pds/PublicDa… 2021-0… "\"4… 433   &lt;NA&gt;    &lt;NA&gt;    STANDA… herba…
- 9 herbariumnsw-pds/PublicDa… 2021-0… "\"f… 33    &lt;NA&gt;    &lt;NA&gt;    STANDA… herba…
-10 herbariumnsw-pds/PublicDa… 2021-0… "\"6… 433   &lt;NA&gt;    &lt;NA&gt;    STANDA… herba…
-# … with 19,990 more rows, and abbreviated variable names ¹​LastModified,
-#   ²​Owner_ID, ³​Owner_DisplayName, ⁴​StorageClass</code></pre>
-</div>
-</div>
-<p>Wonderful! The very first object in the bucket happens to be a file called <code>ReadMe.txt</code>. Perhaps I should download this marvelous object and perhaps even read it?</p>
-</section>
-<section id="downloading-files" class="level3">
-<h3 class="anchored" data-anchor-id="downloading-files">Downloading files</h3>
-<p>Okay then. We are now at the step where we want to download a specific object from the bucket, and save it locally as a file. To do this we use the <code>save_object()</code> function. As before, we specify the <code>bucket</code> and the <code>region</code>, but we’ll also need to specify which <code>object</code> should be downloaded, and the <code>file</code> path to which it should be saved. Here’s how that works for the Read Me file:</p>
-<div class="cell" data-hash="index_cache/html/download-readme_81ce5c37bac9d7bb5f34e5324a1e7d65">
-<div class="sourceCode cell-code" id="cb12" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb12-1"><span class="fu" style="color: #4758AB;">save_object</span>(</span>
-<span id="cb12-2">  <span class="at" style="color: #657422;">object =</span> <span class="st" style="color: #20794D;">"ReadMe.txt"</span>,</span>
-<span id="cb12-3">  <span class="at" style="color: #657422;">bucket =</span> <span class="st" style="color: #20794D;">"s3://herbariumnsw-pds/"</span>, </span>
-<span id="cb12-4">  <span class="at" style="color: #657422;">region =</span> <span class="st" style="color: #20794D;">"ap-southeast-2"</span>,</span>
-<span id="cb12-5">  <span class="at" style="color: #657422;">file =</span> <span class="st" style="color: #20794D;">"herbarium/ReadMe.txt"</span></span>
-<span id="cb12-6">)</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>[1] "herbarium/ReadMe.txt"</code></pre>
-</div>
-</div>
-<p>Once again this works and so off I go, reading the Read Me in search of further clues.</p>
-<p>As you might hope, the Read Me file does in fact tell us something about how the National Herbarium dataset is organised. In particular, one line in the Read Me informs me that there’s a file storing all the metadata, encoded as a zipped csv file:</p>
-<blockquote class="blockquote">
-<p>A zipped csv containing the biocollections metadata for the images is available as a DarwinCore Archive at: https://herbariumnsw-pds.s3-ap-southeast-2.amazonaws.com/dwca-nsw_avh-v1.0.zip</p>
-</blockquote>
-<p>This sounds like a good place to start, doesn’t it? Once again, I’ll use <code>save_object()</code> and try to download the metadata file <code>dwca-nsw_avh-v1.0.zip</code>:</p>
-<div class="cell" data-hash="index_cache/html/download-metadata_4619822fca60c9a956d63567a42bf781">
-<div class="sourceCode cell-code" id="cb14" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb14-1"><span class="fu" style="color: #4758AB;">save_object</span>(</span>
-<span id="cb14-2">  <span class="at" style="color: #657422;">object =</span> <span class="st" style="color: #20794D;">"dwca-nsw_avh-v1.0.zip"</span>,</span>
-<span id="cb14-3">  <span class="at" style="color: #657422;">bucket =</span> <span class="st" style="color: #20794D;">"s3://herbariumnsw-pds/"</span>, </span>
-<span id="cb14-4">  <span class="at" style="color: #657422;">region =</span> <span class="st" style="color: #20794D;">"ap-southeast-2"</span>,</span>
-<span id="cb14-5">  <span class="at" style="color: #657422;">file =</span> <span class="st" style="color: #20794D;">"herbarium/dwca-nsw_avh-v1.0.zip"</span></span>
-<span id="cb14-6">) </span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>[1] "herbarium/dwca-nsw_avh-v1.0.zip"</code></pre>
-</div>
-</div>
-<p>Success!</p>
-<p>I now have a copy of the 79MB zip file on my laptop, and after decompressing the file it turns out I have a 402MB file called <code>occurrence.txt</code> that contains the metadata. As it turns out, the metadata aren’t stored in comma-separated value format, they’re stored in tab-separated value format. Still, that’s fine: the <code>read_tsv()</code> function from the <strong>readr</strong> package can handle it:</p>
-<div class="cell" data-hash="index_cache/html/read-data_1e0738550c63a961802caf74734b1c07">
-<div class="sourceCode cell-code" id="cb16" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb16-1">herbarium <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">read_tsv</span>(<span class="st" style="color: #20794D;">"herbarium/dwca-nsw_avh-v1.0/occurrence.txt"</span>)</span></code></pre></div>
-<div class="cell-output cell-output-stderr">
-<pre><code>Warning: One or more parsing issues, see `problems()` for details</code></pre>
-</div>
-<div class="cell-output cell-output-stderr">
-<pre><code>Rows: 725507 Columns: 74
-── Column specification ────────────────────────────────────────────────────────
-Delimiter: "\t"
-chr  (38): id, type, institutionCode, collectionCode, basisOfRecord, occurre...
-dbl   (7): minimumElevationInMeters, maximumElevationInMeters, minimumDepthI...
-lgl  (28): lifeStage, associatedSequences, associatedTaxa, previousIdentific...
-dttm  (1): modified
-
-ℹ Use `spec()` to retrieve the full column specification for this data.
-ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.</code></pre>
-</div>
-<div class="sourceCode cell-code" id="cb19" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb19-1">herbarium</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code># A tibble: 725,507 × 74
-   id     type  modified            institutionCode collectionCode basisOfRecord
-   &lt;chr&gt;  &lt;chr&gt; &lt;dttm&gt;              &lt;chr&gt;           &lt;chr&gt;          &lt;chr&gt;        
- 1 NSW:N… Phys… 2013-11-28 11:56:00 NSW             NSW            PreservedSpe…
- 2 NSW:N… Phys… 2012-08-09 15:47:00 NSW             NSW            PreservedSpe…
- 3 NSW:N… Phys… 2015-03-13 15:51:00 NSW             NSW            PreservedSpe…
- 4 NSW:N… Phys… 2018-07-24 10:06:00 NSW             NSW            PreservedSpe…
- 5 NSW:N… Phys… 2015-03-13 15:51:00 NSW             NSW            PreservedSpe…
- 6 NSW:N… Phys… 2013-07-24 15:16:00 NSW             NSW            PreservedSpe…
- 7 NSW:N… Phys… 2015-03-13 15:51:00 NSW             NSW            PreservedSpe…
- 8 NSW:N… Phys… 2010-12-01 14:25:00 NSW             NSW            PreservedSpe…
- 9 NSW:N… Phys… 2018-01-24 16:49:00 NSW             NSW            PreservedSpe…
-10 NSW:N… Phys… 2018-07-24 10:05:00 NSW             NSW            PreservedSpe…
-# … with 725,497 more rows, and 68 more variables: occurrenceID &lt;chr&gt;,
-#   catalogNumber &lt;chr&gt;, occurrenceRemarks &lt;chr&gt;, recordNumber &lt;chr&gt;,
-#   recordedBy &lt;chr&gt;, lifeStage &lt;lgl&gt;, reproductiveCondition &lt;chr&gt;,
-#   establishmentMeans &lt;chr&gt;, occurrenceStatus &lt;chr&gt;, preparations &lt;chr&gt;,
-#   associatedSequences &lt;lgl&gt;, associatedTaxa &lt;lgl&gt;,
-#   previousIdentifications &lt;lgl&gt;, eventDate &lt;chr&gt;, verbatimEventDate &lt;chr&gt;,
-#   habitat &lt;chr&gt;, eventRemarks &lt;lgl&gt;, continent &lt;lgl&gt;, waterBody &lt;lgl&gt;, …</code></pre>
-</div>
-</div>
-<p>There’s quite a lot of interesting information stored in the 74 columns of the <code>herbarium</code> data, but I won’t dive very deep into it in this post. I will mention, however, that if you find yourself following along at home you’ll likely discover that there is a small proportion of the 725507 rows that cause problems for <code>read_tsv()</code>, likely because they contain additional tab characters that mess up the parsing slightly. In real life I’d want to look into this, but this is a blog post. Nothing here is real and nobody is watching, right?</p>
-</section>
-<section id="wrangling-the-data" class="level3">
-<h3 class="anchored" data-anchor-id="wrangling-the-data">Wrangling the data</h3>
-<p>Now that I have some data, I can do a little poking around to see what’s in it. Exploring a new data set is always fun, but this isn’t really a post about data wrangling, so I’ll keep this brief. A quick look suggests that (unsurprisingly) there are a lot of records corresponding to samples collected in Australia, and a disproportionate number of those come from New South Wales:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb21" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb21-1">herbarium <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb21-2">  <span class="fu" style="color: #4758AB;">filter</span>(country <span class="sc" style="color: #5E5E5E;">==</span> <span class="st" style="color: #20794D;">"Australia"</span>) <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb21-3">  <span class="fu" style="color: #4758AB;">count</span>(stateProvince)</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code># A tibble: 10 × 2
-   stateProvince                     n
-   &lt;chr&gt;                         &lt;int&gt;
- 1 Australian Capital Territory     52
- 2 External Territories           1549
- 3 New South Wales              394439
- 4 Northern Territory            28922
- 5 Queensland                    89016
- 6 South Australia               20206
- 7 Tasmania                      23994
- 8 Victoria                      40984
- 9 Western Australia             80447
-10 &lt;NA&gt;                           4287</code></pre>
-</div>
-</div>
-<p>That’s nice, but doesn’t immediately suggest a fun example for me to continue this post. On a whim, I decide to name search my neighbourhood. I live in Newtown (in Sydney), so I’m going to find the subset of images in the National Herbarium data whose locality matches the string <code>"Newtown"</code>:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb23" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb23-1">newtowners <span class="ot" style="color: #003B4F;">&lt;-</span> herbarium <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb23-2">  <span class="fu" style="color: #4758AB;">filter</span>(</span>
-<span id="cb23-3">    country <span class="sc" style="color: #5E5E5E;">==</span> <span class="st" style="color: #20794D;">"Australia"</span>, </span>
-<span id="cb23-4">    locality <span class="sc" style="color: #5E5E5E;">%&gt;%</span> <span class="fu" style="color: #4758AB;">str_detect</span>(<span class="st" style="color: #20794D;">"Newtown"</span>)</span>
-<span id="cb23-5">  )</span></code></pre></div>
-</div>
-<p>Yeah, no. This is misleading.</p>
-<p>From a data science point of view I’m being extremely sloppy here. If my intention had been to find only plants from my neighbourhood, I would also be wise to filter by recorded longitude and latitude where available, and I would certainly want to exclude cases listed as coming from another Australian state. “Newtown” is not an uncommon name, and – to the surprise of nobody – it turns out that there are several different locations called “Newtown” in different parts of Australia. Fortunately for me, I really don’t care! All I wanted was a query that would return around 20-30 results, so this is fine for my purposes.</p>
-<p>Now that we’ve got a subset of records, let’s pull out the catalog numbers:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb24" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb24-1">newtowners <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb24-2">  <span class="fu" style="color: #4758AB;">pull</span>(catalogNumber)</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code> [1] "NSW 395530"  "NSW 461895"  "NSW 650052"  "NSW 1055313" "NSW 1056305"
- [6] "NSW 29246"   "NSW 36860"   "NSW 39618"   "NSW 687458"  "NSW 121207" 
-[11] "NSW 214616"  "NSW 306564"  "NSW 307215"  "NSW 389387"  "NSW 395529" 
-[16] "NSW 402973"  "NSW 403188"  "NSW 404127"  "NSW 421494"  "NSW 446243" 
-[21] "NSW 570557"  "NSW 702035"  "NSW 676197"  "NSW 776212"  "NSW 777249" 
-[26] "NSW 739455"  "NSW 751830" </code></pre>
-</div>
-</div>
-<p>The Read Me file had something useful to say about these numbers. Specifically, the catalog numbers are used as the basis of the file naming convention for images stored in the bucket:</p>
-<blockquote class="blockquote">
-<p>Image data are organized by NSW specimen barcode number. For example, the file for Dodonaea lobulata recorded on 1968-09-07 = NSW 041500 can be accessed via the URI https://herbariumnsw-pds.s3-ap-southeast-2.amazonaws.com/images/NSW041500.jp2</p>
-</blockquote>
-<p>Hm. I wonder if I can write code to extract these images?</p>
-<p><br></p>
-<div class="cell">
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/https:/tiny-herbs.s3-ap-southeast-2.amazonaws.com/NSW307215.jpg" class="img-fluid"></p>
-</div>
-</div>
-<p><br></p>
-</section>
-<section id="scripting-the-download" class="level3">
-<h3 class="anchored" data-anchor-id="scripting-the-download">Scripting the download</h3>
-<p>Okay, now I want to pull the images for these records. First, I’m going to construct the paths. I am <em>not</em> going to download the jp2 files because they’re about 100MB each. Multiplying that number by the number of records gives… well, it gives a big enough number that I think I’ve worked out why the National Herbarium dataset is on S3 and not on a laptop in a damp basement somewhere!</p>
-<p>In any case, for a lot of the records there’s a jpg file that is considerably smaller in size, so I’m going to try to download those. Based on the barcodes I’ve got, these are the files I’m expecting to find:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb26" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb26-1">objects <span class="ot" style="color: #003B4F;">&lt;-</span> newtowners <span class="sc" style="color: #5E5E5E;">%&gt;%</span></span>
-<span id="cb26-2">  <span class="fu" style="color: #4758AB;">pull</span>(catalogNumber) <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb26-3">  <span class="fu" style="color: #4758AB;">str_remove_all</span>(<span class="st" style="color: #20794D;">" "</span>) <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb26-4">  <span class="fu" style="color: #4758AB;">str_c</span>(<span class="st" style="color: #20794D;">"images/"</span>, ., <span class="st" style="color: #20794D;">".jpg"</span>)</span>
-<span id="cb26-5"></span>
-<span id="cb26-6">objects</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code> [1] "images/NSW395530.jpg"  "images/NSW461895.jpg"  "images/NSW650052.jpg" 
- [4] "images/NSW1055313.jpg" "images/NSW1056305.jpg" "images/NSW29246.jpg"  
- [7] "images/NSW36860.jpg"   "images/NSW39618.jpg"   "images/NSW687458.jpg" 
-[10] "images/NSW121207.jpg"  "images/NSW214616.jpg"  "images/NSW306564.jpg" 
-[13] "images/NSW307215.jpg"  "images/NSW389387.jpg"  "images/NSW395529.jpg" 
-[16] "images/NSW402973.jpg"  "images/NSW403188.jpg"  "images/NSW404127.jpg" 
-[19] "images/NSW421494.jpg"  "images/NSW446243.jpg"  "images/NSW570557.jpg" 
-[22] "images/NSW702035.jpg"  "images/NSW676197.jpg"  "images/NSW776212.jpg" 
-[25] "images/NSW777249.jpg"  "images/NSW739455.jpg"  "images/NSW751830.jpg" </code></pre>
-</div>
-</div>
-<p>This all seems pretty reasonable, but there’s a nuance here that is worth pointing out. When you look at the output above, it’s tempting to think that <code>"images"</code> must be a subfolder within the S3 bucket. That intuition isn’t correct: each S3 bucket is a flat datastore. It doesn’t contain any subfolders: the <code>"/"</code> is treated as part of the object name, nothing more. It can be convenient to name objects this way, though, because it makes it a little easier to organise them into subfolders later on if you want to move them onto a more traditional hierarchical file system.</p>
-<p>Anyway…</p>
-<p>Since I’m going to try downloading objects that may or may not actually exist (i.e., I’m not certain if all these records actually have jpg files), I’m going to start out by writing a helper function <code>save_herbarium_image()</code> that does three things:</p>
-<ul>
-<li>First, it uses the <code>object_exists()</code> function to check if an object with that name exists in this bucket. The <code>object_exists()</code> function works similarly to the <code>bucket_exists()</code> function I used earlier: the only difference is that I also specify the object name.</li>
-<li>Second, if the object exists, it downloads the file and stores it locally, in the <code>"herbarium"</code> subfolder in the folder that contains this blog post.</li>
-<li>Third, it returns information to the user. If the object exists and was successfully downloaded, it returns a character string specifying the location of the saved file. If the object doesn’t exist, it returns <code>NA</code>.</li>
-</ul>
-<p>Here’s the code:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb28" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb28-1">save_herbarium_image <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>(file) {</span>
-<span id="cb28-2">  </span>
-<span id="cb28-3">  <span class="co" style="color: #5E5E5E;"># if object doesn't exist in bucket, return NA</span></span>
-<span id="cb28-4">  ok <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">object_exists</span>(</span>
-<span id="cb28-5">    <span class="at" style="color: #657422;">object =</span> file,</span>
-<span id="cb28-6">    <span class="at" style="color: #657422;">bucket =</span> <span class="st" style="color: #20794D;">"s3://herbariumnsw-pds/"</span>, </span>
-<span id="cb28-7">    <span class="at" style="color: #657422;">region =</span> <span class="st" style="color: #20794D;">"ap-southeast-2"</span></span>
-<span id="cb28-8">  )</span>
-<span id="cb28-9">  <span class="cf" style="color: #003B4F;">if</span>(<span class="sc" style="color: #5E5E5E;">!</span>ok) <span class="fu" style="color: #4758AB;">return</span>(<span class="cn" style="color: #8f5902;">NA_character_</span>)</span>
-<span id="cb28-10">  </span>
-<span id="cb28-11">  <span class="co" style="color: #5E5E5E;"># if object exists, save it and return file path</span></span>
-<span id="cb28-12">  <span class="fu" style="color: #4758AB;">save_object</span>(</span>
-<span id="cb28-13">      <span class="at" style="color: #657422;">object =</span> file,</span>
-<span id="cb28-14">      <span class="at" style="color: #657422;">bucket =</span> <span class="st" style="color: #20794D;">"s3://herbariumnsw-pds/"</span>, </span>
-<span id="cb28-15">      <span class="at" style="color: #657422;">region =</span> <span class="st" style="color: #20794D;">"ap-southeast-2"</span>,</span>
-<span id="cb28-16">      <span class="at" style="color: #657422;">file =</span> <span class="fu" style="color: #4758AB;">paste0</span>(<span class="st" style="color: #20794D;">"herbarium/"</span>, file)</span>
-<span id="cb28-17">  )</span>
-<span id="cb28-18">}</span></code></pre></div>
-</div>
-<p>And here it is applied to the first file:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb29" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb29-1">objects[<span class="dv" style="color: #AD0000;">1</span>] <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb29-2">  <span class="fu" style="color: #4758AB;">save_herbarium_image</span>()</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>[1] "herbarium/images/NSW395530.jpg"</code></pre>
-</div>
-</div>
-<p>That seemed to work well when applied to a single file, so I’ll use the functional programming tools from <strong>purrr</strong> to vectorise the operation. More precisely, I’ll use <code>map_chr()</code> to iterate over all of the <code>objects</code>, applying the <code>save_herbarium_image()</code> function to each one, and collecting the return values from all these function calls into a character vector:</p>
-<div class="cell" data-hash="index_cache/html/unnamed-chunk-15_3834f1bc9f251eaafda5d7a5284b7f7e">
-<div class="sourceCode cell-code" id="cb31" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb31-1">objects <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb31-2">  <span class="fu" style="color: #4758AB;">map_chr</span>(save_herbarium_image)</span></code></pre></div>
-<div class="cell-output cell-output-stderr">
-<pre><code>Client error: (404) Not Found
-Client error: (404) Not Found
-Client error: (404) Not Found
-Client error: (404) Not Found</code></pre>
-</div>
-<div class="cell-output cell-output-stdout">
-<pre><code> [1] "herbarium/images/NSW395530.jpg"  "herbarium/images/NSW461895.jpg" 
- [3] "herbarium/images/NSW650052.jpg"  "herbarium/images/NSW1055313.jpg"
- [5] NA                                "herbarium/images/NSW29246.jpg"  
- [7] "herbarium/images/NSW36860.jpg"   "herbarium/images/NSW39618.jpg"  
- [9] "herbarium/images/NSW687458.jpg"  "herbarium/images/NSW121207.jpg" 
-[11] "herbarium/images/NSW214616.jpg"  "herbarium/images/NSW306564.jpg" 
-[13] "herbarium/images/NSW307215.jpg"  "herbarium/images/NSW389387.jpg" 
-[15] NA                                "herbarium/images/NSW402973.jpg" 
-[17] "herbarium/images/NSW403188.jpg"  "herbarium/images/NSW404127.jpg" 
-[19] NA                                "herbarium/images/NSW446243.jpg" 
-[21] "herbarium/images/NSW570557.jpg"  "herbarium/images/NSW702035.jpg" 
-[23] "herbarium/images/NSW676197.jpg"  "herbarium/images/NSW776212.jpg" 
-[25] "herbarium/images/NSW777249.jpg"  "herbarium/images/NSW739455.jpg" 
-[27] NA                               </code></pre>
-</div>
-</div>
-<p>Did it work? Well, kind of. Notice there are some missing values in the output. In those cases the object doesn’t exist in this bucket, and when that happens the <code>save_herbarium_image()</code> function bails and doesn’t try to download anything. But in most cases images it worked.</p>
-</section>
-<section id="a-minor-irritant-appears" class="level3">
-<h3 class="anchored" data-anchor-id="a-minor-irritant-appears">A minor irritant appears!</h3>
-<p>At this point, I’d like to start displaying the images. It’s nice to have pretty pictures in a blog post, don’t you think? Like, maybe what I could do is include some of those images in this post. One problem though is that the files stored in the National Herbarium dataset are high resolution images and as consequence even the jpg files are usually about 7MB each. That’s a bit excessive, so I think what I’ll do is write a little helper function that reads in each image, resizes it to something smaller, and then saves that smaller file.</p>
-<p>If I want to do this within R, the <strong>magick</strong> package is my friend. It’s extremely well suited to this kind of image manipulation task. This post isn’t about the <strong>magick</strong> package, so I’m not going to explain this part of the code,<sup>2</sup> but suffice it to say that this helper function solves the problem:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb34" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb34-1">shrink_herbarium_image <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>(file) {</span>
-<span id="cb34-2">  <span class="fu" style="color: #4758AB;">on.exit</span>(<span class="fu" style="color: #4758AB;">gc</span>())</span>
-<span id="cb34-3">  img_from <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">file.path</span>(<span class="st" style="color: #20794D;">"herbarium"</span>, <span class="st" style="color: #20794D;">"images"</span>, file)</span>
-<span id="cb34-4">  img_to <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">file.path</span>(<span class="st" style="color: #20794D;">"herbarium"</span>, <span class="st" style="color: #20794D;">"tiny_images"</span>, file)</span>
-<span id="cb34-5">  <span class="fu" style="color: #4758AB;">image_read</span>(img_from) <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb34-6">    <span class="fu" style="color: #4758AB;">image_resize</span>(<span class="fu" style="color: #4758AB;">geometry_size_pixels</span>(<span class="at" style="color: #657422;">width =</span> <span class="dv" style="color: #AD0000;">1000</span>)) <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb34-7">    <span class="fu" style="color: #4758AB;">image_write</span>(img_to)</span>
-<span id="cb34-8">}</span></code></pre></div>
-</div>
-<p>Now that I have this function, I can iterate over every image stored in my local <code>images</code> folder, shrink it, and save the small version to the <code>tiny_images</code> folder:</p>
-<div class="cell" data-hash="index_cache/html/unnamed-chunk-17_8ed24bec88d65d45ecb0f8d2bc6bb9b3">
-<div class="sourceCode cell-code" id="cb35" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb35-1"><span class="fu" style="color: #4758AB;">list.files</span>(<span class="st" style="color: #20794D;">"herbarium/images"</span>) <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb35-2">  <span class="fu" style="color: #4758AB;">map_chr</span>(shrink_herbarium_image)</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code> [1] "herbarium/tiny_images/NSW1055313.jpg"
- [2] "herbarium/tiny_images/NSW121207.jpg" 
- [3] "herbarium/tiny_images/NSW214616.jpg" 
- [4] "herbarium/tiny_images/NSW29246.jpg"  
- [5] "herbarium/tiny_images/NSW306564.jpg" 
- [6] "herbarium/tiny_images/NSW307215.jpg" 
- [7] "herbarium/tiny_images/NSW36860.jpg"  
- [8] "herbarium/tiny_images/NSW389387.jpg" 
- [9] "herbarium/tiny_images/NSW395530.jpg" 
-[10] "herbarium/tiny_images/NSW39618.jpg"  
-[11] "herbarium/tiny_images/NSW402973.jpg" 
-[12] "herbarium/tiny_images/NSW403188.jpg" 
-[13] "herbarium/tiny_images/NSW404127.jpg" 
-[14] "herbarium/tiny_images/NSW446243.jpg" 
-[15] "herbarium/tiny_images/NSW461895.jpg" 
-[16] "herbarium/tiny_images/NSW570557.jpg" 
-[17] "herbarium/tiny_images/NSW650052.jpg" 
-[18] "herbarium/tiny_images/NSW676197.jpg" 
-[19] "herbarium/tiny_images/NSW687458.jpg" 
-[20] "herbarium/tiny_images/NSW702035.jpg" 
-[21] "herbarium/tiny_images/NSW739455.jpg" 
-[22] "herbarium/tiny_images/NSW776212.jpg" 
-[23] "herbarium/tiny_images/NSW777249.jpg" </code></pre>
-</div>
-</div>
-<p>The output here is a character vector containing names for the created files. That’s nice as a way of checking that everything worked, but I want pretty pictures! So here’s the contents of the <code>tiny_images</code> folder, but shown as the actual images rather than file names:<sup>3</sup></p>
-<p><br></p>
-<div class="cell">
-<div class="cell-output cell-output-stderr">
-<pre><code>using 'image-only' layout</code></pre>
-</div>
-<div class="cell-output-display">
-<div>
-<div class="row p-0 row-cols-1 row-cols-sm-2 row-cols-md-3 row-cols-lg-4" style="margin-left: -.2rem; margin-right: -.2rem; margin-top: 1rem; margin-bottom: 1rem; ">
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .2rem ; border-width: 0; border-radius: 0 0 0 0 ;">
-<a href="https://tiny-herbs.s3-ap-southeast-2.amazonaws.com/NSW1055313.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/herbarium/tiny_images/NSW1055313.jpg" class="card-img" style="border-style:solid; border-color:inherits; border-width:0; border-radius: 0 0 0 0 ;">
-</a>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .2rem ; border-width: 0; border-radius: 0 0 0 0 ;">
-<a href="https://tiny-herbs.s3-ap-southeast-2.amazonaws.com/NSW121207.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/herbarium/tiny_images/NSW121207.jpg" class="card-img" style="border-style:solid; border-color:inherits; border-width:0; border-radius: 0 0 0 0 ;">
-</a>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .2rem ; border-width: 0; border-radius: 0 0 0 0 ;">
-<a href="https://tiny-herbs.s3-ap-southeast-2.amazonaws.com/NSW214616.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/herbarium/tiny_images/NSW214616.jpg" class="card-img" style="border-style:solid; border-color:inherits; border-width:0; border-radius: 0 0 0 0 ;">
-</a>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .2rem ; border-width: 0; border-radius: 0 0 0 0 ;">
-<a href="https://tiny-herbs.s3-ap-southeast-2.amazonaws.com/NSW29246.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/herbarium/tiny_images/NSW29246.jpg" class="card-img" style="border-style:solid; border-color:inherits; border-width:0; border-radius: 0 0 0 0 ;">
-</a>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .2rem ; border-width: 0; border-radius: 0 0 0 0 ;">
-<a href="https://tiny-herbs.s3-ap-southeast-2.amazonaws.com/NSW306564.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/herbarium/tiny_images/NSW306564.jpg" class="card-img" style="border-style:solid; border-color:inherits; border-width:0; border-radius: 0 0 0 0 ;">
-</a>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .2rem ; border-width: 0; border-radius: 0 0 0 0 ;">
-<a href="https://tiny-herbs.s3-ap-southeast-2.amazonaws.com/NSW307215.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/herbarium/tiny_images/NSW307215.jpg" class="card-img" style="border-style:solid; border-color:inherits; border-width:0; border-radius: 0 0 0 0 ;">
-</a>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .2rem ; border-width: 0; border-radius: 0 0 0 0 ;">
-<a href="https://tiny-herbs.s3-ap-southeast-2.amazonaws.com/NSW36860.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/herbarium/tiny_images/NSW36860.jpg" class="card-img" style="border-style:solid; border-color:inherits; border-width:0; border-radius: 0 0 0 0 ;">
-</a>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .2rem ; border-width: 0; border-radius: 0 0 0 0 ;">
-<a href="https://tiny-herbs.s3-ap-southeast-2.amazonaws.com/NSW389387.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/herbarium/tiny_images/NSW389387.jpg" class="card-img" style="border-style:solid; border-color:inherits; border-width:0; border-radius: 0 0 0 0 ;">
-</a>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .2rem ; border-width: 0; border-radius: 0 0 0 0 ;">
-<a href="https://tiny-herbs.s3-ap-southeast-2.amazonaws.com/NSW395530.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/herbarium/tiny_images/NSW395530.jpg" class="card-img" style="border-style:solid; border-color:inherits; border-width:0; border-radius: 0 0 0 0 ;">
-</a>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .2rem ; border-width: 0; border-radius: 0 0 0 0 ;">
-<a href="https://tiny-herbs.s3-ap-southeast-2.amazonaws.com/NSW39618.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/herbarium/tiny_images/NSW39618.jpg" class="card-img" style="border-style:solid; border-color:inherits; border-width:0; border-radius: 0 0 0 0 ;">
-</a>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .2rem ; border-width: 0; border-radius: 0 0 0 0 ;">
-<a href="https://tiny-herbs.s3-ap-southeast-2.amazonaws.com/NSW402973.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/herbarium/tiny_images/NSW402973.jpg" class="card-img" style="border-style:solid; border-color:inherits; border-width:0; border-radius: 0 0 0 0 ;">
-</a>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .2rem ; border-width: 0; border-radius: 0 0 0 0 ;">
-<a href="https://tiny-herbs.s3-ap-southeast-2.amazonaws.com/NSW403188.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/herbarium/tiny_images/NSW403188.jpg" class="card-img" style="border-style:solid; border-color:inherits; border-width:0; border-radius: 0 0 0 0 ;">
-</a>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .2rem ; border-width: 0; border-radius: 0 0 0 0 ;">
-<a href="https://tiny-herbs.s3-ap-southeast-2.amazonaws.com/NSW404127.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/herbarium/tiny_images/NSW404127.jpg" class="card-img" style="border-style:solid; border-color:inherits; border-width:0; border-radius: 0 0 0 0 ;">
-</a>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .2rem ; border-width: 0; border-radius: 0 0 0 0 ;">
-<a href="https://tiny-herbs.s3-ap-southeast-2.amazonaws.com/NSW446243.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/herbarium/tiny_images/NSW446243.jpg" class="card-img" style="border-style:solid; border-color:inherits; border-width:0; border-radius: 0 0 0 0 ;">
-</a>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .2rem ; border-width: 0; border-radius: 0 0 0 0 ;">
-<a href="https://tiny-herbs.s3-ap-southeast-2.amazonaws.com/NSW461895.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/herbarium/tiny_images/NSW461895.jpg" class="card-img" style="border-style:solid; border-color:inherits; border-width:0; border-radius: 0 0 0 0 ;">
-</a>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .2rem ; border-width: 0; border-radius: 0 0 0 0 ;">
-<a href="https://tiny-herbs.s3-ap-southeast-2.amazonaws.com/NSW570557.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/herbarium/tiny_images/NSW570557.jpg" class="card-img" style="border-style:solid; border-color:inherits; border-width:0; border-radius: 0 0 0 0 ;">
-</a>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .2rem ; border-width: 0; border-radius: 0 0 0 0 ;">
-<a href="https://tiny-herbs.s3-ap-southeast-2.amazonaws.com/NSW650052.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/herbarium/tiny_images/NSW650052.jpg" class="card-img" style="border-style:solid; border-color:inherits; border-width:0; border-radius: 0 0 0 0 ;">
-</a>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .2rem ; border-width: 0; border-radius: 0 0 0 0 ;">
-<a href="https://tiny-herbs.s3-ap-southeast-2.amazonaws.com/NSW676197.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/herbarium/tiny_images/NSW676197.jpg" class="card-img" style="border-style:solid; border-color:inherits; border-width:0; border-radius: 0 0 0 0 ;">
-</a>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .2rem ; border-width: 0; border-radius: 0 0 0 0 ;">
-<a href="https://tiny-herbs.s3-ap-southeast-2.amazonaws.com/NSW687458.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/herbarium/tiny_images/NSW687458.jpg" class="card-img" style="border-style:solid; border-color:inherits; border-width:0; border-radius: 0 0 0 0 ;">
-</a>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .2rem ; border-width: 0; border-radius: 0 0 0 0 ;">
-<a href="https://tiny-herbs.s3-ap-southeast-2.amazonaws.com/NSW702035.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/herbarium/tiny_images/NSW702035.jpg" class="card-img" style="border-style:solid; border-color:inherits; border-width:0; border-radius: 0 0 0 0 ;">
-</a>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .2rem ; border-width: 0; border-radius: 0 0 0 0 ;">
-<a href="https://tiny-herbs.s3-ap-southeast-2.amazonaws.com/NSW739455.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/herbarium/tiny_images/NSW739455.jpg" class="card-img" style="border-style:solid; border-color:inherits; border-width:0; border-radius: 0 0 0 0 ;">
-</a>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .2rem ; border-width: 0; border-radius: 0 0 0 0 ;">
-<a href="https://tiny-herbs.s3-ap-southeast-2.amazonaws.com/NSW776212.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/herbarium/tiny_images/NSW776212.jpg" class="card-img" style="border-style:solid; border-color:inherits; border-width:0; border-radius: 0 0 0 0 ;">
-</a>
-</div>
-<div class="card bg-transparent m-0 border-0 collapse.show bs4cards-blahblahblah " style="padding: .2rem ; border-width: 0; border-radius: 0 0 0 0 ;">
-<a href="https://tiny-herbs.s3-ap-southeast-2.amazonaws.com/NSW777249.jpg" style="color: inherit;">
-<img src="https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/herbarium/tiny_images/NSW777249.jpg" class="card-img" style="border-style:solid; border-color:inherits; border-width:0; border-radius: 0 0 0 0 ;">
-</a>
-</div>
-</div>
-</div>
-</div>
-</div>
-<p><br></p>
-<p>Progress!</p>
-<p><br></p>
-</section>
-</section>
-<section id="accounts-and-credentials" class="level2">
-<h2 class="anchored" data-anchor-id="accounts-and-credentials">Accounts and credentials</h2>
-<p>At this point it is starting to dawn on me that it would be kind of neat to create my own S3 bucket and store the tiny images there. I could make the tiny images public and then display them in this post. The National Herbarium data is released under a Creative Commons By-Attribution licence, so I’m allowed to use the images that way as long as I properly acknowledge the source… which I think is fairly well covered in this post already!</p>
-<p>The task I’m going to set for myself later in this post is to do exactly that, and use tools from the <strong>aws.s3</strong> package to do everything in R. However, I can’t do any of that unless I have an AWS account of my very own. The time has come for me to do that.</p>
-<section id="creating-the-account" class="level3">
-<h3 class="anchored" data-anchor-id="creating-the-account">Creating the account</h3>
-<p>Signing up for the account turns out to be pretty easy. All I had to do was visit https://aws.amazon.com/s3/ and click on the “Create an AWS Account” button shown in the image below:</p>
-<p><br></p>
-<div class="cell">
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/screenshots/aws_s3_signup.png" class="img-fluid" width="1221"></p>
-</div>
-</div>
-<p><br></p>
-<p>This then led me through a pretty standard sign up process. I had to provide an email address for the “root user” (i.e., me!), specify a password, and so on. I didn’t sign up for anything that cost money. The free tier allows you 5GB of storage for 12 months, which is fairly convenient for “playing around” purposes, and that’s all I’m intending to do here.</p>
-</section>
-<section id="creating-credentials" class="level3">
-<h3 class="anchored" data-anchor-id="creating-credentials">Creating credentials</h3>
-<p>The next step is to create an access key, so that R can interact with S3 using my credentials. At this point a little care is needed. It is possible to create access credentials for the root user, but that’s not a good idea. The root user has access to every AWS service, not just S3, and it’s a bad idea to give R access to any credentials that have those permissions. What I’ll do here is create an an “IAM user” – where “IAM” stands for “Identity and Access Management” – that <em>only</em> has access to my S3 storage, and the credentials I supply to R will be associated with that user. Here’s how I did that. First, I went over to the IAM console here:</p>
-<p>https://us-east-1.console.aws.amazon.com/iamv2/home#/users</p>
-<p>On this screen there’s an “add users” button that I dutifully click…</p>
-<div class="cell">
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/screenshots/s3_iam_add_user_1.png" class="img-fluid" width="1451"></p>
-</div>
-</div>
-<p><br></p>
-<p>From here it’s mostly a matter of following prompts. The screenshot below shows me part way through the creation process. The IAM user has its own username, and it will be allowed programmatic access using an access key:</p>
-<div class="cell">
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/screenshots/s3_iam_add_user_2.png" class="img-fluid" width="1115"></p>
-</div>
-</div>
-<p><br></p>
-<p>When I get to the next screen it asks me to set the permissions associated with this user. I click on “attach existing policies directly”, and then type “S3” into the search box. It comes up with a list of permission policies associated with S3 and I select the one I want:</p>
-<div class="cell">
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/screenshots/s3_iam_add_user_3.png" class="img-fluid" width="1055"></p>
-</div>
-</div>
-<p><br></p>
-<p>The third screen is boring. It asks for tags. I don’t give it any. I move onto the fourth screen, which turns out to be a review screen:</p>
-<div class="cell">
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/screenshots/s3_iam_add_user_4.png" class="img-fluid" width="1087"></p>
-</div>
-</div>
-<p><br></p>
-<p>Having decided I am happy with these settings, I click on the “next” button that isn’t actually shown in these screenshots (it’s at the bottom of the page) and it takes me to a final screen that gives me the access key ID and the secret access key:</p>
-<div class="cell">
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/screenshots/s3_iam_add_user_5.png" class="img-fluid" width="1054"></p>
-</div>
-</div>
-<p>These are the two pieces of information I need to let R access to my S3 storage.</p>
-</section>
-<section id="storing-your-aws-credentials-in-r" class="level3">
-<h3 class="anchored" data-anchor-id="storing-your-aws-credentials-in-r">Storing your AWS credentials in R</h3>
-<p>There are several ways of storing these credentials in R. The easiest is to add the credentials to your <code>.Renviron</code> file, which you can conveniently open with the <code>edit_r_environ()</code> function from the <strong>usethis</strong> package. To get access to the account, the following lines need to be added to your <code>.Renviron</code> file:</p>
-<pre><code>AWS_ACCESS_KEY_ID=&lt;your access key id&gt;
-AWS_SECRET_ACCESS_KEY=&lt;your secret key&gt;</code></pre>
-<p>However, if you’re going to be using the same AWS region all the time (e.g., you’re in Sydney so you tend to use <code>"ap-southeast-2"</code> rather than <code>"us-east-1"</code>), you might as well add a third line that sets your default region. That way, you won’t need to bother manually specifying the <code>region</code> argument every time you want to interact with S3: the <strong>aws.s3</strong> package will use your default. So for me, the relevant lines ended up looking like this:</p>
-<pre><code>AWS_ACCESS_KEY_ID=&lt;my access key id&gt;
-AWS_SECRET_ACCESS_KEY=&lt;my secret key&gt;
-AWS_DEFAULT_REGION=ap-southeast-2</code></pre>
-<p>After restarting R, these new settings will apply.</p>
-<p><br></p>
-<div class="cell">
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/https:/tiny-herbs.s3-ap-southeast-2.amazonaws.com/NSW650052.jpg" class="img-fluid"></p>
-</div>
-</div>
-<p><br></p>
-</section>
-</section>
-<section id="manipulating-your-s3-storage-from-r" class="level2">
-<h2 class="anchored" data-anchor-id="manipulating-your-s3-storage-from-r">Manipulating your S3 storage from R</h2>
-<p>Now that I have an AWS account and credentials, I can start using the <strong>aws.s3</strong> package for more than just downloading files. I can create my own buckets, put objects into those buckets, control the access settings for those objects, and a good deal more besides. So let’s give that a go, shall we?</p>
-<section id="creating-a-new-bucket" class="level3">
-<h3 class="anchored" data-anchor-id="creating-a-new-bucket">Creating a new bucket</h3>
-<p>The function to create a new bucket is called <code>put_bucket()</code> and now that my credentials are set up it’s almost comically easy to use. If I want to create a bucket called <code>"tiny-herbs"</code>, this is what I do:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb40" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb40-1"><span class="fu" style="color: #4758AB;">put_bucket</span>(<span class="st" style="color: #20794D;">"tiny-herbs"</span>)</span></code></pre></div>
-</div>
-<div class="cell">
-<div class="cell-output cell-output-stdout">
-<pre><code>[1] TRUE</code></pre>
-</div>
-</div>
-<p>That seems too easy? I am skeptical. I’m convinced that something must have gone wrong, so my first impulse is to use <code>bucket_exists()</code> to verify that it worked. Okay, so… does this new bucket exist?</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb42" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb42-1"><span class="fu" style="color: #4758AB;">bucket_exists</span>(<span class="st" style="color: #20794D;">"s3://tiny-herbs/"</span>) </span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>[1] TRUE
-attr(,"x-amz-id-2")
-[1] "4B8L2PauxADAbOSyFra5ra/OHwObxniV89yWTPe44PJ0TRjIOdsNQdHl1El1t0/39aSQOyJS1FE="
-attr(,"x-amz-request-id")
-[1] "GH35D6V4G9W945BY"
-attr(,"date")
-[1] "Tue, 23 Aug 2022 03:05:15 GMT"
-attr(,"x-amz-bucket-region")
-[1] "ap-southeast-2"
-attr(,"x-amz-access-point-alias")
-[1] "false"
-attr(,"content-type")
-[1] "application/xml"
-attr(,"server")
-[1] "AmazonS3"</code></pre>
-</div>
-</div>
-<p>It does, and notice that both <code>put_bucket()</code> and <code>bucket_exists()</code> have respected my default region setting. When I called <code>put_bucket()</code>, the <strong>aws.s3</strong> package supplied the region from my default and so the bucket was created in Sydney (i.e., “ap-southeast-2”), and it did the same again when I used <code>bucket_exists()</code> to look for the buckets.</p>
-<p>So what’s in the bucket? Just like I did with the National Herbarium bucket, I can use the <code>get_bucket_df()</code> function to inspect the contents of my bucket:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb44" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb44-1"><span class="fu" style="color: #4758AB;">get_bucket_df</span>(<span class="st" style="color: #20794D;">"s3://tiny-herbs/"</span>) <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb44-2">  <span class="fu" style="color: #4758AB;">as_tibble</span>()</span></code></pre></div>
-</div>
-<div class="cell">
-<div class="cell-output cell-output-stdout">
-<pre><code># A tibble: 0 × 8
-# … with 8 variables: Key &lt;chr&gt;, LastModified &lt;chr&gt;, ETag &lt;chr&gt;, Size &lt;chr&gt;,
-#   Owner_ID &lt;chr&gt;, Owner_DisplayName &lt;chr&gt;, StorageClass &lt;chr&gt;, Bucket &lt;chr&gt;</code></pre>
-</div>
-</div>
-<p>Hm. Well, yes. Of course it’s empty: I haven’t put any objects in it yet. Maybe I should do that? It does seem like a good idea!</p>
-<p>But first…</p>
-</section>
-<section id="managing-access-control" class="level3">
-<h3 class="anchored" data-anchor-id="managing-access-control">Managing access control</h3>
-<p>One thing though… is this private or public? This is governed by the Access Control List (ACL) settings. By default, S3 buckets are set to private. You can read and write to them, but no-one else has any access at all. Let’s soften that slightly, and allow anyone to read from the “tiny-herbs” bucket. I could have done that from the beginning by setting <code>acl = "public-read"</code> when I called <code>put_bucket()</code>. However, because I “forgot” to do that earlier, I’ll change it now using <code>put_acl()</code></p>
-<div class="cell" data-hash="index_cache/html/unnamed-chunk-29_1fd59396c2d351c8fdf4633241ef6b52">
-<div class="sourceCode cell-code" id="cb46" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb46-1"><span class="fu" style="color: #4758AB;">put_acl</span>(</span>
-<span id="cb46-2">  <span class="at" style="color: #657422;">bucket =</span> <span class="st" style="color: #20794D;">"s3://tiny-herbs/"</span>,</span>
-<span id="cb46-3">  <span class="at" style="color: #657422;">acl =</span> <span class="st" style="color: #20794D;">"public-read"</span></span>
-<span id="cb46-4">)</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>[1] TRUE</code></pre>
-</div>
-</div>
-<p>Now everyone has read access to the bucket.<sup>4</sup></p>
-</section>
-<section id="adding-objects-to-your-bucket" class="level3">
-<h3 class="anchored" data-anchor-id="adding-objects-to-your-bucket">Adding objects to your bucket</h3>
-<p>To put an object inside my new bucket, the function I need is <code>put_object()</code>. When calling it, I need to specify the local path to the <code>file</code> that I want to upload, the name that the <code>object</code> will be assigned when it is added to the bucket, and of course the <code>bucket</code> itself. This time around, I’ll also explicitly set <code>acl = "public-read"</code> to ensure that – while only I have write access – everyone has read access and can download the object if they want to. Because I’m going to call this repeatedly, I’ll wrap all this in a helper function called <code>put_tiny_image()</code>:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb48" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb48-1">put_tiny_image <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>(file) {</span>
-<span id="cb48-2">  <span class="fu" style="color: #4758AB;">put_object</span>(</span>
-<span id="cb48-3">    <span class="at" style="color: #657422;">file =</span> <span class="fu" style="color: #4758AB;">file.path</span>(<span class="st" style="color: #20794D;">"herbarium"</span>, <span class="st" style="color: #20794D;">"tiny_images"</span>, file),</span>
-<span id="cb48-4">    <span class="at" style="color: #657422;">object =</span> file, </span>
-<span id="cb48-5">    <span class="at" style="color: #657422;">bucket =</span> <span class="st" style="color: #20794D;">"s3://tiny-herbs/"</span>,</span>
-<span id="cb48-6">    <span class="at" style="color: #657422;">acl =</span> <span class="st" style="color: #20794D;">"public-read"</span></span>
-<span id="cb48-7">  )</span>
-<span id="cb48-8">}</span></code></pre></div>
-</div>
-<p>To see this in action, let’s create a vector that lists the names of all the tiny images, and then apply the <code>put_tiny_image()</code> function to the first one:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb49" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb49-1">tiny_images <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">list.files</span>(<span class="st" style="color: #20794D;">"herbarium/tiny_images"</span>)</span>
-<span id="cb49-2">tiny_images[<span class="dv" style="color: #AD0000;">1</span>] <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb49-3">  <span class="fu" style="color: #4758AB;">put_tiny_image</span>()</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>[1] TRUE</code></pre>
-</div>
-</div>
-<p>Okay that seems to work, so once again I’ll use <strong>purrr</strong> to iterate over all the <code>tiny_images</code>, uploading them one by one into my newly-created bucket:</p>
-<div class="cell" data-hash="index_cache/html/unnamed-chunk-32_091b93ac8aa084d7681aa0638904c615">
-<div class="sourceCode cell-code" id="cb51" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb51-1">tiny_images <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb51-2">  <span class="fu" style="color: #4758AB;">map_lgl</span>(put_tiny_image)</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code> [1] TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE
-[16] TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE</code></pre>
-</div>
-</div>
-<p>That looks pretty good! I’m seeing nothing but <code>TRUE</code> values in the output so it looks like I’ve successfully uploaded all the tiny images. Now that I’ve done this, I can try calling <code>get_bucket_df()</code> again to inspect the current contents of the bucket:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb53" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb53-1"><span class="fu" style="color: #4758AB;">get_bucket_df</span>(<span class="st" style="color: #20794D;">"s3://tiny-herbs/"</span>) <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb53-2">  <span class="fu" style="color: #4758AB;">as_tibble</span>()</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code># A tibble: 23 × 8
-   Key            LastModified        ETag  Size  Owner…¹ Owner…² Stora…³ Bucket
-   &lt;chr&gt;          &lt;chr&gt;               &lt;chr&gt; &lt;chr&gt; &lt;chr&gt;   &lt;chr&gt;   &lt;chr&gt;   &lt;chr&gt; 
- 1 NSW1055313.jpg 2022-08-23T03:05:1… "\"c… 1494… b8b231… djnava… STANDA… tiny-…
- 2 NSW121207.jpg  2022-04-22T09:08:0… "\"6… 1562… b8b231… djnava… STANDA… tiny-…
- 3 NSW214616.jpg  2022-04-22T09:08:0… "\"f… 2041… b8b231… djnava… STANDA… tiny-…
- 4 NSW29246.jpg   2022-04-22T09:08:0… "\"e… 1043… b8b231… djnava… STANDA… tiny-…
- 5 NSW306564.jpg  2022-04-22T09:08:0… "\"d… 1819… b8b231… djnava… STANDA… tiny-…
- 6 NSW307215.jpg  2022-04-22T09:08:0… "\"e… 1684… b8b231… djnava… STANDA… tiny-…
- 7 NSW36860.jpg   2022-04-22T09:08:1… "\"f… 1962… b8b231… djnava… STANDA… tiny-…
- 8 NSW389387.jpg  2022-04-22T09:08:1… "\"d… 1240… b8b231… djnava… STANDA… tiny-…
- 9 NSW395530.jpg  2022-04-22T09:08:1… "\"3… 1435… b8b231… djnava… STANDA… tiny-…
-10 NSW39618.jpg   2022-04-22T09:08:1… "\"a… 1028… b8b231… djnava… STANDA… tiny-…
-# … with 13 more rows, and abbreviated variable names ¹​Owner_ID,
-#   ²​Owner_DisplayName, ³​StorageClass</code></pre>
-</div>
-</div>
-<p>Yay! It’s done!</p>
-</section>
-<section id="urls-for-objects-in-public-buckets" class="level3">
-<h3 class="anchored" data-anchor-id="urls-for-objects-in-public-buckets">URLs for objects in public buckets</h3>
-<p>One last thing. Because the <code>"tiny-herbs"</code> bucket is public, the objects it contains each have their own URL. To make my life a little easier, I wrote a helper function that constructs these URL:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb55" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb55-1">tiny_herb_url <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>(object, </span>
-<span id="cb55-2">                          <span class="at" style="color: #657422;">bucket =</span> <span class="st" style="color: #20794D;">"tiny-herbs"</span>,</span>
-<span id="cb55-3">                          <span class="at" style="color: #657422;">region =</span> <span class="st" style="color: #20794D;">"ap-southeast-2"</span>) {</span>
-<span id="cb55-4">  <span class="fu" style="color: #4758AB;">paste0</span>(</span>
-<span id="cb55-5">    <span class="st" style="color: #20794D;">"https://"</span>, bucket, <span class="st" style="color: #20794D;">"."</span>, <span class="st" style="color: #20794D;">"s3-"</span>, </span>
-<span id="cb55-6">    region, <span class="st" style="color: #20794D;">".amazonaws.com"</span>, <span class="st" style="color: #20794D;">"/"</span>, object</span>
-<span id="cb55-7">  )</span>
-<span id="cb55-8">}</span></code></pre></div>
-</div>
-<p>For example, here’s one of the URLs associated with the <code>"tiny-herbs"</code> bucket:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb56" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb56-1"><span class="fu" style="color: #4758AB;">tiny_herb_url</span>(<span class="st" style="color: #20794D;">"NSW121207.jpg"</span>)</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>[1] "https://tiny-herbs.s3-ap-southeast-2.amazonaws.com/NSW121207.jpg"</code></pre>
-</div>
-</div>
-<p>The images I’ve been showing throughout this post aren’t the original ones from the National Herbarium data set. Rather, they’re the smaller files I stored in the <code>"tiny-herbs"</code> bucket, and the code I’ve been using to display the images throughout the post looks like this:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb58" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb58-1"><span class="fu" style="color: #4758AB;">tiny_herb_url</span>(<span class="st" style="color: #20794D;">"NSW121207.jpg"</span>) <span class="sc" style="color: #5E5E5E;">%&gt;%</span> </span>
-<span id="cb58-2">  knitr<span class="sc" style="color: #5E5E5E;">::</span><span class="fu" style="color: #4758AB;">include_graphics</span>()</span></code></pre></div>
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/https:/tiny-herbs.s3-ap-southeast-2.amazonaws.com/NSW121207.jpg" class="img-fluid"></p>
-</div>
-</div>
-<p><br></p>
-</section>
-</section>
-<section id="wrapping-up" class="level2">
-<h2 class="anchored" data-anchor-id="wrapping-up">Wrapping up</h2>
-<p>At the end of all this you might have all kinds of questions. Questions like, “Danielle, what’s wrong with you?” and “Danielle, is this even your job? Aren’t you supposed to be working on Apache Arrow?” While I could write an entire novel trying to answer the first one, I think I’ll skip over it and move straight onto the second on, because that’s more interesting and doesn’t require anyone to get a therapist.</p>
-<p>Although this isn’t a post about Apache Arrow – and so is not directly related to the work I do every day – of the reasons I found myself looking into S3 in the first place is that Arrow is a tool designed to let data scientists work with very large data sets, and S3 is a tool designed to make it easy to store very large data sets. These two things go well together, so much so that the <strong>arrow</strong> R package has its own support for S3 data storage, and many of the data sets that new <strong>arrow</strong> users encounter are stored on S3. From an educational perspective (sorry – I used to be an academic and I can’t help myself) it’s really difficult for people when they need to learn lots of things at the same time. Trying to learn how Arrow works is really hard when you’re still confused about S3. When I started learning Arrow I didn’t know anything about S3, and it was extremely frustrating to have to learn Arrow concepts with all this confusing S3 stuff floating around.</p>
-<p>Hence… this post. My main goal here was to talk about S3 as a topic in its own right, and how tools like <strong>aws.s3</strong> allow R users to write code that interacts with S3 data storage. But it’s very handy background knowledge to have if you’re planning to use <strong>arrow</strong> later on.</p>
-<p>On top of all that, the <strong>aws.s3</strong> package has a lot more functionality that I haven’t talked about here. You can use it to copy objects from one bucket to another, and delete objects and buckets that you control. You can use it to add tagging metadata, you can use it to configure your S3 bucket as a website (yes, even with all that painful cross-origin resource sharing configuration stuff), and a good deal more besides. It’s a really nice package and I’m glad I took the time to learn it!</p>
-<!--------------- appendices go here ----------------->
-<div class="cell">
-
-</div>
-
-
-</section>
-
-
-<div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
-
-<ol>
-<li id="fn1"><p>It’s deeply important to me that you read this knowing that I was singing <a href="https://www.youtube.com/watch?v=OiwDHHcHPh0"><em>Tragedy</em></a> by Steps at the time I wrote this, complete with dramatic hand gestures↩︎</p></li>
-<li id="fn2"><p>I will, yet again, sigh in frustration that I have to include the <code>on.exit(gc())</code> line. My limited understanding is as follows. The <strong>magick</strong> package provides wrappers to the C++ ImageMagick library, and none of the image manipulation is actually done in R. The objects that get “loaded” are just pointers, and exiting the <code>shrink_herbarium_image()</code> function doesn’t necessarily cause R to release memory. So whenever I’m iterating over many images, R doesn’t release old images from the magick resource cache unless I trigger the garbage collection with <code>gc()</code>. This feels inelegant but I haven’t had time to find a better solution.↩︎</p></li>
-<li id="fn3"><p>I’m using the <strong>bs4cards</strong> package to display the images in this layout. Oh, and if you click on any image you’ll see a higher resolution version of that image.↩︎</p></li>
-<li id="fn4"><p>You can specify different ACL settings for each object, if you want to. The <code>put_acl()</code> function also has an <code>object</code> argument that allows you to control the setting for a single object in a bucket.↩︎</p></li>
-</ol>
-</section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
-  author = {Danielle Navarro},
-  title = {Using {Amazon} {S3} with {R}},
-  date = {2022-03-17},
-  url = {https://blog.djnavarro.net/using-aws-s3-in-r},
-  langid = {en}
-}
-</code></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2022" class="csl-entry quarto-appendix-citeas">
-Danielle Navarro. 2022. <span>“Using Amazon S3 with R.”</span> March 17,
-2022. <a href="https://blog.djnavarro.net/using-aws-s3-in-r">https://blog.djnavarro.net/using-aws-s3-in-r</a>.
-</div></div></section></div> ]]></description>
-  <category>Amazon S3</category>
-  <category>R</category>
-  <guid>https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/index.html</guid>
-  <pubDate>Wed, 16 Mar 2022 13:00:00 GMT</pubDate>
-  <media:content url="https://blog.djnavarro.net/posts/2022-03-17_using-aws-s3-in-r/preview-image.jpg" medium="image" type="image/jpeg"/>
 </item>
 </channel>
 </rss>
