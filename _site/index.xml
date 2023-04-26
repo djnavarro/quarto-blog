@@ -15,7 +15,379 @@
 <link>https://blog.djnavarro.net/index.html</link>
 </image>
 <generator>quarto-1.2.335</generator>
-<lastBuildDate>Tue, 11 Apr 2023 14:00:00 GMT</lastBuildDate>
+<lastBuildDate>Tue, 25 Apr 2023 14:00:00 GMT</lastBuildDate>
+<item>
+  <title>Non-compartmental analysis</title>
+  <dc:creator>Danielle Navarro</dc:creator>
+  <link>https://blog.djnavarro.net/posts/2023-04-26_non-compartmental-analysis/index.html</link>
+  <description><![CDATA[ 
+
+
+
+
+<!--
+CC0 cover:
+https://unsplash.com/photos/iPl3q-gEGzY
+-->
+<!--------------- my typical setup ----------------->
+<!--------------- post begins here ----------------->
+<p>Back in my academic days, one thing that always made me sad about being “technically” a psychologist rather than a statistician or computer scientist is that it was always incumbent on my to use my technical skills in areas that would be of interest to behavioural scientists. As John Tukey once remarked, <a href="https://www.azquotes.com/quote/603405">“The best thing about being a statistician is that you get to play in everyone’s backyard.”</a>. Fortunately for me, my academic backyard was quite large. On the applied side I had the opportunity to work in cognitive science, social psychology, forensic psychology, linguistics, and more, while still finding opportunities to write the occasional paper on machine learning or information theory. I even managed to find a way to play with quantum walks at one point.</p>
+<p>Nevertheless, my envy persisted. There are so many other interesting things out there, and I never tire of learning new things. As such, I require very little pretext to start reading papers on… um… [checks notes]… statistical techniques in <a href="https://en.wikipedia.org/wiki/Pharmacokinetics">pharmacokinetics</a>. Pharmacokinetics (PK) is a subfield of pharamacology that studies the concentrations of drugs and other substances over time when they are administered. Pharmacokinetic models are typically contrasted with (and sometimes paired with) <a href="https://en.wikipedia.org/wiki/Pharmacodynamics">pharmacodynamic</a> (PD) models used to study the effect that drugs (and other substances) have on the organism. When these two things are paired – as you would often need to do if, say, you’d like to understand the behaviour of a new drug – it’s referred to as <a href="https://en.wikipedia.org/wiki/PK/PD_models">PK/PD</a> modelling.<sup>1</sup></p>
+<section id="a-little-background" class="level2">
+<h2 class="anchored" data-anchor-id="a-little-background">A little background</h2>
+<div class="cell">
+
+</div>
+<p>To the surprise of exactly no-one who has experience with applied statistics, it turns out that there is quite a bit of nuance to pharmacometric analyses, and I’m only just starting to wrap my head around it all.<sup>2</sup> To help make sense of it, let’s imagine a simple data set that looks like this when plotted:</p>
+<div class="cell">
+<div class="cell-output-display">
+<p><img src="https://blog.djnavarro.net/posts/2023-04-26_non-compartmental-analysis/index_files/figure-html/unnamed-chunk-2-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>It’s a very simple data set because we’re only looking at data from a single dose of some drug administered only to a single organism, and we’re measuring the concentration<sup>3</sup> of that drug at several time points. This is quite sensibly referred to as a concentration-time curve.</p>
+<p>Given data that take the form of one or more concentration-time curves, what kind of modelling strategy should you pursue? <sup>4</sup> <sup>5</sup> As usual there are many choices an analyst needs to make, but one key distinction is between <a href="https://en.wikipedia.org/wiki/Pharmacokinetics#Noncompartmental_analysis">noncompartmental</a> and <a href="https://en.wikipedia.org/wiki/Pharmacokinetics#Compartmental_analysis">compartmental</a> analyses.</p>
+<p>In a <strong>compartmental analysis</strong>, the statistician makes some (generally simplified) assumptions about the biological processes<sup>6</sup> at play when a drug is administered, and estimates parameters using this model. For example, you might use a two-compartment model with a central compartment that corresponds to the circulatory system through which the drug is distributed, and a peripheral compartment corresponding to the body tissues to which the drug is delivered. The good thing about compartmental models is that they can provide a somewhat realistic description of what happens when a drug is administered. The bad thing is that it can be difficult to work out how to formulate the model correctly, with all the attendant worries about model misspecification. I’m not going to talk about these models in this post.</p>
+<p>An alternative strategy – one that has complementary strengths and weaknesses to compartmental models – is to try to estimate quantities of interest (more or less) directly from the concentration-time curve. This approach is referred to as <strong>non-compartmental analysis</strong> (NCA), and it has the advantage of being simpler to implement, and as such inherits much of the robustness that comes from model simplicity.<sup>7</sup></p>
+<p>With that in mind it is useful to list some of the <a href="https://en.wikipedia.org/wiki/Pharmacokinetics#Metrics">quantities of interest</a> that are typically used in pharmacokinetic modelling. They vary a bit. Some of them are defined in a way that relates straightforwardly to the data. They’re things that you can directly measure, or they’re part of the study design, etc:</p>
+<table class="table">
+<colgroup>
+<col style="width: 19%">
+<col style="width: 20%">
+<col style="width: 14%">
+<col style="width: 13%">
+<col style="width: 15%">
+<col style="width: 13%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Quantity</th>
+<th>Notes</th>
+<th>Symbol</th>
+<th>Unit</th>
+<th>Formula</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Dose</td>
+<td>Amount of drug administered</td>
+<td><img src="https://latex.codecogs.com/png.latex?D"></td>
+<td>mmol</td>
+<td>(Design)</td>
+<td>500 mmol</td>
+</tr>
+<tr class="even">
+<td>C<sub>max</sub></td>
+<td>Peak plasma concentration of drug after administration</td>
+<td><img src="https://latex.codecogs.com/png.latex?C_%7Bmax%7D"></td>
+<td>mmol/L</td>
+<td>(Measured)</td>
+<td>60.9 mmol/L</td>
+</tr>
+<tr class="odd">
+<td>t<sub>max</sub></td>
+<td>Time taken to reach C<sub>max</sub></td>
+<td><img src="https://latex.codecogs.com/png.latex?t_%7Bmax%7D"></td>
+<td>h</td>
+<td>(Measured)</td>
+<td>3.9h</td>
+</tr>
+<tr class="even">
+<td>Volume of distribution</td>
+<td>Volume over which the drug is distributed</td>
+<td><img src="https://latex.codecogs.com/png.latex?V_d"></td>
+<td>L</td>
+<td><img src="https://latex.codecogs.com/png.latex?D/C_0"></td>
+<td>6.0 L</td>
+</tr>
+</tbody>
+</table>
+<p>Not everything is that simple however. For example, the half-life parameters for absorption and elimination are not directly observable, and estimates of those quantities must be computed from other quantities:</p>
+<table class="table">
+<colgroup>
+<col style="width: 16%">
+<col style="width: 17%">
+<col style="width: 21%">
+<col style="width: 11%">
+<col style="width: 17%">
+<col style="width: 11%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Quantity</th>
+<th>Notes</th>
+<th>Symbol</th>
+<th>Unit</th>
+<th>Formula</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Absorption half-life</td>
+<td>The time taken for 50% of the dose to be absorbed into circulation</td>
+<td><img src="https://latex.codecogs.com/png.latex?t_%7B%5Cfrac%7B1%7D%7B2%7Da%7D"></td>
+<td>h</td>
+<td><img src="https://latex.codecogs.com/png.latex?%5Cln(2)%20/%20k_a"></td>
+<td>1.0 h</td>
+</tr>
+<tr class="even">
+<td>Elimination half-life</td>
+<td>The time taken for the drug concentration to fall to 50% of its initial value</td>
+<td><img src="https://latex.codecogs.com/png.latex?t_%7B%5Cfrac%7B1%7D%7B2%7Db%7D"></td>
+<td>h</td>
+<td><img src="https://latex.codecogs.com/png.latex?%5Cln(2)%20/%20k_e"></td>
+<td>12 h</td>
+</tr>
+</tbody>
+</table>
+<p>Of course, when an uninitiated reader looks at these formulas, the first question they’d ask is “what the heck do the <img src="https://latex.codecogs.com/png.latex?k_a"> and <img src="https://latex.codecogs.com/png.latex?k_e"> quantities refer to? In a slightly circular fashion, we can extend the table somewhat and refer to these as the corresponding rate parameters for absorption and elimination:</p>
+<table class="table">
+<colgroup>
+<col style="width: 16%">
+<col style="width: 17%">
+<col style="width: 15%">
+<col style="width: 11%">
+<col style="width: 22%">
+<col style="width: 15%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Quantity</th>
+<th>Notes</th>
+<th>Symbol</th>
+<th>Unit</th>
+<th>Formula</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Absorption rate</td>
+<td>The rate at which the drug enters into circulation</td>
+<td><img src="https://latex.codecogs.com/png.latex?k_a"></td>
+<td><img src="https://latex.codecogs.com/png.latex?h%5E%7B-1%7D"></td>
+<td><img src="https://latex.codecogs.com/png.latex?%5Cfrac%7B%5Cln%202%7D%20%7Bt_%7B%5Cfrac%7B1%7D%7B2%7Da%7D%7D"></td>
+<td>0.693 h<sup>-1</sup></td>
+</tr>
+<tr class="even">
+<td>Elimination rate</td>
+<td>The rate at which the drug is eliminated from the body</td>
+<td><img src="https://latex.codecogs.com/png.latex?k_e"></td>
+<td><img src="https://latex.codecogs.com/png.latex?h%5E%7B-1%7D"></td>
+<td><img src="https://latex.codecogs.com/png.latex?%5Cfrac%7B%5Cln%202%7D%20%7Bt_%7B%5Cfrac%7B1%7D%7B2%7Db%7D%7D%20=%20%5Cfrac%7BCL%7D%7BV_d%7D"></td>
+<td>0.0578 h<sup>-1</sup></td>
+</tr>
+</tbody>
+</table>
+<p>For the most part, these extra lines in our table don’t do much other than rephrase the last two… but there is something new here. One way of thinking about the underlying biology here is to suppose that the body has the capacity to “clean” or “clear” some volume of blood plasma per unit time. This is referred to as the <a href="https://en.wikipedia.org/wiki/Clearance_(pharmacology)"><strong>clearance rate</strong></a> (denoted <img src="https://latex.codecogs.com/png.latex?CL"> in the table).</p>
+<p>Once we have the concept of a clearance rate <img src="https://latex.codecogs.com/png.latex?CL"> – and implicitly, a concept of how it relates to elimination rates <img src="https://latex.codecogs.com/png.latex?k_e"> and distribution volume <img src="https://latex.codecogs.com/png.latex?V_d"> – we can start linking it to observable (or at least, estimable) quantities…</p>
+<table class="table">
+<colgroup>
+<col style="width: 15%">
+<col style="width: 16%">
+<col style="width: 14%">
+<col style="width: 10%">
+<col style="width: 21%">
+<col style="width: 17%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Quantity</th>
+<th>Notes</th>
+<th>Symbol</th>
+<th>Unit</th>
+<th>Formula</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Area under the curve</td>
+<td>Integral of the concentration- time curve</td>
+<td><img src="https://latex.codecogs.com/png.latex?AUC"></td>
+<td><img src="https://latex.codecogs.com/png.latex?M%20s"></td>
+<td><img src="https://latex.codecogs.com/png.latex?%5Cint_I%20C%20dt"></td>
+<td>1,320 h mmol/L</td>
+</tr>
+<tr class="even">
+<td>Clearance rate</td>
+<td>Volume of plasma cleared per unit time</td>
+<td><img src="https://latex.codecogs.com/png.latex?CL"></td>
+<td><img src="https://latex.codecogs.com/png.latex?m%5E3/%20s"></td>
+<td><img src="https://latex.codecogs.com/png.latex?V_d%20%5C%20k_e%20=%20%5Cfrac%7BD%7D%7BAUC%7D"></td>
+<td>0.38 L/h</td>
+</tr>
+</tbody>
+</table>
+<p>…where I’m being slightly imprecise here in the formula for the area under the curve, because I haven’t specified the interval <img src="https://latex.codecogs.com/png.latex?I"> over which we should integrate. In the simplest case where as single dose is administered, the interval is generally taken to be <img src="https://latex.codecogs.com/png.latex?%5B0,%20%5Cinfty%5D">, and that is good enough for this post.<sup>8</sup></p>
+<p>At long last, we get to the point… you can think of the AUC as a kind of “total drug exposure” measure, but it’s not immediately obvious whether that’s a biologically meaningful quantity. However, it is naturally related to the clearance rate… which <em>does</em> have an inherent meaning from a biological perspective. And from this observation we arrive at the logic behind noncompartmental analysis. Instead of constructing a model of the <em>process</em> by which the body eliminates a drug, we instead aim to estimate AUC (and other quantities) from the observed data.<sup>9</sup> <sup>10</sup></p>
+<p>Yay! Now we understand a minimal amount of the basic science. We know <em>why</em> the lovely pharma folks might want an estimate of AUC, and we can see why a nonparametric<sup>11</sup> <sup>12</sup> estimate of the AUC might useful to have.</p>
+</section>
+<section id="a-simple-approach" class="level2">
+<h2 class="anchored" data-anchor-id="a-simple-approach">A simple approach</h2>
+<p>How might we estimate this? The simplest approach would be to linearly interpolate between observations, and then compute the area under the resulting curve. Represented visually, area we would compute is the sum of the trapezoidal regions shown below:</p>
+<div class="cell">
+<div class="cell-output-display">
+<p><img src="https://blog.djnavarro.net/posts/2023-04-26_non-compartmental-analysis/index_files/figure-html/unnamed-chunk-3-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>For a single trapezoid defined by time values <img src="https://latex.codecogs.com/png.latex?t_1"> and <img src="https://latex.codecogs.com/png.latex?t_2">, at which concentration levels <img src="https://latex.codecogs.com/png.latex?c_1"> and <img src="https://latex.codecogs.com/png.latex?c_2"> are observed, the corresponding area is <img src="https://latex.codecogs.com/png.latex?(t_2%20-%20t_1)%20(c_2%20+%20c_1)%20/%202">, so applying the <a href="https://en.wikipedia.org/wiki/Trapezoidal_rule">trapezoidal rule</a> to the finite set of observations provides an approximation to the integral we care about, yielding a simple estimator for the area under the curve:</p>
+<p><img src="https://latex.codecogs.com/png.latex?%0AAUC%20=%20%5Csum_%7Bi=1%7D%5E%7Bn-1%7D%20(t_%7Bi+1%7D%20-%20t_i)%20%5Cfrac%7Bc_%7Bi+1%7D%20+%20c_i%7D%7B2%7D%0A"></p>
+<p>where <img src="https://latex.codecogs.com/png.latex?n"> denotes the total number of time points at which a measurement has been taken. To tidy the notation slightly I’ll let <img src="https://latex.codecogs.com/png.latex?%5CDelta%20t_i%20=%20t_%7Bi%20+%201%7D%20-%20t_i">, and thus</p>
+<p><img src="https://latex.codecogs.com/png.latex?%0AAUC%20=%20%5Csum_%7Bi=1%7D%5E%7Bn-1%7D%20%5CDelta%20t_i%20%5Cfrac%7Bc_%7Bi+1%7D%20+%20c_i%7D%7B2%7D%0A"></p>
+<p>That’s easy enough to implement as an R function:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1">auc <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>(time, conc) {</span>
+<span id="cb1-2">  n <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">length</span>(time)</span>
+<span id="cb1-3">  <span class="fu" style="color: #4758AB;">sum</span>((time[<span class="sc" style="color: #5E5E5E;">-</span><span class="dv" style="color: #AD0000;">1</span>] <span class="sc" style="color: #5E5E5E;">-</span> time[<span class="sc" style="color: #5E5E5E;">-</span>n]) <span class="sc" style="color: #5E5E5E;">*</span> (conc[<span class="sc" style="color: #5E5E5E;">-</span><span class="dv" style="color: #AD0000;">1</span>] <span class="sc" style="color: #5E5E5E;">+</span> conc[<span class="sc" style="color: #5E5E5E;">-</span>n]) <span class="sc" style="color: #5E5E5E;">/</span> <span class="dv" style="color: #AD0000;">2</span>)</span>
+<span id="cb1-4">}</span></code></pre></div>
+</div>
+<p>This <code>auc()</code> function is incredibly limited, but it will suffice for now.<sup>13</sup> Let’s say we have a data frame <code>df</code> that contains the data I used to draw the figure above:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb2" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1">df</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 7 × 2
+   time concentration
+  &lt;dbl&gt;         &lt;dbl&gt;
+1     0             0
+2     1             8
+3     2            12
+4     4            14
+5     8             9
+6    16             4
+7    32             2</code></pre>
+</div>
+</div>
+<p>Then:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb4" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><span class="fu" style="color: #4758AB;">with</span>(df, <span class="fu" style="color: #4758AB;">auc</span>(time, concentration))</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] 186</code></pre>
+</div>
+</div>
+<p>Using such calculated values of AUC I could then go on to calculate values for <a href="https://en.wikipedia.org/wiki/Clearance_(pharmacology)">clearance</a>, <a href="https://en.wikipedia.org/wiki/Bioavailability">bioavailability</a>, and more. Yay!</p>
+</section>
+<section id="a-concern-about-tails" class="level2">
+<h2 class="anchored" data-anchor-id="a-concern-about-tails">A concern about tails</h2>
+<p>In practice, a pharmacometrician wouldn’t calculate AUC the way I’ve just done it, for all sorts of reasons. To see why, I’ll let <img src="https://latex.codecogs.com/png.latex?f(t)"> denote the true concentration-time curve, such that the observed concentration <img src="https://latex.codecogs.com/png.latex?c_i"> at time <img src="https://latex.codecogs.com/png.latex?t_i"> is given by</p>
+<p><img src="https://latex.codecogs.com/png.latex?%0Ac_i%20=%20f(t_i)%20+%20%5Cepsilon_i%0A"></p>
+<p>where <img src="https://latex.codecogs.com/png.latex?%5Cepsilon_i"> denotes the measurement errors that – purely for simplicity – I’ll pretend are <a href="https://en.wikipedia.org/wiki/Independent_and_identically_distributed_random_variables">i.i.d.</a> with mean zero.<sup>14</sup> By definition then, the true value of the AUC we seek to estimate is given</p>
+<p><img src="https://latex.codecogs.com/png.latex?%0A%5Cint_0%5E%5Cinfty%20f(t)%20%5C%20dt%0A"></p>
+<p>which we can decompose into the sum of two definite integrals, one taken over the range of times for which we have data <img src="https://latex.codecogs.com/png.latex?%5Bt_1,%20t_n%5D"> where <img src="https://latex.codecogs.com/png.latex?t_1%20=%200">, and the other corresponding to the tail area <img src="https://latex.codecogs.com/png.latex?%5Bt_n,%20%5Cinfty%5D"></p>
+<p><img src="https://latex.codecogs.com/png.latex?%0A%5Cint_%7Bt_1%7D%5E%7Bt_n%7D%20f(t)%20%5C%20dt%20+%20%5Cint_%7Bt_n%7D%5E%7B%5Cinfty%7D%20f(t)%20%5C%20dt%0A"></p>
+<p>It doesn’t take a lot of work to notice that the AUC that we calculate is a numerical approximation to the first term only.<sup>15</sup> <sup>16</sup> <sup>17</sup> Unless we have designed our study such that the concentration <img src="https://latex.codecogs.com/png.latex?c_n"> is effectively zero at the final time point <img src="https://latex.codecogs.com/png.latex?t_n">, we’re going to end up with an estimate of the AUC that systematically underestimates the true value. Given that AUC is used as a measure of “total drug exposure” and is rather important for estimating other important quantities, we’d prefer to avoid that, but in order to do so we might have to – gasp! – start using our knowledge of the domain to make some assumptions.</p>
+</section>
+<section id="making-sensible-assumptions" class="level2">
+<h2 class="anchored" data-anchor-id="making-sensible-assumptions">Making sensible assumptions</h2>
+<p>At this point it’s useful to consider the reasons why the curve I’ve used as my toy data set starts at zero, rises to a maximum concentration after a moderate amount of time, and then smoothly decreases afterwards. This pattern might be observed from a drug administered orally. At the time of administration the blood plasma concentration of the drug will be zero because it hasn’t yet been absorbed into systemic circulation – because bodies have that pesky gastrointestinal system that has to do its job before ingested substances pass into the bloodstream. In other words, at the beginning the absorption process is the main factor at play, and blood concentration rises. Later on, however, once the substance has been (mostly) absorbed the situation changes, and it’s the elimination process that dominates: drug concentration falls as the kidneys etc do their job and clear it from the system. For a drug administered intravenously, however, the situation is going to be a little different because we bypass the absorption process: the plasma concentration <em>starts</em> at its maximum value and falls steadily as the elimination process takes place.</p>
+<p>Given all this let’s return to NCA estimate of AUC, and think about what happens in the tails. Assuming we have designed our study sensibly, the last time point <img src="https://latex.codecogs.com/png.latex?t_n"> will be chosen so that absorption (if relevant) is substantially complete, and the blood concentration is falling: when estimating the tail area, it’s not unreasonable to assume that elimination is the only process in play, and that the body is able to clear some fixed volume of blood (i.e., the clearance, CL) per unit time. Or, to put it another way, for the purposes of estimating the tail area, we’ll use a one-compartment bolus model that assumes drug concentrations over time follow an exponential decay:<sup>18</sup></p>
+<p><img src="https://latex.codecogs.com/png.latex?%0Ac(t)%20=%20c_0%20%5C%20e%5E%7B-k_e%20t%7D%0A"></p>
+<p>where <img src="https://latex.codecogs.com/png.latex?c_0"> refers to the initial concentration and <img src="https://latex.codecogs.com/png.latex?k_e"> is the elimination rate constant discussed earlier in the post. To be slightly more precise, we take the final observed concentration <img src="https://latex.codecogs.com/png.latex?c_n"> to be our starting concentration, and then assume that the remaining time course of elimination produces an exponential decay, giving us this as our estimate of the tail area:</p>
+<p><img src="https://latex.codecogs.com/png.latex?%0A%5Cint_%7Bt_n%7D%5E%7B%5Cinfty%7D%20c_n%20%5C%20e%5E%7B-k_e%20(t%20-%20t_n)%7D%20%5C%20dt%20%20=%20%5Cfrac%7Bc_n%7D%7Bk_e%7D%0A"></p>
+<p>That’s nice and neat, except for one small problem: we don’t actually know the value of <img src="https://latex.codecogs.com/png.latex?k_e">. Fortunately, since we’re assuming that the concentration-time curve is exponential in the tail, we expect that a plot of log concentration against time will be linear for the later time points. Better yet, per the one-compartment bolus model, the slope of this plot will give us an estimate of <img src="https://latex.codecogs.com/png.latex?k_e">:</p>
+<p><img src="https://latex.codecogs.com/png.latex?%0A%5Cln%20c(t)%20=%20-k_e%20t%20+%20%5Cln%20c_0%0A"></p>
+<p>In a truly shocking turn of events, when we plot the entirely made-up data I’ve used for this post on a logarithmic scale, we see precisely the expected pattern:</p>
+<div class="cell">
+<div class="cell-output-display">
+<p><img src="https://blog.djnavarro.net/posts/2023-04-26_non-compartmental-analysis/index_files/figure-html/unnamed-chunk-7-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>Expressed as R code, we can estimate the elimination rate by regressing log concentration against time for the final few data points (about 3 or 4 is considered okay) and using the slope<sup>19</sup> as our estimate:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb6" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1"><span class="sc" style="color: #5E5E5E;">-</span><span class="fu" style="color: #4758AB;">lm</span>(<span class="fu" style="color: #4758AB;">log</span>(concentration) <span class="sc" style="color: #5E5E5E;">~</span> time, df[<span class="dv" style="color: #AD0000;">4</span><span class="sc" style="color: #5E5E5E;">:</span><span class="dv" style="color: #AD0000;">7</span>, ])<span class="sc" style="color: #5E5E5E;">$</span>coef[<span class="dv" style="color: #AD0000;">2</span>]</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>      time 
+0.06791393 </code></pre>
+</div>
+</div>
+<p>So we could refine our <code>auc()</code> function as follows:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb8" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1">auc <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="cf" style="color: #003B4F;">function</span>(time, conc, <span class="at" style="color: #657422;">tail_n =</span> <span class="dv" style="color: #AD0000;">4</span>) {</span>
+<span id="cb8-2">  n <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">length</span>(time)</span>
+<span id="cb8-3">  tail_points <span class="ot" style="color: #003B4F;">&lt;-</span> (n <span class="sc" style="color: #5E5E5E;">-</span> tail_n <span class="sc" style="color: #5E5E5E;">+</span> <span class="dv" style="color: #AD0000;">1</span>)<span class="sc" style="color: #5E5E5E;">:</span>n</span>
+<span id="cb8-4">  auc_body <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">sum</span>((time[<span class="sc" style="color: #5E5E5E;">-</span><span class="dv" style="color: #AD0000;">1</span>] <span class="sc" style="color: #5E5E5E;">-</span> time[<span class="sc" style="color: #5E5E5E;">-</span>n]) <span class="sc" style="color: #5E5E5E;">*</span> (conc[<span class="sc" style="color: #5E5E5E;">-</span><span class="dv" style="color: #AD0000;">1</span>] <span class="sc" style="color: #5E5E5E;">+</span> conc[<span class="sc" style="color: #5E5E5E;">-</span>n]) <span class="sc" style="color: #5E5E5E;">/</span> <span class="dv" style="color: #AD0000;">2</span>)</span>
+<span id="cb8-5">  k_e <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="sc" style="color: #5E5E5E;">-</span><span class="fu" style="color: #4758AB;">lm</span>(<span class="fu" style="color: #4758AB;">log</span>(conc[tail_points]) <span class="sc" style="color: #5E5E5E;">~</span> time[tail_points])<span class="sc" style="color: #5E5E5E;">$</span>coef[<span class="dv" style="color: #AD0000;">2</span>]</span>
+<span id="cb8-6">  auc_tail <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">unname</span>(conc[n] <span class="sc" style="color: #5E5E5E;">/</span> k_e)</span>
+<span id="cb8-7">  auc_body <span class="sc" style="color: #5E5E5E;">+</span> auc_tail</span>
+<span id="cb8-8">}</span></code></pre></div>
+</div>
+<p>Applying it to the toy data set, we can see that the estimated AUC has increased quite considerably:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb9" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1"><span class="fu" style="color: #4758AB;">with</span>(df, <span class="fu" style="color: #4758AB;">auc</span>(time, concentration))</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] 215.449</code></pre>
+</div>
+</div>
+<p>That’s not entirely surprising, given that I deliberately created a toy data set where the plasma concentration was still relatively high at the final time point.</p>
+</section>
+<section id="further-refinement" class="level2">
+<h2 class="anchored" data-anchor-id="further-refinement">Further refinement</h2>
+<p>My goal in this post was very modest: all I really wanted to do was wrap my head around some core concepts in pharmacokinetics and implement a simple analytic method. It’s worth noting, however, that in real life there are further refinements to NCA that are usually considered. For example, in order to construct an estimate of the tail area I relied on some sensible assumptions (exponential decay) about the shape of the underlying pharmacokinetic function. That’s very sensible, but there’s nothing stopping us making use of the same ideas to refine the estimate of the “AUC body” as well as the “AUC tail”. Using the trapezoid rule (linear interpolation) to construct our estimate makes sense if we have no idea whether the function is concave or convex at a particular point in the curve. But, as the plot below illustrates, this method systematically underestimates concave areas, and overestimates convex areas.</p>
+<p>Suppose, for example, that instead of a one-compartment bolus model, the pharmacokinetics of our drug are better described by a “Bateman” curve that assumes a constant rate of absorption and a constant rate of elimination:</p>
+<p><img src="https://latex.codecogs.com/png.latex?%0Ac(t)%20=%20%5Cfrac%7BF%20%5Ctimes%20D%20%5Ctimes%20k_a%7D%7BV_D%20(k_a%20-%20k_e)%7D%20%5Cleft(%20e%5E%7B-k_e%20t%7D%20-%20e%5E%7B-k_a%20t%7D%20%5Cright)%0A"> In this expression <img src="https://latex.codecogs.com/png.latex?F"> denotes the bioavailability (fraction of the drug that gets absorbed, e.g., 0.8), <img src="https://latex.codecogs.com/png.latex?D"> is the dose (e.g., 200mmol), and <img src="https://latex.codecogs.com/png.latex?V_D"> is the volume over which the drug is distributed (e.g.&nbsp;6L). This kind of system gives us pharmacokinetic profiles that look like this:<sup>20</sup></p>
+<div class="cell">
+<div class="cell-output-display">
+<p><img src="https://blog.djnavarro.net/posts/2023-04-26_non-compartmental-analysis/index_files/figure-html/unnamed-chunk-11-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>Now suppose we measured this function at a few data points and used the trapezoid rule to estimate the integral:</p>
+<div class="cell">
+<div class="cell-output-display">
+<p><img src="https://blog.djnavarro.net/posts/2023-04-26_non-compartmental-analysis/index_files/figure-html/unnamed-chunk-12-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>Notice that there are systematic (and non-trivial) overestimates on the right side of the curve where the concentrations are decaying exponentially but the estimator is interpolating linearly. The corresponding underestimates on the left hand side – where the curve is concave – are smaller because we’ve designed the study to measure more frequently early on (which is sensible). Because these overestimates tend to occur in the part of the curve where the elimination process dominates, there are variations of non-compartmental AUC calculations that use nonlinear interpolation for those parts of the concentration-time curve.<sup>21</sup> However, I’m not going to dive into that in this post, since I wanted to keep the discussion as simple as possible.</p>
+<p>I am sure you are all deeply thrilled to hear that.</p>
+<!--------------- appendices go here ----------------->
+
+
+</section>
+
+
+<div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
+
+<ol>
+<li id="fn1"><p>The specific discipline that refers to the formal modelling aspect to pharmacology is called <a href="https://en.wikipedia.org/wiki/Pharmacometrics">pharmacometrics</a>.↩︎</p></li>
+<li id="fn2"><p>Whenever learning a new thing I try to force myself to be the precise opposite of <a href="https://xkcd.com/793/">this person</a>.↩︎</p></li>
+<li id="fn3"><p>Typically the <a href="https://en.wikipedia.org/wiki/Blood_plasma">blood plasma</a> concentration, which might be something like <a href="https://en.wikipedia.org/wiki/Mass_concentration_(chemistry)">mass concentration</a> but of course doesn’t have to be. The plots I’m using in this post don’t bother to specify units because I’m not doing that deep a dive yet, but obviously that would… um… matter quite a lot in real life. One should not confuse mass concentration with molar concentration or volume concentration etc etc. So much undergraduate chemistry coming back to me as I write this… it’s kind of fun.↩︎</p></li>
+<li id="fn4"><p>Realistically you’d expect to obtain more than one such curve in a real study, and as such you have all the usual issues around aggregating data from possibly-heterogeneous sources. This line of thought leads you naturally to considering <a href="https://www.fda.gov/regulatory-information/search-fda-guidance-documents/population-pharmacokinetics">population pharmacokinetics</a>, and there will be exactly zero statisticians surprised to learn that this leads you to thinking about mixed models (see, for example, this lovely <a href="https://www.youtube.com/watch?v=y1TPbJENacE">talk by Joseph Standing</a>. I’m not going to get to that in this post but I did start reading about some of the models used for this purpose and, not gonna lie, they look like fun.↩︎</p></li>
+<li id="fn5"><p>I mean, this morning I discovered the <a href="https://insightrx.github.io/PKPDposterior/">PKPDposterior</a> R package that provides Stan wrappers for Bayesian PKPD models and am awfully excited to play with it at a later point.↩︎</p></li>
+<li id="fn6"><p>I’m still learning my way around the territory here but even I can see that when constructing a specific model you’ll likely want to think about processes of absorption, distribution, metabolism, and elimination (<a href="https://en.wikipedia.org/wiki/ADME">ADME</a>).↩︎</p></li>
+<li id="fn7"><p>This simplicity also makes it an attractive place for me to start learning about a new field. Learning a new discipline always requires learning the terminology and notation, understanding the assumptions and practices, and so on. I find it much easier to wrap my head around those things in the context of a comparatively-simple statistical technique rather than attempting to do the same thing in the context of a more complex one.↩︎</p></li>
+<li id="fn8"><p>In more complex cases where a steady state is reached (e.g., when doses are administered at regular intervals, eventually the concentration-time curve becomes periodic and the system is in dynamic equilibrium), the interval is computed from some time <img src="https://latex.codecogs.com/png.latex?t"> after the steady state is reached, to some time <img src="https://latex.codecogs.com/png.latex?t+%5Ctau">.↩︎</p></li>
+<li id="fn9"><p>Okay, fine, I confess I am oversimplifying here. Noncompartmental analysis is somewhat more general than this. For the purposes of this post I’m restricting myself to thinking about the area under the concentration-time curve, but as noted in review papers (e.g., <a href="https://dx.doi.org/10.1007/978-1-62703-050-2_16">Gabrielsson &amp; Weiner 2012</a>) there are other curves to which you can apply much the same logic. For example, if you plot the first moment (concentration x time) against time and compute the area under that curve (typically denoted AUMC), you can use this to estimate other quantities that pharmacometricians care about. That being said, I’m not going to go into that here.↩︎</p></li>
+<li id="fn10"><p>Slightly confusingly, it appears to be a convention in the literature that, unless otherwise stated, “AUC” refers <em>specifically</em> to the area under the concentration-time curve. Per the previous footnote, the area under the first moment curve is referred to as the “AUMF”. I’d complain about this imprecision, but I too have worked as a research scientist. I am acutely aware that “AUC” also has an equally-confusing default meaning in psychology – in that context, “AUC” is almost always taken to refer to the area under the <a href="https://en.wikipedia.org/wiki/Receiver_operating_characteristic">receiver operating characteristic</a> curve, because <a href="https://en.wikipedia.org/wiki/Detection_theory">signal detection theory</a> often lies in the background as an unstated assumption. Sigh. Science is a cruel mistress.↩︎</p></li>
+<li id="fn11"><p>I hate that word. Seriously. If you’re not a statistician, but happen to know a devout frequentist and a devout Bayesian, gather the two of them together and ask them what “nonparametric” means. Then, measure the size of the resulting mushroom cloud. It’s an empty term that doesn’t mean anything. But whatever. The reason I use it here has fuck all to do with Bayesian/frequentist squabbles, and everything to do with the fact that we are deliberately trying our best <em>not</em> to construct a model that makes strong theoretical assumptions. My statistical logic for thinking of this as “nonparametric” follows naturally from the scientific logic for calling it “noncompartmental”.↩︎</p></li>
+<li id="fn12"><p>On top of that, there’s the fact that as soon as one moves past the simplest possible approach, we actually do start making some assumptions about the structure of the concentration-time curve, partially expressing it in terms of a low dimensional model, so there is a sense in which “nonparametric” is a bit misleading. Whatever. I’m not entirely convinced that terminology was ever very helpful.↩︎</p></li>
+<li id="fn13"><p>I’ll talk about its limitations from a statistical perspective in a moment, but it’s worth noting that assumes the observations are ordered chronologically, and I’ve not bothered with input checking or anything that I’d want to do in real life to prevent accidental misuse. But that’s not the point of the post and I’m getting off track.↩︎</p></li>
+<li id="fn14"><p>Or, more precisely, I’m simply going to ignore them for now. I promise I am not this sloppy when working professionally but honestly right now I’m focusing on learning the basics.↩︎</p></li>
+<li id="fn15"><p>I did briefly consider writing something more detailed about this point but it’s sort of silly: the trapezoid rule for numeric integration is the average of the left and right <a href="https://en.wikipedia.org/wiki/Riemann_sum">Riemann sums</a>, so if we’re assuming that <img src="https://latex.codecogs.com/png.latex?f()"> is a Riemann-integrable function, it’s pretty clear that the thing we’re doing here is employing a well-established method for numerically approximating the area under the curve, but only measured up to the last observed time point.↩︎</p></li>
+<li id="fn16"><p>We could go slightly further in this hypothetical analysis that I didn’t bother with and show that under a simple design where we sample the values of <img src="https://latex.codecogs.com/png.latex?t"> in such a way that as <img src="https://latex.codecogs.com/png.latex?n%20%5Crightarrow%20%5Cinfty"> the longest time interval also goes to infinity <img src="https://latex.codecogs.com/png.latex?t_n%20%5Crightarrow%20%5Cinfty">, this method will produce an <a href="https://en.wikipedia.org/wiki/Consistent_estimator">asymptotically consistent</a> estimator for the true AUC. But, honestly, who cares? Asymptotic consistency is the coldest of cold comforts, and guarantees very little in practice. There’s a good reason why pharmacometricians prefer methods that attempt to estimate the tail area in the pre-asymptotic (i.e., real world) scenario.↩︎</p></li>
+<li id="fn17"><p>The reason, of course, being that they are not idiots and they care about making sensible inferences.↩︎</p></li>
+<li id="fn18"><p>I suppose this is one of those models that is so widely used that it’s almost weird to cite, but for what it’s worth I’ve found <a href="https://doi.org/10.1016/S0169-409X(01)00118-1">Holz &amp; Fahr (2001)</a> to be a nice introduction to compartment modelling.↩︎</p></li>
+<li id="fn19"><p>Well, -1 times the slope, but whatever.↩︎</p></li>
+<li id="fn20"><p>Okay yes my toy data set does look rather like a Bateman curve. In truth I made up the values intuitively, but I’m amused to see that they closely adhere to a model that I hadn’t yet read about when I created the data.↩︎</p></li>
+<li id="fn21"><p>One question that I haven’t yet found the answer for is the one that pops up when you look at the curve above: there’s a systematic underestimate that occurs when you don’t have many data points near the peak concentration. In that region the curve is concave. Intuitively it seemed to me that if you’re going to apply corrections in regions where you are pretty sure the curve is convex, it might be wise to do similarly in regions where you’re pretty sure it’s concave. I imagine there’s an answer to this in the literature somewhere.↩︎</p></li>
+</ol>
+</section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2023,
+  author = {Danielle Navarro},
+  title = {Non-Compartmental Analysis},
+  date = {2023-04-26},
+  url = {https://blog.djnavarro.net/posts/2023-04-26_non-compartmental-analysis},
+  langid = {en}
+}
+</code></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2023" class="csl-entry quarto-appendix-citeas">
+Danielle Navarro. 2023. <span>“Non-Compartmental Analysis.”</span> April
+26, 2023. <a href="https://blog.djnavarro.net/posts/2023-04-26_non-compartmental-analysis">https://blog.djnavarro.net/posts/2023-04-26_non-compartmental-analysis</a>.
+</div></div></section></div> ]]></description>
+  <category>Statistics</category>
+  <category>Pharmacokinetics</category>
+  <guid>https://blog.djnavarro.net/posts/2023-04-26_non-compartmental-analysis/index.html</guid>
+  <pubDate>Tue, 25 Apr 2023 14:00:00 GMT</pubDate>
+  <media:content url="https://blog.djnavarro.net/posts/2023-04-26_non-compartmental-analysis/cover.jpg" medium="image" type="image/jpeg"/>
+</item>
 <item>
   <title>A personal essay on Bayes factors</title>
   <dc:creator>Danielle Navarro</dc:creator>
@@ -8920,1265 +9292,6 @@ in R with Apache Arrow.”</span> August 23, 2022. <a href="https://blog.djnavar
   <guid>https://blog.djnavarro.net/posts/2022-08-23_visualising-a-billion-rows/index.html</guid>
   <pubDate>Mon, 22 Aug 2022 14:00:00 GMT</pubDate>
   <media:content url="https://blog.djnavarro.net/posts/2022-08-23_visualising-a-billion-rows/img/cover.jpg" medium="image" type="image/jpeg"/>
-</item>
-<item>
-  <title>Arrays and tables in Arrow</title>
-  <dc:creator>Danielle Navarro</dc:creator>
-  <link>https://blog.djnavarro.net/posts/2022-05-25_arrays-and-tables-in-arrow/index.html</link>
-  <description><![CDATA[ 
-
-
-
-
-<!--------------- my typical setup ----------------->
-<!--------------- post begins here ----------------->
-<blockquote class="blockquote">
-<p>My catholic taste in the devil<br>
-All gilded and golden, yes, I’m your girl<br>
-Hell, if it glitters, I’m going<br>
-&nbsp;&nbsp;– <em>Heaven is Here</em>, Florence + The Machine</p>
-</blockquote>
-<p>If you’ve made the life choice to become a developer advocate with a focus on <a href="https://arrow.apache.org/">Apache Arrow</a>, you’re probably not unfamiliar with masochism.</p>
-<p>Don’t believe me? Let’s consider my past choices:</p>
-<ul>
-<li>My first attempt to write about the topic didn’t even talk about Arrow: the post was a descent into the madness of <a href="https://blog.djnavarro.net/posts/2021-11-15_serialisation-with-rds/">data serialisation in R</a> and the RDS format. I don’t think I need to explain the pain that one involved.</li>
-<li>My second attempt went a little better, and I managed to write a few thousand words on <a href="https://blog.djnavarro.net/posts/2021-11-19_starting-apache-arrow-in-r/">getting started with Apache Arrow</a> for the R user. Much of that post was spent on answering very technical questions like “what is this?” and “why do I care?” These are excellent questions to answer, but nevertheless it was a learning experience for me, shall we say? There were headaches.</li>
-<li>My third attempt talked about how <a href="https://blog.djnavarro.net/posts/2022-01-18_binding-arrow-to-r/">the <strong>arrow</strong> package supplies <strong>dplyr</strong> bindings</a>, allowing R to perform data manipulation on Arrow data using familiar <strong>dplyr</strong> syntax. It wasn’t a bad post to be honest, but I did go down a very strange path with all the <em>Magicians</em> gifs and as anyone familiar with the series knows, the magic comes from pain.</li>
-<li>As for my fourth attempt, the <a href="https://blog.djnavarro.net/posts/2022-03-04_data-types-in-arrow-and-r/">data types in Arrow and R</a> post… look, if you’ve ever had a secret desire to see what happens when I am reduced to tears and wailing at the horrors of the world and of IEEE 754, then oh my yes, this is the extremely long blog post for you.</li>
-</ul>
-<p>I don’t regret any of these choices, particularly the fact that they have helped keep me gainfully employed, but there’s no denying the fact that a lot of blood and tears have been spilled in the endeavour.</p>
-<p>In any case, what I am trying to convey to you, dear reader, is that – setting aside the superficial trappings of whips and chains and the various other devices that propelled E. L. James to great fortune – I am intimately acquainted with pain. It is important to me that you understand this, and that when I mention the pain I encountered when trying to learn how the <strong>arrow</strong> R package works, I am not using the term lightly.</p>
-<p>So let talk about my latest pain point, shall we?</p>
-<p><br><br></p>
-<section id="data-objects" class="level2 page-columns page-full">
-<h2 class="anchored" data-anchor-id="data-objects">Data objects</h2>
-<p>Here’s the thing that has been giving me grief. Suppose you are an R user who is new to this whole Apache Arrow business. You’ve installed the <strong>arrow</strong> package, and you’re now reading the <a href="https://arrow.apache.org/docs/r/articles/arrow.html">Get Started</a> page in the hopes that you too will be able to, well, get started. When you visit this page, one of the very first things you encounter is a table listing a variety of data structures used by Arrow. Specifically, the table tells you that Arrow has classes for zero-dimensional data (scalars), one-dimensional data (arrays and other vector-like data), and two-dimensional data (tabular or data frame-like data). It shows you that…</p>
-<p>…actually, you know what? Instead of describing it, let’s take a look at the actual table. Here’s what it tells you about the hierarchy of data structures in <strong>arrow</strong>:</p>
-<p><br></p>
-<table class="table">
-<colgroup>
-<col style="width: 1%">
-<col style="width: 8%">
-<col style="width: 25%">
-<col style="width: 63%">
-</colgroup>
-<thead>
-<tr class="header">
-<th>Dim</th>
-<th>Class</th>
-<th>Description</th>
-<th>How to create an instance</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td>0</td>
-<td><code>Scalar</code></td>
-<td>single value and its <code>DataType</code></td>
-<td><code>Scalar$create(value, type)</code></td>
-</tr>
-<tr class="even">
-<td>1</td>
-<td><code>Array</code></td>
-<td>vector of values and its <code>DataType</code></td>
-<td><code>Array$create(vector, type)</code></td>
-</tr>
-<tr class="odd">
-<td>1</td>
-<td><code>ChunkedArray</code></td>
-<td>vectors of values and their <code>DataType</code></td>
-<td><code>ChunkedArray$create(..., type)</code> or alias <code>chunked_array(..., type)</code></td>
-</tr>
-<tr class="even">
-<td>2</td>
-<td><code>RecordBatch</code></td>
-<td>list of <code>Array</code>s with a <code>Schema</code></td>
-<td><code>RecordBatch$create(...)</code> or alias <code>record_batch(...)</code></td>
-</tr>
-<tr class="odd">
-<td>2</td>
-<td><code>Table</code></td>
-<td>list of <code>ChunkedArray</code> with a <code>Schema</code></td>
-<td><code>Table$create(...)</code>, alias <code>arrow_table(...)</code>, or <code>arrow::read_*(file, as_data_frame = FALSE)</code></td>
-</tr>
-<tr class="even">
-<td>2</td>
-<td><code>Dataset</code></td>
-<td>list of <code>Table</code>s with the same <code>Schema</code></td>
-<td><code>Dataset$create(sources, schema)</code> or alias <code>open_dataset(sources, schema)</code></td>
-</tr>
-</tbody>
-</table>
-<p><br></p>
-<p>Now, perhaps there are some devilishly clever R users who can look at this table and immediately decode all its mysteries. But I will be honest with you, and confess that I am not one of these people. When I first started learning Arrow, I had no idea what any of this meant. This whole table was completely intimidating. I looked at it and thoughts roughly along the following lines went through my head:</p>
-<blockquote class="blockquote">
-<p>Oh… f**k me. I’m completely out of my depth, I am too stupid to understand any of this. I should quit now and find a new job before everyone realises I’m a total fraud. They made a terrible mistake hiring me and… blah blah blah</p>
-</blockquote>
-<p>The self-pity went on for a while and the names I called myself became quite inappropriate for a family restaurant, but I’ll be kind and spare you the tiresome details.</p>
-<p>Eventually I remembered that this is my impostor syndrome talking and that I am in fact quite good at learning technical concepts. The problem I’m encountering here is that this table isn’t self-explanatory, and isn’t accompanied by the explanatory scaffolding that helps new users orient themselves. That’s a documentation issue, not a user problem. At a later point someone<sup>1</sup> might need to add a few explanatory paragraphs and probably a vignette to ensure that new Arrow users don’t get confused at this point, but for now let’s see if we can’t unpack it here?</p>
-<p>Looking at this table, a new user might have some very reasonable questions. What exactly is a <code>ChunkedArray</code> and how is it different from an <code>Array</code>? Why are these necessary as distinct concepts? While we are at it, what is a <code>RecordBatch</code>, a <code>Table</code> and a <code>Dataset</code>, and what makes them different from one another? Unless someone takes the time to explain it all to you, it does look like Arrow is unnecessarily complicated, doesn’t it? These are core concepts in Arrow, but new users don’t know what they are yet!</p>
-<p>In short, the time has come to tell the story behind this table. With that in mind, I’ll go through this table row by row and talk about what each line actually means.<sup>2</sup></p>
-<p>Adventure!</p>
-<p>Romance!</p>
-<p>Drama!</p>
-<p>Joy!</p>
-<p>I am absolutely not going to deliver any of those things, but hopefully this will be useful.</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><span class="fu" style="color: #4758AB;">library</span>(arrow)</span>
-<span id="cb1-2"><span class="fu" style="color: #4758AB;">library</span>(spotifyr)</span>
-<span id="cb1-3"><span class="fu" style="color: #4758AB;">library</span>(dplyr)</span>
-<span id="cb1-4"><span class="fu" style="color: #4758AB;">library</span>(tibble)</span>
-<span id="cb1-5"><span class="fu" style="color: #4758AB;">options</span>(<span class="at" style="color: #657422;">scipen =</span> <span class="dv" style="color: #AD0000;">20</span>)</span></code></pre></div>
-</div>
-<div class="cell">
-
-</div>
-<p><br></p>
-<div class="cell page-columns page-full">
-<div class="cell-output-display column-screen">
-<div class="quarto-figure quarto-figure-center">
-<figure class="figure">
-<p><a href="https://www.youtube.com/watch?v=Q4Ez9pitRJ0"><img src="https://blog.djnavarro.net/posts/2022-05-25_arrays-and-tables-in-arrow/img/heaven_is_here.png" class="img-fluid figure-img" width="1281"></a></p>
-</figure>
-</div>
-</div>
-</div>
-<p><br><br></p>
-</section>
-<section id="scalars" class="level2">
-<h2 class="anchored" data-anchor-id="scalars">Scalars</h2>
-<p>Let’s start with scalars. A scalar object is simply a single value, that can be of any type. It might be an integer, a string, a timestamp, or any of the different data types that Arrow supports. I won’t talk about the different types in this post because I already wrote <a href="https://blog.djnavarro.net/posts/2022-03-04_data-types-in-arrow-and-r/">an extremely long post on that topic</a>. For the current purposes, what matters is that a scalar is <em>one</em> value. It is “zero dimensional”. All higher order data structures are built on top of scalars, so they are in some sense fundamental, but there is not much I need to say about them for this post. For the record though, you can create a scalar using <code>Scalar$create()</code>:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb2" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1">Scalar<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">create</span>(<span class="st" style="color: #20794D;">"hi"</span>)</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>Scalar
-hi</code></pre>
-</div>
-</div>
-<p>Oh the excitement. I can barely contain myself.</p>
-<p><br><br></p>
-</section>
-<section id="arrays" class="level2 page-columns page-full">
-<h2 class="anchored" data-anchor-id="arrays">Arrays</h2>
-<blockquote class="blockquote">
-<p>All the gods have been domesticated<br>
-And heaven is now overrated<br>
-&nbsp;&nbsp;– <em>Cassandra</em>, Florence + The Machine</p>
-</blockquote>
-<p>Okay, so scalars aren’t very interesting for the purposes of this post. Let’s turn our attention to arrays next. An array is roughly analogous to a vector in R, and the <strong>arrow</strong> package is written in a way that allows you to interact with Arrow arrays in ways that feel familiar to R users.</p>
-<p>I can create an array using <code>Array$create()</code>:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb4" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1">arr <span class="ot" style="color: #003B4F;">&lt;-</span> Array<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">create</span>(<span class="fu" style="color: #4758AB;">c</span>(<span class="st" style="color: #20794D;">"hello"</span>, <span class="st" style="color: #20794D;">"cruel"</span>, <span class="st" style="color: #20794D;">"world"</span>))</span>
-<span id="cb4-2">arr</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>Array
-&lt;string&gt;
-[
-  "hello",
-  "cruel",
-  "world"
-]</code></pre>
-</div>
-</div>
-<p>I can create a subset of an array using square brackets:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb6" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1">arr[<span class="dv" style="color: #AD0000;">2</span><span class="sc" style="color: #5E5E5E;">:</span><span class="dv" style="color: #AD0000;">3</span>]</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>Array
-&lt;string&gt;
-[
-  "cruel",
-  "world"
-]</code></pre>
-</div>
-</div>
-<p>Notice that I used <code>2:3</code> here to extract the 2nd and 3rd elements of the array. Unlike R, Arrow uses <a href="https://en.wikipedia.org/wiki/Zero-based_numbering">zero-based indexing</a>, so if I were writing this using “Arrow native” code, the relevant subset would be <code>1:2</code>. However, as a general principle, <strong>arrow</strong> tries to make Arrow data structures behave like R native objects. The design principle here is that you should be able to use your usual R code to manipulate Arrow data objects, without needing to think too much about the Arrow implementation.</p>
-<p>I’m stressing the principle now because later in this post I am going to violate it!</p>
-<p>Because one of the other things <strong>arrow</strong> does is expose a low-level interface to Arrow. You don’t need to use this (and in general you don’t really need to), but it’s there if you want it, and because this post explores the R/Arrow interface I am going to use it sometimes. When that happens, you’ll start to see zero-based indexing appear! I promise I will signpost this every time it happens so you aren’t caught unawares.</p>
-<p><br></p>
-<section id="structure-of-arrays" class="level3">
-<h3 class="anchored" data-anchor-id="structure-of-arrays">Structure of arrays</h3>
-<p>Anyway, as I was saying, an array in Arrow is analogous to a vector in R: it is a sequence of values with known length, all of which have the same type. When you’re using the <strong>arrow</strong> package on a day-to-day basis, you really don’t need to know much more than that. But if you want to understand data objects in Arrow properly, it helps to do a slightly deeper dive. All the low level details are described on the <a href="https://arrow.apache.org/docs/format/Columnar.html">Arrow specification</a> page, but the full specification is a little overwhelming when you’re first starting out. I’ll start by introducing two key concepts:</p>
-<ul>
-<li>The data in an array are stored in one or more <strong>buffers</strong>. A buffer is a sequential virtual address space (i.e., block of memory) with a given length. As long as you have a pointer specifting the memory address for the buffer (i.e., where it starts), you can reach any byte in the buffer using an “offset” value that tells you the location of that byte relative to the start of the buffer.</li>
-<li>The <strong>physical layout</strong> of an array is a term used to describe how data in an array is laid out in memory, without taking into account of how that information is interpreted. For example, a 32-bit signed integer and 32-bit floating point number have the same layout: they are both 32 bits, represented as 4 contiguous bytes in memory. The meaning is different, but the layout is the same. However, unlike simple scalars, an array can have a relatively complex layout, storing data and metadata in a structured arrangement.</li>
-</ul>
-<p><br></p>
-<section id="layouts-and-buffers" class="level4">
-<h4 class="anchored" data-anchor-id="layouts-and-buffers">Layouts and buffers</h4>
-<p>Let’s unpack some of these ideas using a simple array of integer values:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb8" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1">arr <span class="ot" style="color: #003B4F;">&lt;-</span> Array<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">create</span>(<span class="fu" style="color: #4758AB;">c</span>(1L, <span class="cn" style="color: #8f5902;">NA</span>, 2L, 4L, 8L))</span>
-<span id="cb8-2">arr</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>Array
-&lt;int32&gt;
-[
-  1,
-  null,
-  2,
-  4,
-  8
-]</code></pre>
-</div>
-</div>
-<p>What precisely is this thing? Well that’s a mess of different questions. In one sense, the answer is straightforward. It’s an Arrow array, and the values contained within the array are all stored as signed 32 bit integers:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb10" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1">arr<span class="sc" style="color: #5E5E5E;">$</span>type</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>Int32
-int32</code></pre>
-</div>
-</div>
-<p>But that’s not a very satisfying answer at some level. What does this thing look like in memory? How is the information structured? In other words, what is the <strong>physical layout</strong> of this object?</p>
-<p>The Arrow documentation page helps us answer that. Our array contains two pieces of metadata, namely the length of the array (i.e.&nbsp;5) and a count of the number of null values (i.e., 1), both of which are stored as 64-bit integers. The <strong>arrow</strong> package makes it easy to extract these values, because the Array object has fields and methods that will return them:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb12" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb12-1">arr<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">length</span>()</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>[1] 5</code></pre>
-</div>
-<div class="sourceCode cell-code" id="cb14" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb14-1">arr<span class="sc" style="color: #5E5E5E;">$</span>null_count</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>[1] 1</code></pre>
-</div>
-</div>
-<p>Okay, that seems reasonable. What about the data itself? Where is that stored? In Arrow, these are stored within buffers, a contiguous block of memory assigned to the array. The number of buffers associated with an array depends on the exact type of data being stored. For an integer array such as <code>arr</code>, there are two buffers, a <strong>validity bitmap buffer</strong> and a <strong>data value buffer</strong>. So we have a data structure that could be depicted like this:</p>
-<div class="cell">
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2022-05-25_arrays-and-tables-in-arrow/img/array_layout.svg" class="img-fluid"></p>
-</div>
-</div>
-<p>In this figure I’ve shown the array as a grey rectangle subdivided into two parts, one for the metadata and the other for the buffers. Underneath I’ve unpacked this it a little, showing the contents of the two buffers in the area enclosed in a dotted line. At the lowest level of the figure, you can see the contents of specific bytes. Notice that the numbering of the bytes starts at zero: I’m referring to Arrow data structures here, and Arrow is zero-indexed. Later in the post I’ll talk about how you can access the raw content of these buffers, but for now let’s talk about what each of these buffers contains.</p>
-<p><br></p>
-</section>
-<section id="the-validity-bitmap-buffer" class="level4">
-<h4 class="anchored" data-anchor-id="the-validity-bitmap-buffer">The validity bitmap buffer</h4>
-<p>The validity bitmap is binary-valued, and contains a 1 whenever the corresponding slot in the array contains a valid, non-null value. Setting aside some very tiresome technicalities we can imagine that the validity bitmap is a buffer that contains the following five bits:</p>
-<div class="sourceCode" id="cb16" style="background: #f1f3f5;"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb16-1"><span class="dv" style="color: #AD0000;">10111</span></span></code></pre></div>
-<p>Except… this isn’t really true, for three reasons. First, memory is allocated in byte-size units, so we have to pad it out to the full 8 bits. That gives us the bitmap <code>10111000</code>. Second, that’s still a little inaccurate because – assuming you read left to right – you’re looking it with the “most significant bit” first (i.e., <a href="https://en.wikipedia.org/wiki/Endianness">big endian format</a>), and the bits are actually organised with the least significant bit first (i.e., little endian format) so the bits in this byte should be shown in the reverse order, <code>00011101</code>. Third, this is still misleading because I’ve not padded it enough. For reasons that make a lot of sense if you start diving into the Arrow specifications at a low level, you have to imagine another 503 trailing zeros.<sup>3</sup> So that the nice and neat <code>10111</code> I’ve shown above actually looks like this in memory:</p>
-<div class="grid">
-<div class="g-col-6">
-<table class="table">
-<thead>
-<tr class="header">
-<th>Byte 0 (validity bitmap)</th>
-<th>Bytes 1-63</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td><code>00011101</code></td>
-<td><code>0</code> (padding)</td>
-</tr>
-</tbody>
-</table>
-</div>
-</div>
-<p>I probably wouldn’t have gone into quite this much detail, except for the fact that you can find this exact example when reading about <a href="https://arrow.apache.org/docs/format/Columnar.html#fixed-size-primitive-layout">physical layouts</a> in the Arrow documentation, and I think it’s helpful to have a clear point of contact between this post and the documentation.</p>
-<p>Anyway, I realise I’m being boring. So let’s move on.</p>
-<p><br></p>
-</section>
-<section id="the-data-value-buffer" class="level4">
-<h4 class="anchored" data-anchor-id="the-data-value-buffer">The data value buffer</h4>
-<p>Okay, now let’s have a look at the value buffer. It’s essentially the same logic. Again notice that its padded out to a length of 64 bytes to preserve natural alignment, but for our purposes those details don’t matter too much. Here’s the diagram showing the physical layout, again lifted straight from the Arrow specification page:</p>
-<div class="grid">
-<div class="g-col-12">
-<table class="table">
-<colgroup>
-<col style="width: 14%">
-<col style="width: 17%">
-<col style="width: 16%">
-<col style="width: 17%">
-<col style="width: 17%">
-<col style="width: 17%">
-</colgroup>
-<thead>
-<tr class="header">
-<th>Bytes 0-3</th>
-<th>Bytes 4-7</th>
-<th>Bytes 8-11</th>
-<th>Bytes 12-15</th>
-<th>Bytes 16-19</th>
-<th>Bytes 20-63</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td><code>1</code></td>
-<td>unspecified</td>
-<td><code>2</code></td>
-<td><code>4</code></td>
-<td><code>8</code></td>
-<td>unspecified</td>
-</tr>
-</tbody>
-</table>
-</div>
-</div>
-<p>Each integer occupies 4 bytes, as required by the int32 data type. (If you want to know more about how Arrow represents integers, it’s discussed in the <a href="https://blog.djnavarro.net/posts/2022-03-04_data-types-in-arrow-and-r/#integer-types">data types</a> post).</p>
-
-<!--
-Just to give you a sense of what that looks like, I'll take a peek at the bits that make up the integer `8` (i.e., the contents of Bytes 16-19). I could do this using base R with a command like `intToBits(8L)` but the `bits()` function from the **pryr** package produces a more compact output so I'll do this:
-
-
-::: {.cell}
-
-```{.r .cell-code}
-pryr::bits(8L)
-```
-
-::: {.cell-output .cell-output-stdout}
-```
-[1] "00000000 00000000 00000000 00001000"
-```
-:::
-:::
-
-
-Or, to condense it even further, we can express each byte as a hexadecimal value. That's what the `pryr::bytes()` function does, so this is an equivalent way of writing out the content of those four bytes:
-
-
-::: {.cell}
-
-```{.r .cell-code}
-pryr::bytes(8L)
-```
-
-::: {.cell-output .cell-output-stdout}
-```
-[1] "00 00 00 08"
-```
-:::
-:::
-
-
-Putting all this together you can imagine -- roughly speaking -- what the contents of the data buffer should look like. Ignoring all the trailing bytes used for padding, and not worrying too much about what's going on with the command I've used to extract them, the 20 bytes worth of actual data in the data buffer look like this:
-
-
-::: {.cell}
-
-```{.r .cell-code}
-arr$data()$buffers[[2]]$data()
-```
-
-::: {.cell-output .cell-output-stdout}
-```
- [1] 01 00 00 00 00 00 00 80 02 00 00 00 04 00 00 00 08 00 00 00
-```
-:::
-:::
-
-
-Notice that the last four bytes shown are written `08 00 00 00` (little endian), whereas the bytes produced by `pryr::bytes()` are shown in the other direction. It's the same thing, just a different display convention! 
-
-<br>
-
-#### Um... summary please?
-
-Okay, let's be honest. This section went down into the weeds a bit. I personally find it helpful to understand how all these concepts play out in terms of actual bits in memory, but it does get a bit much. So let's pull back and ask ourselves what matters here. For me, the big picture is this: an Arrow array is an immutable object with an "metadata + buffers" structure that is designed to be efficient, and each buffer is a contiguous bloc of memory on your machine. 
-
--->
-<p><br></p>
-</section>
-</section>
-<section id="peeking-inside-arrays" class="level3">
-<h3 class="anchored" data-anchor-id="peeking-inside-arrays">Peeking inside arrays</h3>
-<p>I mentioned earlier that <strong>arrow</strong> exposes some “low level” tools that allow you to interact with Arrow data objects in more of a bare bones fashion than a data analyst normally would. For example, you wouldn’t normally have a need to extract the raw bytes that comprise the buffers in an array. There’s no “high level” interface that lets you do this. But if you really want to see what’s going on under the hood you absolutely can, and <strong>arrow</strong> lets you do this. To show you how it works, I’ll uses a small data set containing the track listing for the new Florence + The Machine album, <a href="https://en.wikipedia.org/wiki/Dance_Fever_(album)">Dance Fever</a>:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb17" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb17-1">dance_fever <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">read_csv_arrow</span>(<span class="st" style="color: #20794D;">"dance_fever_tracks.csv"</span>)</span>
-<span id="cb17-2">dance_fever</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code># A tibble: 14 × 3
-   track_number title             duration
-          &lt;int&gt; &lt;chr&gt;                &lt;int&gt;
- 1            1 King                   280
- 2            2 Free                   234
- 3            3 Choreomania            213
- 4            4 Back in Town           236
- 5            5 Girls Against God      280
- 6            6 Dream Girl Evil        227
- 7            7 Prayer Factory          73
- 8            8 Cassandra              258
- 9            9 Heaven Is Here         111
-10           10 Daffodil               214
-11           11 My Love                231
-12           12 Restraint               48
-13           13 The Bomb               165
-14           14 Morning Elvis          262</code></pre>
-</div>
-</div>
-<p>I’ll start by taking the <code>duration</code> variable and creating an Arrow array from it:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb19" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb19-1">duration <span class="ot" style="color: #003B4F;">&lt;-</span> Array<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">create</span>(dance_fever<span class="sc" style="color: #5E5E5E;">$</span>duration)</span>
-<span id="cb19-2">duration</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>Array
-&lt;int32&gt;
-[
-  280,
-  234,
-  213,
-  236,
-  280,
-  227,
-  73,
-  258,
-  111,
-  214,
-  231,
-  48,
-  165,
-  262
-]</code></pre>
-</div>
-</div>
-<p>As a reminder, here’s a crude schematic diagram showing how that object is laid out. It has some metadata that you’ve already learned how to extract (e.g., using <code>duration$null_count</code>), and it has two data buffers that I talked about at tedious length but haven’t actually <em>shown</em> you yet:</p>
-<div class="cell">
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2022-05-25_arrays-and-tables-in-arrow/img/array_layout_with_nulls.svg" class="img-fluid"></p>
-</div>
-</div>
-<p>To take a more detailed look at the data stored in the <code>duration</code> object, we can call its <code>data()</code> method to return an <code>ArrayData</code> object. Admittedly, the results are not immediately very exciting:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb21" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb21-1">duration<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">data</span>()</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>ArrayData</code></pre>
-</div>
-</div>
-<p>This output is a little underwhelming because at the moment the print method for an <code>ArrayData</code> object doesn’t do anything except print the class name. Boring! However, because an <code>ArrayData</code> object is stored as an R6 object, all the information is tucked away in an environment. We can find out the names of objects contained in that environment easily enough:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb23" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb23-1"><span class="fu" style="color: #4758AB;">names</span>(duration<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">data</span>())</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code> [1] ".__enclos_env__" "buffers"         "offset"          "null_count"     
- [5] "length"          "type"            ".:xp:."          "clone"          
- [9] "print"           "set_pointer"     "pointer"         "initialize"     </code></pre>
-</div>
-</div>
-<p>Hm. There’s a <code>buffers</code> variable in there. I wonder what that is…</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb25" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb25-1">duration<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">data</span>()<span class="sc" style="color: #5E5E5E;">$</span>buffers</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>[[1]]
-NULL
-
-[[2]]
-Buffer</code></pre>
-</div>
-</div>
-<p>Oh look, there are two buffers here! What’s the chance that the first one is the validity bitmap and the second one is the data buffer? (Answer: 100% chance). It turns out that this is another situation where a <code>Buffer</code> object belongs to an R6 class with a boring print method. I could bore you by going through the same process I did last time, but I’d rather not waste your time. It turns out that <code>Buffer</code> objects have a <code>data()</code> method of their own. When we call the <code>data()</code> method returns the bytes stored in the relevant buffer as a raw vector. At long last, we can pull out the raw bytes:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb27" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb27-1">data_buffer <span class="ot" style="color: #003B4F;">&lt;-</span> duration<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">data</span>()<span class="sc" style="color: #5E5E5E;">$</span>buffers[[<span class="dv" style="color: #AD0000;">2</span>]]<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">data</span>()</span>
-<span id="cb27-2">data_buffer</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code> [1] 18 01 00 00 ea 00 00 00 d5 00 00 00 ec 00 00 00 18 01 00 00 e3 00 00 00 49
-[26] 00 00 00 02 01 00 00 6f 00 00 00 d6 00 00 00 e7 00 00 00 30 00 00 00 a5 00
-[51] 00 00 06 01 00 00</code></pre>
-</div>
-</div>
-<p>Shockingly, I personally cannot read binary, but as it turns out the <code>readBin()</code> function from base R is perfectly well equipped to do that. Let’s see what happens when we interpret these 56 bytes as a sequence of 14 integers:<sup>4</sup></p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb29" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb29-1"><span class="fu" style="color: #4758AB;">readBin</span>(data_buffer, <span class="at" style="color: #657422;">what =</span> <span class="st" style="color: #20794D;">"integer"</span>, <span class="at" style="color: #657422;">n =</span> <span class="dv" style="color: #AD0000;">14</span>)</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code> [1] 280 234 213 236 280 227  73 258 111 214 231  48 165 262</code></pre>
-</div>
-</div>
-<p>Those are the values stored in the <code>duration</code> array. Yay!</p>
-<p><br></p>
-</section>
-<section id="prettier-arraydata" class="level3 page-columns page-full">
-<h3 class="anchored" data-anchor-id="prettier-arraydata">Prettier ArrayData</h3>
-<p>A little digression before we move on to talking about chunked arrays. Later in this post I’ll occasionally want to show you the internal structure of an array, just so you can see that the buffers and metadata have the values you’d expect them to. The information I need for this is stored in the <code>ArrayData</code> object returned by a command like <code>duration$data()</code> but as we saw in the last section there’s no convenient way to display these objects. To make this a little simpler, I wrote my own <code>array_layout()</code> function that shows you the metadata and buffer contents associated with an Arrow array – the source code is <a href="display_array_layout.R">here</a>) — that doesn’t work for all array types, but can handle the ones I’m using in this post. When applied to the <code>duration</code> array it produces this output:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb31" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb31-1">duration <span class="sc" style="color: #5E5E5E;">|&gt;</span></span>
-<span id="cb31-2">  <span class="fu" style="color: #4758AB;">array_layout</span>()</span></code></pre></div>
-<div class="cell-output cell-output-stderr">
-<pre><code>
-── Metadata 
-• length : 14
-• null count : 0
-
-── Buffers 
-• validity : null
-• data : 280 234 213 236 280 227 73 258 111 214 231 48 165 262</code></pre>
-</div>
-</div>
-<p>The output here is divided into two sections, structured to mirror how the Arrow columnar specification is described on the website (and also to mirrot the diagrams in the post). There is one section showing the metadata variables stored: array length, and a count of the number of null values. Underneath that we have a section listing all the buffers associated with an array. For an integer array like <code>duration</code> there are two buffers, the validity bitmap buffer and the data values buffer.</p>
-<p>The <code>array_layout()</code> function also works for string arrays and produces similar output. However, character data in Arrow are stored using three buffers rather than two. As before the first buffer stores the validity bitmap. The second buffer is a vector of offsets specifying the locations for each of the substrings. The third buffer contains the character data itself. Here’s an example of that:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb33" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb33-1">dance_fever<span class="sc" style="color: #5E5E5E;">$</span>title <span class="sc" style="color: #5E5E5E;">|&gt;</span></span>
-<span id="cb33-2">  Array<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">create</span>() <span class="sc" style="color: #5E5E5E;">|&gt;</span></span>
-<span id="cb33-3">  <span class="fu" style="color: #4758AB;">array_layout</span>()</span></code></pre></div>
-<div class="cell-output cell-output-stderr">
-<pre><code>
-── Metadata 
-• length : 14
-• null count : 0
-
-── Buffers 
-• validity : null
-• offset : 0 4 8 19 31 48 63 77 86 100 108 115 124 132 145
-• data : KingFreeChoreomaniaBack in TownGirls Against GodDream Girl EvilPrayer
-FactoryCassandraHeaven Is HereDaffodilMy LoveRestraintThe BombMorning Elvis</code></pre>
-</div>
-</div>
-<p>If you want more information about how character data are stored in Arrow and how the offset buffer and data buffer are used to define the array as a whole, I wrote about it in tiresome detail in my <a href="https://blog.djnavarro.net/posts/2022-03-04_data-types-in-arrow-and-r/#character-types">data types post</a>. For the purposes of this post, it’s enough to understand that string arrays are organised using these three buffers.</p>
-<p><br></p>
-<div class="cell page-columns page-full">
-<div class="cell-output-display column-screen">
-<div class="quarto-figure quarto-figure-center">
-<figure class="figure">
-<p><a href="https://www.youtube.com/watch?v=5GHXEGz3PJg"><img src="https://blog.djnavarro.net/posts/2022-05-25_arrays-and-tables-in-arrow/img/hunger.png" class="img-fluid figure-img" width="945"></a></p>
-</figure>
-</div>
-</div>
-</div>
-<p><br><br></p>
-</section>
-</section>
-<section id="chunked-arrays" class="level2 page-columns page-full">
-<h2 class="anchored" data-anchor-id="chunked-arrays">Chunked arrays</h2>
-<blockquote class="blockquote">
-<p>I need my golden crown of sorrow, my bloody sword to swing<br>
-I need my empty halls to echo with grand self-mythology<br>
-’Cause I am no mother, I am no bride<br>
-I am king<br>
-&nbsp;&nbsp;– <em>King</em>, Florence + The Machine</p>
-</blockquote>
-<p>The next entry in the table of data objects refers to “chunked arrays”. In most respects a chunked array behaves just like a regular array. It is a one-dimensional data structure. It requires every value stored to be of the same type: all integers, or all strings, or whatever. From the perspective of a <em>data scientist</em> who just wants to analyse the data, an array and a chunked array are essentially identical. Under the hood, however, they are quite different – and the reason for this is fundamentally a <em>data engineering</em> issue. In this section I’ll unpack this.</p>
-<p>Recall at the beginning I emphasised that an array is an <a href="https://en.wikipedia.org/wiki/Immutable_object">immutable object</a>. Once an array has been created by Arrow, the values it stores cannot be altered. The decision to make arrays immutable reduces the need to create copies: many other objects can all safely refer to the array (via pointers) without making copies of the data, safe in the knowledge that it is impossible<sup>5</sup> for anyone else to change the data values. For large data sets that’s a huge advantage: you really don’t want to be making copies of data if you can avoid doing so. Immutable arrays are good.</p>
-<p>Well, mostly good.</p>
-<p>There are some limitations to immutable arrays, and one of the big ones is prompted by the very simple question: what happens when a new batch of data arrives? An array is immutable, so you can’t add the new information to an existing array. The only thing you can do if you don’t want to disturb or copy your existing array is create a new array that contains the new data. Doing that preserves the immutability of arrays and doesn’t lead to any unnecessary copying – which keeps us happy(ish) from a data engineering perspective – but now we have a new problem: the data are now split across two arrays. Each array contains only one “chunk” of the data. We need some way of “pretending” that these two arrays are in fact a single array-like object.</p>
-<p>This is the problem that chunked arrays solve. A chunked array is a wrapper around a list of arrays, and allows you to index their contents “as if” they were a single array. Physically, the data are still stored in separate places – each array is one chunk, and these chunks don’t have to be adjacent to each other in memory – but the chunked array provides us will a layer of abstraction that allows us to pretend that they are all one thing.</p>
-<p><br></p>
-<section id="list-like-aspects" class="level3">
-<h3 class="anchored" data-anchor-id="list-like-aspects">List-like aspects</h3>
-<p>Here’s an example. I’ll take some lyrics to <em>King</em> by Florence + The Machine, and use the <code>chunked_array()</code> function from <strong>arrow</strong> to store them as a chunked array that is comprised of three smaller arrays:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb35" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb35-1">king <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">chunked_array</span>(</span>
-<span id="cb35-2">  <span class="fu" style="color: #4758AB;">c</span>(<span class="st" style="color: #20794D;">"I"</span>, <span class="st" style="color: #20794D;">"am"</span>, <span class="st" style="color: #20794D;">"no"</span>, <span class="st" style="color: #20794D;">"mother"</span>), <span class="co" style="color: #5E5E5E;"># chunk 0</span></span>
-<span id="cb35-3">  <span class="fu" style="color: #4758AB;">c</span>(<span class="st" style="color: #20794D;">"I"</span>, <span class="st" style="color: #20794D;">"am"</span>, <span class="cn" style="color: #8f5902;">NA</span>, <span class="st" style="color: #20794D;">"bride"</span>),    <span class="co" style="color: #5E5E5E;"># chunk 1</span></span>
-<span id="cb35-4">  <span class="fu" style="color: #4758AB;">c</span>(<span class="st" style="color: #20794D;">"I"</span>, <span class="st" style="color: #20794D;">"am"</span>, <span class="st" style="color: #20794D;">"king"</span>)          <span class="co" style="color: #5E5E5E;"># chunk 2</span></span>
-<span id="cb35-5">)</span></code></pre></div>
-</div>
-<p>An alternative way to do the same thing would be to use the <code>create()</code> method of the <a href="https://r6.r-lib.org/">R6 object</a> <code>ChunkedArray</code>. In fact, the <code>chunked_array()</code> function is just a slightly nicer wrapper around the same functionality that <code>ChunkedArray$create()</code> provides. But that’s a bit of a digression. Let’s take a look at the object I just created:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb36" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb36-1">king</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>ChunkedArray
-[
-  [
-    "I",
-    "am",
-    "no",
-    "mother"
-  ],
-  [
-    "I",
-    "am",
-    null,
-    "bride"
-  ],
-  [
-    "I",
-    "am",
-    "king"
-  ]
-]</code></pre>
-</div>
-</div>
-<p>The double bracketing in this output is intended to highlight the “list-like” nature of chunked arrays. There are three separate arrays that I have created here, wrapped in a handly little container object that is secretly a list of arrays, but allows that list to behave just like a regular one-dimensional data structure. Schematically, this is what I’ve just created:</p>
-<div class="cell">
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2022-05-25_arrays-and-tables-in-arrow/img/chunked_array_layout.svg" class="img-fluid"></p>
-</div>
-</div>
-<p>As this figure illustrates, there really are three arrays here. I can pull them out individually by referring to their position in the array list by using the <code>chunk()</code> method that all chunked array objects possess. This is another one of those situations where I’m using a low-level feature, and the zero-based indexing in Arrow reappears. To extract the second chunk, here’s what I do:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb38" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb38-1">king<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">chunk</span>(<span class="dv" style="color: #AD0000;">1</span>)</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>Array
-&lt;string&gt;
-[
-  "I",
-  "am",
-  null,
-  "bride"
-]</code></pre>
-</div>
-</div>
-<p>Notice from the output that this chunk is a vanilla <code>Array</code> object, and I can take a peek at the underlying metadata and buffers associated with that object by using the <code>array_layout()</code> function I wrote earlier. Here’s what that chunk looks like:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb40" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb40-1">king<span class="sc" style="color: #5E5E5E;">$</span><span class="fu" style="color: #4758AB;">chunk</span>(<span class="dv" style="color: #AD0000;">1</span>) <span class="sc" style="color: #5E5E5E;">|&gt;</span> </span>
-<span id="cb40-2">  <span class="fu" style="color: #4758AB;">array_layout</span>()</span></code></pre></div>
-<div class="cell-output cell-output-stderr">
-<pre><code>
-── Metadata 
-• length : 4
-• null count : 1
-
-── Buffers 
-• validity : 1 1 0 1
-• offset : 0 1 3 3 8
-• data : Iambride</code></pre>
-</div>
-</div>
-<p>Hopefully by now this all looks quite familiar to you! The <code>Array</code> object here has length 4, contains 1 missing value (referred to as null values in Arrow), and because it is a string array, it contains three buffers: a validity bitmap, an offset buffer, and a data buffer.</p>
-<p><br></p>
-</section>
-<section id="vector-like-aspects" class="level3 page-columns page-full">
-<h3 class="anchored" data-anchor-id="vector-like-aspects">Vector-like aspects</h3>
-<p>In the previous section I highlighted the fact that internally a chunked array is “just” a list of arrays and showed you how you can interact with a chunked array in a “list-like” way. Most of the time though, when you’re working with a chunked array as a data analyst you aren’t really interested in its list-like properties, what you actually care about is the abstraction layer that provides it with vector-like properties. Specifically, what you actually care about is the fact that a chunked array is a one-dimensional object with a single indexing scheme. Let’s go back to the <code>king</code> data to illustrate this. Suppose I want to extract a subset of the elements. Specifically I want to grab the 3rd through 6th elements. These slots actually belong to different arrays, and it would be a pain to extract the 3rd and 4th slots from the first array, and the 1st and 2nd slots from the second array. No data analyst wants that headache. Fortunately, I don’t have to:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb42" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb42-1">king[<span class="dv" style="color: #AD0000;">3</span><span class="sc" style="color: #5E5E5E;">:</span><span class="dv" style="color: #AD0000;">6</span>]</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>ChunkedArray
-[
-  [
-    "no",
-    "mother"
-  ],
-  [
-    "I",
-    "am"
-  ]
-]</code></pre>
-</div>
-</div>
-<p>As an R user you are probably breathing a sigh of relief to see the return of one-based indexing! Again I should stress that this is the norm: as a general rule, the <strong>arrow</strong> package tries to mimic R conventions whenever you are “just trying to do normal R things”. If you’re trying to manipulate and analyse data, the intention is that your regular <strong>dplyr</strong> functions should work the same way they always did, and the same goes for subsetting data. In R, the first element of a vector is element 1, not element 0, and that convention is preserved here. The only time you’re going to see <strong>arrow</strong> adopt zero-based indexing is when you are interacting with Arrow at a low level.</p>
-<p>Another thing to highlight about chunked arrays is that the “chunking” is not considered semantically meaningful. It is an internal implementation detail only: you should never treat the chunk as a meaningful unit! Writing the data to disk, for example, often results in the data being organised into different chunks. Two arrays that have the same values in different chunking arrangements are deemed equivalent. For example, here’s the same four values as <code>king[3:6]</code> all grouped into a single chunk:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb44" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb44-1">no_mother <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">chunked_array</span>(<span class="fu" style="color: #4758AB;">c</span>(<span class="st" style="color: #20794D;">"no"</span>, <span class="st" style="color: #20794D;">"mother"</span>, <span class="st" style="color: #20794D;">"I"</span>, <span class="st" style="color: #20794D;">"am"</span>))</span>
-<span id="cb44-2">no_mother</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>ChunkedArray
-[
-  [
-    "no",
-    "mother",
-    "I",
-    "am"
-  ]
-]</code></pre>
-</div>
-</div>
-<p>When I test for equality using <code>==</code>, you can see that the results are shown element-wise. All four elements are the same, so the result is a (chunked) array of four <code>true</code> values:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb46" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb46-1">no_mother <span class="sc" style="color: #5E5E5E;">==</span> king[<span class="dv" style="color: #AD0000;">3</span><span class="sc" style="color: #5E5E5E;">:</span><span class="dv" style="color: #AD0000;">6</span>]</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>ChunkedArray
-[
-  [
-    true,
-    true,
-    true,
-    true
-  ]
-]</code></pre>
-</div>
-</div>
-<p>The intention, ultimately, is that users should be able to interact with chunked arrays as if they were ordinary one-dimensional data structures without ever having to think much about their list-like nature. Chunked arrays exist as an abstraction to help bridge the gap between the needs of the data engineer and the needs of the data scientist. So except in those special cases where you have to think carefully about the engineering aspect, a data analyst should be able to treat them just like regular vectors!</p>
-<p><br></p>
-<div class="cell page-columns page-full">
-<div class="cell-output-display column-screen">
-<div class="quarto-figure quarto-figure-center">
-<figure class="figure">
-<p><a href="https://www.youtube.com/watch?v=L62LtChAwww"><img src="https://blog.djnavarro.net/posts/2022-05-25_arrays-and-tables-in-arrow/img/king.png" class="img-fluid figure-img" width="1276"></a></p>
-</figure>
-</div>
-</div>
-</div>
-<p><br><br></p>
-</section>
-</section>
-<section id="record-batches" class="level2 page-columns page-full">
-<h2 class="anchored" data-anchor-id="record-batches">Record batches</h2>
-<p>Now that we have a good understanding of zero dimensional data objects (scalars), and one dimensional data objects (arrays and chunked arrays), the time has come to make the jump into the second dimension and talk about tabular data structures in <strong>arrow</strong>. In the data objects table I presented at the start of the post there are three of these listed: record batches, tables, and datasets. Record batches are the simplest of the three so I’m going to start there, but in everyday data analysis you’re not likely to be using them very much: in practice tables and datasets are the things you’re likely to care about most. Even so, from a learning standpoint it really helps to have a good understanding of record batches because the other concepts are built on top of them.</p>
-<p>A record batch is table-like data structure comprised of a sequence of arrays. The arrays can be of different types but they must all be the same length. Each array is referred to as one of the “fields” or “columns” of the record batch. This probably sounds terribly familiar to you as an R user, because – apart from a few differences in terminology – what I’ve just described to you is essentially the same kind of thing as a data frame. The parallels between record batches and data frames run deeper too:</p>
-<ul>
-<li>In R, the columns in a data frame must be named.<sup>6</sup> Record batches have the same property: each field must have a (UTF8-encoded) name, and these names form part of the metadata for the record batch.</li>
-<li>A data frame in R is secretly just a list of vectors, and like any other list it does not really “contain” those vectors: rather it consists of a set of pointers that link to those vector objects. There’s a good discussion of list references in <a href="https://adv-r.hadley.nz/names-values.html#list-references">chapter 2 of Advanced R</a>. Record batches in Arrow are much the same. When stored in memory, the record batch does not include physical storage for the values stored in each field, it simply contains pointers to the relevant array objects. It does, however, contain its own validity bitmap.</li>
-</ul>
-<p>To illustrate, let’s return to our <code>dance_fever</code> data set. Here it is as a data frame (well, tibble technically, but whatever):</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb48" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb48-1">dance_fever</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code># A tibble: 14 × 3
-   track_number title             duration
-          &lt;int&gt; &lt;chr&gt;                &lt;int&gt;
- 1            1 King                   280
- 2            2 Free                   234
- 3            3 Choreomania            213
- 4            4 Back in Town           236
- 5            5 Girls Against God      280
- 6            6 Dream Girl Evil        227
- 7            7 Prayer Factory          73
- 8            8 Cassandra              258
- 9            9 Heaven Is Here         111
-10           10 Daffodil               214
-11           11 My Love                231
-12           12 Restraint               48
-13           13 The Bomb               165
-14           14 Morning Elvis          262</code></pre>
-</div>
-</div>
-<p>The <strong>arrow</strong> package provides two different ways to create a record batch. I can either use <code>RecordBatch$create()</code> or I can use the <code>record_batch()</code> function. The latter is simpler, so I’ll do that. The <code>record_batch()</code> function is pretty flexible, and can accept inputs in several formats. I can pass it a data frame, one or more named vectors, an input stream, or even a raw vector containing appropriate binary data. But I don’t need all that fancy complexity here so I’ll just give it a data frame:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb50" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb50-1">df <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">record_batch</span>(dance_fever)</span>
-<span id="cb50-2">df</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>RecordBatch
-14 rows x 3 columns
-$track_number &lt;int32&gt;
-$title &lt;string&gt;
-$duration &lt;int32&gt;</code></pre>
-</div>
-</div>
-<p>The output is amusingly terse. It doesn’t give a preview of the data, but it kindly confirms that this is a record batch containing 14 rows and 3 columns. It also tells me the column names and the type of data stored in each column. The <strong>arrow</strong> package supplies a <code>$</code> method for record batch objects, and it behaves the same way you’d expect for a data frame. If I want to look at a particular column in my record batch, I can refer to it by name like so:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb52" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb52-1">df<span class="sc" style="color: #5E5E5E;">$</span>title</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>Array
-&lt;string&gt;
-[
-  "King",
-  "Free",
-  "Choreomania",
-  "Back in Town",
-  "Girls Against God",
-  "Dream Girl Evil",
-  "Prayer Factory",
-  "Cassandra",
-  "Heaven Is Here",
-  "Daffodil",
-  "My Love",
-  "Restraint",
-  "The Bomb",
-  "Morning Elvis"
-]</code></pre>
-</div>
-</div>
-<p>At an abstract level the <code>df</code> object behaves like a two dimensional structure with rows and columns, but in terms of how it is represented in memory it is fundamentally a list of arrays, and so schematically I’ve drawn it like this:</p>
-<div class="cell">
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2022-05-25_arrays-and-tables-in-arrow/img/record_batch_layout.svg" class="img-fluid"></p>
-</div>
-</div>
-<p>In some respects it’s structurally similar to a chunked array, insofar record batches and chunked arrays are both lists of arrays, but in other ways they are quite different. The arrays indexed in a record batch can be different types, but they must be the same length: this is required to ensure that at a high level we can treat a record batch like a two dimensional table. In contrast, the arrays indexed by a chunked array can be different lengths, but must all be the same type: this is required to ensure that at a high level we can treat a chunked array like a one dimensional vector.</p>
-<p>Returning to the practical details, it’s worth noting that in addition to the <code>$</code> operator that refers to columns by name, you can use double brackets <code>[[</code> to refer to columns by position. Just like we saw with chunked array, these positions follow the R convention of using 1 to refer to the first element. The <code>df$title</code> array is the 2nd column in our record batch so I can extract it with this:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb54" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb54-1">df[[<span class="dv" style="color: #AD0000;">2</span>]]</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>Array
-&lt;string&gt;
-[
-  "King",
-  "Free",
-  "Choreomania",
-  "Back in Town",
-  "Girls Against God",
-  "Dream Girl Evil",
-  "Prayer Factory",
-  "Cassandra",
-  "Heaven Is Here",
-  "Daffodil",
-  "My Love",
-  "Restraint",
-  "The Bomb",
-  "Morning Elvis"
-]</code></pre>
-</div>
-</div>
-<p>Finally there is a <code>[</code> method that allows you to extract subsets of a record batch in the same way you would for a data frame. The command <code>df[1:10, 1:2]</code> extracts the first 10 rows and the first 2 columns:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb56" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb56-1">df[<span class="dv" style="color: #AD0000;">1</span><span class="sc" style="color: #5E5E5E;">:</span><span class="dv" style="color: #AD0000;">10</span>, <span class="dv" style="color: #AD0000;">1</span><span class="sc" style="color: #5E5E5E;">:</span><span class="dv" style="color: #AD0000;">2</span>]</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>RecordBatch
-10 rows x 2 columns
-$track_number &lt;int32&gt;
-$title &lt;string&gt;</code></pre>
-</div>
-</div>
-<p>If you are wondering what <code>df[1:2]</code> returns, try it out for yourself. Hopefully you will not be surprised!</p>
-<p><br></p>
-<section id="serialisation" class="level3 page-columns page-full">
-<h3 class="anchored" data-anchor-id="serialisation">Serialisation</h3>
-<p>Before I move on to talk about Arrow tables, I want to make a small digression. At the beginning of this post I mentioned that my very first attempt to write about Arrow ended up becoming a post about <a href="https://blog.djnavarro.net/posts/2021-11-15_serialisation-with-rds/">data serialisation in R</a> that had nothing to do with Arrow. That didn’t happen entirely by accident, and I’ll try to explain some of that now.</p>
-<p>When we talk about data serialisation, what we’re talking about is taking a data structure stored in memory and organising it into a format that is suitable for writing to disk (serialising to file format) or transmitting over some other communication channel (serialising to a stream). From the beginning, data structures in Arrow were designed <em>together</em> with file formats and streaming formats, with the intention that – to the extent that it is practical and doesn’t mess with other important design considerations – the thing you send across the communication channel (or write to disk) has the same structure as the thing you need to store in memory. That way, when the data arrive at the other end, you don’t have to do a lot of work reorganising the data.</p>
-<p>That… makes sense, right?</p>
-<p>If I want to tell you to meet me under the bridge, the message I should send you should be “meet me under the bridge”. It makes no sense whatsoever for me to say “meet me [the title of that really annoying Red Hot Chilli Peppers song]” and expect you to decode it. There is no point in me expending effort deliberately obscuring what I’m trying to say, and then forcing you to expend effort trying to interpret my message.</p>
-<p>Yet, surprisingly, that’s what happens a lot of the time when we send data across communication channels. For example, suppose you and I are both R users. We both work with data frames. Because a data frame is fundamentally a list of variables (each of which is a vector), we use data that are organised <em>column-wise</em>: the first thing in a data frame is column 1, then column 2, then column 3, and so on. Okay, cool. So now let’s say you want to send me a data set, and what you do is send me a CSV file. A CSV file is written row by row: the first thing in a CSV file is row 1, then row 2, then row 3. It is a <em>row-wise</em> data structure. In order for you to send data to me, what has to happen is you take your column-wise data frame, invert it so that it is now a row-wise structure, write that to a CSV and then send it to me. At the other end, I have to invert the whole process, transforming the row-wise structure into a column-wise organisation that I can now load into memory as a data frame.<sup>7</sup></p>
-<p>Um… that <em>doesn’t</em> make sense.</p>
-<p>This particular problem arises quite a lot, largely because serialisation formats and in-memory data structures aren’t always designed in tandem. To get around this, Arrow specifies the <a href="https://arrow.apache.org/docs/format/Columnar.html#serialization-and-interprocess-communication-ipc">Interprocess Communication</a> (IPC) serialisation format that is designed specifically to ensure that Arrow data objects can be transmitted (and saved) efficiently. Because data sets are typically organised into tabular structures, the primitive unit for communication is the record batch. I’m not going to dive into the very low level details of how IPC messages are structured, but the key thing for our purposes is that IPC is designed to ensure that the structure of the serialised record batch is essentially identical to the physical layout of an in-memory record batch.</p>
-<p>I’ll give a very simple example. Let’s take the first few rows of the <code>dance_fever</code> data set and convert them into a small record batch:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb58" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb58-1">df_batch_0 <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">record_batch</span>(dance_fever[<span class="dv" style="color: #AD0000;">1</span><span class="sc" style="color: #5E5E5E;">:</span><span class="dv" style="color: #AD0000;">4</span>,])</span>
-<span id="cb58-2">df_batch_0</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>RecordBatch
-4 rows x 3 columns
-$track_number &lt;int32&gt;
-$title &lt;string&gt;
-$duration &lt;int32&gt;</code></pre>
-</div>
-</div>
-<p>Suppose I want to share this. Currently this is an object in memory that consists of three arrays (which are contiguous in memory) but as we’ve seen earlier, these arrays are themselves comprised of multiple buffers. What the IPC format does is collect the relevant metadata into a “data header”,<sup>8</sup> and then lay out the buffers one after the other. Glossing a few minor details<sup>9</sup>, this is essentially what the IPC message would look like for this record batch:</p>
-<div class="cell">
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2022-05-25_arrays-and-tables-in-arrow/img/record_batch_serialised.svg" class="img-fluid"></p>
-</div>
-</div>
-<p>At this point you’re probably thinking okay that’s nice Danielle, but how do I do this? There are three functions you can use:</p>
-<ul>
-<li>To send the data directly to an output stream use <code>write_ipc_stream()</code>.</li>
-<li>To write data in IPC format to a static file on disk it is referred to as a “feather” formatted file,<sup>10</sup> and you use <code>write_feather()</code>.</li>
-<li>To construct the same sequence of bytes but return them in R as raw vectors, you can use <code>write_to_raw()</code>.</li>
-</ul>
-<p>In order to show you what the byte stream actually looks like, I’ll use the <code>write_to_raw()</code> function:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb60" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb60-1">df_ipc_0 <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">write_to_raw</span>(df_batch_0)</span>
-<span id="cb60-2">df_ipc_0</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>  [1] ff ff ff ff f0 00 00 00 10 00 00 00 00 00 0a 00 0c 00 06 00 05 00 08 00 0a
- [26] 00 00 00 00 01 04 00 0c 00 00 00 08 00 08 00 00 00 04 00 08 00 00 00 04 00
- [51] 00 00 03 00 00 00 7c 00 00 00 3c 00 00 00 04 00 00 00 a0 ff ff ff 00 00 01
- [76] 02 10 00 00 00 1c 00 00 00 04 00 00 00 00 00 00 00 08 00 00 00 64 75 72 61
-[101] 74 69 6f 6e 00 00 00 00 8c ff ff ff 00 00 00 01 20 00 00 00 d4 ff ff ff 00
-[126] 00 01 05 10 00 00 00 1c 00 00 00 04 00 00 00 00 00 00 00 05 00 00 00 74 69
-[151] 74 6c 65 00 00 00 04 00 04 00 04 00 00 00 10 00 14 00 08 00 06 00 07 00 0c
-[176] 00 00 00 10 00 10 00 00 00 00 00 01 02 10 00 00 00 28 00 00 00 04 00 00 00
-[201] 00 00 00 00 0c 00 00 00 74 72 61 63 6b 5f 6e 75 6d 62 65 72 00 00 00 00 08
-[226] 00 0c 00 08 00 07 00 08 00 00 00 00 00 00 01 20 00 00 00 00 00 00 00 ff ff
-[251] ff ff f8 00 00 00 14 00 00 00 00 00 00 00 0c 00 16 00 06 00 05 00 08 00 0c
-[276] 00 0c 00 00 00 00 03 04 00 18 00 00 00 58 00 00 00 00 00 00 00 00 00 0a 00
-[301] 18 00 0c 00 04 00 08 00 0a 00 00 00 8c 00 00 00 10 00 00 00 04 00 00 00 00
-[326] 00 00 00 00 00 00 00 07 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
-[351] 00 00 00 00 00 00 00 00 00 00 10 00 00 00 00 00 00 00 10 00 00 00 00 00 00
-[376] 00 00 00 00 00 00 00 00 00 10 00 00 00 00 00 00 00 14 00 00 00 00 00 00 00
-[401] 28 00 00 00 00 00 00 00 1f 00 00 00 00 00 00 00 48 00 00 00 00 00 00 00 00
-[426] 00 00 00 00 00 00 00 48 00 00 00 00 00 00 00 10 00 00 00 00 00 00 00 00 00
-[451] 00 00 03 00 00 00 04 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 04 00 00
-[476] 00 00 00 00 00 00 00 00 00 00 00 00 00 04 00 00 00 00 00 00 00 00 00 00 00
-[501] 00 00 00 00 01 00 00 00 02 00 00 00 03 00 00 00 04 00 00 00 00 00 00 00 04
-[526] 00 00 00 08 00 00 00 13 00 00 00 1f 00 00 00 00 00 00 00 4b 69 6e 67 46 72
-[551] 65 65 43 68 6f 72 65 6f 6d 61 6e 69 61 42 61 63 6b 20 69 6e 20 54 6f 77 6e
-[576] 00 18 01 00 00 ea 00 00 00 d5 00 00 00 ec 00 00 00 ff ff ff ff 00 00 00 00</code></pre>
-</div>
-</div>
-<p>To reassure you that this byte stream does indeed contain the relevant information, I’ll use the <code>read_ipc_stream()</code> function to decode it. By default this function returns data to R natively as a tibble, which is fine for my purposes:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb62" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb62-1"><span class="fu" style="color: #4758AB;">read_ipc_stream</span>(df_ipc_0)</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code># A tibble: 4 × 3
-  track_number title        duration
-         &lt;int&gt; &lt;chr&gt;           &lt;int&gt;
-1            1 King              280
-2            2 Free              234
-3            3 Choreomania       213
-4            4 Back in Town      236</code></pre>
-</div>
-</div>
-<p>We can use the same logic to write data to disk. As mentioned above, when writing data in IPC format to file, the result is called a “feather” file. So okay, let’s take the rest of the <code>dance_fever</code> data, and write it to a feather file:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb64" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb64-1">dance_fever[<span class="dv" style="color: #AD0000;">5</span><span class="sc" style="color: #5E5E5E;">:</span><span class="dv" style="color: #AD0000;">14</span>,] <span class="sc" style="color: #5E5E5E;">|&gt;</span></span>
-<span id="cb64-2">  <span class="fu" style="color: #4758AB;">record_batch</span>() <span class="sc" style="color: #5E5E5E;">|&gt;</span></span>
-<span id="cb64-3">  <span class="fu" style="color: #4758AB;">write_feather</span>(<span class="st" style="color: #20794D;">"df_ipc_1.feather"</span>)</span></code></pre></div>
-</div>
-<p>Now we can read this feather file from disk:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb65" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb65-1"><span class="fu" style="color: #4758AB;">read_feather</span>(<span class="st" style="color: #20794D;">"df_ipc_1.feather"</span>)</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code># A tibble: 10 × 3
-   track_number title             duration
-          &lt;int&gt; &lt;chr&gt;                &lt;int&gt;
- 1            5 Girls Against God      280
- 2            6 Dream Girl Evil        227
- 3            7 Prayer Factory          73
- 4            8 Cassandra              258
- 5            9 Heaven Is Here         111
- 6           10 Daffodil               214
- 7           11 My Love                231
- 8           12 Restraint               48
- 9           13 The Bomb               165
-10           14 Morning Elvis          262</code></pre>
-</div>
-</div>
-<p>Yay! It’s always nice when things do what you expect them to do.</p>
-<p>Before moving on, there’s one last thing I should mention. The feather file format is a handy thing to know about, and can be very convenient in some instances, but it’s not really optimised to be the best “big data file format”. It’s intended to be the file format analog of IPC messages, and those in turn are designed for optimal streaming of Arrow data. Because of this, in practice you will probably not find yourself using the feather format all that much. Instead, you’re more likely to use something like <a href="https://parquet.apache.org/">Apache Parquet</a>, which is explicitly designed for this purpose. Arrow and parquet play nicely with one another, and <strong>arrow</strong> supports reading and parquet files using the <code>read_parquet()</code> and <code>write_parquet()</code> functions. However, parquet is a topic for a future post, so that’s all I’ll say about this today!</p>
-<p><br></p>
-<div class="cell page-columns page-full">
-<div class="cell-output-display column-screen">
-<div class="quarto-figure quarto-figure-center">
-<figure class="figure">
-<p><a href="https://www.youtube.com/watch?v=zZr5Tid3Qw4"><img src="https://blog.djnavarro.net/posts/2022-05-25_arrays-and-tables-in-arrow/img/delilah.png" class="img-fluid figure-img" width="1274"></a></p>
-</figure>
-</div>
-</div>
-</div>
-<p><br><br></p>
-</section>
-</section>
-<section id="tables" class="level2 page-columns page-full">
-<h2 class="anchored" data-anchor-id="tables">Tables</h2>
-<blockquote class="blockquote">
-<p>Tell me where to put my love<br>
-Do I wait for time to do what it does?<br>
-I don’t know where to put my love<br>
-&nbsp;&nbsp;– <em>My Love</em>, Florence + The Machine</p>
-</blockquote>
-<p>Earlier when I introduced the concept of chunked arrays, I explained that Arrow needs these structures because arrays are immutable objects, and Arrow is designed to avoid copying data whenever possible: when a new block of data arrive, it is stored as its own array without disturbing the existing ones, and we use the chunked array as a wrapper that lets us pretend that all these chunks are laid out end to end in a single vector. The previous section shows you exactly how that can happen. If I have a data set that arrives sequentially as a sequence of record batches, I have this problem for every column in the data set! Quite by accident<sup>11</sup> that’s what happened in the last section – the <code>dance_fever</code> data set has been serialised in two parts. In that example it happened because I wanted to show you what an IPC stream looked like (creating one record batch for that) as well as what a feather file looks like (creating another record batch), but in real life it’s more likely to happen every time you receive an update on an ongoing data collection process (e.g., today’s data arrive).</p>
-<p>To deal with this situation, we need a tabular data structure that is similar to a record batch with one exception: instead of storing each column as an array, we now want to store it as a chunked array. This is what the <code>Table</code> class in <strong>arrow</strong> does. Schematically, here’s what the data structure for a table looks like:</p>
-<div class="cell">
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2022-05-25_arrays-and-tables-in-arrow/img/table_layout.svg" class="img-fluid"></p>
-</div>
-</div>
-<p>Tables have a huge advantage over record batches: they can be concatenated. You can’t append one record batch to another because arrays are immutable: you can’t append one array to the end of another array. You would have to create a new array with all new data – and do this for <em>every</em> column in the data – which is a thing we really don’t want to do. But because tables are built from chunked arrays, concatenation is easy: all you have to do is update the chunked arrays so that they include pointers to the newly-arrived arrays as well as the previously-existing arrays.</p>
-<p>Because tables are so much more flexible than record batches, functions in <strong>arrow</strong> tend to return tables rather than record batches. Unless you do what I did in the previous section and deliberately call <code>record_batch()</code> you’re not likely to encounter them as the output of normal data analysis code.<sup>12</sup> For instance, in the previous section I serialised two record batches, one to a file and one to a raw vector. Let’s look at what happens when I try to deserialise (a.k.a. “read”) them. First the IPC stream:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb67" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb67-1">df_table_0 <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">read_ipc_stream</span>(</span>
-<span id="cb67-2">  <span class="at" style="color: #657422;">file =</span> df_ipc_0, </span>
-<span id="cb67-3">  <span class="at" style="color: #657422;">as_data_frame =</span> <span class="cn" style="color: #8f5902;">FALSE</span></span>
-<span id="cb67-4">)</span>
-<span id="cb67-5">df_table_0</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>Table
-4 rows x 3 columns
-$track_number &lt;int32&gt;
-$title &lt;string&gt;
-$duration &lt;int32&gt;</code></pre>
-</div>
-</div>
-<p>That’s the same data as before, but it’s a table not a record batch. Each column is a chunked array, not an array. The same happens when I read from the feather file:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb69" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb69-1">df_table_1 <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">read_feather</span>(</span>
-<span id="cb69-2">  <span class="at" style="color: #657422;">file =</span> <span class="st" style="color: #20794D;">"df_ipc_1.feather"</span>, </span>
-<span id="cb69-3">  <span class="at" style="color: #657422;">as_data_frame =</span> <span class="cn" style="color: #8f5902;">FALSE</span></span>
-<span id="cb69-4">)</span>
-<span id="cb69-5">df_table_1</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>Table
-10 rows x 3 columns
-$track_number &lt;int32&gt;
-$title &lt;string&gt;
-$duration &lt;int32&gt;</code></pre>
-</div>
-</div>
-<p>Again, this is a table. In general, you won’t get a record batch in <strong>arrow</strong> unless you explicitly ask for one. Tables are the default tabular data structure, which is usually what you want anyway.</p>
-<p>Okay, so now I have the two fragments of my data set represented as tables. The difference between the table version and the record batch version is that the columns are all represented as chunked arrays. Each array from the original record batch is now one chunk in the corresponding chunked array in the table:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb71" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb71-1">df_batch_0<span class="sc" style="color: #5E5E5E;">$</span>title</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>Array
-&lt;string&gt;
-[
-  "King",
-  "Free",
-  "Choreomania",
-  "Back in Town"
-]</code></pre>
-</div>
-<div class="sourceCode cell-code" id="cb73" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb73-1">df_table_0<span class="sc" style="color: #5E5E5E;">$</span>title</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>ChunkedArray
-[
-  [
-    "King",
-    "Free",
-    "Choreomania",
-    "Back in Town"
-  ]
-]</code></pre>
-</div>
-</div>
-<p>It’s the same underlying data (and indeed the same immutable array is referenced by both), just enclosed by a new, flexible chunked array wrapper. However, it is this wrapper that allows us to concatenate tables:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb75" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb75-1">df <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">concat_tables</span>(</span>
-<span id="cb75-2">  df_table_0,</span>
-<span id="cb75-3">  df_table_1</span>
-<span id="cb75-4">)</span>
-<span id="cb75-5">df</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>Table
-14 rows x 3 columns
-$track_number &lt;int32&gt;
-$title &lt;string&gt;
-$duration &lt;int32&gt;</code></pre>
-</div>
-</div>
-<p>This is successful (yay!) and the result will behave exactly like a two dimensional object with <code>$</code>, <code>[[</code>, and <code>[</code> operators that behave as you expect them to<sup>13</sup> (yay!), but if you look closely you can still see the “seams” showing where the tables were appended:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb77" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb77-1">df<span class="sc" style="color: #5E5E5E;">$</span>title</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>ChunkedArray
-[
-  [
-    "King",
-    "Free",
-    "Choreomania",
-    "Back in Town"
-  ],
-  [
-    "Girls Against God",
-    "Dream Girl Evil",
-    "Prayer Factory",
-    "Cassandra",
-    "Heaven Is Here",
-    "Daffodil",
-    "My Love",
-    "Restraint",
-    "The Bomb",
-    "Morning Elvis"
-  ]
-]</code></pre>
-</div>
-</div>
-<p>When tables are concatenated the chunking is preserved. That’s because those are the original arrays, still located at the same spot in memory. That’s efficient from a memory use perspective, but again, don’t forget that the chunking is not semantically meaningful, and there is no guaranteed that a write-to-file operation (e.g., to parquet format) will preserve those chunks.</p>
-<p><br></p>
-<div class="cell page-columns page-full">
-<div class="cell-output-display column-screen">
-<div class="quarto-figure quarto-figure-center">
-<figure class="figure">
-<p><a href="https://www.youtube.com/watch?v=h9CNGPy11Jc"><img src="https://blog.djnavarro.net/posts/2022-05-25_arrays-and-tables-in-arrow/img/my_love.png" class="img-fluid figure-img" width="1277"></a></p>
-</figure>
-</div>
-</div>
-</div>
-<p><br><br></p>
-</section>
-<section id="datasets" class="level2 page-columns page-full">
-<h2 class="anchored" data-anchor-id="datasets">Datasets</h2>
-<blockquote class="blockquote">
-<p>What kind of man loves like this?<br>
-To let me dangle at a cruel angle<br>
-Oh, my feet don’t touch the floor<br>
-Sometimes you’re half in and then you’re half out<br>
-Buy you never close the door<br>
-&nbsp;&nbsp;– <em>What Kind Of Man</em>, Florence + The Machine</p>
-</blockquote>
-<p>So what about datasets? They’re the last item on that table, and you might be wondering where they fall in all this. I’m not going to dive into the details on datasets in this post, because they’re a whole separate topic and they deserve their own blog post. However, it’s a little unsatisfying to write all this and not say anything about them, so I’ll give a very quick overview here.</p>
-<p>Up to this point I’ve talked about tabular data sets that are contained entirely in memory. When such data are written to disk, they are typically written to a single file. For larger-than-memory data sets, a different strategy is needed. Only a subset of the data can be stored in memory at any point in time, and as a consequence it becomes convenient to write the data to disk by partitioning it into many smaller files. This functionality is supported in Arrow via Datasets.</p>
-<p>I’ll give a simple example here, using a small data set. Let’s suppose I’ve downloaded the entire Florence + The Machine discography using the <strong>spotifyr</strong> package:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb79" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb79-1">florence <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">get_discography</span>(<span class="st" style="color: #20794D;">"florence + the machine"</span>)</span>
-<span id="cb79-2">florence</span></code></pre></div>
-</div>
-<div class="cell">
-<div class="cell-output cell-output-stdout">
-<pre><code># A tibble: 414 × 41
-# Groups:   album_name [18]
-   artist_name   artis…¹ album…² album…³ album…⁴ album…⁵ album…⁶ album…⁷ dance…⁸
-   &lt;chr&gt;         &lt;chr&gt;   &lt;chr&gt;   &lt;chr&gt;   &lt;list&gt;  &lt;chr&gt;     &lt;dbl&gt; &lt;chr&gt;     &lt;dbl&gt;
- 1 Florence + T… 1moxjb… 0uGwPm… album   &lt;df&gt;    2022-0…    2022 day       0.73 
- 2 Florence + T… 1moxjb… 0uGwPm… album   &lt;df&gt;    2022-0…    2022 day       0.467
- 3 Florence + T… 1moxjb… 0uGwPm… album   &lt;df&gt;    2022-0…    2022 day       0.635
- 4 Florence + T… 1moxjb… 0uGwPm… album   &lt;df&gt;    2022-0…    2022 day       0.346
- 5 Florence + T… 1moxjb… 0uGwPm… album   &lt;df&gt;    2022-0…    2022 day       0.599
- 6 Florence + T… 1moxjb… 0uGwPm… album   &lt;df&gt;    2022-0…    2022 day       0.565
- 7 Florence + T… 1moxjb… 0uGwPm… album   &lt;df&gt;    2022-0…    2022 day       0.472
- 8 Florence + T… 1moxjb… 0uGwPm… album   &lt;df&gt;    2022-0…    2022 day       0.571
- 9 Florence + T… 1moxjb… 0uGwPm… album   &lt;df&gt;    2022-0…    2022 day       0.542
-10 Florence + T… 1moxjb… 0uGwPm… album   &lt;df&gt;    2022-0…    2022 day       0.643
-# … with 404 more rows, 32 more variables: energy &lt;dbl&gt;, key &lt;int&gt;,
-#   loudness &lt;dbl&gt;, mode &lt;int&gt;, speechiness &lt;dbl&gt;, acousticness &lt;dbl&gt;,
-#   instrumentalness &lt;dbl&gt;, liveness &lt;dbl&gt;, valence &lt;dbl&gt;, tempo &lt;dbl&gt;,
-#   track_id &lt;chr&gt;, analysis_url &lt;chr&gt;, time_signature &lt;int&gt;, artists &lt;list&gt;,
-#   available_markets &lt;list&gt;, disc_number &lt;int&gt;, duration_ms &lt;int&gt;,
-#   explicit &lt;lgl&gt;, track_href &lt;chr&gt;, is_local &lt;lgl&gt;, track_name &lt;chr&gt;,
-#   track_preview_url &lt;lgl&gt;, track_number &lt;int&gt;, type &lt;chr&gt;, track_uri &lt;chr&gt;, …</code></pre>
-</div>
-</div>
-<p>The <code>florence</code> data frame is of course quite small, and I have no real need to use Arrow Datasets: it’s small enough that I can store it natively in R as a tibble! But it will suffice to illustrate concepts that come in handy when working with large datasets.</p>
-<p>Let’s suppose I want to partition this in into many data files, using the album release year as the basis for the partitioning. To do this I’ll use the <code>write_dataset()</code> function, specifying <code>partitioning = "album_release_year"</code> to ensure that files are created after splitting the data set by release year. By default, the <code>write_dataset()</code> function writes individual data files in the parquet format, which is in general a very good default choice for large tabular data sets. However, because I have not talked about <a href="https://parquet.apache.org/">Apache Parquet</a> in this post, I’ll make a different choice and write the data files in the feather format that we’ve seen earlier in this post. I can do that by setting <code>format = "feather"</code>. Finally, I’ll set <code>path = "spotify_florence"</code> to ensure that all the files are stored in a folder by that name. That gives this command:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb81" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb81-1">florence <span class="sc" style="color: #5E5E5E;">|&gt;</span> </span>
-<span id="cb81-2">  <span class="fu" style="color: #4758AB;">select</span>(<span class="fu" style="color: #4758AB;">where</span>(<span class="sc" style="color: #5E5E5E;">~!</span><span class="fu" style="color: #4758AB;">is.list</span>(.))) <span class="sc" style="color: #5E5E5E;">|&gt;</span>  <span class="co" style="color: #5E5E5E;"># drop list columns</span></span>
-<span id="cb81-3">  <span class="fu" style="color: #4758AB;">as_arrow_table</span>() <span class="sc" style="color: #5E5E5E;">|&gt;</span>             <span class="co" style="color: #5E5E5E;"># convert to an arrow table</span></span>
-<span id="cb81-4">  <span class="fu" style="color: #4758AB;">write_dataset</span>(                  <span class="co" style="color: #5E5E5E;"># write to multi-file storage</span></span>
-<span id="cb81-5">    <span class="at" style="color: #657422;">path =</span> <span class="st" style="color: #20794D;">"spotify_florence"</span>,</span>
-<span id="cb81-6">    <span class="at" style="color: #657422;">format =</span> <span class="st" style="color: #20794D;">"feather"</span>,</span>
-<span id="cb81-7">    <span class="at" style="color: #657422;">partitioning =</span> <span class="st" style="color: #20794D;">"album_release_year"</span></span>
-<span id="cb81-8">  )</span></code></pre></div>
-</div>
-<p>The result is that the following files are written to disk:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb82" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb82-1"><span class="fu" style="color: #4758AB;">list.files</span>(<span class="st" style="color: #20794D;">"spotify_florence"</span>, <span class="at" style="color: #657422;">recursive =</span> <span class="cn" style="color: #8f5902;">TRUE</span>)</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>[1] "album_release_year=2009/part-0.feather"
-[2] "album_release_year=2010/part-0.feather"
-[3] "album_release_year=2011/part-0.feather"
-[4] "album_release_year=2012/part-0.feather"
-[5] "album_release_year=2015/part-0.feather"
-[6] "album_release_year=2018/part-0.feather"
-[7] "album_release_year=2022/part-0.feather"</code></pre>
-</div>
-</div>
-<p>These file names are written in “Hive partitioning” format. It looks a little weird the first time you encounter it, because <code>=</code> is a character most coders instinctively avoid including in file names because it has such a strong meaning in programming contexts. However, when files are named in Hive partitioning format, the intended interpretation is exactly the one you implicitly expect as a coder: it’s a <code>field_name=value</code> statement, so you will often encounter files with names like</p>
-<pre><code>/year=2019/month=2/data.parquet</code></pre>
-<p>For more information see the help documentation for the <code>hive_partitioning()</code> function in the <strong>arrow</strong> package.</p>
-<p>In any case, the key thing is that I’ve now written the data to disk in a fashion that splits it across multiple files. For the Florence + The Machine discography data this is is really not needed because the entire <code>spotify_florence</code> folder occupies a mere 320kB on my hard drive. However, elsewhere on my laptop I have a copy of the infamous New York City Taxi data set, and that one occupies a rather more awkward 69GB of storage. For that one, it really does matter that I have it written to disk in a sensible format!</p>
-<p>Having a data set stored in a distributed multi-file format is nice, but it’s only useful if I can open it and work with it as if it were the same as a regular tabular data set. The <code>open_dataset()</code> function allows me to do exactly this. Here’s what happens when I open the file:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb85" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb85-1">florence_dataset <span class="ot" style="color: #003B4F;">&lt;-</span> <span class="fu" style="color: #4758AB;">open_dataset</span>(<span class="st" style="color: #20794D;">"spotify_florence"</span>, <span class="at" style="color: #657422;">format =</span> <span class="st" style="color: #20794D;">"feather"</span>)</span>
-<span id="cb85-2">florence_dataset</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>FileSystemDataset with 7 Feather files
-artist_name: string
-artist_id: string
-album_id: string
-album_type: string
-album_release_date: string
-album_release_date_precision: string
-danceability: double
-energy: double
-key: int32
-loudness: double
-mode: int32
-speechiness: double
-acousticness: double
-instrumentalness: double
-liveness: double
-valence: double
-tempo: double
-track_id: string
-analysis_url: string
-time_signature: int32
-disc_number: int32
-duration_ms: int32
-explicit: bool
-track_href: string
-is_local: bool
-track_name: string
-track_preview_url: bool
-track_number: int32
-type: string
-track_uri: string
-external_urls.spotify: string
-album_name: string
-key_name: string
-mode_name: string
-key_mode: string
-track_n: double
-album_release_year: int32
-
-See $metadata for additional Schema metadata</code></pre>
-</div>
-</div>
-<p>Okay yes, the output makes clear that I have loaded <em>something</em> and it has registered the existence of the 7 constituent files that comprise the dataset as a whole. But can I work with it? One of the big selling points to the <strong>arrow</strong> package is that it supplies a <strong>dplyr</strong> backend that lets me work with <code>Tables</code> as if they were R data frames, using familiar syntax. Can I do the same thing with <code>Datasets</code>?</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb87" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb87-1">danceability <span class="ot" style="color: #003B4F;">&lt;-</span> florence_dataset <span class="sc" style="color: #5E5E5E;">|&gt;</span> </span>
-<span id="cb87-2">  <span class="fu" style="color: #4758AB;">select</span>(album_name, track_name, danceability) <span class="sc" style="color: #5E5E5E;">|&gt;</span></span>
-<span id="cb87-3">  <span class="fu" style="color: #4758AB;">distinct</span>() <span class="sc" style="color: #5E5E5E;">|&gt;</span></span>
-<span id="cb87-4">  <span class="fu" style="color: #4758AB;">arrange</span>(<span class="fu" style="color: #4758AB;">desc</span>(danceability)) <span class="sc" style="color: #5E5E5E;">|&gt;</span> </span>
-<span id="cb87-5">  <span class="fu" style="color: #4758AB;">head</span>(<span class="at" style="color: #657422;">n =</span> <span class="dv" style="color: #AD0000;">10</span>) <span class="sc" style="color: #5E5E5E;">|&gt;</span> </span>
-<span id="cb87-6">  <span class="fu" style="color: #4758AB;">compute</span>()</span>
-<span id="cb87-7"></span>
-<span id="cb87-8">danceability</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>Table
-10 rows x 3 columns
-$album_name &lt;string&gt;
-$track_name &lt;string&gt;
-$danceability &lt;double&gt;
-
-See $metadata for additional Schema metadata</code></pre>
-</div>
-</div>
-<p>Yes. Yes I can. Because I called <code>compute()</code> at the end of this pipeline rather than <code>collect()</code>, the results have been returned to me as a <code>Table</code> rather than a data frame. I did that so that I can show that the <code>danceability</code> output is no different to the <code>Table</code> objects we’ve seen earlier, constructed from <code>ChunkedArray</code> objects:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb89" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb89-1">danceability<span class="sc" style="color: #5E5E5E;">$</span>track_name</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>ChunkedArray
-[
-  [
-    "Heaven Is Here",
-    "King",
-    "King",
-    "Hunger",
-    "My Love - Acoustic",
-    "Ghosts - Demo",
-    "What The Water Gave Me - Demo",
-    "What The Water Gave Me - Demo",
-    "South London Forever",
-    "What The Water Gave Me - Demo"
-  ]
-]</code></pre>
-</div>
-</div>
-<p>If I want to I can convert this to a tibble, and discover that “Dance Fever” does indeed contain the most danceable Florence + The Machine tracks, at least according to Spotify:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb91" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb91-1"><span class="fu" style="color: #4758AB;">as.data.frame</span>(danceability)</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code># A tibble: 10 × 3
-   album_name                            track_name                    danceab…¹
-   &lt;chr&gt;                                 &lt;chr&gt;                             &lt;dbl&gt;
- 1 Dance Fever                           Heaven Is Here                    0.852
- 2 Dance Fever                           King                              0.731
- 3 Dance Fever (Deluxe)                  King                              0.73 
- 4 High As Hope                          Hunger                            0.729
- 5 Dance Fever (Deluxe)                  My Love - Acoustic                0.719
- 6 Lungs (Deluxe Version)                Ghosts - Demo                     0.681
- 7 Ceremonials                           What The Water Gave Me - Demo     0.68 
- 8 Ceremonials (Deluxe Edition)          What The Water Gave Me - Demo     0.68 
- 9 High As Hope                          South London Forever              0.679
-10 Ceremonials (Original Deluxe Version) What The Water Gave Me - Demo     0.678
-# … with abbreviated variable name ¹​danceability</code></pre>
-</div>
-</div>
-<p><br></p>
-<p>I am certain you are as reassured by this as I am.</p>
-<p><br></p>
-<div class="cell page-columns page-full">
-<div class="cell-output-display column-screen">
-<div class="quarto-figure quarto-figure-center">
-<figure class="figure">
-<p><a href="https://www.youtube.com/watch?v=_kIrRooQwuk"><img src="https://blog.djnavarro.net/posts/2022-05-25_arrays-and-tables-in-arrow/img/big_god.png" class="img-fluid figure-img" width="1192"></a></p>
-</figure>
-</div>
-</div>
-</div>
-<p><br><br></p>
-<!--------------- appendices go here ----------------->
-<div class="cell">
-
-</div>
-
-
-</section>
-
-
-<div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
-
-<ol>
-<li id="fn1"><p>Me.↩︎</p></li>
-<li id="fn2"><p>In the near future, I hope that the documentation itself is going to tell this story but sometimes it’s easier to do the same job in an informal blog post where I have the luxury of going overboard with “authorial voice” and “narrative”, and all those other fancy things that writers love.↩︎</p></li>
-<li id="fn3"><p>Quick explanation: As a general rule, if you want things to be efficient you want the beginnings and endings of your data structures to be <a href="https://en.wikipedia.org/wiki/Data_structure_alignment">naturally aligned</a>, in the sense that the memory address is a multiple of the data block sizes. So on a 64-bit machine, you want the memory address for every data structure to start on a multiple of 64 bits. Apparently that makes lookup easier or something. Unfortunately, I’ve only specified 8 bits (i.e.&nbsp;1 byte) so if I wanted to ensure that the validity bitmap is naturally aligned I’m going to need to add another 7 bytes worth of padding in order to make it to the full 64 bits. This method of aligning data structures in memory is referred to as “8 byte alignment”. However, what Arrow does in this situation is <em>64 byte alignment</em>, so each data structure has to be 64 bytes long at a minimum. This design feature exists to allow efficient use of modern hardware, and if you want to know more, it’s discussed in the <a href="https://arrow.apache.org/docs/format/Columnar.html#buffer-alignment-and-padding">Arrow documentation</a>.↩︎</p></li>
-<li id="fn4"><p>More precisely, signed 32 bit integers.↩︎</p></li>
-<li id="fn5"><p>I know, I know. Nothing is impossible. But you know what I mean.↩︎</p></li>
-<li id="fn6"><p>If you don’t specify names when creating a data frame, R will create them for you. For example, when you create an ostensibly unnamed data frame with a command like <code>x &lt;- data.frame(1:2, 3:4)</code>, you’ll find that <code>x</code> still has a <code>names</code> attribute, and <code>names(x)</code> returns X1.2, X3.4↩︎</p></li>
-<li id="fn7"><p>On the off chance that you’re one of those extremely sensible people who chose not to read my data serialisation post, I’ll mention that the native RDS format that R uses avoids this trap. Much like Arrow serialisation formats, RDS preserves the column wise organisation to data frames.↩︎</p></li>
-<li id="fn8"><p>The data header for contains the length and null count for each flattened field. It also contains the memory offset (i.e., the start point) and length of every buffer that is stored in the message body.↩︎</p></li>
-<li id="fn9"><p>For instance, there are padding requirements involved that I am ignoring here.↩︎</p></li>
-<li id="fn10"><p>Full disclosure: there are a few minor differences between the IPC streaming format and the feather file format. I’ve glossed over those in this post but you can find the details on the <a href="https://arrow.apache.org/docs/format/Columnar.html#ipc-file-format">Arrow specification page</a>.↩︎</p></li>
-<li id="fn11"><p>Okay fine, I’m lying. I did it on purpose.↩︎</p></li>
-<li id="fn12"><p>If you ever do need to convert a record batch to a table you can use <code>as_arrow_table()</code>.↩︎</p></li>
-<li id="fn13"><p>Because tables are built from chunked arrays, and chunked arrays are an abstraction layer designed to ensure that the distinct arrays can be treated as if they were one contiguous vector, Arrow tables inherit all those features. You can subset tables with <code>$</code>, <code>[[</code>, and <code>[</code> the same way you can for record batches.↩︎</p></li>
-</ol>
-</section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div quarto-reuse="quarto-reuse" class="quarto-appendix-contents"><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
-  author = {Danielle Navarro},
-  title = {Arrays and Tables in {Arrow}},
-  date = {2022-05-25},
-  url = {https://blog.djnavarro.net/posts/2022-05-25_arrays-and-tables-in-arrow},
-  langid = {en}
-}
-</code></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2022" class="csl-entry quarto-appendix-citeas">
-Danielle Navarro. 2022. <span>“Arrays and Tables in Arrow.”</span> May
-25, 2022. <a href="https://blog.djnavarro.net/posts/2022-05-25_arrays-and-tables-in-arrow">https://blog.djnavarro.net/posts/2022-05-25_arrays-and-tables-in-arrow</a>.
-</div></div></section></div> ]]></description>
-  <category>Apache Arrow</category>
-  <category>R</category>
-  <guid>https://blog.djnavarro.net/posts/2022-05-25_arrays-and-tables-in-arrow/index.html</guid>
-  <pubDate>Tue, 24 May 2022 14:00:00 GMT</pubDate>
-  <media:content url="https://blog.djnavarro.net/posts/2022-05-25_arrays-and-tables-in-arrow/img/cover.jpg" medium="image" type="image/jpeg"/>
 </item>
 </channel>
 </rss>
