@@ -29,64 +29,295 @@ set.seed(1)
 
 <!--------------- post begins here ----------------->
 
-For the sake of my sanity I'm using [CmdStanR](https://mc-stan.org/cmdstanr/), a lightweight interface to Stan.
+For someone who has spent most of her professional life as a Bayesian statistician, it's strange to admit that I'm only moderately experienced with Stan. My early work in Bayesian modelling involved some Laplace approximations to Bayes factors, MCMC samplers for posterior sampling, and in a few cases I would even resort to using BIC. I hand-coded everything myself, which was super helpful for understanding the mechanics underpinning the statistical inference, but terribly inefficient. When I did start using a domain-specific language for my probabilistic inference I mostly used JAGS.^[I did try WinBUGS briefly but it was a bit awkward since I wasn't a Windows user even then.] Eventually I started hearing the whispers... 
+
+"Have you heard the good news about Hamiltonian Monte Carlo?" the Stan believers would ask me.
+
+With some regret I would have to reply that I was saddled with latent discrete parameters for theoretical reasons,^[Yes, I know that sometimes there are tricks to work around them. It was more effort than it was worth.] and because the Stan stans are in fact lovely humans they would all express their sympathies, offer their thoughts and prayers, and think to themselves "there but for the grace of God go I".
+
+Long story short, it's taken me a long time to be in a position to learn Stan.
+
+Prolonged unemployment has a silver lining, I suppose.^[I'd offer my thanks to those responsible, but gratitude isn't really the strongest emotion I feel after several months of being bored out of my mind with nothing to do.]
+
+## Setting up
+
+The first thing I have to do is go through the installation process. Yes, I have used Stan before, but that was a few laptops ago and things have changed a little since then. One happy little development from my perspective is that R users now have multiple options for interacting with Stan. The last time I used Stan the accepted method was to use the RStan package,^[There's also many packages for specific modelling frameworks like brms and rstanarm but for the purposes of this post I'm only interested in packages that supply a  general-purpose interface to Stan from R.] and... there's absolutely nothing wrong with RStan. It's a great package. Really. It's just... there's a lot going on there, you know? Lots of bells and whistles. It's powerful. It makes my head hurt. 
+
+Also, I can't get the bloody thing to install on my Ubuntu box. Fucked if I know why.
+
+Fortunately, nowadays there is also [CmdStanR](https://mc-stan.org/cmdstanr/), a lightweight interface to Stan. It suits my style of thinking nicely because it provides [R6](https://r6.r-lib.org/) classes with methods that interact more or less directly with Stan. It does mean that you have to work harder to finesse the outputs, but I'm okay with that.^[Please please please do not take any of this as a general purpose statement: I cordially dislike the "I am better than you because my code is closer to bare metal than yours" thing. Personally I think it's kinda dickish behaviour. In this particular instance I find the lightweight interface helps me think, and I prefer it over all the convenience tooling provided by RStan because I need that clarity right now. Nothing more nor less than that is intended.] As is usually the case with the Stan folks, the documentation is really nice so I won't bother talking about the installation process. Suffice to say I've got the package working, so now I'll load it:
 
 ```{r}
 library(cmdstanr)
 ```
 
-Since I'm doing this within a quarto blog, I'm going to register the knitr engine:
+The only finicky thing to talk about here lies in the fact that I'm doing all this in the context of a quarto blog post, and specifically a post that is using the knitr engine to execute the code chunks. By default, if knitr encounters a code chunk tagged as the `stan` language it will look for the RStan package to do the work.^[I mean, technically the real work of compiling the Stan code into an executable and then running the sampler is all being done by Stan itself and has sweet fuck all to do with any R package, but knitr has no way of talking to Stan, so it has to rely on an R package to do that... and by default it asks RStan.] That's not going to work for me since I don't actually have RStan installed on my machine. Thankfully the cmdstanr package makes this easy for me to fix:
 
 ```{r}
 register_knitr_engine()
 ```
 
+Now that this is done, quarto/knitr will use cmdstanr to handle all the stan code included below.
 
-## Posterior sampling 
 
-Here's some Stan code for the model:
+## The context: pharmacokinetic modelling
 
-```{stan, output.var="coin"}
+Next, I need a toy problem to work with. In my [last post](https://blog.djnavarro.net/posts/2023-04-26_non-compartmental-analysis/) I'd started teaching myself some pharmacokinetic modelling -- statistical analysis of drug concentrations over time -- and I'll continue that line of thinking here. In that post I wrote about [noncompartmental analysis](https://en.wikipedia.org/wiki/Pharmacokinetics#Noncompartmental_analysis) (NCA), a method for analysing pharmacokinetic data without making strong assumptions about the dynamics underpinning the biological processes of drug absorption and elimination, or the statistical properties of the measurement. NCA has its uses, but often it helps to have a model with a little structure to it. 
+
+In compartmental modelling, the analyst adopts a simplified model of (the relevant aspects of) the body as comprised of a number of distinct "compartments" that the drug can flow between. A two-compartment model might suppose that in addition to a "central" compartment that comprises systemic circulation, there is also a "peripheral" compartment where drug concentrations accrue in other bodily tissues. The model would thus include some assumptions about the dynamics that describe how the drug is absorbed (from whatever delivery mechanism is used) into (probably) the central compartment, and how it is eliminated from (probably) the central compartment. It would also need dynamics to describe how the drug moves from the central to peripheral compartment, and vice versa. These assumptions form the **structural** component of the compartmental model.
+
+In addition to all this, a compartmental model needs to make **statistical** assumptions. The structure of the model describes how drug concentrations change over time, but in addition to that we might need a model that describes measurement error, variation among individuals, and covariates that affect the processes. 
+
+In other words, it's really cool. 
+
+## A very simple one-compartmental model
+
+Okay let's start super simple. We'll have a one-compartment model, and we'll assume bolus intravenous administration.^[Or, to those of us who don't speak the language, the drug is injected into the bloodstream in a single dose.] That's convenient because we don't have to have a model for the absorption process: at time zero the entire dose goes straight into systemic circulation. Assuming we know both the dose $D$ in milligrams and the volume of distribution^[Not quite the same as the total amount of blood plasma, as I understand it, but approximately the same idea.] $V_d$, then the drug concentration in the first (and only) compartment $C(t)$ at time $t=0$ is given by $C(0) = D/V_d$. That's the only thing we need to consider on the absorption (or "influx") side.
+
+On the elimination (or "efflux") side, there are a number of possible dynamical models we could consider. One of the simplest models assumes that the body is able to "clear" a fixed volume of blood of the drug per unit time. If this clearance rate is constant, some fixed proportion $k$ of the current drug concentration will be eliminated during each such time interval. Expressed as a differential equation this gives us:
+
+$$
+\frac{dC(t)}{dt} = kC(t)
+$$
+Unlike many differential equations, this one is easy to solve^[So easy even I could do it.] and yields an exponential concentration-time curve:
+
+$$
+C(t) = C(0) e^{-kt}
+$$
+
+That completes the structural side to our model. Now the statistical side. Again, we'll keep it simple: I'm going to assume independent and identically normally distributed errors, no matter how unlikely that is in real life. Reflecting the fact that from a statistics point of view we're now talking about a discrete set of time points and discrete set of measured drug concentrations, I'll refer to the $n$ time points as $t_1, t_2, \ldots, t_n$ and the corresponding observed concentrations as $c_1, c_2, \ldots, c_n$. In this notation our statistical model is expressed:
+
+$$
+c_i = c_0 e^{-kt_i} + \epsilon_i 
+$$
+
+where
+
+$$
+\epsilon_i \sim \mbox{Normal}(0, \sigma)
+$$
+
+Our model therefore has two unknowns, the scale parameter $\sigma$ and the elimination rate parameter $k$. Since we are being Bayesians for the purposes of this post I'll place some priors over these parameters. However, since we are also being *lazy* Bayesians for the purposes of this post I'm not even going to pretend I've thought much about these priors. I've made them up because my actual goal here is to familiarise myself with the mechanics of pharmacokinetic modelling in Stan. The real world practicalities -- critically important though they are -- can wait! Anyway, some arbitrarily chosen priors:
+
+$$
+\begin{array}{rcl}
+\sigma & \sim & \mbox{Cauchy}(0, 5) \\
+k & \sim & \mbox{Exponential}(1)
+\end{array}
+$$
+
+Again, I cannot stress this enough: I literally did not think *at all* about these choices. Never ever adopt such an appalling practice in real life, boys and girls and enby kids!
+
+### Implementation in Stan
+
+Moving along, let's have a look at how this model would be implemented in Stan. The code for the model is shown below, and -- in case you're not familiar with Stan code -- I'll quickly outline the structure. Stan is a declarative language, not an imperative one: you specify the model, it takes care of the inference. Your code is an abstract description of the model, not a sequence of instructions. In my code below, you can see it's organised into three blocks:
+
+- The **data** block defines quantities that the user needs to supply. Some of those correspond to empirical data like concentrations, others are design variables for the study like measurement times.
+- The **parameters** block defines quantities over which inference must be performed. In this case that's $k$ and $\sigma$.
+- The **model** block specifies the model itself, which in this case includes both the structural and statistical components to our model, and does not distinguish between "likelihood" and "prior". From the Stan point of view Bayesian inference it's not really about "priors and likelihood" it's more of a Doctor Who style "modelly-wobbelly joint probability distribution" kind of thing. 
+
+Anyway here it is:
+
+```{stan}
+#| filename: bolus
+#| output.var: "bolus"
 data {
-  int<lower=0> N;
-  array[N] int<lower=0,upper=1> y;
+  int<lower=1> n_obs;
+  real<lower=0> c0;
+  vector<lower=0>[n_obs] t_obs;
+  vector<lower=0>[n_obs] c_obs;
 }
+
 parameters {
-  real<lower=0,upper=1> theta;
+  real<lower=0> sigma;
+  real<lower=0> k;
 }
+
 model {
-  theta ~ beta(1,1);
-  y ~ bernoulli(theta);
+  k ~ exponential(1);
+  sigma ~ cauchy(0, 5);
+  c_obs ~ normal(c0 * exp(-k * t_obs), sigma);
 }
 ```
 
-Over in R we can print the model:
+Some additional things to note:
 
-```{r}
-coin
+- Stan is strongly typed with (for example) `int` and `real` scalar types, and `vector` types containing multiple reals.
+- Variable declarations allow you to specify lower and upper allowable values for variables. It is always good to include those if you know them
+- There's some fanciness going on under the hood in how Stan "thinks about" probability distributions in terms of log-probability functions, but I'm glossing over that because Now Is Not The Time
+
+Perhaps more important from the perspective of this post, here's the important bit of quarto syntax I used when defining the code chunk above. When I defined the code chunk I specified the `output.var` option by including the following line in the yaml header to the chunk:
+
+``` r
+#| output.var: "bolus"
 ```
 
-This is an object of class [`CmdStanModel`](https://mc-stan.org/cmdstanr/reference/CmdStanModel.html). More precisely it's an [R6 class](https://r6.r-lib.org/). 
+By specifying `output.var: "bolus"` I've ensured that when the quarto document is rendered there is a model object called `bolus` available in the R session. It's essentially equivalent to having the code above saved to a file called `bolus.stan` and then calling the cmdstanr function `cmdstan_model()` to compile it to C++ with the assistance of Stan:
 
-Specify observations to be passed to Stan:
-
-```{r}
-data_list <- list(N = 10, y = c(0,1,0,0,0,0,0,0,0,1))
+``` r
+bolus <- cmdstan_model("bolus.stan")
 ```
 
-Now we run the sampler:
+For future Stan models I'll just print the name of the output variable at the top of the code chunk so that you can tell which R variable corresponds to which Stan model. 
+
+In any case let's take a look at our `bolus` object. Printing the object yields sensible, if not exciting, output: it shows you the source code for the underlying model: 
 
 ```{r}
-fit <- coin$sample(
-  data = data_list, 
-  seed = 123, 
-  chains = 4, 
-  parallel_chains = 4,
-  refresh = 500 # print update every 500 iters
+bolus
+```
+
+Perhaps more helpfully for our purposes, it's useful to know that this is an object of class [`CmdStanModel`](https://mc-stan.org/cmdstanr/reference/CmdStanModel.html), and if you take a look at the documentation on the linked page, you'll find a description of the methods available for such objects. There are quite a few possibilities, but a few of particular interest from a statistical perspective are:^[I'm adopting the `$method()` convention here sometimes used when discussing R6 classes to be clear that we're talking about encapsulated OOP in which methods belong to objects (as is typical in many programming languages) rather than functional OOP in which methods belong to generic functions (as appears in the S3 and S4 systems in R, for instance).]
+
+- [`$sample()`](https://mc-stan.org/cmdstanr/reference/model-method-sample.html) calls the posterior sampling method implemented by Stan on the model
+- [`$variational()`](https://mc-stan.org/cmdstanr/reference/model-method-variational.html) calls the variational Bayes algorithms implemented by Stan on the model
+- [`$optimize()`](https://mc-stan.org/cmdstanr/reference/model-method-optimize.html) estimates the posterior mode
+
+For the purposes of this post I'll use the `$sample()` method, and in order to call it on my `bolus` object I'll need to specify some data to pass from R to the compiled Stan model. These are passed as a list:
+
+```{r}
+bolus_data <- list(
+  n_obs = 6,
+  c0 = 9.1,
+  t_obs = c(.1, .5, 1, 1.5, 2, 3),
+  c_obs = c(8.4, 3.1, 1.9, 0.6, 0.2, 0.01)
 )
 ```
 
-## A simple system
+To quickly visualise these "observed data", I'll organise the relevant variables into a data frame and draw a pretty little scatterplot with ggplot2: 
+
+```{r}
+library(ggplot2)
+df <- data.frame(
+  time = bolus_data$t_obs,
+  conc = bolus_data$c_obs
+)
+ggplot(df, aes(time, conc)) + geom_point()
+```
+
+Delightful, truly. So neat. So clean. So obviously, obviously fictitious.
+
+As a Bayesian^[Note for young people: This was the pre-2023 equivalent of saying "As an AI language model..."] that has observed the data, what I want to compute is the joint posterior distribution over my parameters $k$ and $\sigma$. Or, since this has been an unrealistic expectation ever since the death of the Cult of Conjugacy,^[I can still remember quite viscerally the moment that conjugacy died for me as a potentially useful statistical guideline: it was the day I learned that  a Dirichlet Process prior is conjugate to i.i.d. sampling from an arbitrary(ish) unknown distribution. DP priors are... well, I don't want to say "worthless" because I try to see the good in things, but having worked with them a lot over the years I am yet to discover a situation where the thing I actually want is a Dirichlet Process. It's one of those interesting inductive cases about the projectibility of different properties. What "should" have happened is that the DP-conjugacy property made me more willing to use the DP. Instead, what "actually" happened is that learning about DP-conjugacy made me less willing to trust conjugacy. I *knew* in my bones that the DP was useless, so I revised my belief about conjugacy. Someone really should come up with a formal language to describe this kind of belief revision... I imagine it would be quite handy.] what I'll settle for are samples from that joint posterior that I can use to numerically estimate whatever it is that I'm interested in. To do this for our `bolus` model with the help of cmdstanr, we call `bolus$sample()`:
+
+```{r}
+bolus_fitted <- bolus$sample(
+  data = bolus_data, 
+  seed = 451, 
+  chains = 4,
+  refresh = 1000
+)
+```
+
+This is an object of class [CmdStanMCMC](https://mc-stan.org/cmdstanr/reference/CmdStanMCMC.html) and again you can look at the linked page to see what methods are defined for it. I'll keep things simple for now and call the [`$summary()`](https://mc-stan.org/cmdstanr/reference/fit-method-summary.html) method, which returns a tibble containing summary statistics associated with the MCMC chains:
+
+```{r}
+bolus_fitted$summary()
+```
+
+Evidently the estimated posterior mean for the elimination rate $k$ is 1.79, with a 90% [credible interval](https://en.wikipedia.org/wiki/Credible_interval)^[This is "of course" (see next footnote) an equal-tailed interval rather than a highest density interval.] ^[In technical writing, the term "of course" is an expression that used to denote "something that the author is painfully aware of and some subset of the readership is equally exhausted with, and none of those people really want to talk or hear about for the rest of their living days, but is entirely unknown and a source of total confusion to another subset of the readership who have no idea why this should be obvious because in truth it absolutely is not obvious". As such it should, of course, be used with caution and with a healthy dose of self-deprecation and rolling-of-the-eyes. It is in this latter spirit that my use of the term is intended: I simply do not wish to devote any more of my life to thinking about the different kinds of credible intervals.] of [1.43, 2.19]. Similarly, the standard deviation of the measurement error $\sigma$ is estimated to have mean 0.635 and 90% interval [0.34, 1.15]. 
+
+If we wanted to we could take this a little further by pulling out the posterior samples themselves using the [`$draws()`](https://mc-stan.org/cmdstanr/reference/fit-method-draws.html) method. Internally this method relies on the [posterior](https://mc-stan.org/posterior/) package, and supports any of the output formats allowed by that package. In this case I'll have it return a tibble because I like tibbles:
+
+```{r}
+bolus_samples <- bolus_fitted$draws(format = "draws_df")
+bolus_samples
+```
+
+You could then go on to do whatever you like with these samples but I have other fish to fry so I'm going to move on.
+
+### Generated quantities
+
+A slight extension:
+
+```{stan}
+#| filename: bolus2
+#| output.var: "bolus2"
+data {
+  int<lower=1> n_obs;
+  int<lower=1> n_fit;
+  real<lower=0> c0;
+  vector<lower=0>[n_obs] t_obs;
+  vector<lower=0>[n_obs] c_obs;
+  vector<lower=0>[n_fit] t_fit;
+}
+
+parameters {
+  real<lower=0> sigma;
+  real<lower=0> k;
+}
+
+model {
+  k ~ exponential(1);
+  sigma ~ cauchy(0, 5);
+  c_obs ~ normal(c0 * exp(-k * t_obs), sigma);
+}
+
+generated quantities {
+  vector<lower=0>[n_fit] c_fit = c0 * exp(-k * t_fit);
+}
+```
+
+Data for this version of the model needs to specify the times for which we want to generate fitted curves:
+
+```{r}
+bolus2_data <- list(
+  n_obs = 6,
+  n_fit = 60,
+  c0 = 9.1,
+  t_obs = c(.1, .5, 1, 1.5, 2, 3),
+  c_obs = c(8.4, 3.1, 1.9, 0.6, 0.2, 0.01),
+  t_fit = seq(.05, 3, .05)
+)
+```
+
+Fit the model:
+
+```{r}
+bolus2_fitted <- bolus2$sample(
+  data = bolus2_data, 
+  seed = 123, 
+  chains = 4,
+  refresh = 1000
+)
+```
+
+Generate quantities:
+
+```{r}
+bolus2_generated <- bolus2$generate_quantities(
+  fitted_params = bolus2_fitted,
+  data = bolus2_data,
+  seed = 666
+)
+```
+
+This is a [CmdStanGQ](https://mc-stan.org/cmdstanr/reference/CmdStanGQ.html) object, and again it has `$draws()` and `$summary()` methods. For our purposes the `$summary()` method will suffice as it returns a tibble containing the thing I want to plot:
+
+```{r}
+bolus2_summary <- bolus2_generated$summary()
+bolus2_summary
+```
+
+I'll add a column specifying the actual times:
+
+```{r}
+bolus2_summary$time <- bolus2_data$t_fit
+```
+
+Now draw the plot I really want:
+
+```{r}
+dat <- data.frame(t_obs = bolus2_data$t_obs, c_obs = bolus2_data$c_obs)
+ggplot(bolus2_summary) + 
+  geom_ribbon(aes(time, ymin = q5, ymax = q95), fill = "grey70") +
+  geom_line(aes(time, mean)) + 
+  geom_point(aes(t_obs, c_obs), data = dat) + 
+  labs(x = "time", y = "conc")
+```
+
+I'm still learning the ropes as a pharmacometrician -- and acutely aware that there are disciplinary norms I don't yet understand -- but at least as a mathematical psychologist this was the kind of plot I really liked to have at the end of a model based inference. The solid line gives our best point estimate of the true concentration-time curve, and the shaded region shows a 90% credible interval that expresses our uncertainty about what part of the space the true curve might actually occupy.^[We could supplement it further and maybe add dotted lines even further out that show 90% credible regions for future *data* (i.e., acknowledging the role of measurement error in the future) but today I don't feel like doing that!] 
+
+
+## Sadly, biology isn't always analytically tractable
 
 [Michaelis-Menten kinetics](https://en.wikipedia.org/wiki/Michaelis%E2%80%93Menten_kinetics)
 
@@ -95,8 +326,6 @@ $$
 $$
 
 I'll use the example from Holz (2001).
-
-## ODE Solving with R
 
 The [CRAN task view for differential equations](https://cran.r-project.org/web/views/DifferentialEquations.html) has lots of options. I'll use the [deSolve package](http://desolve.r-forge.r-project.org/):
 
