@@ -9,7 +9,7 @@ author:
 description: "Yeah yeah"
 date: "2023-05-11"
 categories: [Statistics, Pharmacokinetics]
-image: cover.jpg
+image: stan_logo.png
 ---
 
 <!--
@@ -74,7 +74,7 @@ In other words, it's really cool.
 
 Okay let's start super simple. We'll have a one-compartment model, and we'll assume bolus intravenous administration.^[Or, to those of us who don't speak the language, the drug is injected into the bloodstream in a single dose.] That's convenient because we don't have to have a model for the absorption process: at time zero the entire dose goes straight into systemic circulation. Assuming we know both the dose $D$ in milligrams and the volume of distribution^[Not quite the same as the total amount of blood plasma, as I understand it, but approximately the same idea.] $V_d$, then the drug concentration in the first (and only) compartment $C(t)$ at time $t=0$ is given by $C(0) = D/V_d$. That's the only thing we need to consider on the absorption (or "influx") side.
 
-On the elimination (or "efflux") side, there are a number of possible dynamical models we could consider. One of the simplest models assumes that the body is able to "clear" a fixed volume of blood of the drug per unit time. If this clearance rate is constant, some fixed proportion $k$ of the current drug concentration will be eliminated during each such time interval. Expressed as a differential equation this gives us:
+On the elimination (or "efflux") side, there are a number of possible dynamical models we could consider. One of the simplest models assumes that the body is able to "clear" a fixed volume of blood of the drug per unit time. If this clearance rate is constant, some constant proportion $k$ of the current drug concentration will be eliminated during each such time interval. Expressed as a differential equation this gives us:
 
 $$
 \frac{dC(t)}{dt} = kC(t)
@@ -319,87 +319,153 @@ I'm still learning the ropes as a pharmacometrician -- and acutely aware that th
 
 ## Sadly, biology isn't always analytically tractable
 
-[Michaelis-Menten kinetics](https://en.wikipedia.org/wiki/Michaelis%E2%80%93Menten_kinetics)
+Earlier when I justified the use of an exponential concentration-time function $C(t)$, I did so by assuming that the body is able to "clear" a constant volume of blood per unit time. That assumption works reasonably well in some situations. If we suppose that the kidneys^[And other organs, I guess. I've heard rumours the human body contains other organs that actually do things...] work a bit like a filter, you can imagine that the body is filtering the blood at a fixed rate, which produces the exponential curve I used earlier. But the real world is a little more complicated than that sometimes.
+
+Suppose, instead, that the elimination process involves an [enzyme-catalysed](https://en.wikipedia.org/wiki/Enzyme_catalysis) reaction. That is, the body eliminates the drug (the substrate) by binding it to enzyme, and from this transition state it is catalysed to something else (the product). The dynamics of such a process are a little different: the enzyme concentration is often very low relative to the substrate concentration and the reaction rate saturates: once you've hit that point adding more of the drug into the blood won't speed up the elimination rate because there's no free enzyme to catalyse its conversion. Put slightly differently, if elimination involves a saturable process it won't necessarily have a constant clearance rate, and you won't see an exponential concentration-time function. 
+
+Well, that's awkward. 
+
+### Michaelis-Menten kinetics
+
+Sometimes a process like this can instead be described by [Michaelis-Menten kinetics](https://en.wikipedia.org/wiki/Michaelis%E2%80%93Menten_kinetics), characterised by the following differential equation:
 
 $$
 \frac{dC(t)}{dt} = - \frac{V_m}{K_m + C(t)} C(t)
 $$
 
-I'll use the example from Holz (2001).
+In this expression: 
 
-The [CRAN task view for differential equations](https://cran.r-project.org/web/views/DifferentialEquations.html) has lots of options. I'll use the [deSolve package](http://desolve.r-forge.r-project.org/):
+- $V_m$ is a constant that denotes the maximum velocity of elimination (i.e., how quickly can the drug be eliminated once the process reaches its saturation point? You can satisfy yourself that this is true by first noting that $dC(t)/dt$ increases monotonically with $C(t)$, and then taking the limit as $C(t) \rightarrow \infty$. When you do that, the ratio $C(t)/(K_m + C(t)) \rightarrow 1$ and hence the elimination velocity $dC(t)/dt$ approaches the saturation rate $V_m$.
+
+- $K_m$ is a constant denoting the drug concentration at which the elimination rate slows to half its maximum speed. Again, we can get this interpretation directly from the equation by setting $C(t) = K_m$ and noting that in this special case $dC(t)/dt = V_m/2$.
+
+We can extend our intuitions about Michaelis-Menten kinetics a little further by noting two more properties that follow from the differential equation: 
+
+- If the drug concentration $C(t)$ is very large, $dC(t)/dt$ will be roughly constant and very close to the satuation rate $V_m$. In other words... **at high concentrations, the concentration decreases linearly over time**. 
+
+- If the drug concentration $C(t)$ is very small, then $V_m / (K_m + C(t))$ will be roughly constant, and $dC(t)/dt$ will be roughly proportional to the concentration $C(t)$. In other words... **at low concentrations the concentration decreases exponentially over time**.
+
+Okay, that's enough intuition. Time to see what the curves actually look like. One teeny-tiny problem... this differential equation doesn't really have an analytic  solution.^[Apparently this is only half true. A deep dive on the relevant [wikipedia page](https://en.wikipedia.org/wiki/Michaelis%E2%80%93Menten_kinetics#Closed_form_equation) suggests that it is possible to solve it analytically, but insofar as the solution involves the [Lambert W function](https://en.wikipedia.org/wiki/Lambert_W_function) I personally would prefer to take a numerical approach.] We're going to have to do this numerically.
+
+### What does it look like?
+
+A little later in this post I'm going to implement Michaelis-Menten kinetics using Stan, so as to eventually give me the ability to do Bayesian statistics in a pharmacokinetic model that involves this kind of dynamics. However, I'm a big fan of doing things in small steps. For example, if I weren't planning to build all this into a probabilistic model, I wouldn't really need to use Stan at all. R has many different [tools for solving differential equations numerically](https://cran.r-project.org/web/views/DifferentialEquations.html), and I could just use one of those.
+
+For instance, if I chose to use the [deSolve package](http://desolve.r-forge.r-project.org/), I'd begin by defining an R function `mmk()` that returns the value of the derivative at a given point in time and given specified parameters, pass it to the `ode()` solver supplied by deSolve, and then draw myself a pretty little picture using ggplot2:
 
 ```{r}
 library(deSolve)
 library(ggplot2)
+
+# differential equation for MM kinetics: it returns a list because
+# that's what ode() expects to receive when it calls this function
 mmk <- function(t, y, parms) {
   dydt <- - y * parms["vm"] / (parms["km"] + y) 
   return(list(dydt))
 }
-dose <- 50 # does in milligrams
-vd <- 5.5  # circulation volume in litres
+
+# parameters
+dose <- 120 # (in milligrams)
+circulation_vol <- 5.5  # (in litres)
+max_elimination <- 8 
+halving_point <- 4
+times <- seq(0, 8, .05) # (in hours)
+
+# use the desolve package
 out <- ode(
-  y = c("conc" = dose/vd),
-  times = seq(0, 3, .025),
+  y = c("conc" = dose/circulation_vol),
+  times = times,
   func = mmk,
-  parms = c("vm" = 8, "km" = 4)
+  parms = c(
+    "vm" = max_elimination, 
+    "km" = halving_point
+  )
 )
-ggplot(as.data.frame(out), aes(time, conc)) +
+
+# convert matrix to tibble and plot
+out <- as.data.frame(out)
+ggplot(out, aes(time, conc)) + 
   geom_line()
 ```
 
-## ODE Solving with Stan
+Consistent with the intuitions we developed earlier you can see that on the left hand side this curve looks pretty linear, but on the right hand side it looks pretty much like an exponential decay. 
+
+## Solving ODEs in Stan
 
 One of the many things Stan provides is an [ODE solver](https://mc-stan.org/docs/stan-users-guide/ode-solver.html). I'm not sure it makes a lot of sense to use Stan *only* as an ODE solver since you can already do that with other packages, but I find it a convenient stepping stone. Let's implement Michaelis-Menten kinetics in Stan without incorporating any statistical model: 
 
-```{stan, output.var = "mmk"}
+```{stan}
+#| filename: mmk
+#| output.var: "mmk"
 functions {
-  vector mmk(real t,
-             vector c,
+  vector mmk(real time,
+             vector state,
              real vm,
              real km) {
-    vector[1] dcdt;
-    dcdt[1] = - c[1] * vm / (km + c[1]);
-    return dcdt;
+    vector[1] derivative;
+    derivative[1] = - state[1] * vm / (km + state[1]);
+    return derivative;
   }
 }
+
 data {
-  int<lower=1> T;
+  int<lower=1> nt;
   vector[1] c0;
   real t0;
-  array[T] real ts;
+  array[nt] real ts;
   real vm;
   real km;
 }
+
 model {
 }
+
 generated quantities {
-  array[T] vector[1] conc = ode_rk45(mmk, c0, t0, ts, vm, km);
+  array[nt] vector[1] conc = ode_rk45(mmk, c0, t0, ts, vm, km);
 }
 ```
 
+The first part here defines the [ODE system function](https://mc-stan.org/docs/functions-reference/functions-ode-solver.html#ode-system-function) and the choice of signature is important
 
-Here we go:
+Create some data:
 
 ```{r}
+times <- seq(.05, 8, .05)
 mmk_data <- list(
-  c0 = dose/vd, 
+  c0 = 21.8, 
   t0 = 0, 
-  ts = seq(.025, 3, .025), 
+  ts = times, 
   vm = 8,
   km = 4,
-  T = 120
+  nt = length(times)
 )
+```
+
+Next we "sample" from the model. 
+
+```{r}
 mmk_fitted <- mmk$sample(
-  data = mmk_data, 
+  data = mmk_data,
   fixed_param = TRUE, 
   chains = 1, 
   iter_sampling = 1
 )
+```
+
+There aren't any parameters but we can get the generated quantities
+
+```{r}
 mmk_draws <- mmk_fitted$draws()
-out <- as.vector(apply(mmk_draws, 3, mean))
-ggplot(data.frame(time = seq(.025, 3, .025), conc = out), aes(time, conc)) +
-  geom_line()
+```
+
+Tidy up the data and draw the plot:
+
+```{r}
+dat <- data.frame(
+  time = times,
+  conc = as.vector(apply(mmk_draws, 3, mean))
+)
+ggplot(dat, aes(time, conc)) + geom_line()
 ```
 
 Yep, same thing.
