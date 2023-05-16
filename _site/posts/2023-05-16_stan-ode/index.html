@@ -1,0 +1,1880 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.3.340">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+<meta name="author" content="Danielle Navarro">
+<meta name="dcterms.date" content="2023-05-16">
+<meta name="description" content="A discussion of one- and two-compartment pharmacokinetic models with model implementations in Stan, covering both first-order dynamics and Michaelis-Menten kinetics.">
+
+<title>Notes from a data witch - Pharmacokinetic ODE models in Stan</title>
+<style>
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+/* CSS for syntax highlighting */
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+</style>
+
+
+<script src="../../site_libs/quarto-nav/quarto-nav.js"></script>
+<script src="../../site_libs/quarto-nav/headroom.min.js"></script>
+<script src="../../site_libs/clipboard/clipboard.min.js"></script>
+<script src="../../site_libs/quarto-search/autocomplete.umd.js"></script>
+<script src="../../site_libs/quarto-search/fuse.min.js"></script>
+<script src="../../site_libs/quarto-search/quarto-search.js"></script>
+<meta name="quarto:offset" content="../../">
+<script src="../../site_libs/quarto-html/quarto.js"></script>
+<script src="../../site_libs/quarto-html/popper.min.js"></script>
+<script src="../../site_libs/quarto-html/tippy.umd.min.js"></script>
+<script src="../../site_libs/quarto-html/anchor.min.js"></script>
+<link href="../../site_libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="../../site_libs/quarto-html/quarto-syntax-highlighting.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="../../site_libs/bootstrap/bootstrap.min.js"></script>
+<link href="../../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="../../site_libs/bootstrap/bootstrap.min.css" rel="stylesheet" id="quarto-bootstrap" data-mode="light">
+<script id="quarto-search-options" type="application/json">{
+  "location": "navbar",
+  "copy-button": false,
+  "collapse-after": 3,
+  "panel-placement": "end",
+  "type": "overlay",
+  "limit": 20,
+  "language": {
+    "search-no-results-text": "No results",
+    "search-matching-documents-text": "matching documents",
+    "search-copy-link-title": "Copy link to search",
+    "search-hide-matches-text": "Hide additional matches",
+    "search-more-match-text": "more match in this document",
+    "search-more-matches-text": "more matches in this document",
+    "search-clear-button-title": "Clear",
+    "search-detached-cancel-button-title": "Cancel",
+    "search-submit-button-title": "Submit"
+  }
+}</script>
+<style>
+
+      .quarto-title-block .quarto-title-banner {
+        background: #eeeeee;
+      }
+</style>
+
+  <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml-full.js" type="text/javascript"></script>
+
+<link rel="stylesheet" href="../../styles.css">
+<meta property="og:title" content="Notes from a data witch - Pharmacokinetic ODE models in Stan">
+<meta property="og:description" content="A discussion of one- and two-compartment pharmacokinetic models with model implementations in Stan, covering both first-order dynamics and Michaelis-Menten kinetics.">
+<meta property="og:image" content="https://blog.djnavarro.net/posts/2023-05-16_stan-ode/dreamlike_06_1533.jpg">
+<meta property="og:site-name" content="Notes from a data witch">
+<meta name="twitter:title" content="Notes from a data witch - Pharmacokinetic ODE models in Stan">
+<meta name="twitter:description" content="A discussion of one- and two-compartment pharmacokinetic models with model implementations in Stan, covering both first-order dynamics and Michaelis-Menten kinetics.">
+<meta name="twitter:image" content="https://blog.djnavarro.net/posts/2023-05-16_stan-ode/dreamlike_06_1533.jpg">
+<meta name="twitter:creator" content="@djnavarro">
+<meta name="twitter:card" content="summary_large_image">
+</head>
+
+<body class="floating nav-fixed slimcontent">
+
+<div id="quarto-search-results"></div>
+  <header id="quarto-header" class="headroom fixed-top">
+    <nav class="navbar navbar-expand-lg navbar-dark ">
+      <div class="navbar-container container-fluid">
+      <div class="navbar-brand-container">
+    <a class="navbar-brand" href="../../index.html">
+    <span class="navbar-title">Notes from a data witch</span>
+    </a>
+  </div>
+            <div id="quarto-search" class="" title="Search"></div>
+          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarCollapse" aria-controls="navbarCollapse" aria-expanded="false" aria-label="Toggle navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
+  <span class="navbar-toggler-icon"></span>
+</button>
+          <div class="collapse navbar-collapse" id="navbarCollapse">
+            <ul class="navbar-nav navbar-nav-scroll ms-auto">
+  <li class="nav-item compact">
+    <a class="nav-link" href="https://fosstodon.org/@djnavarro" rel="" target=""><i class="bi bi-mastodon" role="img" aria-label="mastodon">
+</i> 
+ <span class="menu-text"></span></a>
+  </li>  
+  <li class="nav-item compact">
+    <a class="nav-link" href="https://github.com/djnavarro" rel="" target=""><i class="bi bi-github" role="img" aria-label="github">
+</i> 
+ <span class="menu-text"></span></a>
+  </li>  
+  <li class="nav-item compact">
+    <a class="nav-link" href="https://djnavarro.net" rel="" target=""><i class="bi bi-person-circle" role="img" aria-label="website">
+</i> 
+ <span class="menu-text"></span></a>
+  </li>  
+  <li class="nav-item compact">
+    <a class="nav-link" href="https://art.djnavarro.net" rel="" target=""><i class="bi bi-palette-fill" role="img" aria-label="art">
+</i> 
+ <span class="menu-text"></span></a>
+  </li>  
+</ul>
+            <div class="quarto-navbar-tools">
+</div>
+          </div> <!-- /navcollapse -->
+      </div> <!-- /container-fluid -->
+    </nav>
+</header>
+<!-- content -->
+<header id="title-block-header" class="quarto-title-block default toc-left page-columns page-full">
+  <div class="quarto-title-banner page-columns page-full">
+    <div class="quarto-title column-body">
+      <h1 class="title">Pharmacokinetic ODE models in Stan</h1>
+                  <div>
+        <div class="description">
+          A discussion of one- and two-compartment pharmacokinetic models with model implementations in Stan, covering both first-order dynamics and Michaelis-Menten kinetics.
+        </div>
+      </div>
+                          <div class="quarto-categories">
+                <div class="quarto-category">Statistics</div>
+                <div class="quarto-category">Pharmacokinetics</div>
+                <div class="quarto-category">Stan</div>
+                <div class="quarto-category">Bayes</div>
+                <div class="quarto-category">MCMC</div>
+              </div>
+                  </div>
+  </div>
+    
+  <div class="quarto-title-meta-author">
+    <div class="quarto-title-meta-heading">Author</div>
+    <div class="quarto-title-meta-heading">Affiliation</div>
+    
+      <div class="quarto-title-meta-contents">
+      <p class="author"><a href="https://djnavarro.net">Danielle Navarro</a> <a href="https://orcid.org/0000-0001-7648-6578" class="quarto-title-author-orcid"> <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAA2ZpVFh0WE1MOmNvbS5hZG9iZS54bXAAAAAAADw/eHBhY2tldCBiZWdpbj0i77u/IiBpZD0iVzVNME1wQ2VoaUh6cmVTek5UY3prYzlkIj8+IDx4OnhtcG1ldGEgeG1sbnM6eD0iYWRvYmU6bnM6bWV0YS8iIHg6eG1wdGs9IkFkb2JlIFhNUCBDb3JlIDUuMC1jMDYwIDYxLjEzNDc3NywgMjAxMC8wMi8xMi0xNzozMjowMCAgICAgICAgIj4gPHJkZjpSREYgeG1sbnM6cmRmPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5LzAyLzIyLXJkZi1zeW50YXgtbnMjIj4gPHJkZjpEZXNjcmlwdGlvbiByZGY6YWJvdXQ9IiIgeG1sbnM6eG1wTU09Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC9tbS8iIHhtbG5zOnN0UmVmPSJodHRwOi8vbnMuYWRvYmUuY29tL3hhcC8xLjAvc1R5cGUvUmVzb3VyY2VSZWYjIiB4bWxuczp4bXA9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC8iIHhtcE1NOk9yaWdpbmFsRG9jdW1lbnRJRD0ieG1wLmRpZDo1N0NEMjA4MDI1MjA2ODExOTk0QzkzNTEzRjZEQTg1NyIgeG1wTU06RG9jdW1lbnRJRD0ieG1wLmRpZDozM0NDOEJGNEZGNTcxMUUxODdBOEVCODg2RjdCQ0QwOSIgeG1wTU06SW5zdGFuY2VJRD0ieG1wLmlpZDozM0NDOEJGM0ZGNTcxMUUxODdBOEVCODg2RjdCQ0QwOSIgeG1wOkNyZWF0b3JUb29sPSJBZG9iZSBQaG90b3Nob3AgQ1M1IE1hY2ludG9zaCI+IDx4bXBNTTpEZXJpdmVkRnJvbSBzdFJlZjppbnN0YW5jZUlEPSJ4bXAuaWlkOkZDN0YxMTc0MDcyMDY4MTE5NUZFRDc5MUM2MUUwNEREIiBzdFJlZjpkb2N1bWVudElEPSJ4bXAuZGlkOjU3Q0QyMDgwMjUyMDY4MTE5OTRDOTM1MTNGNkRBODU3Ii8+IDwvcmRmOkRlc2NyaXB0aW9uPiA8L3JkZjpSREY+IDwveDp4bXBtZXRhPiA8P3hwYWNrZXQgZW5kPSJyIj8+84NovQAAAR1JREFUeNpiZEADy85ZJgCpeCB2QJM6AMQLo4yOL0AWZETSqACk1gOxAQN+cAGIA4EGPQBxmJA0nwdpjjQ8xqArmczw5tMHXAaALDgP1QMxAGqzAAPxQACqh4ER6uf5MBlkm0X4EGayMfMw/Pr7Bd2gRBZogMFBrv01hisv5jLsv9nLAPIOMnjy8RDDyYctyAbFM2EJbRQw+aAWw/LzVgx7b+cwCHKqMhjJFCBLOzAR6+lXX84xnHjYyqAo5IUizkRCwIENQQckGSDGY4TVgAPEaraQr2a4/24bSuoExcJCfAEJihXkWDj3ZAKy9EJGaEo8T0QSxkjSwORsCAuDQCD+QILmD1A9kECEZgxDaEZhICIzGcIyEyOl2RkgwAAhkmC+eAm0TAAAAABJRU5ErkJggg=="></a></p>
+    </div>
+      <div class="quarto-title-meta-contents">
+          <p class="affiliation">
+              <a href="https://www.youtube.com/watch?v=j58V2vC9EPc">
+              I’m on smoko
+              </a>
+            </p>
+        </div>
+      </div>
+
+  <div class="quarto-title-meta">
+
+        
+      <div>
+      <div class="quarto-title-meta-heading">Published</div>
+      <div class="quarto-title-meta-contents">
+        <p class="date">May 16, 2023</p>
+      </div>
+    </div>
+    
+      
+    </div>
+    
+  
+  </header><div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-article page-navbar">
+<!-- sidebar -->
+  <nav id="quarto-sidebar" class="sidebar collapse collapse-horizontal sidebar-navigation floating overflow-auto">
+    <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">Table of contents</h2>
+   
+  <ul>
+  <li><a href="#setting-up" id="toc-setting-up" class="nav-link active" data-scroll-target="#setting-up">Setting up</a></li>
+  <li><a href="#the-context-pharmacokinetic-modelling" id="toc-the-context-pharmacokinetic-modelling" class="nav-link" data-scroll-target="#the-context-pharmacokinetic-modelling">The context: pharmacokinetic modelling</a></li>
+  <li><a href="#a-very-simple-one-compartment-model" id="toc-a-very-simple-one-compartment-model" class="nav-link" data-scroll-target="#a-very-simple-one-compartment-model">A very simple one-compartment model</a>
+  <ul class="collapse">
+  <li><a href="#implementation-in-stan" id="toc-implementation-in-stan" class="nav-link" data-scroll-target="#implementation-in-stan">Implementation in Stan</a></li>
+  <li><a href="#generated-quantities" id="toc-generated-quantities" class="nav-link" data-scroll-target="#generated-quantities">Generated quantities</a></li>
+  </ul></li>
+  <li><a href="#when-biology-isnt-analytically-tractable" id="toc-when-biology-isnt-analytically-tractable" class="nav-link" data-scroll-target="#when-biology-isnt-analytically-tractable">When biology isn’t analytically tractable</a>
+  <ul class="collapse">
+  <li><a href="#michaelis-menten-kinetics" id="toc-michaelis-menten-kinetics" class="nav-link" data-scroll-target="#michaelis-menten-kinetics">Michaelis-Menten kinetics</a></li>
+  <li><a href="#what-does-it-look-like" id="toc-what-does-it-look-like" class="nav-link" data-scroll-target="#what-does-it-look-like">What does it look like?</a></li>
+  <li><a href="#the-exact-same-thing-but-in-stan-this-time" id="toc-the-exact-same-thing-but-in-stan-this-time" class="nav-link" data-scroll-target="#the-exact-same-thing-but-in-stan-this-time">The exact same thing, but in Stan this time</a></li>
+  </ul></li>
+  <li><a href="#one-compartment-bolus-model-with-mmk-elimination" id="toc-one-compartment-bolus-model-with-mmk-elimination" class="nav-link" data-scroll-target="#one-compartment-bolus-model-with-mmk-elimination">One compartment bolus model with MMK elimination</a>
+  <ul class="collapse">
+  <li><a href="#the-model" id="toc-the-model" class="nav-link" data-scroll-target="#the-model">The model</a></li>
+  <li><a href="#posterior-densities" id="toc-posterior-densities" class="nav-link" data-scroll-target="#posterior-densities">Posterior densities</a></li>
+  <li><a href="#credible-intervals-for-the-pharamacokinetic-function" id="toc-credible-intervals-for-the-pharamacokinetic-function" class="nav-link" data-scroll-target="#credible-intervals-for-the-pharamacokinetic-function">Credible intervals for the pharamacokinetic function</a></li>
+  </ul></li>
+  <li><a href="#multi-compartment-models" id="toc-multi-compartment-models" class="nav-link" data-scroll-target="#multi-compartment-models">Multi compartment models</a>
+  <ul class="collapse">
+  <li><a href="#two-compartment-model" id="toc-two-compartment-model" class="nav-link" data-scroll-target="#two-compartment-model">Two compartment model</a></li>
+  <li><a href="#fitting-the-model" id="toc-fitting-the-model" class="nav-link" data-scroll-target="#fitting-the-model">Fitting the model</a></li>
+  </ul></li>
+  <li><a href="#things-i-have-not-discussed" id="toc-things-i-have-not-discussed" class="nav-link" data-scroll-target="#things-i-have-not-discussed">Things I have not discussed</a></li>
+  <li><a href="#resources" id="toc-resources" class="nav-link" data-scroll-target="#resources">Resources</a></li>
+  </ul>
+</nav>
+</nav>
+<div id="quarto-sidebar-glass" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar,#quarto-sidebar-glass"></div>
+<!-- margin-sidebar -->
+    <div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
+    </div>
+<!-- main -->
+<main class="content quarto-banner-title-block page-columns page-full" id="quarto-document-content">
+
+
+
+
+<!--------------- my typical setup ----------------->
+<!--------------- post begins here ----------------->
+<p>For someone who has spent most of her professional life as a Bayesian statistician, it’s strange to admit that I’m only moderately experienced with <a href="https://mc-stan.org/">Stan</a>. My early work in Bayesian modelling involved some Laplace approximations to Bayes factors, MCMC samplers for posterior sampling, and in a few cases I would even resort to using BIC. I hand-coded everything myself, which was super helpful for understanding the mechanics underpinning the statistical inference, but terribly inefficient. When I did start using a domain-specific language for my probabilistic inference I mostly used <a href="https://mcmc-jags.sourceforge.io/">JAGS</a>.<a href="#fn1" class="footnote-ref" id="fnref1" role="doc-noteref"><sup>1</sup></a></p>
+<p>Eventually I started hearing the whispers…</p>
+<p>“Have you heard the good news about <a href="https://arxiv.org/pdf/1111.4246.pdf">Hamiltonian Monte Carlo</a>?” the Stan believers would ask me.</p>
+<p>With some regret I would have to reply that I was saddled with numerous <a href="https://mc-stan.org/docs/2_32/stan-users-guide/latent-discrete.html">latent discrete parameters</a> for theoretical reasons,<a href="#fn2" class="footnote-ref" id="fnref2" role="doc-noteref"><sup>2</sup></a> and because the Stan stans are in fact lovely humans they would all express their sympathies, offer their thoughts and prayers, and think to themselves “there but for the grace of God go I”.</p>
+<p>Long story short, it’s taken me a long time to be in a position to make the most of Stan. I’ve used it and enjoyed it but not really had the opportunity to dive in properly. In recent weeks, however, I’ve been talking with some lovely folks who work in pharmacometrics, and they have problems that are very well suited to this kind of modelling. Excellent… a pretext!</p>
+<p><br></p>
+<div class="quarto-figure quarto-figure-center page-columns page-full">
+<figure class="figure page-columns page-full">
+<p><img src="dreamlike_06_1533.jpg" class="img-fluid figure-img" alt="swirling blue grainy patterns in semi-circular shapes on the bottom half, with a more bursty look in the top-left"></p>
+<figcaption class="figure-caption margin-caption">The generative art in this post is tenuously tied to the topic. The pieces are generated from a dynamical system, and the models implement dynamical systems too.</figcaption>
+</figure>
+</div>
+<p><br></p>
+<section id="setting-up" class="level2 page-columns page-full">
+<h2 class="anchored" data-anchor-id="setting-up">Setting up</h2>
+<p>The first thing I have to do is go through the installation process. Yes, I have used Stan before, but that was a few laptops ago and things have changed a little since then. One happy little development from my perspective is that R users now have multiple options for interacting with Stan. The last time I used Stan the accepted method was to use the RStan package,<a href="#fn3" class="footnote-ref" id="fnref3" role="doc-noteref"><sup>3</sup></a> and… there’s absolutely nothing wrong with RStan. It’s a great package. Really. It’s just… there’s a lot going on there, you know? Lots of bells and whistles. It’s powerful. It makes my head hurt.</p>
+<p>Also, I can’t get the bloody thing to install on my Ubuntu box. I have no idea why.</p>
+<p>Fortunately, nowadays there is also <a href="https://mc-stan.org/cmdstanr/">CmdStanR</a>, a lightweight interface to Stan. It suits my style of thinking nicely because it provides <a href="https://r6.r-lib.org/">R6</a> classes with methods that interact more or less directly with Stan. It does mean that you have to work harder to finesse the outputs, but I honestly don’t mind doing that kind of thing. As is usually the case with the Stan folks, the documentation is really nice so I won’t bother talking about the installation process. Suffice to say I’ve got the package working, so now I’ll load it:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb1"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(cmdstanr)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>This is cmdstanr version 0.5.3</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>- CmdStanR documentation and vignettes: mc-stan.org/cmdstanr</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>- CmdStan path: /home/danielle/.cmdstan/cmdstan-2.32.1</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>- CmdStan version: 2.32.1</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>
+A newer version of CmdStan is available. See ?install_cmdstan() to install it.
+To disable this check set option or environment variable CMDSTANR_NO_VER_CHECK=TRUE.</code></pre>
+</div>
+</div>
+<p>The only finicky thing to talk about here lies in the fact that I’m doing all this in the context of a quarto blog post, and specifically a post that is using the knitr engine to execute the code chunks. By default, if knitr encounters a code chunk tagged as the <code>stan</code> language it will look for the RStan package to do the work.<a href="#fn4" class="footnote-ref" id="fnref4" role="doc-noteref"><sup>4</sup></a> That’s not going to work for me since I don’t actually have RStan installed on my machine. Thankfully the cmdstanr package makes this easy for me to fix:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb7"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="fu">register_knitr_engine</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>Now that this is done, quarto/knitr will use cmdstanr to handle all the stan code included in this post.</p>
+<p><br></p>
+<div class="quarto-figure quarto-figure-center page-columns page-full">
+<figure class="figure page-columns page-full">
+<p><img src="dreamlike_06_1510.jpg" class="img-fluid figure-img" alt="swirling white grainy patterns in a three-quarter circular arc, against a pink background"></p>
+<figcaption class="figure-caption margin-caption">I’m amazed at how luminescent the white appears in this piece.</figcaption>
+</figure>
+</div>
+<p><br></p>
+</section>
+<section id="the-context-pharmacokinetic-modelling" class="level2 page-columns page-full">
+<h2 class="anchored" data-anchor-id="the-context-pharmacokinetic-modelling">The context: pharmacokinetic modelling</h2>
+<p>Next, I need a toy problem to work with. In my <a href="https://blog.djnavarro.net/posts/2023-04-26_non-compartmental-analysis/">last post</a> I’d started teaching myself some pharmacokinetic modelling – statistical analysis of drug concentrations over time – and I’ll continue that line of thinking here. In that post I wrote about <strong>noncompartmental analysis</strong> (NCA), a method for analysing pharmacokinetic data without making strong assumptions about the dynamics underpinning the biological processes of drug absorption and elimination, or the statistical properties of the measurement. NCA has its uses, but often it helps to have a model with a little structure to it.</p>
+<p>In <strong>compartmental modelling</strong>, the analyst adopts a simplified model of (the relevant aspects of) the body as comprised of a number of distinct “compartments” that the drug can flow between. A two-compartment model might suppose that in addition to a “central” compartment that comprises systemic circulation, there is also a “peripheral” compartment where drug concentrations accrue in other bodily tissues. The model would thus include some assumptions about the dynamics that describe how the drug is absorbed (from whatever delivery mechanism is used) into (probably) the central compartment, and how it is eliminated from (probably) the central compartment. It would also need dynamics to describe how the drug moves from the central to peripheral compartment, and vice versa. These assumptions form the structural component of the compartmental model.</p>
+<p>In addition to all this, a compartmental model needs to make statistical assumptions. The structure of the model describes how drug concentrations change over time, but in addition to that we might need a model that describes measurement error, variation among individuals, and covariates that affect the processes.</p>
+<p>In other words, it’s really cool.</p>
+<p><br></p>
+<div class="quarto-figure quarto-figure-center page-columns page-full">
+<figure class="figure page-columns page-full">
+<p><img src="dreamlike_07_1612.jpg" class="img-fluid figure-img" alt="swirling grainy textures in a roughly hexagonal shape, rendered in pink, purple and white, against a  purple background, with noisy speckling escaping the hexagonal region on the left hand side."></p>
+<figcaption class="figure-caption margin-caption">This totally works as a special effect in some epic fantasy graphic novel or something.</figcaption>
+</figure>
+</div>
+<p><br></p>
+</section>
+<section id="a-very-simple-one-compartment-model" class="level2 page-columns page-full">
+<h2 class="anchored" data-anchor-id="a-very-simple-one-compartment-model">A very simple one-compartment model</h2>
+<p>Okay let’s start super simple. We’ll have a one-compartment model, and we’ll assume bolus intravenous administration.<a href="#fn5" class="footnote-ref" id="fnref5" role="doc-noteref"><sup>5</sup></a> That’s convenient because we don’t have to have a model for the absorption process: at time zero the entire dose goes straight into systemic circulation. Assuming we know both the dose <span class="math inline">\(D\)</span> in milligrams and the volume of distribution<a href="#fn6" class="footnote-ref" id="fnref6" role="doc-noteref"><sup>6</sup></a> <span class="math inline">\(V_d\)</span>, then the drug concentration in the first (and only) compartment <span class="math inline">\(C(t)\)</span> at time <span class="math inline">\(t=0\)</span> is given by <span class="math inline">\(C(0) = D/V_d\)</span>. That’s the only thing we need to consider on the absorption (or “influx”) side.</p>
+<p>On the elimination (or “efflux”) side, there are a number of possible dynamical models we could consider. One of the simplest models assumes that the body is able to “clear” a fixed volume of blood of the drug per unit time. If this clearance rate is constant, some constant proportion <span class="math inline">\(k\)</span> of the current drug concentration will be eliminated during each such time interval. Expressed as a differential equation this gives us:</p>
+<p><span class="math display">\[
+\frac{dC(t)}{dt} = - k\ C(t)
+\]</span> Unlike many differential equations, this one is easy to solve<a href="#fn7" class="footnote-ref" id="fnref7" role="doc-noteref"><sup>7</sup></a> and yields an exponential concentration-time curve:</p>
+<p><span class="math display">\[
+C(t) = C(0) \ e^{-kt}
+\]</span></p>
+<p>That completes the structural side to our model. Now the statistical side. Again, we’ll keep it simple: I’m going to assume independent and identically normally distributed errors, no matter how unlikely that is in real life. Reflecting the fact that from a statistics point of view we’re now talking about a discrete set of time points and discrete set of measured drug concentrations, I’ll refer to the <span class="math inline">\(n\)</span> time points as <span class="math inline">\(t_1, t_2, \ldots, t_n\)</span> and the corresponding observed concentrations as <span class="math inline">\(c_1, c_2, \ldots, c_n\)</span>. In this notation our statistical model is expressed:</p>
+<p><span class="math display">\[
+c_i = c_0 \ e^{-kt_i} + \epsilon_i
+\]</span></p>
+<p>where</p>
+<p><span class="math display">\[
+\epsilon_i \sim \mbox{Normal}(0, \sigma)
+\]</span></p>
+<p>Our model therefore has two unknowns, the scale parameter <span class="math inline">\(\sigma\)</span> and the elimination rate parameter <span class="math inline">\(k\)</span>. Since we are being Bayesians for the purposes of this post I’ll place some priors over these parameters. However, since we are also being <em>lazy</em> Bayesians for the purposes of this post I’m not even going to pretend I’ve thought much about these priors. I’ve made them up because my actual goal here is to familiarise myself with the mechanics of pharmacokinetic modelling in Stan. The real world practicalities – critically important though they are – can wait!</p>
+<p>Anyway, here’s the priors I used:</p>
+<p><span class="math display">\[
+\begin{array}{rcl}
+\sigma &amp; \sim &amp; \mbox{Half-Normal}_+(0, 1) \\
+k &amp; \sim &amp; \mbox{Half-Normal}_+(0, 5)
+\end{array}
+\]</span></p>
+<p>Again, I cannot stress this enough: I literally did not think <em>at all</em> about these choices. Never ever adopt such an appalling practice in real life, boys and girls and enby kids!</p>
+<p>It’s almost time to move onto the implementation but first… I kind of lied. There’s a third unknown. The initial concentration <span class="math inline">\(c_0\)</span> is technically an unknown as well. True, we usually know the dosage to a high degree of precision (if I administer 50μg of a drug, there’s not much error there…), but the volume of the volume of systemic distribution is likely an estimate based on the assumption that <a href="https://en.wikipedia.org/wiki/Blood_volume">blood volume</a> is about 7-8% of body mass. I might guess that this value is about 5.5l but it might be a little more or a little less than that. Allowing the model to have a prior over the true value of <span class="math inline">\(v_d\)</span> makes some intuitive sense and also has the nice consequence of allowing the model to infer the value of <span class="math inline">\(c_0\)</span> from the data. In practice we’re not likely to be far wrong in guessing this quantity, so I’ve used the following prior:</p>
+<p><span class="math display">\[
+v_d \sim \mbox{Normal}(5.5, 1)
+\]</span></p>
+<p>where 5.5l is my prior estimate.</p>
+<section id="implementation-in-stan" class="level3">
+<h3 class="anchored" data-anchor-id="implementation-in-stan">Implementation in Stan</h3>
+<p>Moving along, let’s have a look at how this model would be implemented in Stan. The code for the model is shown below, and – in case you’re not familiar with Stan code – I’ll quickly outline the structure. Stan is a declarative language, not an imperative one: you specify the model, it takes care of the inference. Your code is an abstract description of the model, not a sequence of instructions. In my code below, you can see it’s organised into three blocks:</p>
+<ul>
+<li>The <strong>data</strong> block defines quantities that the user needs to supply. Some of those correspond to empirical data like concentrations, others are design variables for the study like measurement times.</li>
+<li>The <strong>parameters</strong> block defines quantities over which inference must be performed. In this case that’s <span class="math inline">\(k\)</span> and <span class="math inline">\(\sigma\)</span>.</li>
+<li>The <strong>model</strong> block specifies the model itself, which in this case includes both the structural and statistical components to our model, and does not distinguish between “likelihood” and “prior”. From the Stan point of view Bayesian inference it’s not really about “priors and likelihood” it’s more of a Doctor Who style “modelly-wobbelly joint probability distribution” kind of thing.</li>
+</ul>
+<p>Anyway here it is:</p>
+<div class="cell" data-output.var="bolus">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>bolus</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb8"><pre class="sourceCode numberSource stan number-lines code-with-copy"><code class="sourceCode stan"><span id="cb8-1"><a href="#cb8-1"></a><span class="kw">data</span> {</span>
+<span id="cb8-2"><a href="#cb8-2"></a>  <span class="dt">int</span>&lt;<span class="kw">lower</span>=<span class="dv">1</span>&gt; n_obs;</span>
+<span id="cb8-3"><a href="#cb8-3"></a>  <span class="dt">real</span>&lt;<span class="kw">lower</span>=<span class="dv">0</span>&gt; dose;</span>
+<span id="cb8-4"><a href="#cb8-4"></a>  <span class="dt">real</span>&lt;<span class="kw">lower</span>=<span class="dv">0</span>&gt; vol_d;</span>
+<span id="cb8-5"><a href="#cb8-5"></a>  <span class="dt">vector</span>[n_obs] t_obs;</span>
+<span id="cb8-6"><a href="#cb8-6"></a>  <span class="dt">vector</span>&lt;<span class="kw">lower</span>=<span class="dv">0</span>&gt;[n_obs] c_obs;</span>
+<span id="cb8-7"><a href="#cb8-7"></a>}</span>
+<span id="cb8-8"><a href="#cb8-8"></a></span>
+<span id="cb8-9"><a href="#cb8-9"></a><span class="kw">parameters</span> {</span>
+<span id="cb8-10"><a href="#cb8-10"></a>  <span class="dt">real</span>&lt;<span class="kw">lower</span>=<span class="fl">0.01</span>&gt; sigma;</span>
+<span id="cb8-11"><a href="#cb8-11"></a>  <span class="dt">real</span>&lt;<span class="kw">lower</span>=<span class="fl">0.01</span>&gt; k;</span>
+<span id="cb8-12"><a href="#cb8-12"></a>  <span class="dt">real</span>&lt;<span class="kw">lower</span>=<span class="dv">1</span>, <span class="kw">upper</span>=<span class="dv">12</span>&gt; vol_d_true;</span>
+<span id="cb8-13"><a href="#cb8-13"></a>}</span>
+<span id="cb8-14"><a href="#cb8-14"></a></span>
+<span id="cb8-15"><a href="#cb8-15"></a><span class="kw">model</span> {</span>
+<span id="cb8-16"><a href="#cb8-16"></a>  k ~ normal(<span class="dv">0</span>, <span class="dv">5</span>) <span class="kw">T</span>[<span class="fl">0.01</span>, ];</span>
+<span id="cb8-17"><a href="#cb8-17"></a>  sigma ~ normal(<span class="dv">0</span>, <span class="dv">1</span>) <span class="kw">T</span>[<span class="fl">0.01</span>, ];</span>
+<span id="cb8-18"><a href="#cb8-18"></a>  vol_d_true ~ normal(vol_d, <span class="dv">1</span>);</span>
+<span id="cb8-19"><a href="#cb8-19"></a>  c_obs ~ normal(dose / vol_d_true * exp(-k * t_obs), sigma);</span>
+<span id="cb8-20"><a href="#cb8-20"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+<p>Some additional things to note:</p>
+<ul>
+<li>Stan is strongly typed with (for example) <code>int</code> and <code>real</code> scalar types, and <code>vector</code> types containing multiple reals.</li>
+<li>Variable declarations allow you to specify lower and upper allowable values for variables. It is always good to include those if you know them.</li>
+<li>There’s some fanciness going on under the hood in how Stan “thinks about” probability distributions in terms of log-probability functions, but I’m glossing over that because Now Is Not The Time.</li>
+<li>I’ve set my lower bounds on the parameters to “something very close to zero” rather than actually zero because (a) those values are wildly implausible anyway, but (b) if the sampler tries to get too close to zero the log probability goes batshit and numerical chaos ensues.</li>
+</ul>
+<p>Perhaps more important from the perspective of this post, here’s the important bit of quarto syntax I used when defining the code chunk above. When I defined the code chunk I specified the <code>output.var</code> option by including the following line in the yaml header to the chunk:</p>
+<div class="sourceCode" id="cb9"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="co">#| output.var: "bolus"</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>By specifying <code>output.var: "bolus"</code> I’ve ensured that when the quarto document is rendered there is a model object called <code>bolus</code> available in the R session. It’s essentially equivalent to having the code above saved to a file called <code>bolus.stan</code> and then calling the cmdstanr function <code>cmdstan_model()</code> to compile it to C++ with the assistance of Stan:</p>
+<div class="sourceCode" id="cb10"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a>bolus <span class="ot">&lt;-</span> <span class="fu">cmdstan_model</span>(<span class="st">"bolus.stan"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>For future Stan models I’ll just print the name of the output variable at the top of the code chunk so that you can tell which R variable corresponds to which Stan model.</p>
+<p>In any case let’s take a look at our <code>bolus</code> object. Printing the object yields sensible, if not exciting, output: it shows you the source code for the underlying model:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb11"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a>bolus</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>data {
+  int&lt;lower=1&gt; n_obs;
+  real&lt;lower=0&gt; dose;
+  real&lt;lower=0&gt; vol_d;
+  vector[n_obs] t_obs;
+  vector&lt;lower=0&gt;[n_obs] c_obs;
+}
+
+parameters {
+  real&lt;lower=0.01&gt; sigma;
+  real&lt;lower=0.01&gt; k;
+  real&lt;lower=1, upper=12&gt; vol_d_true;
+}
+
+model {
+  k ~ normal(0, 5) T[0.01, ];
+  sigma ~ normal(0, 1) T[0.01, ];
+  vol_d_true ~ normal(vol_d, 1);
+  c_obs ~ normal(dose / vol_d_true * exp(-k * t_obs), sigma);
+}</code></pre>
+</div>
+</div>
+<p>Perhaps more helpfully for our purposes, it’s useful to know that this is an object of class <a href="https://mc-stan.org/cmdstanr/reference/CmdStanModel.html"><code>CmdStanModel</code></a>, and if you take a look at the documentation on the linked page, you’ll find a description of the methods available for such objects. There are quite a few possibilities, but a few of particular interest from a statistical perspective are:<a href="#fn8" class="footnote-ref" id="fnref8" role="doc-noteref"><sup>8</sup></a></p>
+<ul>
+<li><a href="https://mc-stan.org/cmdstanr/reference/model-method-sample.html"><code>$sample()</code></a> calls the posterior sampling method implemented by Stan on the model</li>
+<li><a href="https://mc-stan.org/cmdstanr/reference/model-method-variational.html"><code>$variational()</code></a> calls the variational Bayes algorithms implemented by Stan on the model</li>
+<li><a href="https://mc-stan.org/cmdstanr/reference/model-method-optimize.html"><code>$optimize()</code></a> estimates the posterior mode</li>
+</ul>
+<p>For the purposes of this post I’ll use the <code>$sample()</code> method, and in order to call it on my <code>bolus</code> object I’ll need to specify some data to pass from R to the compiled Stan model. These are passed as a list:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb13"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a>bolus_data <span class="ot">&lt;-</span> <span class="fu">list</span>(</span>
+<span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">dose =</span> <span class="dv">50</span>,</span>
+<span id="cb13-3"><a href="#cb13-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">vol_d =</span> <span class="fl">5.5</span>,</span>
+<span id="cb13-4"><a href="#cb13-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">n_obs =</span> <span class="dv">6</span>,</span>
+<span id="cb13-5"><a href="#cb13-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">t_obs =</span> <span class="fu">c</span>(<span class="fl">0.1</span>, <span class="fl">0.5</span>, <span class="fl">1.0</span>, <span class="fl">1.5</span>, <span class="fl">2.0</span>, <span class="fl">3.0</span>),</span>
+<span id="cb13-6"><a href="#cb13-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">c_obs =</span> <span class="fu">c</span>(<span class="fl">8.4</span>, <span class="fl">3.1</span>, <span class="fl">1.9</span>, <span class="fl">0.6</span>, <span class="fl">0.2</span>, <span class="fl">0.02</span>)</span>
+<span id="cb13-7"><a href="#cb13-7" aria-hidden="true" tabindex="-1"></a>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>To quickly visualise these “observed data”, I’ll organise the relevant variables into a data frame and draw a pretty little scatterplot with ggplot2:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb14"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(ggplot2)</span>
+<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a>df <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(</span>
+<span id="cb14-3"><a href="#cb14-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">time =</span> bolus_data<span class="sc">$</span>t_obs,</span>
+<span id="cb14-4"><a href="#cb14-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">conc =</span> bolus_data<span class="sc">$</span>c_obs</span>
+<span id="cb14-5"><a href="#cb14-5" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb14-6"><a href="#cb14-6" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(df, <span class="fu">aes</span>(time, conc)) <span class="sc">+</span> </span>
+<span id="cb14-7"><a href="#cb14-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="at">size =</span> <span class="dv">2</span>) <span class="sc">+</span> </span>
+<span id="cb14-8"><a href="#cb14-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">x =</span> <span class="st">"time"</span>, <span class="at">y =</span> <span class="st">"concentration"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<p><img src="index_files/figure-html/plot-bolus-data-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>Delightful, truly. So neat. So clean. So obviously, obviously fictitious.</p>
+<p>As a Bayesian<a href="#fn9" class="footnote-ref" id="fnref9" role="doc-noteref"><sup>9</sup></a> that has observed the data, what I want to compute is the joint posterior distribution over my parameters <span class="math inline">\(k\)</span> and <span class="math inline">\(\sigma\)</span>. Or, since this has been an unrealistic expectation ever since the death of the <a href="https://en.wikipedia.org/wiki/Conjugate_prior">cult of conjugacy</a>,<a href="#fn10" class="footnote-ref" id="fnref10" role="doc-noteref"><sup>10</sup></a> what I’ll settle for are samples from that joint posterior that I can use to numerically estimate whatever it is that I’m interested in. To do this for our <code>bolus</code> model with the help of cmdstanr, we call <code>bolus$sample()</code>:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb15"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a>bolus_fitted <span class="ot">&lt;-</span> bolus<span class="sc">$</span><span class="fu">sample</span>(</span>
+<span id="cb15-2"><a href="#cb15-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> bolus_data, </span>
+<span id="cb15-3"><a href="#cb15-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">seed =</span> <span class="dv">451</span>, </span>
+<span id="cb15-4"><a href="#cb15-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">chains =</span> <span class="dv">4</span>,</span>
+<span id="cb15-5"><a href="#cb15-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">refresh =</span> <span class="dv">1000</span></span>
+<span id="cb15-6"><a href="#cb15-6" aria-hidden="true" tabindex="-1"></a>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Running MCMC with 4 sequential chains...
+
+Chain 1 Iteration:    1 / 2000 [  0%]  (Warmup) 
+Chain 1 Iteration: 1000 / 2000 [ 50%]  (Warmup) 
+Chain 1 Iteration: 1001 / 2000 [ 50%]  (Sampling) 
+Chain 1 Iteration: 2000 / 2000 [100%]  (Sampling) 
+Chain 1 finished in 0.0 seconds.
+Chain 2 Iteration:    1 / 2000 [  0%]  (Warmup) 
+Chain 2 Iteration: 1000 / 2000 [ 50%]  (Warmup) 
+Chain 2 Iteration: 1001 / 2000 [ 50%]  (Sampling) 
+Chain 2 Iteration: 2000 / 2000 [100%]  (Sampling) 
+Chain 2 finished in 0.0 seconds.
+Chain 3 Iteration:    1 / 2000 [  0%]  (Warmup) 
+Chain 3 Iteration: 1000 / 2000 [ 50%]  (Warmup) 
+Chain 3 Iteration: 1001 / 2000 [ 50%]  (Sampling) 
+Chain 3 Iteration: 2000 / 2000 [100%]  (Sampling) 
+Chain 3 finished in 0.0 seconds.
+Chain 4 Iteration:    1 / 2000 [  0%]  (Warmup) 
+Chain 4 Iteration: 1000 / 2000 [ 50%]  (Warmup) 
+Chain 4 Iteration: 1001 / 2000 [ 50%]  (Sampling) 
+Chain 4 Iteration: 2000 / 2000 [100%]  (Sampling) 
+Chain 4 finished in 0.0 seconds.
+
+All 4 chains finished successfully.
+Mean chain execution time: 0.0 seconds.
+Total execution time: 0.6 seconds.</code></pre>
+</div>
+</div>
+<p>This is an object of class <a href="https://mc-stan.org/cmdstanr/reference/CmdStanMCMC.html">CmdStanMCMC</a> and again you can look at the linked page to see what methods are defined for it. I’ll keep things simple for now and call the <a href="https://mc-stan.org/cmdstanr/reference/fit-method-summary.html"><code>$summary()</code></a> method, which returns a tibble containing summary statistics associated with the MCMC chains:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb17"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a>bolus_fitted<span class="sc">$</span><span class="fu">summary</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 4 × 10
+  variable    mean median    sd   mad    q5   q95  rhat ess_bulk ess_tail
+  &lt;chr&gt;      &lt;num&gt;  &lt;num&gt; &lt;num&gt; &lt;num&gt; &lt;num&gt; &lt;num&gt; &lt;num&gt;    &lt;num&gt;    &lt;num&gt;
+1 lp__       3.25   3.61  1.49  1.30  0.346  4.94  1.00    1244.    1507.
+2 sigma      0.556  0.499 0.240 0.185 0.289  1.02  1.00    1453.    1870.
+3 k          2.09   2.04  0.371 0.277 1.60   2.71  1.00    1709.    1712.
+4 vol_d_true 5.04   5.01  0.414 0.369 4.42   5.76  1.00    1795.    1994.</code></pre>
+</div>
+</div>
+<p>Evidently the estimated posterior mean for the elimination rate <span class="math inline">\(k\)</span> is 1.79, with a 90% <a href="https://en.wikipedia.org/wiki/Credible_interval">credible interval</a><a href="#fn11" class="footnote-ref" id="fnref11" role="doc-noteref"><sup>11</sup></a> <a href="#fn12" class="footnote-ref" id="fnref12" role="doc-noteref"><sup>12</sup></a> of [1.43, 2.19]. Similarly, the standard deviation of the measurement error <span class="math inline">\(\sigma\)</span> is estimated to have mean 0.635 and 90% interval [0.34, 1.15].</p>
+<p>If we wanted to we could take this a little further by pulling out the posterior samples themselves using the <a href="https://mc-stan.org/cmdstanr/reference/fit-method-draws.html"><code>$draws()</code></a> method. Internally this method relies on the <a href="https://mc-stan.org/posterior/">posterior</a> package, and supports any of the output formats allowed by that package. In this case I’ll have it return a tibble because I like tibbles:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb19"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a>bolus_samples <span class="ot">&lt;-</span> bolus_fitted<span class="sc">$</span><span class="fu">draws</span>(<span class="at">format =</span> <span class="st">"draws_df"</span>)</span>
+<span id="cb19-2"><a href="#cb19-2" aria-hidden="true" tabindex="-1"></a>bolus_samples</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A draws_df: 1000 iterations, 4 chains, and 4 variables
+    lp__ sigma   k vol_d_true
+1  1.893  0.74 2.8        4.3
+2  2.083  0.81 2.7        4.5
+3  2.517  0.67 2.7        4.5
+4  2.543  0.69 2.7        4.4
+5  3.122  0.62 2.5        4.5
+6  2.434  0.52 2.8        4.6
+7  0.073  1.27 2.8        4.5
+8  1.257  0.36 1.6        5.8
+9  1.392  0.35 1.7        5.8
+10 3.846  0.37 1.8        5.4
+# ... with 3990 more draws
+# ... hidden reserved variables {'.chain', '.iteration', '.draw'}</code></pre>
+</div>
+</div>
+<p>You could then go on to do whatever you like with these samples but I have other fish to fry so I’m going to move on.</p>
+</section>
+<section id="generated-quantities" class="level3 page-columns page-full">
+<h3 class="anchored" data-anchor-id="generated-quantities">Generated quantities</h3>
+<p>The model I built in the previous section is perfectly fine, as far as it goes, but it’s missing something that matters a lot to me. There’s nothing in the code that allows me to use the inferred model parameters to make predictions about the shape of the concentration-time curve across the full range of times. To do that I’ll introduce a “generated quantities” block to my code, as shown below:</p>
+<div class="cell" data-output.var="bolus2">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>bolus2</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb21"><pre class="sourceCode numberSource stan number-lines code-with-copy"><code class="sourceCode stan"><span id="cb21-1"><a href="#cb21-1"></a><span class="kw">data</span> {</span>
+<span id="cb21-2"><a href="#cb21-2"></a>  <span class="dt">int</span>&lt;<span class="kw">lower</span>=<span class="dv">1</span>&gt; n_obs;</span>
+<span id="cb21-3"><a href="#cb21-3"></a>  <span class="dt">int</span>&lt;<span class="kw">lower</span>=<span class="dv">1</span>&gt; n_fit;</span>
+<span id="cb21-4"><a href="#cb21-4"></a>  <span class="dt">real</span>&lt;<span class="kw">lower</span>=<span class="dv">0</span>&gt; dose;</span>
+<span id="cb21-5"><a href="#cb21-5"></a>  <span class="dt">real</span>&lt;<span class="kw">lower</span>=<span class="dv">0</span>&gt; vol_d;</span>
+<span id="cb21-6"><a href="#cb21-6"></a>  <span class="dt">vector</span>[n_obs] t_obs;</span>
+<span id="cb21-7"><a href="#cb21-7"></a>  <span class="dt">vector</span>&lt;<span class="kw">lower</span>=<span class="dv">0</span>&gt;[n_obs] c_obs;</span>
+<span id="cb21-8"><a href="#cb21-8"></a>  <span class="dt">vector</span>[n_fit] t_fit;</span>
+<span id="cb21-9"><a href="#cb21-9"></a>}</span>
+<span id="cb21-10"><a href="#cb21-10"></a></span>
+<span id="cb21-11"><a href="#cb21-11"></a><span class="kw">parameters</span> {</span>
+<span id="cb21-12"><a href="#cb21-12"></a>  <span class="dt">real</span>&lt;<span class="kw">lower</span>=<span class="fl">0.01</span>&gt; sigma;</span>
+<span id="cb21-13"><a href="#cb21-13"></a>  <span class="dt">real</span>&lt;<span class="kw">lower</span>=<span class="fl">0.01</span>&gt; k;</span>
+<span id="cb21-14"><a href="#cb21-14"></a>  <span class="dt">real</span>&lt;<span class="kw">lower</span>=<span class="dv">1</span>, <span class="kw">upper</span>=<span class="dv">12</span>&gt; vol_d_true;</span>
+<span id="cb21-15"><a href="#cb21-15"></a>}</span>
+<span id="cb21-16"><a href="#cb21-16"></a></span>
+<span id="cb21-17"><a href="#cb21-17"></a><span class="kw">model</span> {</span>
+<span id="cb21-18"><a href="#cb21-18"></a>  k ~ normal(<span class="dv">0</span>, <span class="dv">5</span>) <span class="kw">T</span>[<span class="fl">0.01</span>, ]; </span>
+<span id="cb21-19"><a href="#cb21-19"></a>  sigma ~ normal(<span class="dv">0</span>, <span class="dv">1</span>) <span class="kw">T</span>[<span class="fl">0.01</span>, ];</span>
+<span id="cb21-20"><a href="#cb21-20"></a>  vol_d_true ~ normal(vol_d, <span class="dv">1</span>);</span>
+<span id="cb21-21"><a href="#cb21-21"></a>  c_obs ~ normal(dose / vol_d_true * exp(-k * t_obs), sigma);</span>
+<span id="cb21-22"><a href="#cb21-22"></a>}</span>
+<span id="cb21-23"><a href="#cb21-23"></a></span>
+<span id="cb21-24"><a href="#cb21-24"></a><span class="kw">generated quantities</span> {</span>
+<span id="cb21-25"><a href="#cb21-25"></a>  <span class="dt">vector</span>&lt;<span class="kw">lower</span>=<span class="dv">0</span>&gt;[n_fit] c_fit = dose / vol_d_true * exp(-k * t_fit);</span>
+<span id="cb21-26"><a href="#cb21-26"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+<p>When I do this, the data that I pass to this version of the model needs to be modified too. It needs to specify the times for which we want to generate fitted curves:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb22"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a>t_fit <span class="ot">&lt;-</span> <span class="fu">seq</span>(<span class="dv">0</span>, <span class="dv">3</span>, <span class="fl">0.05</span>)</span>
+<span id="cb22-2"><a href="#cb22-2" aria-hidden="true" tabindex="-1"></a>bolus2_data <span class="ot">&lt;-</span> <span class="fu">list</span>(</span>
+<span id="cb22-3"><a href="#cb22-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">n_obs =</span> <span class="dv">6</span>,</span>
+<span id="cb22-4"><a href="#cb22-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">n_fit =</span> <span class="fu">length</span>(t_fit),</span>
+<span id="cb22-5"><a href="#cb22-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">dose =</span> <span class="dv">50</span>,</span>
+<span id="cb22-6"><a href="#cb22-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">vol_d =</span> <span class="fl">5.5</span>,</span>
+<span id="cb22-7"><a href="#cb22-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">t_obs =</span> <span class="fu">c</span>(<span class="fl">0.1</span>, <span class="fl">0.5</span>, <span class="fl">1.0</span>, <span class="fl">1.5</span>, <span class="fl">2.0</span>, <span class="fl">3.0</span>),</span>
+<span id="cb22-8"><a href="#cb22-8" aria-hidden="true" tabindex="-1"></a>  <span class="at">c_obs =</span> <span class="fu">c</span>(<span class="fl">8.4</span>, <span class="fl">3.1</span>, <span class="fl">1.9</span>, <span class="fl">0.6</span>, <span class="fl">0.2</span>, <span class="fl">0.02</span>),</span>
+<span id="cb22-9"><a href="#cb22-9" aria-hidden="true" tabindex="-1"></a>  <span class="at">t_fit =</span> t_fit</span>
+<span id="cb22-10"><a href="#cb22-10" aria-hidden="true" tabindex="-1"></a>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>Now that we have an augmented model and augmented data set, we can re-run our sampling procedure using the new code:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb23"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb23-1"><a href="#cb23-1" aria-hidden="true" tabindex="-1"></a>bolus2_fitted <span class="ot">&lt;-</span> bolus2<span class="sc">$</span><span class="fu">sample</span>(</span>
+<span id="cb23-2"><a href="#cb23-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> bolus2_data, </span>
+<span id="cb23-3"><a href="#cb23-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">seed =</span> <span class="dv">123</span>, </span>
+<span id="cb23-4"><a href="#cb23-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">chains =</span> <span class="dv">4</span>,</span>
+<span id="cb23-5"><a href="#cb23-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">refresh =</span> <span class="dv">1000</span></span>
+<span id="cb23-6"><a href="#cb23-6" aria-hidden="true" tabindex="-1"></a>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Running MCMC with 4 sequential chains...
+
+Chain 1 Iteration:    1 / 2000 [  0%]  (Warmup) 
+Chain 1 Iteration: 1000 / 2000 [ 50%]  (Warmup) 
+Chain 1 Iteration: 1001 / 2000 [ 50%]  (Sampling) 
+Chain 1 Iteration: 2000 / 2000 [100%]  (Sampling) 
+Chain 1 finished in 0.0 seconds.
+Chain 2 Iteration:    1 / 2000 [  0%]  (Warmup) 
+Chain 2 Iteration: 1000 / 2000 [ 50%]  (Warmup) 
+Chain 2 Iteration: 1001 / 2000 [ 50%]  (Sampling) 
+Chain 2 Iteration: 2000 / 2000 [100%]  (Sampling) 
+Chain 2 finished in 0.1 seconds.
+Chain 3 Iteration:    1 / 2000 [  0%]  (Warmup) 
+Chain 3 Iteration: 1000 / 2000 [ 50%]  (Warmup) 
+Chain 3 Iteration: 1001 / 2000 [ 50%]  (Sampling) 
+Chain 3 Iteration: 2000 / 2000 [100%]  (Sampling) 
+Chain 3 finished in 0.1 seconds.
+Chain 4 Iteration:    1 / 2000 [  0%]  (Warmup) 
+Chain 4 Iteration: 1000 / 2000 [ 50%]  (Warmup) 
+Chain 4 Iteration: 1001 / 2000 [ 50%]  (Sampling) 
+Chain 4 Iteration: 2000 / 2000 [100%]  (Sampling) 
+Chain 4 finished in 0.0 seconds.
+
+All 4 chains finished successfully.
+Mean chain execution time: 0.0 seconds.
+Total execution time: 0.5 seconds.</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: 3 of 4000 (0.0%) transitions ended with a divergence.
+See https://mc-stan.org/misc/warnings for details.</code></pre>
+</div>
+</div>
+<p>The <code>bolus2_fitted</code> object contains both the parameter values sampled during the MCMC routine, and the generated quantities that emerged in the process. If I wanted to I could use those generated quantities as is. However, because there’s some value in separating the “posterior prediction” process from the “posterior sampling” process, it’s generally considered best practice to create a new set of generated quantities sampled using the posterior parameter distribution. We can do that by calling the <code>$generate_quantities()</code> method of our fitted model object:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb26"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb26-1"><a href="#cb26-1" aria-hidden="true" tabindex="-1"></a>bolus2_generated <span class="ot">&lt;-</span> bolus2<span class="sc">$</span><span class="fu">generate_quantities</span>(</span>
+<span id="cb26-2"><a href="#cb26-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">fitted_params =</span> bolus2_fitted,</span>
+<span id="cb26-3"><a href="#cb26-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> bolus2_data,</span>
+<span id="cb26-4"><a href="#cb26-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">seed =</span> <span class="dv">666</span></span>
+<span id="cb26-5"><a href="#cb26-5" aria-hidden="true" tabindex="-1"></a>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Running standalone generated quantities after 4 MCMC chains, 1 chain at a time ...
+
+Chain 1 finished in 0.0 seconds.
+Chain 2 finished in 0.0 seconds.
+Chain 3 finished in 0.0 seconds.
+Chain 4 finished in 0.0 seconds.
+
+All 4 chains finished successfully.
+Mean chain execution time: 0.0 seconds.
+Total execution time: 0.5 seconds.</code></pre>
+</div>
+</div>
+<p>This is a <a href="https://mc-stan.org/cmdstanr/reference/CmdStanGQ.html">CmdStanGQ</a> object, and again it has <code>$draws()</code> and <code>$summary()</code> methods. For our purposes the <code>$summary()</code> method will suffice as it returns a tibble containing the thing I want to plot:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb28"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb28-1"><a href="#cb28-1" aria-hidden="true" tabindex="-1"></a>bolus2_summary <span class="ot">&lt;-</span> bolus2_generated<span class="sc">$</span><span class="fu">summary</span>()</span>
+<span id="cb28-2"><a href="#cb28-2" aria-hidden="true" tabindex="-1"></a>bolus2_summary</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 61 × 7
+   variable   mean median    sd   mad    q5   q95
+   &lt;chr&gt;     &lt;num&gt;  &lt;num&gt; &lt;num&gt; &lt;num&gt; &lt;num&gt; &lt;num&gt;
+ 1 c_fit[1]   9.97   9.99 0.804 0.684  8.64 11.3 
+ 2 c_fit[2]   8.98   9.01 0.648 0.560  7.88  9.97
+ 3 c_fit[3]   8.09   8.13 0.551 0.473  7.14  8.89
+ 4 c_fit[4]   7.29   7.34 0.500 0.404  6.46  7.99
+ 5 c_fit[5]   6.57   6.62 0.480 0.363  5.79  7.22
+ 6 c_fit[6]   5.93   5.98 0.478 0.345  5.14  6.55
+ 7 c_fit[7]   5.35   5.40 0.482 0.351  4.56  5.98
+ 8 c_fit[8]   4.83   4.88 0.488 0.361  4.01  5.48
+ 9 c_fit[9]   4.36   4.41 0.493 0.370  3.52  5.02
+10 c_fit[10]  3.94   3.98 0.494 0.378  3.10  4.61
+# ℹ 51 more rows</code></pre>
+</div>
+</div>
+<p>The <code>variable</code> column here is only mildly helpful, so I’ll add a column specifying the actual times associated with each row in this tibble:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb30"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb30-1"><a href="#cb30-1" aria-hidden="true" tabindex="-1"></a>bolus2_summary<span class="sc">$</span>time <span class="ot">&lt;-</span> bolus2_data<span class="sc">$</span>t_fit</span>
+<span id="cb30-2"><a href="#cb30-2" aria-hidden="true" tabindex="-1"></a>bolus2_summary</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 61 × 8
+   variable   mean median    sd   mad    q5   q95  time
+   &lt;chr&gt;     &lt;num&gt;  &lt;num&gt; &lt;num&gt; &lt;num&gt; &lt;num&gt; &lt;num&gt; &lt;num&gt;
+ 1 c_fit[1]   9.97   9.99 0.804 0.684  8.64 11.3   0   
+ 2 c_fit[2]   8.98   9.01 0.648 0.560  7.88  9.97  0.05
+ 3 c_fit[3]   8.09   8.13 0.551 0.473  7.14  8.89  0.1 
+ 4 c_fit[4]   7.29   7.34 0.500 0.404  6.46  7.99  0.15
+ 5 c_fit[5]   6.57   6.62 0.480 0.363  5.79  7.22  0.2 
+ 6 c_fit[6]   5.93   5.98 0.478 0.345  5.14  6.55  0.25
+ 7 c_fit[7]   5.35   5.40 0.482 0.351  4.56  5.98  0.3 
+ 8 c_fit[8]   4.83   4.88 0.488 0.361  4.01  5.48  0.35
+ 9 c_fit[9]   4.36   4.41 0.493 0.370  3.52  5.02  0.4 
+10 c_fit[10]  3.94   3.98 0.494 0.378  3.10  4.61  0.45
+# ℹ 51 more rows</code></pre>
+</div>
+</div>
+<p>Having done so I can now draw the plot I really want:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb32"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb32-1"><a href="#cb32-1" aria-hidden="true" tabindex="-1"></a>df <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(</span>
+<span id="cb32-2"><a href="#cb32-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">t_obs =</span> bolus2_data<span class="sc">$</span>t_obs, </span>
+<span id="cb32-3"><a href="#cb32-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">c_obs =</span> bolus2_data<span class="sc">$</span>c_obs</span>
+<span id="cb32-4"><a href="#cb32-4" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb32-5"><a href="#cb32-5" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(bolus2_summary) <span class="sc">+</span> </span>
+<span id="cb32-6"><a href="#cb32-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_ribbon</span>(<span class="fu">aes</span>(time, <span class="at">ymin =</span> q5, <span class="at">ymax =</span> q95), <span class="at">fill =</span> <span class="st">"grey70"</span>) <span class="sc">+</span></span>
+<span id="cb32-7"><a href="#cb32-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_line</span>(<span class="fu">aes</span>(time, mean)) <span class="sc">+</span> </span>
+<span id="cb32-8"><a href="#cb32-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="fu">aes</span>(t_obs, c_obs), <span class="at">data =</span> df, <span class="at">size =</span> <span class="dv">2</span>) <span class="sc">+</span> </span>
+<span id="cb32-9"><a href="#cb32-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">x =</span> <span class="st">"time"</span>, <span class="at">y =</span> <span class="st">"concentration"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<p><img src="index_files/figure-html/plot-bolus2-pk-posterior-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>The solid line gives our best point estimate of the true concentration-time curve, and the shaded region shows a 90% credible interval that expresses our uncertainty about what part of the space the true curve might actually occupy.<a href="#fn13" class="footnote-ref" id="fnref13" role="doc-noteref"><sup>13</sup></a></p>
+<p><br></p>
+<div class="quarto-figure quarto-figure-center page-columns page-full">
+<figure class="figure page-columns page-full">
+<p><img src="dreamlike_07_1657.jpg" class="img-fluid figure-img" alt="swirling purple and brown texturing within a hexagonal pattern agains tan background, with bursts of noise sharply escaping on the left side"></p>
+<figcaption class="figure-caption margin-caption">I think this is my very favourite piece from this system. The texturing worked out so well.</figcaption>
+</figure>
+</div>
+<p><br></p>
+</section>
+</section>
+<section id="when-biology-isnt-analytically-tractable" class="level2 page-columns page-full">
+<h2 class="anchored" data-anchor-id="when-biology-isnt-analytically-tractable">When biology isn’t analytically tractable</h2>
+<p>Earlier when I justified the use of an exponential concentration-time function <span class="math inline">\(C(t)\)</span>, I did so by assuming that the body is able to “clear” a constant volume of blood per unit time. That assumption works reasonably well in some situations. If we suppose that the kidneys<a href="#fn14" class="footnote-ref" id="fnref14" role="doc-noteref"><sup>14</sup></a> work a bit like a filter, you can imagine that the body is filtering the blood at a fixed rate, which produces the exponential curve I used earlier. But the real world is a little more complicated than that sometimes.</p>
+<p>Suppose, instead, that the elimination process involves an <a href="https://en.wikipedia.org/wiki/Enzyme_catalysis">enzyme-catalysed</a> reaction. That is, the body eliminates the drug (the substrate) by binding it to enzyme, and from this transition state it is catalysed to something else (the product). The dynamics of such a process are a little different: the enzyme concentration is often very low relative to the substrate concentration and the reaction rate saturates: once you’ve hit that point adding more of the drug into the blood won’t speed up the elimination rate because there’s no free enzyme to catalyse its conversion. Put slightly differently, if elimination involves a saturable process it won’t necessarily have a constant clearance rate, and you won’t see an exponential concentration-time function.</p>
+<p>Well, that’s awkward.</p>
+<section id="michaelis-menten-kinetics" class="level3">
+<h3 class="anchored" data-anchor-id="michaelis-menten-kinetics">Michaelis-Menten kinetics</h3>
+<p>The paper I’ve relied on for an introduction to compartmental models in pharmacometrics is Holz and Fahr (2001) and they use <a href="https://en.wikipedia.org/wiki/Michaelis%E2%80%93Menten_kinetics">Michaelis-Menten kinetics</a> as an example of a saturable elimination process. Michaelis-Menten kinetics is characterised by the following differential equation:</p>
+<p><span class="math display">\[
+\frac{dC(t)}{dt} = - \frac{v_{m}}{k_m + C(t)} C(t)
+\]</span></p>
+<p>In this expression, <span class="math inline">\(v_{m}\)</span> is a constant that denoting the maximum velocity of elimination: due to the limitations imposed by the enzyme concentration, the drug concentration cannot decrease faster than this rate. The term <span class="math inline">\(k_m\)</span> is the <strong>Michaelis constant</strong>: when the drug concentration <span class="math inline">\(C(t)\)</span> equals <span class="math inline">\(k_m\)</span>, the elimination rate <span class="math inline">\(\frac{dC(t)}{dt}\)</span> is exactly half its maximum rate, <span class="math inline">\(\frac{v_m}{2}\)</span>. Both of these properties are easy enough to demonstrate if you’re willing to spend a few minutes playing around with the equation above, but it’s not very interesting, so we’ll move on. A more useful approach is to think about how we should expect Michaelis-Menten kinetics to behave at high and low drug concentrations:</p>
+<ul>
+<li><p>If the drug concentration <span class="math inline">\(C(t)\)</span> is very large, <span class="math inline">\(\frac{dC(t)}{dt}\)</span> will be roughly constant and very close to the satuation rate <span class="math inline">\(v_m\)</span>. In other words: At high concentrations, the concentration decreases <strong>linearly</strong> over time.</p></li>
+<li><p>If the drug concentration <span class="math inline">\(C(t)\)</span> is very small, then <span class="math inline">\(\frac{v_m}{k_m + C(t)}\)</span> will be roughly constant, and <span class="math inline">\(\frac{dC(t)}{dt}\)</span> will be roughly proportional to the concentration <span class="math inline">\(C(t)\)</span>. In other words: At low concentrations the concentration decreases <strong>exponentially</strong> over time.</p></li>
+</ul>
+<p>Now that we have a sensible intuition, we should try to draw the actual curves. One teeny-tiny problem… this differential equation doesn’t really have an analytic solution.<a href="#fn15" class="footnote-ref" id="fnref15" role="doc-noteref"><sup>15</sup></a> We’re going to have to do this numerically.</p>
+</section>
+<section id="what-does-it-look-like" class="level3">
+<h3 class="anchored" data-anchor-id="what-does-it-look-like">What does it look like?</h3>
+<p>In a moment I’m going to implement Michaelis-Menten kinetics using Stan, so as to eventually give me the ability to do Bayesian statistics in a pharmacokinetic model that involves this kind of dynamics. However, I’m a big fan of doing things in small steps. For example, if I weren’t planning to build all this into a probabilistic model, I wouldn’t really need to use Stan at all. R has many different <a href="https://cran.r-project.org/web/views/DifferentialEquations.html">tools for solving differential equations numerically</a>, and I could just use one of those.</p>
+<p>For instance, if I chose to use the <a href="http://desolve.r-forge.r-project.org/">deSolve package</a>, I’d begin by defining an R function <code>mmk()</code> that returns the value of the derivative at a given point in time and given specified parameters, pass it to the <code>ode()</code> solver supplied by deSolve, and then draw myself a pretty little picture using ggplot2:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb33"><pre class="sourceCode numberSource r number-lines code-with-copy"><code class="sourceCode r"><span id="cb33-1"><a href="#cb33-1"></a><span class="fu">library</span>(deSolve)</span>
+<span id="cb33-2"><a href="#cb33-2"></a><span class="fu">library</span>(ggplot2)</span>
+<span id="cb33-3"><a href="#cb33-3"></a></span>
+<span id="cb33-4"><a href="#cb33-4"></a><span class="co"># differential equation for MM kinetics: it returns a list because</span></span>
+<span id="cb33-5"><a href="#cb33-5"></a><span class="co"># that's what ode() expects to receive when it calls this function</span></span>
+<span id="cb33-6"><a href="#cb33-6"></a>mmk <span class="ot">&lt;-</span> <span class="cf">function</span>(t, y, parms) {</span>
+<span id="cb33-7"><a href="#cb33-7"></a>  dydt <span class="ot">&lt;-</span> <span class="sc">-</span> y <span class="sc">*</span> parms[<span class="st">"vm"</span>] <span class="sc">/</span> (parms[<span class="st">"km"</span>] <span class="sc">+</span> y) </span>
+<span id="cb33-8"><a href="#cb33-8"></a>  <span class="fu">return</span>(<span class="fu">list</span>(dydt))</span>
+<span id="cb33-9"><a href="#cb33-9"></a>}</span>
+<span id="cb33-10"><a href="#cb33-10"></a></span>
+<span id="cb33-11"><a href="#cb33-11"></a><span class="co"># parameters</span></span>
+<span id="cb33-12"><a href="#cb33-12"></a>dose <span class="ot">&lt;-</span> <span class="dv">120</span> <span class="co"># (in milligrams)</span></span>
+<span id="cb33-13"><a href="#cb33-13"></a>circulation_vol <span class="ot">&lt;-</span> <span class="fl">5.5</span>  <span class="co"># (in litres)</span></span>
+<span id="cb33-14"><a href="#cb33-14"></a>max_elimination <span class="ot">&lt;-</span> <span class="dv">8</span> </span>
+<span id="cb33-15"><a href="#cb33-15"></a>halving_point <span class="ot">&lt;-</span> <span class="dv">4</span></span>
+<span id="cb33-16"><a href="#cb33-16"></a>times <span class="ot">&lt;-</span> <span class="fu">seq</span>(<span class="dv">0</span>, <span class="dv">8</span>, .<span class="dv">05</span>) <span class="co"># (in hours)</span></span>
+<span id="cb33-17"><a href="#cb33-17"></a></span>
+<span id="cb33-18"><a href="#cb33-18"></a><span class="co"># use the desolve package</span></span>
+<span id="cb33-19"><a href="#cb33-19"></a>out <span class="ot">&lt;-</span> <span class="fu">ode</span>(</span>
+<span id="cb33-20"><a href="#cb33-20"></a>  <span class="at">y =</span> <span class="fu">c</span>(<span class="st">"conc"</span> <span class="ot">=</span> dose<span class="sc">/</span>circulation_vol),</span>
+<span id="cb33-21"><a href="#cb33-21"></a>  <span class="at">times =</span> times,</span>
+<span id="cb33-22"><a href="#cb33-22"></a>  <span class="at">func =</span> mmk,</span>
+<span id="cb33-23"><a href="#cb33-23"></a>  <span class="at">parms =</span> <span class="fu">c</span>(</span>
+<span id="cb33-24"><a href="#cb33-24"></a>    <span class="st">"vm"</span> <span class="ot">=</span> max_elimination, </span>
+<span id="cb33-25"><a href="#cb33-25"></a>    <span class="st">"km"</span> <span class="ot">=</span> halving_point</span>
+<span id="cb33-26"><a href="#cb33-26"></a>  )</span>
+<span id="cb33-27"><a href="#cb33-27"></a>)</span>
+<span id="cb33-28"><a href="#cb33-28"></a></span>
+<span id="cb33-29"><a href="#cb33-29"></a><span class="co"># convert matrix to tibble and plot</span></span>
+<span id="cb33-30"><a href="#cb33-30"></a>out <span class="ot">&lt;-</span> <span class="fu">as.data.frame</span>(out)</span>
+<span id="cb33-31"><a href="#cb33-31"></a><span class="fu">ggplot</span>(out, <span class="fu">aes</span>(time, conc)) <span class="sc">+</span> </span>
+<span id="cb33-32"><a href="#cb33-32"></a>  <span class="fu">geom_line</span>() <span class="sc">+</span> </span>
+<span id="cb33-33"><a href="#cb33-33"></a>  <span class="fu">labs</span>(<span class="at">x =</span> <span class="st">"time"</span>, <span class="at">y =</span> <span class="st">"concentration"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<p><img src="index_files/figure-html/ode-with-desolve-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>Consistent with the intuitions we developed earlier you can see that on the left hand side this curve looks pretty linear, but on the right hand side it looks pretty much like an exponential decay.</p>
+</section>
+<section id="the-exact-same-thing-but-in-stan-this-time" class="level3 page-columns page-full">
+<h3 class="anchored" data-anchor-id="the-exact-same-thing-but-in-stan-this-time">The exact same thing, but in Stan this time</h3>
+<p>Having solved the relevant differential equation in R, it’s helpful – if slightly strange – to imagine solving the exact same problem using Stan. Although Stan is primarily a language for probabilistic inference, it does provide a toolkit for <a href="https://mc-stan.org/docs/stan-users-guide/ode-solver.html">solving differential equations</a>. In normal usage we’d use the Stan ODE solver in the context of a larger statistical model, but – in order to wrap my head around how it works – I found it helpful to try invoking the solver for a dynamical system without incorporating it into any statistical model.</p>
+<p>So let’s do that for Michaelis-Menten kinetics. If we squint and ignore the details, the basic idea is the same in Stan as it was in the earlier example in R:</p>
+<ul>
+<li><p>Write a user-defined function called <code>mmk()</code> that takes arguments for the time, current state of the system (in our case concentration), and any other parameters (the maximum elimination rate and the Michaelis constant), and returns the derivatives.</p></li>
+<li><p>Call the ODE solver function, in this case <code>ode_rk45()</code>, passing it the user-defined function and other required quantities. This being Stan, we’ll need to ensure those quantities are defined in the data block.</p></li>
+</ul>
+<p>The actual code is shown below. The function is defined within the functions code block (shocking, right?), input data defined within the data block, and the variable we’re trying to compute (<code>conc</code>) is defined as a generated quantity:</p>
+<div class="cell" data-output.var="mmk">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>mmk</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb34"><pre class="sourceCode numberSource stan number-lines code-with-copy"><code class="sourceCode stan"><span id="cb34-1"><a href="#cb34-1"></a><span class="kw">functions</span> {</span>
+<span id="cb34-2"><a href="#cb34-2"></a>  <span class="dt">vector</span> mmk(<span class="dt">real</span> time,</span>
+<span id="cb34-3"><a href="#cb34-3"></a>             <span class="dt">vector</span> state,</span>
+<span id="cb34-4"><a href="#cb34-4"></a>             <span class="dt">real</span> vm,</span>
+<span id="cb34-5"><a href="#cb34-5"></a>             <span class="dt">real</span> km) {</span>
+<span id="cb34-6"><a href="#cb34-6"></a>    <span class="dt">vector</span>[<span class="dv">1</span>] derivative;</span>
+<span id="cb34-7"><a href="#cb34-7"></a>    derivative[<span class="dv">1</span>] = - state[<span class="dv">1</span>] * vm / (km + state[<span class="dv">1</span>]);</span>
+<span id="cb34-8"><a href="#cb34-8"></a>    <span class="cf">return</span> derivative;</span>
+<span id="cb34-9"><a href="#cb34-9"></a>  }</span>
+<span id="cb34-10"><a href="#cb34-10"></a>}</span>
+<span id="cb34-11"><a href="#cb34-11"></a></span>
+<span id="cb34-12"><a href="#cb34-12"></a><span class="kw">data</span> {</span>
+<span id="cb34-13"><a href="#cb34-13"></a>  <span class="dt">int</span>&lt;<span class="kw">lower</span>=<span class="dv">1</span>&gt; nt;</span>
+<span id="cb34-14"><a href="#cb34-14"></a>  <span class="dt">vector</span>[<span class="dv">1</span>] c0;</span>
+<span id="cb34-15"><a href="#cb34-15"></a>  <span class="dt">real</span> t0;</span>
+<span id="cb34-16"><a href="#cb34-16"></a>  <span class="dt">array</span>[nt] <span class="dt">real</span> ts;</span>
+<span id="cb34-17"><a href="#cb34-17"></a>  <span class="dt">real</span> vm;</span>
+<span id="cb34-18"><a href="#cb34-18"></a>  <span class="dt">real</span> km;</span>
+<span id="cb34-19"><a href="#cb34-19"></a>}</span>
+<span id="cb34-20"><a href="#cb34-20"></a></span>
+<span id="cb34-21"><a href="#cb34-21"></a><span class="kw">model</span> {</span>
+<span id="cb34-22"><a href="#cb34-22"></a>}</span>
+<span id="cb34-23"><a href="#cb34-23"></a></span>
+<span id="cb34-24"><a href="#cb34-24"></a><span class="kw">generated quantities</span> {</span>
+<span id="cb34-25"><a href="#cb34-25"></a>  <span class="dt">array</span>[nt] <span class="dt">vector</span>[<span class="dv">1</span>] conc = ode_rk45(mmk, c0, t0, ts, vm, km);</span>
+<span id="cb34-26"><a href="#cb34-26"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+<p>It may seem strange that the <code>mmk()</code> function defines the <code>state</code> variable to be a vector of length 1. At first pass it might seem a lot simpler to specify a scalar real: if we did that, then we wouldn’t have the weirdness of defining <code>conc</code> as a one-dimensional length <code>nt</code> array, in which each cell is a vector of length 1, each of which contains a single real number. The layers of nesting seem unnecessary.</p>
+<p>However, they are entirely necessary.</p>
+<p>To see this, it’s important to recognise that <code>mmk()</code> isn’t an <em>arbitrary</em> user defined function, it is the <a href="https://mc-stan.org/docs/functions-reference/functions-ode-solver.html#ode-system-function">ODE system function</a> and is designed to be passed to one of the solvers, in this case <code>ode_rk45()</code>. In this particular case our state is one-dimensional: we have a one-compartment model, and the only variable that defines the state is the drug concentration in that compartment. But dynamical systems can be – and usually are – multivariate: in a two-compartment model the state would probably be defined in terms of two drug concentrations, one for each compartment. In that case we would <em>require</em> a vector.</p>
+<p>To accommodate this cleanly, the design choice made in Stan is that the second argument to the system function must be a vector, even if the state happens to be one-dimensional. More generally, the point I’m making here is that to call the ODE solvers you need to ensure that your system function has the appropriate signature.</p>
+<p>In any case, let’s take our code for a spin. First we’ll create some data that we can pass to Stan:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb35"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb35-1"><a href="#cb35-1" aria-hidden="true" tabindex="-1"></a>times <span class="ot">&lt;-</span> <span class="fu">seq</span>(.<span class="dv">05</span>, <span class="dv">8</span>, .<span class="dv">05</span>)</span>
+<span id="cb35-2"><a href="#cb35-2" aria-hidden="true" tabindex="-1"></a>mmk_data <span class="ot">&lt;-</span> <span class="fu">list</span>(</span>
+<span id="cb35-3"><a href="#cb35-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">c0 =</span> <span class="fl">21.8</span>, </span>
+<span id="cb35-4"><a href="#cb35-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">t0 =</span> <span class="dv">0</span>, </span>
+<span id="cb35-5"><a href="#cb35-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">ts =</span> times, </span>
+<span id="cb35-6"><a href="#cb35-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">vm =</span> <span class="dv">8</span>,</span>
+<span id="cb35-7"><a href="#cb35-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">km =</span> <span class="dv">4</span>,</span>
+<span id="cb35-8"><a href="#cb35-8" aria-hidden="true" tabindex="-1"></a>  <span class="at">nt =</span> <span class="fu">length</span>(times)</span>
+<span id="cb35-9"><a href="#cb35-9" aria-hidden="true" tabindex="-1"></a>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>Next, we “sample” from the “model”. This step is, admittedly, super weird. We don’t actually have a model, and there are no parameters to sample and there are no probabilistic aspects to the system at all. This is going to be the world’s shortest MCMC run. The Stan model above is available in R via the <code>mmk</code> object, so I’ll call its <code>$sample()</code> method, specifying <code>fixed_param = TRUE</code> so that Stan doesn’t try to resample parameters that don’t exist. I’m only going to run one “chain” for a single iteration, because I only need to solve the system once:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb36"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb36-1"><a href="#cb36-1" aria-hidden="true" tabindex="-1"></a>mmk_fitted <span class="ot">&lt;-</span> mmk<span class="sc">$</span><span class="fu">sample</span>(</span>
+<span id="cb36-2"><a href="#cb36-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> mmk_data,</span>
+<span id="cb36-3"><a href="#cb36-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">fixed_param =</span> <span class="cn">TRUE</span>, </span>
+<span id="cb36-4"><a href="#cb36-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">chains =</span> <span class="dv">1</span>, </span>
+<span id="cb36-5"><a href="#cb36-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">iter_sampling =</span> <span class="dv">1</span></span>
+<span id="cb36-6"><a href="#cb36-6" aria-hidden="true" tabindex="-1"></a>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Running MCMC with 1 chain...
+
+Chain 1 Iteration: 1 / 1 [100%]  (Sampling) 
+Chain 1 finished in 0.0 seconds.</code></pre>
+</div>
+</div>
+<p>Because Stan has dutifully generated the generated quantities, I now have the values for the solved concentrations. I’ll extract those by calling the <code>$draws()</code> method, do a tiny bit of cleanup to wrangle the data into a nice format…</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb38"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb38-1"><a href="#cb38-1" aria-hidden="true" tabindex="-1"></a>mmk_draws <span class="ot">&lt;-</span> mmk_fitted<span class="sc">$</span><span class="fu">draws</span>(<span class="at">format =</span> <span class="st">"draws_df"</span>)</span>
+<span id="cb38-2"><a href="#cb38-2" aria-hidden="true" tabindex="-1"></a>mmk_draws <span class="ot">&lt;-</span> mmk_draws <span class="sc">|&gt;</span></span>
+<span id="cb38-3"><a href="#cb38-3" aria-hidden="true" tabindex="-1"></a>  tidyr<span class="sc">::</span><span class="fu">pivot_longer</span>(</span>
+<span id="cb38-4"><a href="#cb38-4" aria-hidden="true" tabindex="-1"></a>    <span class="at">cols =</span> tidyr<span class="sc">::</span><span class="fu">starts_with</span>(<span class="st">"conc"</span>), </span>
+<span id="cb38-5"><a href="#cb38-5" aria-hidden="true" tabindex="-1"></a>    <span class="at">names_to =</span> <span class="st">"variable"</span>, </span>
+<span id="cb38-6"><a href="#cb38-6" aria-hidden="true" tabindex="-1"></a>    <span class="at">values_to =</span> <span class="st">"conc"</span></span>
+<span id="cb38-7"><a href="#cb38-7" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">|&gt;</span></span>
+<span id="cb38-8"><a href="#cb38-8" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">mutate</span>(<span class="at">time =</span> mmk_data<span class="sc">$</span>ts)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: Dropping 'draws_df' class as required metadata was removed.</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb40"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb40-1"><a href="#cb40-1" aria-hidden="true" tabindex="-1"></a>mmk_draws</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 160 × 6
+   .chain .iteration .draw variable    conc  time
+    &lt;int&gt;      &lt;int&gt; &lt;int&gt; &lt;chr&gt;      &lt;dbl&gt; &lt;dbl&gt;
+ 1      1          1     1 conc[1,1]   21.5  0.05
+ 2      1          1     1 conc[2,1]   21.1  0.1 
+ 3      1          1     1 conc[3,1]   20.8  0.15
+ 4      1          1     1 conc[4,1]   20.5  0.2 
+ 5      1          1     1 conc[5,1]   20.1  0.25
+ 6      1          1     1 conc[6,1]   19.8  0.3 
+ 7      1          1     1 conc[7,1]   19.5  0.35
+ 8      1          1     1 conc[8,1]   19.1  0.4 
+ 9      1          1     1 conc[9,1]   18.8  0.45
+10      1          1     1 conc[10,1]  18.5  0.5 
+# ℹ 150 more rows</code></pre>
+</div>
+</div>
+<p>…and draw a pretty picture:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb42"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb42-1"><a href="#cb42-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(mmk_draws, <span class="fu">aes</span>(time, conc)) <span class="sc">+</span> </span>
+<span id="cb42-2"><a href="#cb42-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_line</span>() <span class="sc">+</span></span>
+<span id="cb42-3"><a href="#cb42-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">x =</span> <span class="st">"time"</span>, <span class="at">y =</span> <span class="st">"concentration"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<p><img src="index_files/figure-html/plot-mmk-pk-curve-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>Yup, same as before.</p>
+<p><br></p>
+<div class="quarto-figure quarto-figure-center page-columns page-full">
+<figure class="figure page-columns page-full">
+<p><img src="dreamlike_01_1026.jpg" class="img-fluid figure-img" alt="soft purple noise patterns in the bottom left of the image, against a green background, with hints of a square shape in purple in the middle of the image"></p>
+<figcaption class="figure-caption margin-caption">Honestly, I just included this one because it’s weird and I’m a sucker for this palette.</figcaption>
+</figure>
+</div>
+<p><br></p>
+</section>
+</section>
+<section id="one-compartment-bolus-model-with-mmk-elimination" class="level2 page-columns page-full">
+<h2 class="anchored" data-anchor-id="one-compartment-bolus-model-with-mmk-elimination">One compartment bolus model with MMK elimination</h2>
+<p>Some preliminaries. For the purposes of building priors it’s useful to think about what kinds of properties you can have sensible intuitions about. It’s a little tricky to set a joint prior over the maximum elimination rate <span class="math inline">\(v_m\)</span> and the Michaelis constant <span class="math inline">\(k_m\)</span> without using some outside knowledge. If the data don’t span a range that lets you unambiguously discover “a linear bit” and “an exponential bit” it’s very easy to trade off one parameter against the other. Increasing <span class="math inline">\(v_m\)</span> and <span class="math inline">\(k_m\)</span> at the same time will slightly change the “bendiness” of the curve, but that’s easily absorbed into the error terms. In other words, if you don’t have sensible constraints you’re going to end up with a serious identifiability problem. With that in mind, the two thoughts I had are:</p>
+<p>I can see why it would be important to understand <span class="math inline">\(v_m\)</span> and <span class="math inline">\(k_m\)</span> theoretically but from a data analysis perspective, I found it a little easier to set priors by thinking about the elimination rate <span class="math inline">\(v_0\)</span> at time <span class="math inline">\(t = 0\)</span>. After a little high school algebra we obtain the following expressions to transform from <span class="math inline">\(v_0\)</span> to <span class="math inline">\(v_m\)</span> and vice versa:</p>
+<p><span class="math display">\[
+\begin{array}{rcl}
+v_0 &amp;=&amp; v_m \ \displaystyle \frac{c_0}{c_0 + k_m} \\ \\
+v_m &amp;=&amp; v_0 \ \displaystyle \frac{c_0 + k_m}{c_0}
+\end{array}
+\]</span></p>
+<p>Extending this logic, instead of parameterising the prior in terms of the Michaelis constant <span class="math inline">\(k_m\)</span> (the concentration at which the reaction rate falls to half its maximum value), we can use a design-specific analog, <span class="math inline">\(k_0\)</span>, denoting the concentration at which the reaction rate falls to half of <span class="math inline">\(v_0\)</span>. Again, some algebraic shenanigans gives us the transformations:</p>
+<p><span class="math display">\[
+\begin{array}{rcl}
+k_0 &amp;=&amp; \displaystyle \frac{c_0 \ k_m}{c_0 + 2 k_m} \\ \\
+k_m &amp;=&amp; \displaystyle \frac{c_0 \ k_0}{c_0 - 2 k_0}
+\end{array}
+\]</span></p>
+<p>In a sign that I still haven’t really nailed this, the way I’m going to set my priors for the model is kind of unprincipled. I’ll set independent priors over the initial rate <span class="math inline">\(v_0\)</span>, and the Michaelis constant <span class="math inline">\(k_m\)</span>. I suppose I could make a pretense of a justification for this, by saying that the prior over <span class="math inline">\(v_0\)</span> is used to capture my intutions about the experimental design and the prior over <span class="math inline">\(k_m\)</span> is used to capture my intuitions about the fundamental biological processes as they exist outside the experiment but… yeah, that’s 100% a post hoc rationalisation. The actual reason I’m doing this is that I tried several different ways of setting a prior, and this version seemed to be the least vulnerable to numerical problems. Other versions tended to move into regions of the space where the ODE solver becomes very unhappy, or regions where the target probability density is not well-behaved. Practicality rules my world.</p>
+<p>The specific prior:</p>
+<p><span class="math display">\[
+\begin{array}{rcl}
+v_0 &amp; \sim &amp; \mbox{Half-Normal}_+(0, 10) \\
+k_m &amp; \sim &amp; \mbox{Half-Normal}_+(0, 10)
+\end{array}
+\]</span></p>
+<p>Later, when I plot model posteriors, I’ll be a little more sensible though and use the two interpretable versions: I’ll plot <span class="math inline">\(v_m\)</span> against <span class="math inline">\(k_m\)</span>, and <span class="math inline">\(v_0\)</span> against <span class="math inline">\(k_0\)</span>.</p>
+<section id="the-model" class="level3">
+<h3 class="anchored" data-anchor-id="the-model">The model</h3>
+<p>Here’s the Stan code for the model I settled on:<a href="#fn16" class="footnote-ref" id="fnref16" role="doc-noteref"><sup>16</sup></a></p>
+<div class="cell" data-output.var="mmk_bolus">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>mmk_bolus</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb43"><pre class="sourceCode numberSource stan number-lines code-with-copy"><code class="sourceCode stan"><span id="cb43-1"><a href="#cb43-1"></a><span class="kw">functions</span> {</span>
+<span id="cb43-2"><a href="#cb43-2"></a>  <span class="dt">vector</span> mmk(<span class="dt">real</span> time,</span>
+<span id="cb43-3"><a href="#cb43-3"></a>             <span class="dt">vector</span> state,</span>
+<span id="cb43-4"><a href="#cb43-4"></a>             <span class="dt">real</span> vm,</span>
+<span id="cb43-5"><a href="#cb43-5"></a>             <span class="dt">real</span> km) {</span>
+<span id="cb43-6"><a href="#cb43-6"></a>    <span class="dt">vector</span>[<span class="dv">1</span>] derivative;</span>
+<span id="cb43-7"><a href="#cb43-7"></a>    derivative[<span class="dv">1</span>] = - state[<span class="dv">1</span>] * vm / (km + state[<span class="dv">1</span>]);</span>
+<span id="cb43-8"><a href="#cb43-8"></a>    <span class="cf">return</span> derivative;</span>
+<span id="cb43-9"><a href="#cb43-9"></a>  }</span>
+<span id="cb43-10"><a href="#cb43-10"></a>}</span>
+<span id="cb43-11"><a href="#cb43-11"></a></span>
+<span id="cb43-12"><a href="#cb43-12"></a><span class="kw">data</span> {</span>
+<span id="cb43-13"><a href="#cb43-13"></a>  <span class="dt">int</span>&lt;<span class="kw">lower</span>=<span class="dv">1</span>&gt; n_obs;</span>
+<span id="cb43-14"><a href="#cb43-14"></a>  <span class="dt">int</span>&lt;<span class="kw">lower</span>=<span class="dv">1</span>&gt; n_fit;</span>
+<span id="cb43-15"><a href="#cb43-15"></a>  <span class="dt">vector</span>&lt;<span class="kw">lower</span>=<span class="dv">0</span>&gt;[n_obs] c_obs;</span>
+<span id="cb43-16"><a href="#cb43-16"></a>  <span class="dt">array</span>[n_obs] <span class="dt">real</span> t_obs;</span>
+<span id="cb43-17"><a href="#cb43-17"></a>  <span class="dt">array</span>[n_fit] <span class="dt">real</span> t_fit;</span>
+<span id="cb43-18"><a href="#cb43-18"></a>  <span class="dt">real</span>&lt;<span class="kw">lower</span>=<span class="dv">0</span>&gt; vol_d;</span>
+<span id="cb43-19"><a href="#cb43-19"></a>  <span class="dt">real</span>&lt;<span class="kw">lower</span>=<span class="dv">0</span>&gt; dose;</span>
+<span id="cb43-20"><a href="#cb43-20"></a>  <span class="dt">real</span> t0;</span>
+<span id="cb43-21"><a href="#cb43-21"></a>}</span>
+<span id="cb43-22"><a href="#cb43-22"></a></span>
+<span id="cb43-23"><a href="#cb43-23"></a><span class="kw">parameters</span> {</span>
+<span id="cb43-24"><a href="#cb43-24"></a>  <span class="dt">real</span>&lt;<span class="kw">lower</span>=<span class="fl">0.01</span>&gt; sigma;</span>
+<span id="cb43-25"><a href="#cb43-25"></a>  <span class="dt">real</span>&lt;<span class="kw">lower</span>=<span class="fl">0.01</span>, <span class="kw">upper</span>=<span class="dv">30</span>&gt; v0;</span>
+<span id="cb43-26"><a href="#cb43-26"></a>  <span class="dt">real</span>&lt;<span class="kw">lower</span>=<span class="fl">0.01</span>, <span class="kw">upper</span>=<span class="dv">50</span>&gt; km;</span>
+<span id="cb43-27"><a href="#cb43-27"></a>  <span class="dt">real</span>&lt;<span class="kw">lower</span>=<span class="dv">1</span>, <span class="kw">upper</span>=<span class="dv">12</span>&gt; vol_d_true;</span>
+<span id="cb43-28"><a href="#cb43-28"></a>}</span>
+<span id="cb43-29"><a href="#cb43-29"></a></span>
+<span id="cb43-30"><a href="#cb43-30"></a><span class="kw">transformed parameters</span> {</span>
+<span id="cb43-31"><a href="#cb43-31"></a>  <span class="dt">vector</span>[<span class="dv">1</span>] c0;</span>
+<span id="cb43-32"><a href="#cb43-32"></a>  c0[<span class="dv">1</span>] = dose / vol_d_true;</span>
+<span id="cb43-33"><a href="#cb43-33"></a>  <span class="dt">real</span>&lt;<span class="kw">lower</span>=<span class="fl">0.01</span>&gt; vm = v0 * (km + c0[<span class="dv">1</span>]) / c0[<span class="dv">1</span>];</span>
+<span id="cb43-34"><a href="#cb43-34"></a>}</span>
+<span id="cb43-35"><a href="#cb43-35"></a></span>
+<span id="cb43-36"><a href="#cb43-36"></a><span class="kw">model</span> {</span>
+<span id="cb43-37"><a href="#cb43-37"></a>  <span class="dt">array</span>[n_obs] <span class="dt">vector</span>[<span class="dv">1</span>] mu_arr;</span>
+<span id="cb43-38"><a href="#cb43-38"></a>  <span class="dt">vector</span>[n_obs] mu_vec;</span>
+<span id="cb43-39"><a href="#cb43-39"></a></span>
+<span id="cb43-40"><a href="#cb43-40"></a>  v0 ~ normal(<span class="dv">0</span>, <span class="dv">10</span>) <span class="kw">T</span>[<span class="fl">0.01</span>, ];</span>
+<span id="cb43-41"><a href="#cb43-41"></a>  km ~ normal(<span class="dv">0</span>, <span class="dv">10</span>) <span class="kw">T</span>[<span class="fl">0.01</span>, ];</span>
+<span id="cb43-42"><a href="#cb43-42"></a>  sigma ~ normal(<span class="dv">0</span>, <span class="dv">1</span>) <span class="kw">T</span>[<span class="fl">0.01</span>, ];</span>
+<span id="cb43-43"><a href="#cb43-43"></a>  vol_d_true ~ normal(vol_d, <span class="dv">1</span>);</span>
+<span id="cb43-44"><a href="#cb43-44"></a>  </span>
+<span id="cb43-45"><a href="#cb43-45"></a>  mu_arr = ode_rk45(mmk, c0, t0, t_obs, vm, km);</span>
+<span id="cb43-46"><a href="#cb43-46"></a>  <span class="cf">for</span> (i <span class="cf">in</span> <span class="dv">1</span>:n_obs) {</span>
+<span id="cb43-47"><a href="#cb43-47"></a>    mu_vec[i] = mu_arr[i, <span class="dv">1</span>];</span>
+<span id="cb43-48"><a href="#cb43-48"></a>  }</span>
+<span id="cb43-49"><a href="#cb43-49"></a>  c_obs ~ normal(mu_vec, sigma);</span>
+<span id="cb43-50"><a href="#cb43-50"></a>}</span>
+<span id="cb43-51"><a href="#cb43-51"></a></span>
+<span id="cb43-52"><a href="#cb43-52"></a><span class="kw">generated quantities</span> {</span>
+<span id="cb43-53"><a href="#cb43-53"></a>  <span class="dt">array</span>[n_fit] <span class="dt">vector</span>[<span class="dv">1</span>] c_fit = ode_rk45(mmk, c0, t0, t_fit, vm, km);</span>
+<span id="cb43-54"><a href="#cb43-54"></a>  <span class="dt">real</span>&lt;<span class="kw">lower</span>=<span class="fl">0.01</span>&gt; k0 = (c0[<span class="dv">1</span>] * km) / (c0[<span class="dv">1</span>] + <span class="dv">2</span>*km);</span>
+<span id="cb43-55"><a href="#cb43-55"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+<p>It’s truly thrilling, is it not? You’ll notice that I’ve introduced a “transformed parameters” block in which I’ve define the <code>c0</code> and <code>vm</code> variables. These are included as transformed parameters because they are quantities that follow deterministically from the “stochastic” parameters (<code>v0</code>, <code>km</code>, etc) and the data, but – unlike the “generated quantities” – they actually do form part of the model because they are used later. The ODE solver needs access to both <code>c0</code> and <code>vm</code> in order to calculate the model-predicted concentrations at each time point, so they aren’t purely auxiliary. In contrast, the <code>c_fit</code> and <code>k0</code> variables that I’ve included in the “generated quantities” block aren’t used for anything: the human user (me) wants to know what these values are, but the model doesn’t strictly need them.</p>
+<p>Anyway, let’s define some data that we can model:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb44"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb44-1"><a href="#cb44-1" aria-hidden="true" tabindex="-1"></a>t_obs <span class="ot">&lt;-</span> <span class="dv">1</span><span class="sc">:</span><span class="dv">8</span></span>
+<span id="cb44-2"><a href="#cb44-2" aria-hidden="true" tabindex="-1"></a>c_obs <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="fl">14.8</span>, <span class="fl">11.0</span>, <span class="fl">4.5</span>, <span class="fl">1.6</span>, <span class="fl">0.2</span>, <span class="fl">0.01</span>, <span class="dv">0</span>, <span class="dv">0</span>)</span>
+<span id="cb44-3"><a href="#cb44-3" aria-hidden="true" tabindex="-1"></a>t_fit <span class="ot">&lt;-</span> <span class="fu">seq</span>(.<span class="dv">05</span>, <span class="dv">8</span>, .<span class="dv">05</span>)</span>
+<span id="cb44-4"><a href="#cb44-4" aria-hidden="true" tabindex="-1"></a>mmk_bolus_data <span class="ot">&lt;-</span> <span class="fu">list</span>(</span>
+<span id="cb44-5"><a href="#cb44-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">dose =</span> <span class="dv">120</span>,</span>
+<span id="cb44-6"><a href="#cb44-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">vol_d =</span> <span class="fl">5.5</span>,</span>
+<span id="cb44-7"><a href="#cb44-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">t0 =</span> <span class="dv">0</span>, </span>
+<span id="cb44-8"><a href="#cb44-8" aria-hidden="true" tabindex="-1"></a>  <span class="at">c_obs =</span> c_obs,</span>
+<span id="cb44-9"><a href="#cb44-9" aria-hidden="true" tabindex="-1"></a>  <span class="at">t_obs =</span> t_obs,</span>
+<span id="cb44-10"><a href="#cb44-10" aria-hidden="true" tabindex="-1"></a>  <span class="at">t_fit =</span> t_fit,</span>
+<span id="cb44-11"><a href="#cb44-11" aria-hidden="true" tabindex="-1"></a>  <span class="at">n_obs =</span> <span class="fu">length</span>(t_obs),</span>
+<span id="cb44-12"><a href="#cb44-12" aria-hidden="true" tabindex="-1"></a>  <span class="at">n_fit =</span> <span class="fu">length</span>(t_fit)</span>
+<span id="cb44-13"><a href="#cb44-13" aria-hidden="true" tabindex="-1"></a>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>And, because human beings typically prefer pretty pictures to tiresome lists of numbers, here’s a plot that shows you what the to-be-modelled data look like:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb45"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb45-1"><a href="#cb45-1" aria-hidden="true" tabindex="-1"></a>df <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(</span>
+<span id="cb45-2"><a href="#cb45-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">time =</span> mmk_bolus_data<span class="sc">$</span>t_obs,</span>
+<span id="cb45-3"><a href="#cb45-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">conc =</span> mmk_bolus_data<span class="sc">$</span>c_obs</span>
+<span id="cb45-4"><a href="#cb45-4" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb45-5"><a href="#cb45-5" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(df, <span class="fu">aes</span>(time, conc)) <span class="sc">+</span> </span>
+<span id="cb45-6"><a href="#cb45-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="at">size =</span> <span class="dv">2</span>) <span class="sc">+</span> </span>
+<span id="cb45-7"><a href="#cb45-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">lims</span>(<span class="at">x =</span> <span class="fu">c</span>(<span class="dv">0</span>, <span class="dv">8</span>), <span class="at">y =</span> <span class="fu">c</span>(<span class="dv">0</span>, <span class="dv">25</span>)) <span class="sc">+</span></span>
+<span id="cb45-8"><a href="#cb45-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">x =</span> <span class="st">"time"</span>, <span class="at">y =</span> <span class="st">"concentration"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<p><img src="index_files/figure-html/plot-mmk-bolus-data-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>I kind of like this as a toy data set because it’s (a) very clean, in the sense that it doesn’t feel noisy at all and we expect that the measurement error <span class="math inline">\(\sigma\)</span> should be pretty small, and (b) there’s just a tiny bit of ambiguity about where precisely the MMK dynamics kick in… looking carefully at these points there’s this feeling that they aren’t really an exponential curve or a linear function, but something in between. So we should be able to model them using a MMK system, but it’s not quite clear where the linear part ends and where the exponential part begins. So it should be instructive…</p>
+<p>Okay, so now let’s run the sampler:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb46"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb46-1"><a href="#cb46-1" aria-hidden="true" tabindex="-1"></a>mmk_bolus_fitted <span class="ot">&lt;-</span> mmk_bolus<span class="sc">$</span><span class="fu">sample</span>(</span>
+<span id="cb46-2"><a href="#cb46-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> mmk_bolus_data, </span>
+<span id="cb46-3"><a href="#cb46-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">seed =</span> <span class="dv">100</span>, </span>
+<span id="cb46-4"><a href="#cb46-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">chains =</span> <span class="dv">4</span>,</span>
+<span id="cb46-5"><a href="#cb46-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">parallel_chains =</span> <span class="dv">2</span>,  </span>
+<span id="cb46-6"><a href="#cb46-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">refresh =</span> <span class="dv">1000</span></span>
+<span id="cb46-7"><a href="#cb46-7" aria-hidden="true" tabindex="-1"></a>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Running MCMC with 4 chains, at most 2 in parallel...
+
+Chain 1 Iteration:    1 / 2000 [  0%]  (Warmup) 
+Chain 2 Iteration:    1 / 2000 [  0%]  (Warmup) 
+Chain 2 Iteration: 1000 / 2000 [ 50%]  (Warmup) 
+Chain 2 Iteration: 1001 / 2000 [ 50%]  (Sampling) 
+Chain 1 Iteration: 1000 / 2000 [ 50%]  (Warmup) 
+Chain 1 Iteration: 1001 / 2000 [ 50%]  (Sampling) 
+Chain 2 Iteration: 2000 / 2000 [100%]  (Sampling) 
+Chain 2 finished in 1.6 seconds.
+Chain 3 Iteration:    1 / 2000 [  0%]  (Warmup) 
+Chain 1 Iteration: 2000 / 2000 [100%]  (Sampling) 
+Chain 1 finished in 2.0 seconds.
+Chain 4 Iteration:    1 / 2000 [  0%]  (Warmup) 
+Chain 3 Iteration: 1000 / 2000 [ 50%]  (Warmup) 
+Chain 3 Iteration: 1001 / 2000 [ 50%]  (Sampling) 
+Chain 4 Iteration: 1000 / 2000 [ 50%]  (Warmup) 
+Chain 4 Iteration: 1001 / 2000 [ 50%]  (Sampling) 
+Chain 3 Iteration: 2000 / 2000 [100%]  (Sampling) 
+Chain 3 finished in 1.5 seconds.
+Chain 4 Iteration: 2000 / 2000 [100%]  (Sampling) 
+Chain 4 finished in 1.8 seconds.
+
+All 4 chains finished successfully.
+Mean chain execution time: 1.7 seconds.
+Total execution time: 3.8 seconds.</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Warning: 2 of 4000 (0.0%) transitions ended with a divergence.
+See https://mc-stan.org/misc/warnings for details.</code></pre>
+</div>
+</div>
+<p>That looks nice. A couple of minor complaints from Stan about divergences, but nothing too serious.<a href="#fn17" class="footnote-ref" id="fnref17" role="doc-noteref"><sup>17</sup></a> And take a summary:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb49"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb49-1"><a href="#cb49-1" aria-hidden="true" tabindex="-1"></a>mmk_bolus_fitted<span class="sc">$</span><span class="fu">summary</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 168 × 10
+   variable     mean median    sd   mad     q5   q95  rhat ess_bulk ess_tail
+   &lt;chr&gt;       &lt;num&gt;  &lt;num&gt; &lt;num&gt; &lt;num&gt;  &lt;num&gt; &lt;num&gt; &lt;num&gt;    &lt;num&gt;    &lt;num&gt;
+ 1 lp__        3.82   4.20  1.73  1.49   0.506  5.86  1.00    1091.    1561.
+ 2 sigma       0.717  0.673 0.247 0.216  0.416  1.18  1.00    1109.    1491.
+ 3 v0          6.10   5.89  1.03  0.864  4.80   8.06  1.00     814.    1252.
+ 4 km          3.80   2.79  3.34  2.19   0.586 10.6   1.00     906.    1442.
+ 5 vol_d_true  5.67   5.69  0.350 0.329  5.08   6.22  1.00     924.    1398.
+ 6 c0[1]      21.2   21.1   1.34  1.21  19.3   23.6   1.00     924.    1398.
+ 7 vm          7.27   6.69  2.16  1.47   5.00  11.5   1.00     817.    1207.
+ 8 c_fit[1,1] 20.9   20.8   1.30  1.17  19.0   23.2   1.00     934.    1413.
+ 9 c_fit[2,1] 20.6   20.5   1.25  1.13  18.8   22.8   1.00     946.    1418.
+10 c_fit[3,1] 20.3   20.2   1.21  1.10  18.5   22.5   1.00     958.    1423.
+# ℹ 158 more rows</code></pre>
+</div>
+</div>
+<p>Neato.</p>
+</section>
+<section id="posterior-densities" class="level3">
+<h3 class="anchored" data-anchor-id="posterior-densities">Posterior densities</h3>
+<p>Okay, let’s take a look at the posterior distributions. As I hinted earlier on – and indeed has been pointed out previously in the literature on Michaelis-Menten kinetics – there is a serious identifiability issue when parameters are expressed in the <span class="math inline">\((k_m, v_m)\)</span> space:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb51"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb51-1"><a href="#cb51-1" aria-hidden="true" tabindex="-1"></a>mmk_bolus_draws <span class="ot">&lt;-</span> mmk_bolus_fitted<span class="sc">$</span><span class="fu">draws</span>(<span class="at">format =</span> <span class="st">"draws_df"</span>)</span>
+<span id="cb51-2"><a href="#cb51-2" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(mmk_bolus_draws, <span class="fu">aes</span>(km, vm)) <span class="sc">+</span> </span>
+<span id="cb51-3"><a href="#cb51-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="at">alpha =</span> .<span class="dv">5</span>) <span class="sc">+</span> </span>
+<span id="cb51-4"><a href="#cb51-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(</span>
+<span id="cb51-5"><a href="#cb51-5" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> <span class="st">"Michaelis constant, km"</span>, </span>
+<span id="cb51-6"><a href="#cb51-6" aria-hidden="true" tabindex="-1"></a>    <span class="at">y =</span> <span class="st">"Maximum elimination rate, vm"</span></span>
+<span id="cb51-7"><a href="#cb51-7" aria-hidden="true" tabindex="-1"></a>  )</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<p><img src="index_files/figure-html/mmk-bolus-posterior-density-vm-km-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>The very high posterior correlation (the value is 0.96) between <span class="math inline">\(k_m\)</span> and <span class="math inline">\(v_m\)</span> makes it nigh-impossible to uniquely identify either one, and I am pretty sure this is also the reason why this particular model is very temperamental. Sure, it looks pretty well behaved in the output above (there are no warning messages and only two divergences reported), but that’s what it looks like <em>after</em> I reparameterised the model into a format that sorta kinda works. The version I implemented originally made Stan cry. A <em>lot</em>.</p>
+<p>In case you’re interested, here’s what the joint posterior looks like in the <span class="math inline">\((k_0, v_0)\)</span> space. There’s still some correlation there (the value is 0.85), but it has attenuated quite a bit:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb52"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb52-1"><a href="#cb52-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(mmk_bolus_draws, <span class="fu">aes</span>(k0, v0)) <span class="sc">+</span> </span>
+<span id="cb52-2"><a href="#cb52-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="at">alpha =</span> .<span class="dv">5</span>) <span class="sc">+</span> </span>
+<span id="cb52-3"><a href="#cb52-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(</span>
+<span id="cb52-4"><a href="#cb52-4" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> <span class="st">"Rate-halving concentration, k0"</span>, </span>
+<span id="cb52-5"><a href="#cb52-5" aria-hidden="true" tabindex="-1"></a>    <span class="at">y =</span> <span class="st">"Initial elimination rate, v0"</span></span>
+<span id="cb52-6"><a href="#cb52-6" aria-hidden="true" tabindex="-1"></a>  )</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<p><img src="index_files/figure-html/mmk-bolus-posterior-density-v0-k0-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>This is the real reason I introduced these transformations! Finally, let’s look at the posterior in the <span class="math inline">\((k_m, v_0)\)</span> space in which I actually specified my priors:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb53"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb53-1"><a href="#cb53-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(mmk_bolus_draws, <span class="fu">aes</span>(km, v0)) <span class="sc">+</span> </span>
+<span id="cb53-2"><a href="#cb53-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="at">alpha =</span> .<span class="dv">5</span>) <span class="sc">+</span> </span>
+<span id="cb53-3"><a href="#cb53-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(</span>
+<span id="cb53-4"><a href="#cb53-4" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> <span class="st">"Michaelis constant, km"</span>, </span>
+<span id="cb53-5"><a href="#cb53-5" aria-hidden="true" tabindex="-1"></a>    <span class="at">y =</span> <span class="st">"Initial elimination rate, v0"</span></span>
+<span id="cb53-6"><a href="#cb53-6" aria-hidden="true" tabindex="-1"></a>  )</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<p><img src="index_files/figure-html/mmk-bolus-posterior-density-v0-km-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>The correlation here is 0.82, pretty similar to the previous one.<a href="#fn18" class="footnote-ref" id="fnref18" role="doc-noteref"><sup>18</sup></a></p>
+</section>
+<section id="credible-intervals-for-the-pharamacokinetic-function" class="level3 page-columns page-full">
+<h3 class="anchored" data-anchor-id="credible-intervals-for-the-pharamacokinetic-function">Credible intervals for the pharamacokinetic function</h3>
+<p>Okay, let’s turn to the curve itself. While there are some difficulties associated with recovering parameters of the Michaelis-Menten process, the concentration-time curves themselves are pretty recoverable. First, we use our posterior parameters to generate posterior predicted values for the concentration over time:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb54"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb54-1"><a href="#cb54-1" aria-hidden="true" tabindex="-1"></a>mmk_bolus_generated <span class="ot">&lt;-</span> mmk_bolus<span class="sc">$</span><span class="fu">generate_quantities</span>(</span>
+<span id="cb54-2"><a href="#cb54-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">fitted_params =</span> mmk_bolus_fitted,</span>
+<span id="cb54-3"><a href="#cb54-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> mmk_bolus_data,</span>
+<span id="cb54-4"><a href="#cb54-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">seed =</span> <span class="dv">999</span></span>
+<span id="cb54-5"><a href="#cb54-5" aria-hidden="true" tabindex="-1"></a>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Running standalone generated quantities after 4 MCMC chains, 1 chain at a time ...
+
+Chain 1 finished in 0.0 seconds.
+Chain 2 finished in 0.0 seconds.
+Chain 3 finished in 0.0 seconds.
+Chain 4 finished in 0.0 seconds.
+
+All 4 chains finished successfully.
+Mean chain execution time: 0.0 seconds.
+Total execution time: 1.1 seconds.</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb56"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb56-1"><a href="#cb56-1" aria-hidden="true" tabindex="-1"></a>mmk_bolus_generated_summary <span class="ot">&lt;-</span> mmk_bolus_generated<span class="sc">$</span><span class="fu">summary</span>() <span class="sc">|&gt;</span></span>
+<span id="cb56-2"><a href="#cb56-2" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">filter</span>(variable <span class="sc">|&gt;</span> stringr<span class="sc">::</span><span class="fu">str_detect</span>(<span class="st">"^c_fit"</span>))</span>
+<span id="cb56-3"><a href="#cb56-3" aria-hidden="true" tabindex="-1"></a>mmk_bolus_generated_summary<span class="sc">$</span>time <span class="ot">&lt;-</span> mmk_bolus_data<span class="sc">$</span>t_fit</span>
+<span id="cb56-4"><a href="#cb56-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb56-5"><a href="#cb56-5" aria-hidden="true" tabindex="-1"></a>mmk_bolus_generated_summary</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 160 × 8
+   variable     mean median    sd   mad    q5   q95  time
+   &lt;chr&gt;       &lt;num&gt;  &lt;num&gt; &lt;num&gt; &lt;num&gt; &lt;num&gt; &lt;num&gt; &lt;num&gt;
+ 1 c_fit[1,1]   20.9   20.8 1.30  1.17   19.0  23.2  0.05
+ 2 c_fit[2,1]   20.6   20.5 1.25  1.13   18.8  22.8  0.1 
+ 3 c_fit[3,1]   20.3   20.2 1.21  1.10   18.5  22.5  0.15
+ 4 c_fit[4,1]   20.0   19.9 1.17  1.07   18.3  22.1  0.2 
+ 5 c_fit[5,1]   19.7   19.6 1.13  1.04   18.0  21.7  0.25
+ 6 c_fit[6,1]   19.4   19.3 1.08  0.997  17.8  21.3  0.3 
+ 7 c_fit[7,1]   19.1   19.0 1.04  0.961  17.5  20.9  0.35
+ 8 c_fit[8,1]   18.8   18.7 1.01  0.928  17.3  20.6  0.4 
+ 9 c_fit[9,1]   18.5   18.5 0.968 0.898  17.1  20.2  0.45
+10 c_fit[10,1]  18.2   18.2 0.932 0.869  16.8  19.8  0.5 
+# ℹ 150 more rows</code></pre>
+</div>
+</div>
+<p>Then we plot the data. The plot below shows the posterior mean estimate of the curve, with the shaded region corresponding to the 90% equal-tail credible intervals for the concentration at each time point. For comparison purposes the observed data are overplotted:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb58"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb58-1"><a href="#cb58-1" aria-hidden="true" tabindex="-1"></a>df <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(</span>
+<span id="cb58-2"><a href="#cb58-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">t_obs =</span> mmk_bolus_data<span class="sc">$</span>t_obs, </span>
+<span id="cb58-3"><a href="#cb58-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">c_obs =</span> mmk_bolus_data<span class="sc">$</span>c_obs</span>
+<span id="cb58-4"><a href="#cb58-4" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb58-5"><a href="#cb58-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb58-6"><a href="#cb58-6" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(mmk_bolus_generated_summary) <span class="sc">+</span> </span>
+<span id="cb58-7"><a href="#cb58-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_ribbon</span>(<span class="fu">aes</span>(time, <span class="at">ymin =</span> q5, <span class="at">ymax =</span> q95), <span class="at">fill =</span> <span class="st">"grey70"</span>) <span class="sc">+</span></span>
+<span id="cb58-8"><a href="#cb58-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_line</span>(<span class="fu">aes</span>(time, mean)) <span class="sc">+</span> </span>
+<span id="cb58-9"><a href="#cb58-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="fu">aes</span>(t_obs, c_obs), <span class="at">data =</span> df, <span class="at">size =</span> <span class="dv">2</span>) <span class="sc">+</span> </span>
+<span id="cb58-10"><a href="#cb58-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">x =</span> <span class="st">"time"</span>, <span class="at">y =</span> <span class="st">"concentration"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<p><img src="index_files/figure-html/plot-mmk-pk-posterior-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>Good enough! Naturally, there’s more I could do with this model, but that’s enough for this post so I’ll move on to something new.</p>
+<p><br></p>
+<div class="quarto-figure quarto-figure-center page-columns page-full">
+<figure class="figure page-columns page-full">
+<p><img src="dreamlike_06_1509.jpg" class="img-fluid figure-img" alt="concentric circular noise patterns shonw in orange and brown against a pale tan background, with busts of noise in the lower-left corner"></p>
+<figcaption class="figure-caption margin-caption">Another favourite of mine. I love the illusion of lighting that you get from the bright bits.</figcaption>
+</figure>
+</div>
+<p><br></p>
+</section>
+</section>
+<section id="multi-compartment-models" class="level2 page-columns page-full">
+<h2 class="anchored" data-anchor-id="multi-compartment-models">Multi compartment models</h2>
+<p>Imagine a more complex situation where a drug is administered orally: we now have an influx process where the drug is absorbed from the gut into systemic circulation (the central compartment), from which it is later eliminated. However, if the drug is able to pass between the central compartment and other bodily tissues (the peripheral compartment), we’ll need to model the drug flow between them, since only the drug concentration present in the central compartment is available for potential elimination at any point in time. For the sake of my sanity I’ll assume that it’s just as easy for the drug to pass from central to peripheral as vice versa, so there’s only a single “intercompartmental clearance” parameter associated with this flow. I’m also going to assume that all three processes (absorption, elimination, intercompartmental transfer) involve first order dynamics only.</p>
+<p>In this scenario the state at time <span class="math inline">\(t\)</span> is defined by three concentrations:<a href="#fn19" class="footnote-ref" id="fnref19" role="doc-noteref"><sup>19</sup></a></p>
+<ul>
+<li><span class="math inline">\(c_{gt} = C_g(t)\)</span> is the drug concentration still remaining in the gut</li>
+<li><span class="math inline">\(c_{ct} = C_c(t)\)</span> is the drug concentration currently in the central compartment</li>
+<li><span class="math inline">\(c_{pt} = C_p(t)\)</span> is the drug concentration currently in the peripheral compartment</li>
+</ul>
+<p>In practice, it can be more convenient to express this in terms of the absolute amount of drug in each compartment (including the gut) at each time point:</p>
+<ul>
+<li><span class="math inline">\(a_{gt}\)</span> is the drug amount still remaining in the gut</li>
+<li><span class="math inline">\(a_{ct}\)</span> is the drug amount currently in the central compartment</li>
+<li><span class="math inline">\(a_{pt}\)</span> is the drug amount currently in the peripheral compartment</li>
+</ul>
+<p>where, for each compartment, the concentration is simply the amount divided by the relevant volume, <span class="math inline">\(c = a /v\)</span>. With this in mind we’ll define the state vector at time <span class="math inline">\(t\)</span> as the three drug amounts, <span class="math inline">\(\mathbf{a}_t = (a_{gt}, a_{ct}, a_{pt})\)</span>.</p>
+<p>Strictly speaking, we have four rate parameters in our model:</p>
+<ul>
+<li><span class="math inline">\(k_a\)</span> is the absorption rate (from gut to central compartment)</li>
+<li><span class="math inline">\(k_e\)</span> is the elimination rate from the central compartment (also called the clearance rate)</li>
+<li><span class="math inline">\(k_{cp}\)</span> is the transfer rate from the central to peripheral compartment</li>
+<li><span class="math inline">\(k_{pc}\)</span> is the transfer rate from the peripheral to central compartment</li>
+</ul>
+<p>The biological assumptions of the model are as follows: the gut can only gain drug amount from the external dose which it loses drug to the central compartment, while the peripheral compartment can only exchange drug with the central compartment, and the central compartment has influx from gut, efflux to urine (or whatever), and interchange with the periphery. To help capture this, we’ll define two volumetric parameters:</p>
+<ul>
+<li><span class="math inline">\(v_c\)</span> is the volume of the central compartment</li>
+<li><span class="math inline">\(v_p\)</span> is the volume of the peripheral compartment</li>
+</ul>
+<p>Second, we can define two clearance parameters:<a href="#fn20" class="footnote-ref" id="fnref20" role="doc-noteref"><sup>20</sup></a></p>
+<ul>
+<li><span class="math inline">\(q_e\)</span> is the clearance rate for elimination (traditionally denoted CL)</li>
+<li><span class="math inline">\(q_i\)</span> is the intercompartmental clearance (traditionally denoted Q)</li>
+</ul>
+<p>Using this notation we can write the system of differential equations as follows:</p>
+<p><span class="math display">\[
+\begin{array}{rcl}
+\displaystyle \frac{da_g}{dt} &amp;=&amp; -k_a \ a_{gt}+ d_t \\ \\
+\displaystyle \frac{da_c}{dt} &amp;=&amp; \displaystyle k_a \ a_{gt} + \frac{q_i}{v_p} \ a_{pt} - \frac{q_i}{v_c} \ a_{ct} - \frac{q_e}{a_c} \ a_{ct}  \\ \\
+\displaystyle \frac{da_p}{dt} &amp;=&amp; \displaystyle - \frac{q_i}{v_p} \ a_{pt} + \frac{q_i}{v_c} \ a_{ct}
+\end{array}
+\]</span></p>
+<p>Righty-ho. Now that we’re clear on what our unknowns are, let’s make some fictitious data:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb59"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb59-1"><a href="#cb59-1" aria-hidden="true" tabindex="-1"></a>obs <span class="ot">&lt;-</span> tibble<span class="sc">::</span><span class="fu">tibble</span>(</span>
+<span id="cb59-2"><a href="#cb59-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">t_obs =</span> <span class="dv">1</span><span class="sc">:</span><span class="dv">20</span>,</span>
+<span id="cb59-3"><a href="#cb59-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">c_obs =</span> <span class="fu">c</span>(</span>
+<span id="cb59-4"><a href="#cb59-4" aria-hidden="true" tabindex="-1"></a>    <span class="fl">13.48</span>, <span class="fl">23.66</span>, <span class="fl">28.17</span>, <span class="fl">29.34</span>, <span class="fl">28.02</span>, <span class="fl">25.56</span>, <span class="fl">23.25</span>, </span>
+<span id="cb59-5"><a href="#cb59-5" aria-hidden="true" tabindex="-1"></a>    <span class="fl">21.52</span>, <span class="fl">21.21</span>, <span class="fl">19.30</span>, <span class="fl">14.54</span>, <span class="fl">14.62</span>, <span class="fl">11.71</span>, <span class="fl">12.21</span>, </span>
+<span id="cb59-6"><a href="#cb59-6" aria-hidden="true" tabindex="-1"></a>    <span class="fl">10.21</span>, <span class="fl">10.82</span>, <span class="fl">8.43</span>, <span class="fl">8.79</span>, <span class="fl">7.60</span>, <span class="fl">6.03</span></span>
+<span id="cb59-7"><a href="#cb59-7" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb59-8"><a href="#cb59-8" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb59-9"><a href="#cb59-9" aria-hidden="true" tabindex="-1"></a>obs</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 20 × 2
+   t_obs c_obs
+   &lt;int&gt; &lt;dbl&gt;
+ 1     1 13.5 
+ 2     2 23.7 
+ 3     3 28.2 
+ 4     4 29.3 
+ 5     5 28.0 
+ 6     6 25.6 
+ 7     7 23.2 
+ 8     8 21.5 
+ 9     9 21.2 
+10    10 19.3 
+11    11 14.5 
+12    12 14.6 
+13    13 11.7 
+14    14 12.2 
+15    15 10.2 
+16    16 10.8 
+17    17  8.43
+18    18  8.79
+19    19  7.6 
+20    20  6.03</code></pre>
+</div>
+</div>
+<p>Here’s a picture of said data:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb61"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb61-1"><a href="#cb61-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(obs, <span class="fu">aes</span>(t_obs, c_obs)) <span class="sc">+</span> </span>
+<span id="cb61-2"><a href="#cb61-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="at">size =</span> <span class="dv">2</span>) <span class="sc">+</span></span>
+<span id="cb61-3"><a href="#cb61-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">lims</span>(<span class="at">x =</span> <span class="fu">c</span>(<span class="dv">0</span>, <span class="dv">20</span>), <span class="at">y =</span> <span class="fu">c</span>(<span class="dv">0</span>, <span class="dv">30</span>)) <span class="sc">+</span></span>
+<span id="cb61-4"><a href="#cb61-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">x =</span> <span class="st">"time"</span>, <span class="at">y =</span> <span class="st">"concentration"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<p><img src="index_files/figure-html/plot-two-cpt-data-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>Okay fine yes that looks like data. It’s quite fictitious of course, but whatever. This is a learning exercise for me, not a serious attempt at modelling. Let’s move on, shall we?</p>
+<section id="two-compartment-model" class="level3">
+<h3 class="anchored" data-anchor-id="two-compartment-model">Two compartment model</h3>
+<p>At this point I want to be completely honest. When I started writing this post I really didn’t think I’d reach the point of writing a multi-compartment model with repeated dosing. Nevertheless, here we are. On the one hand, I’m pretty pleased with my progress: I set myself a goal and I went well beyond my goal in this post. On the other hand, I am well aware that when I write, I have an audience. So it’s important to recognise that this part of the post is really pushing the boundaries of my current knowledge. Nevertheless, it sorta kinda works. So let’s go with it yeah? This post is long, and we need to finish it somehow. So. Here’s the code:</p>
+<div class="cell" data-output.var="two_cpt">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>two_cpt</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb62"><pre class="sourceCode numberSource stan number-lines code-with-copy"><code class="sourceCode stan"><span id="cb62-1"><a href="#cb62-1"></a><span class="kw">functions</span> {</span>
+<span id="cb62-2"><a href="#cb62-2"></a>  <span class="dt">vector</span> two_cpt(<span class="dt">real</span> time,</span>
+<span id="cb62-3"><a href="#cb62-3"></a>                 <span class="dt">vector</span> state,</span>
+<span id="cb62-4"><a href="#cb62-4"></a>                 <span class="dt">real</span> qe,</span>
+<span id="cb62-5"><a href="#cb62-5"></a>                 <span class="dt">real</span> qi,</span>
+<span id="cb62-6"><a href="#cb62-6"></a>                 <span class="dt">real</span> vc,</span>
+<span id="cb62-7"><a href="#cb62-7"></a>                 <span class="dt">real</span> vp,</span>
+<span id="cb62-8"><a href="#cb62-8"></a>                 <span class="dt">real</span> ka) {</span>
+<span id="cb62-9"><a href="#cb62-9"></a></span>
+<span id="cb62-10"><a href="#cb62-10"></a>    <span class="co">// convenience...</span></span>
+<span id="cb62-11"><a href="#cb62-11"></a>    <span class="dt">real</span> ag = state[<span class="dv">1</span>]; <span class="co">// gut amount</span></span>
+<span id="cb62-12"><a href="#cb62-12"></a>    <span class="dt">real</span> ac = state[<span class="dv">2</span>]; <span class="co">// central amount</span></span>
+<span id="cb62-13"><a href="#cb62-13"></a>    <span class="dt">real</span> ap = state[<span class="dv">3</span>]; <span class="co">// peripheral amount</span></span>
+<span id="cb62-14"><a href="#cb62-14"></a></span>
+<span id="cb62-15"><a href="#cb62-15"></a>    <span class="co">// derivative of state vector with respect to time</span></span>
+<span id="cb62-16"><a href="#cb62-16"></a>    <span class="dt">vector</span>[<span class="dv">3</span>] dadt;</span>
+<span id="cb62-17"><a href="#cb62-17"></a></span>
+<span id="cb62-18"><a href="#cb62-18"></a>    <span class="co">// compute derivatives</span></span>
+<span id="cb62-19"><a href="#cb62-19"></a>    dadt[<span class="dv">1</span>] = - (ka * ag);</span>
+<span id="cb62-20"><a href="#cb62-20"></a>    dadt[<span class="dv">2</span>] = (ka * ag) + (qi / vp) * ap - (qi / vc) * ac - (qe / vc) * ac;</span>
+<span id="cb62-21"><a href="#cb62-21"></a>    dadt[<span class="dv">3</span>] = - (qi / vp) * ap + (qi / vc) * ac;</span>
+<span id="cb62-22"><a href="#cb62-22"></a></span>
+<span id="cb62-23"><a href="#cb62-23"></a>    <span class="cf">return</span> dadt;</span>
+<span id="cb62-24"><a href="#cb62-24"></a>  }</span>
+<span id="cb62-25"><a href="#cb62-25"></a>}</span>
+<span id="cb62-26"><a href="#cb62-26"></a></span>
+<span id="cb62-27"><a href="#cb62-27"></a><span class="kw">data</span> {</span>
+<span id="cb62-28"><a href="#cb62-28"></a>  <span class="dt">int</span>&lt;<span class="kw">lower</span>=<span class="dv">1</span>&gt; n_obs;</span>
+<span id="cb62-29"><a href="#cb62-29"></a>  <span class="dt">int</span>&lt;<span class="kw">lower</span>=<span class="dv">1</span>&gt; n_fit;</span>
+<span id="cb62-30"><a href="#cb62-30"></a>  <span class="dt">vector</span>[n_obs] c_obs;</span>
+<span id="cb62-31"><a href="#cb62-31"></a>  <span class="dt">array</span>[n_obs] <span class="dt">real</span> t_obs;</span>
+<span id="cb62-32"><a href="#cb62-32"></a>  <span class="dt">array</span>[n_fit] <span class="dt">real</span> t_fit;</span>
+<span id="cb62-33"><a href="#cb62-33"></a>  <span class="dt">vector</span>[<span class="dv">3</span>] a0;</span>
+<span id="cb62-34"><a href="#cb62-34"></a>  <span class="dt">real</span> t0;</span>
+<span id="cb62-35"><a href="#cb62-35"></a>}</span>
+<span id="cb62-36"><a href="#cb62-36"></a></span>
+<span id="cb62-37"><a href="#cb62-37"></a><span class="kw">parameters</span> {</span>
+<span id="cb62-38"><a href="#cb62-38"></a>  <span class="dt">real</span>&lt;<span class="kw">lower</span>=.<span class="dv">001</span>&gt; qe;</span>
+<span id="cb62-39"><a href="#cb62-39"></a>  <span class="dt">real</span>&lt;<span class="kw">lower</span>=.<span class="dv">001</span>&gt; qi;</span>
+<span id="cb62-40"><a href="#cb62-40"></a>  <span class="dt">real</span>&lt;<span class="kw">lower</span>=.<span class="dv">001</span>&gt; vc;</span>
+<span id="cb62-41"><a href="#cb62-41"></a>  <span class="dt">real</span>&lt;<span class="kw">lower</span>=.<span class="dv">001</span>&gt; vp;</span>
+<span id="cb62-42"><a href="#cb62-42"></a>  <span class="dt">real</span>&lt;<span class="kw">lower</span>=.<span class="dv">001</span>&gt; ka;</span>
+<span id="cb62-43"><a href="#cb62-43"></a>  <span class="dt">real</span>&lt;<span class="kw">lower</span>=.<span class="dv">001</span>&gt; sigma;</span>
+<span id="cb62-44"><a href="#cb62-44"></a>}</span>
+<span id="cb62-45"><a href="#cb62-45"></a></span>
+<span id="cb62-46"><a href="#cb62-46"></a><span class="kw">transformed parameters</span> {</span>
+<span id="cb62-47"><a href="#cb62-47"></a>  <span class="co">// use ode solver to find all amounts at all event times</span></span>
+<span id="cb62-48"><a href="#cb62-48"></a>  <span class="dt">array</span>[n_obs] <span class="dt">vector</span>[<span class="dv">3</span>] amount = ode_rk45(two_cpt,</span>
+<span id="cb62-49"><a href="#cb62-49"></a>                                           a0,</span>
+<span id="cb62-50"><a href="#cb62-50"></a>                                           t0,</span>
+<span id="cb62-51"><a href="#cb62-51"></a>                                           t_obs,</span>
+<span id="cb62-52"><a href="#cb62-52"></a>                                           qe,</span>
+<span id="cb62-53"><a href="#cb62-53"></a>                                           qi,</span>
+<span id="cb62-54"><a href="#cb62-54"></a>                                           vc,</span>
+<span id="cb62-55"><a href="#cb62-55"></a>                                           vp,</span>
+<span id="cb62-56"><a href="#cb62-56"></a>                                           ka);</span>
+<span id="cb62-57"><a href="#cb62-57"></a></span>
+<span id="cb62-58"><a href="#cb62-58"></a>  <span class="co">// vector of central concentrations</span></span>
+<span id="cb62-59"><a href="#cb62-59"></a>  <span class="dt">vector</span>[n_obs] mu;</span>
+<span id="cb62-60"><a href="#cb62-60"></a>  <span class="cf">for</span> (j <span class="cf">in</span> <span class="dv">1</span>:n_obs) {</span>
+<span id="cb62-61"><a href="#cb62-61"></a>    mu[j] = amount[j, <span class="dv">2</span>] / vc;</span>
+<span id="cb62-62"><a href="#cb62-62"></a>  }</span>
+<span id="cb62-63"><a href="#cb62-63"></a>}</span>
+<span id="cb62-64"><a href="#cb62-64"></a></span>
+<span id="cb62-65"><a href="#cb62-65"></a><span class="kw">model</span> {</span>
+<span id="cb62-66"><a href="#cb62-66"></a>  <span class="co">// priors (adapted from Margossian et al 2022)</span></span>
+<span id="cb62-67"><a href="#cb62-67"></a>  qe ~ lognormal(log(<span class="dv">10</span>), <span class="fl">0.25</span>); <span class="co">// elimination clearance, CL</span></span>
+<span id="cb62-68"><a href="#cb62-68"></a>  qi ~ lognormal(log(<span class="dv">15</span>), <span class="fl">0.5</span>);  <span class="co">// intercompartmental clearance, Q</span></span>
+<span id="cb62-69"><a href="#cb62-69"></a>  vc ~ lognormal(log(<span class="dv">35</span>), <span class="fl">0.25</span>); <span class="co">// central compartment volume</span></span>
+<span id="cb62-70"><a href="#cb62-70"></a>  vp ~ lognormal(log(<span class="dv">105</span>), <span class="fl">0.5</span>); <span class="co">// peripheral compartment volume</span></span>
+<span id="cb62-71"><a href="#cb62-71"></a>  ka ~ lognormal(log(<span class="fl">2.5</span>), <span class="dv">1</span>);   <span class="co">// absorption rate</span></span>
+<span id="cb62-72"><a href="#cb62-72"></a>  sigma ~ normal(<span class="dv">0</span>, <span class="dv">1</span>);          <span class="co">// measurement error</span></span>
+<span id="cb62-73"><a href="#cb62-73"></a></span>
+<span id="cb62-74"><a href="#cb62-74"></a>  <span class="co">// likelihood of observed central concentrations</span></span>
+<span id="cb62-75"><a href="#cb62-75"></a>  c_obs ~ normal(mu, sigma);</span>
+<span id="cb62-76"><a href="#cb62-76"></a>}</span>
+<span id="cb62-77"><a href="#cb62-77"></a></span>
+<span id="cb62-78"><a href="#cb62-78"></a><span class="kw">generated quantities</span> {</span>
+<span id="cb62-79"><a href="#cb62-79"></a>  <span class="dt">array</span>[n_fit] <span class="dt">vector</span>[<span class="dv">3</span>] amt_fit = ode_rk45(two_cpt,</span>
+<span id="cb62-80"><a href="#cb62-80"></a>                                            a0,</span>
+<span id="cb62-81"><a href="#cb62-81"></a>                                            t0,</span>
+<span id="cb62-82"><a href="#cb62-82"></a>                                            t_fit,</span>
+<span id="cb62-83"><a href="#cb62-83"></a>                                            qe,</span>
+<span id="cb62-84"><a href="#cb62-84"></a>                                            qi,</span>
+<span id="cb62-85"><a href="#cb62-85"></a>                                            vc,</span>
+<span id="cb62-86"><a href="#cb62-86"></a>                                            vp,</span>
+<span id="cb62-87"><a href="#cb62-87"></a>                                            ka);</span>
+<span id="cb62-88"><a href="#cb62-88"></a>  </span>
+<span id="cb62-89"><a href="#cb62-89"></a>  <span class="dt">vector</span>[n_fit] c_fit;</span>
+<span id="cb62-90"><a href="#cb62-90"></a>  <span class="cf">for</span> (j <span class="cf">in</span> <span class="dv">1</span>:n_fit) {</span>
+<span id="cb62-91"><a href="#cb62-91"></a>    c_fit[j] = amt_fit[j, <span class="dv">2</span>] / vc;</span>
+<span id="cb62-92"><a href="#cb62-92"></a>  }</span>
+<span id="cb62-93"><a href="#cb62-93"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+<p>Next, we put together a Stan-friendly version of the data, which includes the initial amount of drug <code>a0</code> in each compartment (gut, central, peripheral):</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb63"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb63-1"><a href="#cb63-1" aria-hidden="true" tabindex="-1"></a>t_fit <span class="ot">&lt;-</span> <span class="fu">seq</span>(<span class="dv">0</span>, <span class="dv">20</span>, .<span class="dv">2</span>)</span>
+<span id="cb63-2"><a href="#cb63-2" aria-hidden="true" tabindex="-1"></a>two_cpt_data <span class="ot">&lt;-</span> <span class="fu">list</span>(</span>
+<span id="cb63-3"><a href="#cb63-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">n_obs =</span> <span class="fu">nrow</span>(obs),</span>
+<span id="cb63-4"><a href="#cb63-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">c_obs =</span> obs<span class="sc">$</span>c_obs,</span>
+<span id="cb63-5"><a href="#cb63-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">t_obs =</span> obs<span class="sc">$</span>t_obs,</span>
+<span id="cb63-6"><a href="#cb63-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">a0 =</span> <span class="fu">c</span>(<span class="dv">1000</span>, <span class="dv">0</span>, <span class="dv">0</span>),</span>
+<span id="cb63-7"><a href="#cb63-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">t0 =</span> <span class="sc">-</span>.<span class="dv">01</span>,</span>
+<span id="cb63-8"><a href="#cb63-8" aria-hidden="true" tabindex="-1"></a>  <span class="at">t_fit =</span> t_fit,</span>
+<span id="cb63-9"><a href="#cb63-9" aria-hidden="true" tabindex="-1"></a>  <span class="at">n_fit =</span> <span class="fu">length</span>(t_fit)</span>
+<span id="cb63-10"><a href="#cb63-10" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb63-11"><a href="#cb63-11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb63-12"><a href="#cb63-12" aria-hidden="true" tabindex="-1"></a>two_cpt_data</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>$n_obs
+[1] 20
+
+$c_obs
+ [1] 13.48 23.66 28.17 29.34 28.02 25.56 23.25 21.52 21.21 19.30 14.54 14.62
+[13] 11.71 12.21 10.21 10.82  8.43  8.79  7.60  6.03
+
+$t_obs
+ [1]  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17 18 19 20
+
+$a0
+[1] 1000    0    0
+
+$t0
+[1] -0.01
+
+$t_fit
+  [1]  0.0  0.2  0.4  0.6  0.8  1.0  1.2  1.4  1.6  1.8  2.0  2.2  2.4  2.6
+ [15]  2.8  3.0  3.2  3.4  3.6  3.8  4.0  4.2  4.4  4.6  4.8  5.0  5.2  5.4
+ [29]  5.6  5.8  6.0  6.2  6.4  6.6  6.8  7.0  7.2  7.4  7.6  7.8  8.0  8.2
+ [43]  8.4  8.6  8.8  9.0  9.2  9.4  9.6  9.8 10.0 10.2 10.4 10.6 10.8 11.0
+ [57] 11.2 11.4 11.6 11.8 12.0 12.2 12.4 12.6 12.8 13.0 13.2 13.4 13.6 13.8
+ [71] 14.0 14.2 14.4 14.6 14.8 15.0 15.2 15.4 15.6 15.8 16.0 16.2 16.4 16.6
+ [85] 16.8 17.0 17.2 17.4 17.6 17.8 18.0 18.2 18.4 18.6 18.8 19.0 19.2 19.4
+ [99] 19.6 19.8 20.0
+
+$n_fit
+[1] 101</code></pre>
+</div>
+</div>
+<p>Thrilling, I know!</p>
+</section>
+<section id="fitting-the-model" class="level3 page-columns page-full">
+<h3 class="anchored" data-anchor-id="fitting-the-model">Fitting the model</h3>
+<p>Let’s see if this works when we run it, shall we? Step one, sample from the model…</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb65"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb65-1"><a href="#cb65-1" aria-hidden="true" tabindex="-1"></a>two_cpt_fitted <span class="ot">&lt;-</span> two_cpt<span class="sc">$</span><span class="fu">sample</span>(</span>
+<span id="cb65-2"><a href="#cb65-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> two_cpt_data, </span>
+<span id="cb65-3"><a href="#cb65-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">seed =</span> <span class="dv">100</span>, </span>
+<span id="cb65-4"><a href="#cb65-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">chains =</span> <span class="dv">4</span>,</span>
+<span id="cb65-5"><a href="#cb65-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">parallel_chains =</span> <span class="dv">2</span>,  </span>
+<span id="cb65-6"><a href="#cb65-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">refresh =</span> <span class="dv">1000</span>,</span>
+<span id="cb65-7"><a href="#cb65-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">show_messages =</span> <span class="cn">FALSE</span></span>
+<span id="cb65-8"><a href="#cb65-8" aria-hidden="true" tabindex="-1"></a>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Running MCMC with 4 chains, at most 2 in parallel...
+
+Chain 1 Iteration:    1 / 2000 [  0%]  (Warmup) 
+Chain 2 Iteration:    1 / 2000 [  0%]  (Warmup) 
+Chain 1 Iteration: 1000 / 2000 [ 50%]  (Warmup) 
+Chain 1 Iteration: 1001 / 2000 [ 50%]  (Sampling) 
+Chain 2 Iteration: 1000 / 2000 [ 50%]  (Warmup) 
+Chain 2 Iteration: 1001 / 2000 [ 50%]  (Sampling) 
+Chain 1 Iteration: 2000 / 2000 [100%]  (Sampling) 
+Chain 1 finished in 12.4 seconds.
+Chain 2 Iteration: 2000 / 2000 [100%]  (Sampling) 
+Chain 2 finished in 14.8 seconds.
+Chain 3 Iteration:    1 / 2000 [  0%]  (Warmup) 
+Chain 4 Iteration:    1 / 2000 [  0%]  (Warmup) 
+Chain 3 Iteration: 1000 / 2000 [ 50%]  (Warmup) 
+Chain 3 Iteration: 1001 / 2000 [ 50%]  (Sampling) 
+Chain 3 Iteration: 2000 / 2000 [100%]  (Sampling) 
+Chain 3 finished in 9.0 seconds.
+Chain 4 Iteration: 1000 / 2000 [ 50%]  (Warmup) 
+Chain 4 Iteration: 1001 / 2000 [ 50%]  (Sampling) 
+Chain 4 Iteration: 2000 / 2000 [100%]  (Sampling) 
+Chain 4 finished in 9.7 seconds.
+
+All 4 chains finished successfully.
+Mean chain execution time: 11.5 seconds.
+Total execution time: 41.6 seconds.</code></pre>
+</div>
+</div>
+<p>That’s a little time consuming and makes me suspect that I’ve implemented this poorly.<a href="#fn21" class="footnote-ref" id="fnref21" role="doc-noteref"><sup>21</sup></a> Oh well. Perhaps I’ll revisit later. The important thing is that it sorta works. So let’s move on and take a summary:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb67"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb67-1"><a href="#cb67-1" aria-hidden="true" tabindex="-1"></a>two_cpt_fitted<span class="sc">$</span><span class="fu">summary</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 491 × 10
+   variable      mean  median      sd     mad      q5     q95  rhat ess_bulk
+   &lt;chr&gt;        &lt;num&gt;   &lt;num&gt;   &lt;num&gt;   &lt;num&gt;   &lt;num&gt;   &lt;num&gt; &lt;num&gt;    &lt;num&gt;
+ 1 lp__       -59.1   -59.1    2.43    2.55   -63.2   -55.5    1.34     9.69
+ 2 qe           2.19    2.31   0.385   0.468    1.61    2.64   1.73     6.13
+ 3 qi          15.2     3.58  16.9     4.54     0.775  46.1    1.74     6.16
+ 4 vc          17.7    17.4    2.88    3.39    13.3    22.3    1.42     8.27
+ 5 vp          32.7    11.7   40.3     9.91     5.46  108.     1.73     6.17
+ 6 ka           0.431   0.436  0.0616  0.0594   0.324   0.529  1.25    12.1 
+ 7 sigma        1.20    1.17   0.238   0.225    0.878   1.64   1.10    25.6 
+ 8 amount[1,… 648.    644.    40.4    38.4    586.    721.     1.25    12.1 
+ 9 amount[2,… 423.    417.    52.8    49.1    346.    522.     1.25    12.1 
+10 amount[3,… 278.    269.    52.2    47.7    204.    377.     1.25    12.1 
+# ℹ 481 more rows
+# ℹ 1 more variable: ess_tail &lt;num&gt;</code></pre>
+</div>
+</div>
+<p>As usual, it’s useful to take a look at some results visually. To that end we’ll again generate posterior predicted time-concentration curves:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb69"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb69-1"><a href="#cb69-1" aria-hidden="true" tabindex="-1"></a>two_cpt_generated <span class="ot">&lt;-</span> two_cpt<span class="sc">$</span><span class="fu">generate_quantities</span>(</span>
+<span id="cb69-2"><a href="#cb69-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">fitted_params =</span> two_cpt_fitted,</span>
+<span id="cb69-3"><a href="#cb69-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> two_cpt_data,</span>
+<span id="cb69-4"><a href="#cb69-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">seed =</span> <span class="dv">999</span></span>
+<span id="cb69-5"><a href="#cb69-5" aria-hidden="true" tabindex="-1"></a>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Running standalone generated quantities after 4 MCMC chains, 1 chain at a time ...
+
+Chain 1 finished in 0.0 seconds.
+Chain 2 finished in 0.0 seconds.
+Chain 3 finished in 0.0 seconds.
+Chain 4 finished in 0.0 seconds.
+
+All 4 chains finished successfully.
+Mean chain execution time: 0.0 seconds.
+Total execution time: 1.7 seconds.</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb71"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb71-1"><a href="#cb71-1" aria-hidden="true" tabindex="-1"></a>two_cpt_generated_summary <span class="ot">&lt;-</span> two_cpt_generated<span class="sc">$</span><span class="fu">summary</span>() <span class="sc">|&gt;</span></span>
+<span id="cb71-2"><a href="#cb71-2" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">filter</span>(variable <span class="sc">|&gt;</span> stringr<span class="sc">::</span><span class="fu">str_detect</span>(<span class="st">"^c_fit"</span>))</span>
+<span id="cb71-3"><a href="#cb71-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb71-4"><a href="#cb71-4" aria-hidden="true" tabindex="-1"></a>two_cpt_generated_summary<span class="sc">$</span>time <span class="ot">&lt;-</span> two_cpt_data<span class="sc">$</span>t_fit</span>
+<span id="cb71-5"><a href="#cb71-5" aria-hidden="true" tabindex="-1"></a>two_cpt_generated_summary</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 101 × 8
+   variable    mean median     sd    mad     q5    q95  time
+   &lt;chr&gt;      &lt;num&gt;  &lt;num&gt;  &lt;num&gt;  &lt;num&gt;  &lt;num&gt;  &lt;num&gt; &lt;num&gt;
+ 1 c_fit[1]   0.249  0.229 0.0549 0.0563  0.188  0.342   0  
+ 2 c_fit[2]   4.54   4.35  0.657  0.721   3.74   5.66    0.2
+ 3 c_fit[3]   8.01   7.81  0.835  0.905   6.94   9.48    0.4
+ 4 c_fit[4]  11.0   10.8   0.873  0.918   9.81  12.6     0.6
+ 5 c_fit[5]  13.6   13.5   0.859  0.873  12.4   15.1     0.8
+ 6 c_fit[6]  15.9   15.8   0.827  0.817  14.7   17.3     1  
+ 7 c_fit[7]  17.8   17.8   0.790  0.769  16.7   19.2     1.2
+ 8 c_fit[8]  19.6   19.5   0.754  0.721  18.4   20.9     1.4
+ 9 c_fit[9]  21.1   21.1   0.721  0.681  20.0   22.3     1.6
+10 c_fit[10] 22.4   22.4   0.692  0.657  21.3   23.6     1.8
+# ℹ 91 more rows</code></pre>
+</div>
+</div>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb73"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb73-1"><a href="#cb73-1" aria-hidden="true" tabindex="-1"></a>df <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(</span>
+<span id="cb73-2"><a href="#cb73-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">t_obs =</span> two_cpt_data<span class="sc">$</span>t_obs, </span>
+<span id="cb73-3"><a href="#cb73-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">c_obs =</span> two_cpt_data<span class="sc">$</span>c_obs</span>
+<span id="cb73-4"><a href="#cb73-4" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb73-5"><a href="#cb73-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb73-6"><a href="#cb73-6" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(two_cpt_generated_summary) <span class="sc">+</span> </span>
+<span id="cb73-7"><a href="#cb73-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_ribbon</span>(<span class="fu">aes</span>(time, <span class="at">ymin =</span> q5, <span class="at">ymax =</span> q95), <span class="at">fill =</span> <span class="st">"grey70"</span>) <span class="sc">+</span></span>
+<span id="cb73-8"><a href="#cb73-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_line</span>(<span class="fu">aes</span>(time, mean)) <span class="sc">+</span> </span>
+<span id="cb73-9"><a href="#cb73-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="fu">aes</span>(t_obs, c_obs), <span class="at">data =</span> df, <span class="at">size =</span> <span class="dv">2</span>) <span class="sc">+</span> </span>
+<span id="cb73-10"><a href="#cb73-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">x =</span> <span class="st">"time"</span>, <span class="at">y =</span> <span class="st">"concentration"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<p><img src="index_files/figure-html/plot-two-cpt-pk-posterior-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>That’s good enough for today.</p>
+<p>It’s probably obvious from the context that this is a work in progress. I haven’t really thought this stuff through yet, and I’m willing to put a lot of money on the proposition this code could be improved considerably. However, that’s quite beside the point for this post. Right now, my goal was to get something to work, and this kinda works. Yay! I am happy.</p>
+<p><br></p>
+<div class="quarto-figure quarto-figure-center page-columns page-full">
+<figure class="figure page-columns page-full">
+<p><img src="dreamlike_07_1600.jpg" class="img-fluid figure-img" alt="swirling brown monochrome image dominated by textured grainy hexagon that appears to be dissolving into pure noise on the left hand side"></p>
+<figcaption class="figure-caption margin-caption">The original system these were based on was called “dreamlike”: the feeling of dissolution in this piece is very characteristic of that ancestor system.</figcaption>
+</figure>
+</div>
+<p><br></p>
+</section>
+</section>
+<section id="things-i-have-not-discussed" class="level2">
+<h2 class="anchored" data-anchor-id="things-i-have-not-discussed">Things I have not discussed</h2>
+<p>There are many topics that are adjacent to and highly relevant to this post that I have not discussed. The real reason for this is simply that I have limits, and this is just a blog post. But for the sake of listing some of them, here are a few issues around statistical inference that I omitted:</p>
+<ul>
+<li><p><strong>MCMC diagnostics</strong>: At various points in the process of writing this post Stan was kind enough to yell <em>very</em> loudly at me about the possibility that things might be going wrong with the MCMC sampler. Having “earned my bones” by writing some truly terrible MCMC samplers of my own, I really appreciate the “fail loudly” aesthetic that Stan has going on. Indeed, the only reason that the models I’ve used here have ended up being… look, let’s call them “okay”, shall we?… is that every time something went awry Stan screamed at me.</p></li>
+<li><p><strong>Different kinds of ODE solvers</strong>: Throughout the post I’ve used <code>ode_rk45()</code> as my ODE solver in Stan, as if that were the only possible choice. It isn’t the only choice, and indeed it’s not even the only solver I used in the process of writing the bloody thing. There were periods in the post development where I couldn’t get the models to behave, and as a consequence of that the sampler kept proposing parameters that pushed the differential equations into a part of the space where they… aren’t pleasant. When that happened the system became “stiff”<a href="#fn22" class="footnote-ref" id="fnref22" role="doc-noteref"><sup>22</sup></a> and I had to switch to using <code>ode_bdf()</code>. There is probably a whole blog post to be written about stiffness but… yeah nah. Suffice it to say this is one of those things where the mapmaker feels an urge to scribble “here be dragons” and move along.</p></li>
+<li><p><strong>Model checking, and Bayesian workflow more generally</strong>: Stating the obvious really, but at no point have I really dived into model checking, model testing, etc. There’s a huge amount that could be said on that. Not gonna say any of it here.</p></li>
+</ul>
+<p>There are other things missing too. On the pharmacometric side, I have not discussed:</p>
+<ul>
+<li>The logic for choosing one <strong>model structure</strong> over another. When do you need multiple compartments? When do you need to assume saturating elimination processes? Etc. There’s a very good reason I haven’t spoken about those things: I am not even slightly qualified to do so. That’s something that requires substantive domain knowledge and I’m not there yet.</li>
+<li>Individual differences (i.e., <strong>population pharmacokinetics</strong>). In real life you really need to consider variability across people. That’s something we can address with hierarchical models, by assuming the population defines distributions over parameters. I omitted that for simplicity: I’ll get to that later.</li>
+<li><strong>Covariates</strong>. Another super important thing in real life is modelling systematic variation across individuals as well as random variation. Predicting the way in which parameters of the process vary across people as a function of other measured characteristics (age, sex, etc) matters hugely. Again, that’s a future topic.</li>
+<li>Modelling the effect of the drug (<strong>pharmacodynamics</strong>): there’s more to these models than simply tracking the drug concentration. Often you need to consider downstream effects… what does the drug <em>do</em> physiologically, or psychologically, and how do those effects persist over time. Future topic babes.</li>
+</ul>
+<p>Finally, there are things I’ve missed on the software side. I’ve not talked about <a href="https://metrumresearchgroup.github.io/Torsten/">Torsten</a> and <a href="https://www.certara.com/software/phoenix-winnonlin/">WinNonlin</a>, and at some point I probably should. But… not today. This post is long enough already. I think we can all agree on that!</p>
+</section>
+<section id="resources" class="level2">
+<h2 class="anchored" data-anchor-id="resources">Resources</h2>
+<p>In my post-academic era I’ve gotten a little lax in my citation habits, but I still care about acknowledging my sources. In addition to the various Wikipedia pages and Stan documentation pages I’ve linked to throughout, this blog post draws heavily on ideas presented in these three papers:</p>
+<ul>
+<li>Holz &amp; Fahr (2001). Compartment modelling. <em>Advanced Drug Delivery Reviews</em>. <a href="https://doi.org/10.1016/S0169-409X(01)00118-1">doi.org/10.1016/S0169-409X(01)00118-1</a></li>
+<li>Choi, Rempala &amp; King (2017). Beyond the Michaelis-Menten equation: Accurate and efficient estimation of enzyme kinetic parameters. <em>Scientific Reports</em>. <a href="https://doi.org/10.1038/s41598-017-17072-z">doi.org/10.1038/s41598-017-17072-z</a></li>
+<li>Margossian, Zhang &amp; Gillespie (2022). Flexible and efficient Bayesian pharmacometrics modeling using Stan and Torsten, Part I. <em>CPT: Pharmacometrics &amp; Systems Pharmacology</em>. <a href="https://doi.org/10.1002/psp4.12812">doi.org/10.1002/psp4.12812</a></li>
+</ul>
+<p>Naturally, all the stuff ups and errors are mine and mine alone.</p>
+<!--------------- appendices go here ----------------->
+
+
+</section>
+
+
+<div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document" role="doc-endnotes"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
+
+<ol>
+<li id="fn1"><p>I did try <a href="https://en.wikipedia.org/wiki/WinBUGS">WinBUGS</a> briefly but it was a bit awkward since I wasn’t a Windows user even then.<a href="#fnref1" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn2"><p>Yes, I know that sometimes there are tricks to work around them. It was more effort than it was worth.<a href="#fnref2" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn3"><p>There’s also many packages for specific modelling frameworks like brms and rstanarm but for the purposes of this post I’m only interested in packages that supply a general-purpose interface to Stan from R.<a href="#fnref3" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn4"><p>I mean, technically the real work of compiling the Stan code into an executable and then running the sampler is all being done by Stan itself and has sweet fuck all to do with any R package, but knitr has no way of talking to Stan, so it has to rely on an R package to do that… and by default it asks RStan.<a href="#fnref4" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn5"><p>Or, to those of us who don’t speak the language, the drug is injected into the bloodstream in a single dose.<a href="#fnref5" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn6"><p>Not quite the same as the total amount of blood plasma, as I understand it, but approximately the same idea.<a href="#fnref6" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn7"><p>So easy even I could do it.<a href="#fnref7" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn8"><p>I’m adopting the <code>$method()</code> convention here sometimes used when discussing R6 classes to be clear that we’re talking about encapsulated OOP in which methods belong to objects (as is typical in many programming languages) rather than functional OOP in which methods belong to generic functions (as appears in the S3 and S4 systems in R, for instance).<a href="#fnref8" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn9"><p>Note for young people: This was the pre-2023 equivalent of saying “As an AI language model…”<a href="#fnref9" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn10"><p>I can still remember quite viscerally the moment that conjugacy died for me as a potentially useful statistical guideline: it was the day I learned that a Dirichlet Process prior is conjugate to i.i.d. sampling from an arbitrary(ish) unknown distribution. DP priors are… well, I don’t want to say “worthless” because I try to see the good in things, but having worked with them a lot over the years I am yet to discover a situation where the thing I actually want is a Dirichlet Process. It’s one of those interesting inductive cases about the projectibility of different properties. What “should” have happened is that the DP-conjugacy property made me more willing to use the DP. Instead, what “actually” happened is that learning about DP-conjugacy made me less willing to trust conjugacy. I <em>knew</em> in my bones that the DP was useless, so I revised my belief about conjugacy. Someone really should come up with a formal language to describe this kind of belief revision… I imagine it would be quite handy.<a href="#fnref10" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn11"><p>This is “of course” (see next footnote) an equal-tailed interval rather than a highest density interval.<a href="#fnref11" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn12"><p>In technical writing, the term “of course” is an expression that used to denote “something that the author is painfully aware of and some subset of the readership is equally exhausted with, and none of those people really want to talk or hear about for the rest of their living days, but is entirely unknown and a source of total confusion to another subset of the readership who have no idea why this should be obvious because in truth it absolutely is not obvious”. As such it should, of course, be used with caution and with a healthy dose of self-deprecation and rolling-of-the-eyes. It is in this latter spirit that my use of the term is intended: I simply do not wish to devote any more of my life to thinking about the different kinds of credible intervals.<a href="#fnref12" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn13"><p>We could supplement it further and maybe add dotted lines even further out that show 90% credible regions for future <em>data</em> (i.e., acknowledging the role of measurement error in the future) but today I don’t feel like doing that!<a href="#fnref13" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn14"><p>And other organs, I guess. I’ve heard rumours the human body contains other organs that actually do things…<a href="#fnref14" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn15"><p>Apparently this is only half true. A deep dive on the relevant <a href="https://en.wikipedia.org/wiki/Michaelis%E2%80%93Menten_kinetics#Closed_form_equation">wikipedia page</a> suggests that it is possible to solve it analytically, but insofar as the solution involves the <a href="https://en.wikipedia.org/wiki/Lambert_W_function">Lambert W function</a> I personally would prefer to take a numerical approach.<a href="#fnref15" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn16"><p>Folks familiar with Stan will probably notice that my code style could be improved a little. It’s probably not ideal that I’m enforcing the truncation range on some of my variables twice, once at variable declaration using the <code>&lt;lower, upper&gt;</code> syntax, and then sometimes later on by truncating a distribution using the <code>T[L, U]</code> syntax. At the moment I find this redundancy helpful to me because it stops me from getting confused (e.g., it means I never look at my own code and wonder why my half-normal is declared to have a <code>normal()</code> distribution), but in the long run I think it’s a bad idea for code maintenance. From that point of view I think it makes sense to have a consistent code style that declares variable bounds once and only once, in a place where future maintainers would expect to find it. That would make it a lot easier to edit later. But that’s the kind of detail I’m not going to worry about right this second.<a href="#fnref16" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn17"><p>Okay look, if this were linear regression I’d be very worried at seeing <em>any</em> divergences. But for this model? Babe, this is really fucking good. It took a lot of effort to find a parameterisation of the MMK elimination model that doesn’t end in nuclear fire, metaphorically speaking. One or two divergences in the MCMC chains, yeah, I can live with that.<a href="#fnref17" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn18"><p>Looking at that plot I had wondered if the correlation was being boosted by a few outliers, but that doesn’t seem to be the case: the rank-order correlation for the third plot is 0.82, which compares to 0.83 for the previous plot, and 0.93 for the first one.<a href="#fnref18" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn19"><p>It should be noted that my notation is slightly nonstandard. My understanding is that the convention in the literature is to use notation consistent with the <a href="https://www.certara.com/software/phoenix-winnonlin/">WinNonlin</a> software package, as that is generally considered the industry standard and often used for benchmarking purposes. I haven’t done this for a very boring reason: I’ve not yet had a chance to play around with WinNonlin.<a href="#fnref19" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn20"><p>Again, I know my notation is nonstandard. But I’m still wrapping my head around all this and, for the time being at least, I <em>like</em> having notation that makes clear that <span class="math inline">\(q_e\)</span> and <span class="math inline">\(q_{cp}\)</span> are both parameters of the same structural kind. I don’t find CL and Q anywhere near as easy to understand.<a href="#fnref20" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn21"><p>Okay, I should be honest. The real reason I suspect there’s room for improvement here is that I’ve had use <code>show_messages = FALSE</code> to suppress some warnings messages in order to keep the output visually tidy. It’s not terrible: Stan throws some warnings from the ODE solver, especially during the very early stages of warmup, in which it quite rightly screams about being fed insane parameters. It’s not ideal, but it’s not terrible either. I hid the messages to avoid ugly output, not for more nefarious reasons. I mean, don’t get me wrong, this model needs a lot more love than I have given it up to this point. But the hidden warning messages are somewhat boring in this instance.<a href="#fnref21" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn22"><p>Too easy.<a href="#fnref22" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+</ol>
+</section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div id="quarto-reuse" class="quarto-appendix-contents"><div><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2023,
+  author = {Navarro, Danielle},
+  title = {Pharmacokinetic {ODE} Models in {Stan}},
+  date = {2023-05-16},
+  url = {https://blog.djnavarro.net/posts/2023-05-16_stan-ode},
+  langid = {en}
+}
+</code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2023" class="csl-entry quarto-appendix-citeas" role="listitem">
+Navarro, Danielle. 2023. <span>“Pharmacokinetic ODE Models in
+Stan.”</span> May 16, 2023. <a href="https://blog.djnavarro.net/posts/2023-05-16_stan-ode">https://blog.djnavarro.net/posts/2023-05-16_stan-ode</a>.
+</div></div></section></div></main> <!-- /main -->
+<!-- plausible -->
+<script async="" defer="" data-domain="blog.djnavarro.net" src="https://plausible.io/js/plausible.js"></script>
+<script id="quarto-html-after-body" type="application/javascript">
+window.document.addEventListener("DOMContentLoaded", function (event) {
+  const toggleBodyColorMode = (bsSheetEl) => {
+    const mode = bsSheetEl.getAttribute("data-mode");
+    const bodyEl = window.document.querySelector("body");
+    if (mode === "dark") {
+      bodyEl.classList.add("quarto-dark");
+      bodyEl.classList.remove("quarto-light");
+    } else {
+      bodyEl.classList.add("quarto-light");
+      bodyEl.classList.remove("quarto-dark");
+    }
+  }
+  const toggleBodyColorPrimary = () => {
+    const bsSheetEl = window.document.querySelector("link#quarto-bootstrap");
+    if (bsSheetEl) {
+      toggleBodyColorMode(bsSheetEl);
+    }
+  }
+  toggleBodyColorPrimary();  
+  const icon = "";
+  const anchorJS = new window.AnchorJS();
+  anchorJS.options = {
+    placement: 'right',
+    icon: icon
+  };
+  anchorJS.add('.anchored');
+  const isCodeAnnotation = (el) => {
+    for (const clz of el.classList) {
+      if (clz.startsWith('code-annotation-')) {                     
+        return true;
+      }
+    }
+    return false;
+  }
+  const clipboard = new window.ClipboardJS('.code-copy-button', {
+    text: function(trigger) {
+      const codeEl = trigger.previousElementSibling.cloneNode(true);
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+    }
+  });
+  clipboard.on('success', function(e) {
+    // button target
+    const button = e.trigger;
+    // don't keep focus
+    button.blur();
+    // flash "checked"
+    button.classList.add('code-copy-button-checked');
+    var currentTitle = button.getAttribute("title");
+    button.setAttribute("title", "Copied!");
+    let tooltip;
+    if (window.bootstrap) {
+      button.setAttribute("data-bs-toggle", "tooltip");
+      button.setAttribute("data-bs-placement", "left");
+      button.setAttribute("data-bs-title", "Copied!");
+      tooltip = new bootstrap.Tooltip(button, 
+        { trigger: "manual", 
+          customClass: "code-copy-button-tooltip",
+          offset: [0, -8]});
+      tooltip.show();    
+    }
+    setTimeout(function() {
+      if (tooltip) {
+        tooltip.hide();
+        button.removeAttribute("data-bs-title");
+        button.removeAttribute("data-bs-toggle");
+        button.removeAttribute("data-bs-placement");
+      }
+      button.setAttribute("title", currentTitle);
+      button.classList.remove('code-copy-button-checked');
+    }, 1000);
+    // clear code selection
+    e.clearSelection();
+  });
+  function tippyHover(el, contentFn) {
+    const config = {
+      allowHTML: true,
+      content: contentFn,
+      maxWidth: 500,
+      delay: 100,
+      arrow: false,
+      appendTo: function(el) {
+          return el.parentElement;
+      },
+      interactive: true,
+      interactiveBorder: 10,
+      theme: 'quarto',
+      placement: 'bottom-start'
+    };
+    window.tippy(el, config); 
+  }
+  const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+  for (var i=0; i<noterefs.length; i++) {
+    const ref = noterefs[i];
+    tippyHover(ref, function() {
+      // use id or data attribute instead here
+      let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+      try { href = new URL(href).hash; } catch {}
+      const id = href.replace(/^#\/?/, "");
+      const note = window.document.getElementById(id);
+      return note.innerHTML;
+    });
+  }
+      let selectedAnnoteEl;
+      const selectorForAnnotation = ( cell, annotation) => {
+        let cellAttr = 'data-code-cell="' + cell + '"';
+        let lineAttr = 'data-code-annotation="' +  annotation + '"';
+        const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+        return selector;
+      }
+      const selectCodeLines = (annoteEl) => {
+        const doc = window.document;
+        const targetCell = annoteEl.getAttribute("data-target-cell");
+        const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+        const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+        const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+        const lineIds = lines.map((line) => {
+          return targetCell + "-" + line;
+        })
+        let top = null;
+        let height = null;
+        let parent = null;
+        if (lineIds.length > 0) {
+            //compute the position of the single el (top and bottom and make a div)
+            const el = window.document.getElementById(lineIds[0]);
+            top = el.offsetTop;
+            height = el.offsetHeight;
+            parent = el.parentElement.parentElement;
+          if (lineIds.length > 1) {
+            const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+            const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+            height = bottom - top;
+          }
+          if (top !== null && height !== null && parent !== null) {
+            // cook up a div (if necessary) and position it 
+            let div = window.document.getElementById("code-annotation-line-highlight");
+            if (div === null) {
+              div = window.document.createElement("div");
+              div.setAttribute("id", "code-annotation-line-highlight");
+              div.style.position = 'absolute';
+              parent.appendChild(div);
+            }
+            div.style.top = top - 2 + "px";
+            div.style.height = height + 4 + "px";
+            let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+            if (gutterDiv === null) {
+              gutterDiv = window.document.createElement("div");
+              gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+              gutterDiv.style.position = 'absolute';
+              const codeCell = window.document.getElementById(targetCell);
+              const gutter = codeCell.querySelector('.code-annotation-gutter');
+              gutter.appendChild(gutterDiv);
+            }
+            gutterDiv.style.top = top - 2 + "px";
+            gutterDiv.style.height = height + 4 + "px";
+          }
+          selectedAnnoteEl = annoteEl;
+        }
+      };
+      const unselectCodeLines = () => {
+        const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+        elementsIds.forEach((elId) => {
+          const div = window.document.getElementById(elId);
+          if (div) {
+            div.remove();
+          }
+        });
+        selectedAnnoteEl = undefined;
+      };
+      // Attach click handler to the DT
+      const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+      for (const annoteDlNode of annoteDls) {
+        annoteDlNode.addEventListener('click', (event) => {
+          const clickedEl = event.target;
+          if (clickedEl !== selectedAnnoteEl) {
+            unselectCodeLines();
+            const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+            if (activeEl) {
+              activeEl.classList.remove('code-annotation-active');
+            }
+            selectCodeLines(clickedEl);
+            clickedEl.classList.add('code-annotation-active');
+          } else {
+            // Unselect the line
+            unselectCodeLines();
+            clickedEl.classList.remove('code-annotation-active');
+          }
+        });
+      }
+  const findCites = (el) => {
+    const parentEl = el.parentElement;
+    if (parentEl) {
+      const cites = parentEl.dataset.cites;
+      if (cites) {
+        return {
+          el,
+          cites: cites.split(' ')
+        };
+      } else {
+        return findCites(el.parentElement)
+      }
+    } else {
+      return undefined;
+    }
+  };
+  var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+  for (var i=0; i<bibliorefs.length; i++) {
+    const ref = bibliorefs[i];
+    const citeInfo = findCites(ref);
+    if (citeInfo) {
+      tippyHover(citeInfo.el, function() {
+        var popup = window.document.createElement('div');
+        citeInfo.cites.forEach(function(cite) {
+          var citeDiv = window.document.createElement('div');
+          citeDiv.classList.add('hanging-indent');
+          citeDiv.classList.add('csl-entry');
+          var biblioDiv = window.document.getElementById('ref-' + cite);
+          if (biblioDiv) {
+            citeDiv.innerHTML = biblioDiv.innerHTML;
+          }
+          popup.appendChild(citeDiv);
+        });
+        return popup.innerHTML;
+      });
+    }
+  }
+});
+</script>
+</div> <!-- /content -->
+
+
+
+</body></html>
