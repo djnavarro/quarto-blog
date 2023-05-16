@@ -1,14 +1,14 @@
 ---
-title: "An ODE by Stan"
+title: "Pharmacokinetic ODE models in Stan"
 author:
   - name: Danielle Navarro
     url: https://djnavarro.net
     affiliation: I'm on smoko
     affiliation-url: https://www.youtube.com/watch?v=j58V2vC9EPc
     orcid: 0000-0001-7648-6578
-description: "Yeah yeah"
-date: "2023-05-11"
-categories: [Statistics, Pharmacokinetics]
+description: "A discussion of one- and two-compartment pharmacokinetic models with model implementations in Stan, covering both first-order dynamics and Michaelis-Menten kinetics."
+date: "2023-05-16"
+categories: [Statistics, Pharmacokinetics, Stan]
 image: stan_logo.png
 ---
 
@@ -41,12 +41,14 @@ Also, I can't get the bloody thing to install on my Ubuntu box. Fucked if I know
 Fortunately, nowadays there is also [CmdStanR](https://mc-stan.org/cmdstanr/), a lightweight interface to Stan. It suits my style of thinking nicely because it provides [R6](https://r6.r-lib.org/) classes with methods that interact more or less directly with Stan. It does mean that you have to work harder to finesse the outputs, but I'm okay with that.^[Please please please do not take any of this as a general purpose statement: I cordially dislike the "I am better than you because my code is closer to bare metal than yours" thing. Personally I think it's kinda dickish behaviour. In this particular instance I find the lightweight interface helps me think, and I prefer it over all the convenience tooling provided by RStan because I need that clarity right now. Nothing more nor less than that is intended.] As is usually the case with the Stan folks, the documentation is really nice so I won't bother talking about the installation process. Suffice to say I've got the package working, so now I'll load it:
 
 ```{r}
+#| label: "load-package"
 library(cmdstanr)
 ```
 
 The only finicky thing to talk about here lies in the fact that I'm doing all this in the context of a quarto blog post, and specifically a post that is using the knitr engine to execute the code chunks. By default, if knitr encounters a code chunk tagged as the `stan` language it will look for the RStan package to do the work.^[I mean, technically the real work of compiling the Stan code into an executable and then running the sampler is all being done by Stan itself and has sweet fuck all to do with any R package, but knitr has no way of talking to Stan, so it has to rely on an R package to do that... and by default it asks RStan.] That's not going to work for me since I don't actually have RStan installed on my machine. Thankfully the cmdstanr package makes this easy for me to fix:
 
 ```{r}
+#| label: "register-with-knitr"
 register_knitr_engine()
 ```
 
@@ -125,6 +127,7 @@ Anyway here it is:
 #| filename: bolus
 #| output.var: "bolus"
 #| code-line-numbers: true
+#| label: "bolus"
 data {
   int<lower=1> n_obs;
   real<lower=0> dose;
@@ -171,6 +174,7 @@ For future Stan models I'll just print the name of the output variable at the to
 In any case let's take a look at our `bolus` object. Printing the object yields sensible, if not exciting, output: it shows you the source code for the underlying model: 
 
 ```{r}
+#| label: "bolus-model-object"
 bolus
 ```
 
@@ -183,6 +187,7 @@ Perhaps more helpfully for our purposes, it's useful to know that this is an obj
 For the purposes of this post I'll use the `$sample()` method, and in order to call it on my `bolus` object I'll need to specify some data to pass from R to the compiled Stan model. These are passed as a list:
 
 ```{r}
+#| label: "stan-data-bolus"
 bolus_data <- list(
   dose = 50,
   vol_d = 5.5,
@@ -195,6 +200,7 @@ bolus_data <- list(
 To quickly visualise these "observed data", I'll organise the relevant variables into a data frame and draw a pretty little scatterplot with ggplot2: 
 
 ```{r}
+#| label: "plot-bolus-data"
 library(ggplot2)
 df <- data.frame(
   time = bolus_data$t_obs,
@@ -210,6 +216,7 @@ Delightful, truly. So neat. So clean. So obviously, obviously fictitious.
 As a Bayesian^[Note for young people: This was the pre-2023 equivalent of saying "As an AI language model..."] that has observed the data, what I want to compute is the joint posterior distribution over my parameters $k$ and $\sigma$. Or, since this has been an unrealistic expectation ever since the death of the [cult of conjugacy](https://en.wikipedia.org/wiki/Conjugate_prior),^[I can still remember quite viscerally the moment that conjugacy died for me as a potentially useful statistical guideline: it was the day I learned that  a Dirichlet Process prior is conjugate to i.i.d. sampling from an arbitrary(ish) unknown distribution. DP priors are... well, I don't want to say "worthless" because I try to see the good in things, but having worked with them a lot over the years I am yet to discover a situation where the thing I actually want is a Dirichlet Process. It's one of those interesting inductive cases about the projectibility of different properties. What "should" have happened is that the DP-conjugacy property made me more willing to use the DP. Instead, what "actually" happened is that learning about DP-conjugacy made me less willing to trust conjugacy. I *knew* in my bones that the DP was useless, so I revised my belief about conjugacy. Someone really should come up with a formal language to describe this kind of belief revision... I imagine it would be quite handy.] what I'll settle for are samples from that joint posterior that I can use to numerically estimate whatever it is that I'm interested in. To do this for our `bolus` model with the help of cmdstanr, we call `bolus$sample()`:
 
 ```{r}
+#| label: "fit-bolus-model"
 bolus_fitted <- bolus$sample(
   data = bolus_data, 
   seed = 451, 
@@ -221,6 +228,7 @@ bolus_fitted <- bolus$sample(
 This is an object of class [CmdStanMCMC](https://mc-stan.org/cmdstanr/reference/CmdStanMCMC.html) and again you can look at the linked page to see what methods are defined for it. I'll keep things simple for now and call the [`$summary()`](https://mc-stan.org/cmdstanr/reference/fit-method-summary.html) method, which returns a tibble containing summary statistics associated with the MCMC chains:
 
 ```{r}
+#| label: "bolus-model-summary"
 bolus_fitted$summary()
 ```
 
@@ -229,6 +237,7 @@ Evidently the estimated posterior mean for the elimination rate $k$ is 1.79, wit
 If we wanted to we could take this a little further by pulling out the posterior samples themselves using the [`$draws()`](https://mc-stan.org/cmdstanr/reference/fit-method-draws.html) method. Internally this method relies on the [posterior](https://mc-stan.org/posterior/) package, and supports any of the output formats allowed by that package. In this case I'll have it return a tibble because I like tibbles:
 
 ```{r}
+#| label: "bolus-posterior-samples"
 bolus_samples <- bolus_fitted$draws(format = "draws_df")
 bolus_samples
 ```
@@ -243,6 +252,7 @@ The model I built in the previous section is perfectly fine, as far as it goes, 
 #| filename: bolus2
 #| output.var: "bolus2"
 #| code-line-numbers: true
+#| label: "bolus2"
 data {
   int<lower=1> n_obs;
   int<lower=1> n_fit;
@@ -274,6 +284,7 @@ generated quantities {
 When I do this, the data that I pass to this version of the model needs to be modified too. It needs to specify the times for which we want to generate fitted curves:
 
 ```{r}
+#| label: "stan-data-bolus2"
 t_fit <- seq(0, 3, 0.05)
 bolus2_data <- list(
   n_obs = 6,
@@ -289,6 +300,7 @@ bolus2_data <- list(
 Now that we have an augmented model and augmented data set, we can re-run our sampling procedure using the new code:
 
 ```{r}
+#| label: "bolus2-posterior-samples"
 bolus2_fitted <- bolus2$sample(
   data = bolus2_data, 
   seed = 123, 
@@ -300,6 +312,7 @@ bolus2_fitted <- bolus2$sample(
 The `bolus2_fitted` object contains both the parameter values sampled during the MCMC routine, and the generated quantities that emerged in the process. If I wanted to I could use those generated quantities as is. However, because there's some value in separating the "posterior prediction" process from the "posterior sampling" process, it's generally considered best practice to create a new set of generated quantities sampled using the posterior parameter distribution. We can do that by calling the `$generate_quantities()` method of our fitted model object:
 
 ```{r}
+#| label: "bolus2-generated-quantities"
 bolus2_generated <- bolus2$generate_quantities(
   fitted_params = bolus2_fitted,
   data = bolus2_data,
@@ -310,6 +323,7 @@ bolus2_generated <- bolus2$generate_quantities(
 This is a [CmdStanGQ](https://mc-stan.org/cmdstanr/reference/CmdStanGQ.html) object, and again it has `$draws()` and `$summary()` methods. For our purposes the `$summary()` method will suffice as it returns a tibble containing the thing I want to plot:
 
 ```{r}
+#| label: "bolus2-generated-quantities-summary"
 bolus2_summary <- bolus2_generated$summary()
 bolus2_summary
 ```
@@ -317,6 +331,7 @@ bolus2_summary
 The `variable` column here is only mildly helpful, so I'll add a column specifying the actual times associated with each row in this tibble:
 
 ```{r}
+#| label: "bolus2-generated-quantities-summary2"
 bolus2_summary$time <- bolus2_data$t_fit
 bolus2_summary
 ```
@@ -324,6 +339,7 @@ bolus2_summary
 Having done so I can now draw the plot I really want:
 
 ```{r}
+#| label: "plot-bolus2-pk-posterior"
 dat <- data.frame(t_obs = bolus2_data$t_obs, c_obs = bolus2_data$c_obs)
 ggplot(bolus2_summary) + 
   geom_ribbon(aes(time, ymin = q5, ymax = q95), fill = "grey70") +
@@ -335,7 +351,7 @@ ggplot(bolus2_summary) +
 The solid line gives our best point estimate of the true concentration-time curve, and the shaded region shows a 90% credible interval that expresses our uncertainty about what part of the space the true curve might actually occupy.^[We could supplement it further and maybe add dotted lines even further out that show 90% credible regions for future *data* (i.e., acknowledging the role of measurement error in the future) but today I don't feel like doing that!] 
 
 
-## Sadly, biology isn't always analytically tractable
+## When biology isn't analytically tractable
 
 Earlier when I justified the use of an exponential concentration-time function $C(t)$, I did so by assuming that the body is able to "clear" a constant volume of blood per unit time. That assumption works reasonably well in some situations. If we suppose that the kidneys^[And other organs, I guess. I've heard rumours the human body contains other organs that actually do things...] work a bit like a filter, you can imagine that the body is filtering the blood at a fixed rate, which produces the exponential curve I used earlier. But the real world is a little more complicated than that sometimes.
 
@@ -345,16 +361,17 @@ Well, that's awkward.
 
 ### Michaelis-Menten kinetics
 
-Sometimes a process like this can instead be described by [Michaelis-Menten kinetics](https://en.wikipedia.org/wiki/Michaelis%E2%80%93Menten_kinetics), characterised by the following differential equation:
+The paper I've relied on for an introduction to compartmental models in pharmacometrics is Holz and Fahr (2001) and they use [Michaelis-Menten kinetics](https://en.wikipedia.org/wiki/Michaelis%E2%80%93Menten_kinetics) as an example of a saturable elimination process. Michaelis-Menten kinetics is characterised by the following differential equation:
 
 $$
-\frac{dC(t)}{dt} = - \frac{v_{m}}{k_m + C(t)} C(t)$$
+\frac{dC(t)}{dt} = - \frac{v_{m}}{k_m + C(t)} C(t)
+$$
 
 In this expression, $v_{m}$ is a constant that denoting the maximum velocity of elimination: due to the limitations imposed by the enzyme concentration, the drug concentration cannot decrease faster than this rate. The term $k_m$ is the **Michaelis constant**: when the drug concentration $C(t)$ equals $k_m$, the elimination rate $dC(t)/dt$ is exactly half its maximum rate, $v_{m} / 2$. Both of these properties are easy enough to demonstrate if you're willing to spend a few minutes playing around with the equation above, but it's not very interesting, so we'll move on. A more useful approach is to think about how we should expect Michaelis-Menten kinetics to behave at high and low drug concentrations:
 
-- If the drug concentration $C(t)$ is very large, $dC(t)/dt$ will be roughly constant and very close to the satuation rate $V_m$. In other words... **at high concentrations, the concentration decreases linearly over time**. 
+- If the drug concentration $C(t)$ is very large, $dC(t)/dt$ will be roughly constant and very close to the satuation rate $V_m$. In other words: At high concentrations, the concentration decreases **linearly** over time. 
 
-- If the drug concentration $C(t)$ is very small, then $V_m / (K_m + C(t))$ will be roughly constant, and $dC(t)/dt$ will be roughly proportional to the concentration $C(t)$. In other words... **at low concentrations the concentration decreases exponentially over time**.
+- If the drug concentration $C(t)$ is very small, then $V_m / (K_m + C(t))$ will be roughly constant, and $dC(t)/dt$ will be roughly proportional to the concentration $C(t)$. In other words: At low concentrations the concentration decreases **exponentially** over time.
 
 Now that we have a sensible intuition, we should try to draw the actual curves. One teeny-tiny problem... this differential equation doesn't really have an analytic  solution.^[Apparently this is only half true. A deep dive on the relevant [wikipedia page](https://en.wikipedia.org/wiki/Michaelis%E2%80%93Menten_kinetics#Closed_form_equation) suggests that it is possible to solve it analytically, but insofar as the solution involves the [Lambert W function](https://en.wikipedia.org/wiki/Lambert_W_function) I personally would prefer to take a numerical approach.] We're going to have to do this numerically.
 
@@ -366,6 +383,7 @@ For instance, if I chose to use the [deSolve package](http://desolve.r-forge.r-p
 
 ```{r}
 #| code-line-numbers: true
+#| label: "ode-with-desolve"
 library(deSolve)
 library(ggplot2)
 
@@ -419,6 +437,7 @@ The actual code is shown below. The function is defined within the functions cod
 #| filename: mmk
 #| output.var: "mmk"
 #| code-line-numbers: true
+#| label: "mmk"
 functions {
   vector mmk(real time,
              vector state,
@@ -447,9 +466,9 @@ generated quantities {
 }
 ```
 
-It may seem strange that the `mmk()` function defines the `state` variable to be a vector of length 1. At first pass it might seem a lot simpler to specify a scalar real: if we did that, then we wouldn't have the weirdness of defining `conc` as a one-dimensional length `nt` array, in which each cell is a vector of length 1, each of which contains a single real number. The layers of nesting seem... unnecessary.
+It may seem strange that the `mmk()` function defines the `state` variable to be a vector of length 1. At first pass it might seem a lot simpler to specify a scalar real: if we did that, then we wouldn't have the weirdness of defining `conc` as a one-dimensional length `nt` array, in which each cell is a vector of length 1, each of which contains a single real number. The layers of nesting seem unnecessary.
 
-However, they are necessary.
+However, they are entirely necessary.
 
 To see this, it's important to recognise that `mmk()` isn't an *arbitrary* user defined function, it is the [ODE system function](https://mc-stan.org/docs/functions-reference/functions-ode-solver.html#ode-system-function) and is designed to be passed to one of the solvers, in this case `ode_rk45()`. In this particular case our state is one-dimensional: we have a one-compartment model, and the only variable that defines the state is the drug concentration in that compartment. But dynamical systems can be -- and usually are --  multivariate: in a two-compartment model the state would probably be defined in terms of two drug concentrations, one for each compartment. In that case we would *require* a vector. 
 
@@ -458,6 +477,7 @@ To accommodate this cleanly, the design choice made in Stan is that the second a
 In any case, let's take our code for a spin. First we'll create some data that we can pass to Stan:
 
 ```{r}
+#| label: "stan-data-mmk"
 times <- seq(.05, 8, .05)
 mmk_data <- list(
   c0 = 21.8, 
@@ -472,6 +492,7 @@ mmk_data <- list(
 Next, we "sample" from the "model". This step is, admittedly, super weird. We don't actually have a model, and there are no parameters to sample and there are no probabilistic aspects to the system at all. This is going to be the world's shortest MCMC run. The Stan model above is available in R via the `mmk` object, so I'll call its `$sample()` method, specifying `fixed_param = TRUE` so that Stan doesn't try to resample parameters that don't exist. I'm only going to run one "chain" for a single iteration, because I only need to solve the system once:
 
 ```{r}
+#| label: "mmk-generated-quantities"
 mmk_fitted <- mmk$sample(
   data = mmk_data,
   fixed_param = TRUE, 
@@ -483,6 +504,7 @@ mmk_fitted <- mmk$sample(
 Because Stan has dutifully generated the generated quantities, I now have the values for the solved concentrations. I'll extract those by calling the `$draws()` method, do a tiny bit of cleanup to wrangle the data into a nice format...
 
 ```{r}
+#| label: "mmk-generated-quantities-draws"
 mmk_draws <- mmk_fitted$draws(format = "draws_df")
 mmk_draws <- mmk_draws |>
   tidyr::pivot_longer(
@@ -498,6 +520,7 @@ mmk_draws
 ...and draw a pretty picture:
 
 ```{r}
+#| label: "plot-mmk-pk-curve"
 ggplot(mmk_draws, aes(time, conc)) + 
   geom_line() +
   labs(x = "time", y = "concentration")
@@ -541,7 +564,6 @@ $$
 Later, when I plot model posteriors, I'll be a little more sensible though and use the two interpretable versions: I'll plot $v_m$ against $k_m$, and $v_0$ against $k_0$. 
 
 
-
 ### The model
 
 Here's the Stan code for the model I settled on:^[Folks familiar with Stan will probably notice that my code style could be improved a little. It's probably not ideal that I'm enforcing the truncation range on some of my variables twice, once at variable declaration using the `<lower, upper>` syntax, and then sometimes later on by truncating a distribution using the `T[L, U]` syntax. At the moment I find this redundancy helpful to me because it stops me from getting confused (e.g., it means I never look at my own code and wonder why my half-normal is declared to have a `normal()` distribution), but in the long run I think it's a bad idea for code maintenance. From that point of view I think it makes sense to have a consistent code style that declares variable bounds once and only once, in a place where future maintainers would expect to find it. That would make it a lot easier to edit later. But that's the kind of detail I'm not going to worry about right this second.]
@@ -551,6 +573,7 @@ Here's the Stan code for the model I settled on:^[Folks familiar with Stan will 
 #| filename: mmk_bolus
 #| output.var: "mmk_bolus"
 #| code-line-numbers: true
+#| label: "mmk-bolus"
 functions {
   vector mmk(real time,
              vector state,
@@ -613,6 +636,7 @@ It's truly thrilling, is it not? You'll notice that I've introduced a "transform
 Anyway, let's define some data that we can model:
 
 ```{r}
+#| label: "stan-data-mmk-bolus"
 t_obs <- 1:8
 c_obs <- c(14.8, 11.0, 4.5, 1.6, 0.2, 0.01, 0, 0)
 t_fit <- seq(.05, 8, .05)
@@ -631,6 +655,7 @@ mmk_bolus_data <- list(
 And, because human beings typically prefer pretty pictures to tiresome lists of numbers, here's a plot that shows you what the to-be-modelled data look like:
 
 ```{r}
+#| label: "plot-mmk-bolus-data"
 df <- data.frame(
   time = mmk_bolus_data$t_obs,
   conc = mmk_bolus_data$c_obs
@@ -646,6 +671,7 @@ I kind of like this as a toy data set because it's (a) very clean, in the sense 
 Okay, so now let's run the sampler:
 
 ```{r}
+#| label: "mmk-bolus-posterior-samples"
 mmk_bolus_fitted <- mmk_bolus$sample(
   data = mmk_bolus_data, 
   seed = 100, 
@@ -658,6 +684,7 @@ mmk_bolus_fitted <- mmk_bolus$sample(
 That looks nice. A couple of minor complaints from Stan about divergences, but nothing too serious.^[Okay look, if this were linear regression I'd be very worried at seeing *any* divergences. But for this model? Babe, this is really fucking good. It took a lot of effort to find a parameterisation of the MMK elimination model that doesn't end in nuclear fire, metaphorically speaking. One or two divergences in the MCMC chains, yeah, I can live with that.] And take a summary:
 
 ```{r}
+#| label: "mmk-bolus-posterior-samples-summary"
 mmk_bolus_fitted$summary()
 ```
 
@@ -668,6 +695,7 @@ Neato.
 Okay, let's take a look at the posterior distributions. As I hinted earlier on -- and indeed has been pointed out previously in the literature on Michaelis-Menten kinetics -- there is a serious identifiability issue when parameters are expressed in the $(k_m, v_m)$ space:
 
 ```{r}
+#| label: "mmk-bolus-posterior-density-vm-km"
 mmk_bolus_draws <- mmk_bolus_fitted$draws(format = "draws_df")
 ggplot(mmk_bolus_draws, aes(km, vm)) + 
   geom_point(alpha = .5) + 
@@ -679,6 +707,7 @@ The very high posterior correlation (the value is `r cor(mmk_bolus_draws$km, mmk
 In case you're interested, here's what the joint posterior looks like in the $(k_0, v_0)$ space. There's still some correlation there (the value is `r cor(mmk_bolus_draws$k0, mmk_bolus_draws$v0)`), but it has attenuated quite a bit: 
 
 ```{r}
+#| label: "mmk-bolus-posterior-density-v0-k0"
 ggplot(mmk_bolus_draws, aes(k0, v0)) + 
   geom_point(alpha = .5) + 
   labs(x = "Rate-halving concentration, k0", y = "Initial elimination rate, v0")
@@ -687,6 +716,7 @@ ggplot(mmk_bolus_draws, aes(k0, v0)) +
 This is the real reason I introduced these transformations! Finally, let's look at the posterior in the $(k_m, v_0)$ space in which I actually specified my priors:
 
 ```{r}
+#| label: "mmk-bolus-posterior-density-v0-km"
 ggplot(mmk_bolus_draws, aes(km, v0)) + 
   geom_point(alpha = .5) + 
   labs(x = "Michaelis constant, km", y = "Initial elimination rate, v0")
@@ -696,9 +726,10 @@ The correlation here is `r cor(mmk_bolus_draws$km, mmk_bolus_draws$v0)`, pretty 
 
 ### Credible intervals for the pharamacokinetic function
 
-Okay, let's turn to the curve itself. While there are some difficulties associated with recovering parameters of the Michaelis-Menten process, the concentration-time curves themselves are pretty recoverable. The plot below shows the posterior mean estimate of the curve, with the shaded region corresponding to the 90% equal-tail credible intervals for the concentration at each time point. For comparison purposes the observed data are overplotted:
+Okay, let's turn to the curve itself. While there are some difficulties associated with recovering parameters of the Michaelis-Menten process, the concentration-time curves themselves are pretty recoverable. First, we use our posterior parameters to generate posterior predicted values for the concentration over time:
 
 ```{r}
+#| label: "mmk-bolus-generated-quantities"
 mmk_bolus_generated <- mmk_bolus$generate_quantities(
   fitted_params = mmk_bolus_fitted,
   data = mmk_bolus_data,
@@ -709,6 +740,13 @@ mmk_bolus_generated_summary <- mmk_bolus_generated$summary() |>
   dplyr::filter(variable |> stringr::str_detect("^c_fit"))
 mmk_bolus_generated_summary$time <- mmk_bolus_data$t_fit
 
+mmk_bolus_generated_summary
+```
+
+Then we plot the data. The plot below shows the posterior mean estimate of the curve, with the shaded region corresponding to the 90% equal-tail credible intervals for the concentration at each time point. For comparison purposes the observed data are overplotted:
+
+```{r}
+#| label: "plot-mmk-pk-posterior"
 dat <- data.frame(
   t_obs = mmk_bolus_data$t_obs, 
   c_obs = mmk_bolus_data$c_obs
@@ -727,86 +765,277 @@ Good enough! Naturally, there's more I could do with this model, but that's enou
 
 Imagine a more complex situation where a drug is administered orally: we now have an influx process where the drug is absorbed from the gut into systemic circulation (the central compartment), from which it is later eliminated. However, if the drug is able to pass between the central compartment and other bodily tissues (the peripheral compartment), we'll need to model the drug flow between them, since only the drug concentration present in the central compartment is available for potential elimination at any point in time. For the sake of my sanity I'll assume that it's just as easy for the drug to pass from central to peripheral as vice versa, so there's only a single "intercompartmental clearance" parameter associated with this flow. I'm also going to assume that all three processes (absorption, elimination, intercompartmental transfer) involve first order dynamics only. 
 
-In this scenario the state $\mathbf{c}_t = (c_{gt}, c_{ct}, c_{pt})$ at time $t$ is defined by three concentrations:^[It should be noted that my notation is slightly nonstandard. My understanding is that the convention in the literature is to use notation consistent with the [WinNonlin](https://www.certara.com/software/phoenix-winnonlin/) software package, as that is generally considered the industry standard and often used for benchmarking purposes. I haven't done this for a very boring reason: I've not yet had a chance to play around with WinNonlin.]
+In this scenario the state at time $t$ is defined by three concentrations:^[It should be noted that my notation is slightly nonstandard. My understanding is that the convention in the literature is to use notation consistent with the [WinNonlin](https://www.certara.com/software/phoenix-winnonlin/) software package, as that is generally considered the industry standard and often used for benchmarking purposes. I haven't done this for a very boring reason: I've not yet had a chance to play around with WinNonlin.]
 
 - $c_{gt} = C_g(t)$ is the drug concentration still remaining in the gut
 - $c_{ct} = C_c(t)$ is the drug concentration currently in the central compartment
 - $c_{pt} = C_p(t)$ is the drug concentration currently in the peripheral compartment
 
+In practice, it can be more convenient to express this in terms of the absolute amount of drug in each compartment (including the gut) at each time point:
+
+- $a_{gt}$ is the drug amount still remaining in the gut
+- $a_{ct}$ is the drug amount currently in the central compartment
+- $a_{pt}$ is the drug amount currently in the peripheral compartment
+
+where, for each compartment, the concentration is simply the amount divided by the relevant volume, $c = a /v$. With this in mind we'll define the state vector at time $t$ as the three drug amounts, $\mathbf{a}_t = (a_{gt}, a_{ct}, a_{pt})$.
+
 Strictly speaking, we have four rate parameters in our model:
 
-- $k_a$ is the absorbtion rate (from gut to central compartment)
+- $k_a$ is the absorption rate (from gut to central compartment)
 - $k_e$ is the elimination rate from the central compartment (also called the clearance rate)
 - $k_{cp}$ is the transfer rate from the central to peripheral compartment
 - $k_{pc}$ is the transfer rate from the peripheral to central compartment
 
-In a moment, we'll be able to rewrite this a little, but I find it helpful to start by writing out the system of differential equations in this notation first:
+I'll also introduce the notation $d_t$ to refer to the (instantaneous) dose given at time $t$. In a moment, we'll be able to rewrite this a little. 
 
-$$
-\begin{array}{rcl}
-\frac{dc_g}{dt} &=& -k_a \ c_g \\
-\frac{dc_c}{dt} &=& k_a \ c_g + k_{pc} \ c_p - k_{cp} \ c_c - k_e \ c_c  \\
-\frac{dc_p}{dt} &=& - k_{pc} \ c_p + k_{cp} \ c_c
-\end{array}
-$$
-
-Written like this, the notation makes very clear that the gut can only lose drug to the central compartment, and the peripheral compartment can only exchange drug with the central compartment, but the central compartment has influx from gut, efflux to urine (or whatever), and interchange with the periphery. In other words, this notation makes the structure of the model clear.
-
-What it doesn't do terribly well, however, is make the biological assumptions explicit. There are structured relationships among $k_{cp}$, $k_{pc}$, and $k_e$. To make these clear, we need to introduce some new notation. First, we can define two volumetric parameters: 
+The biological assumptions of the model are as follows: the gut can only gain drug amount from the external dose which it loses drug to the central compartment, while the peripheral compartment can only exchange drug with the central compartment, and the central compartment has influx from gut, efflux to urine (or whatever), and interchange with the periphery. To help capture this, we'll define two volumetric parameters:
 
 - $v_c$ is the volume of the central compartment
 - $v_p$ is the volume of the peripheral compartment
 
-Second, we can define two clearance parameters:^[Yes, seriously. I know my notation is nonstandard. Hush. I'm still wrapping my head around it and I *like* having notation that makes clear that $q_e$ and $q_{cp}$ are both parameters of the same structural kind. I don't find CL and Q anywhere near as easy to understand.]
+Second, we can define two clearance parameters:^[Again, I know my notation is nonstandard. But I'm still wrapping my head around all this and, for the time being at least, I *like* having notation that makes clear that $q_e$ and $q_{cp}$ are both parameters of the same structural kind. I don't find CL and Q anywhere near as easy to understand.]
 
 - $q_e$ is the clearance rate for elimination (traditionally denoted CL)
 - $q_i$ is the intercompartmental clearance (traditionally denoted Q)
 
-Expressed in these terms we have the following structural relationships:
+Using this notation we can write the system of differential equations as follows:
 
 $$
 \begin{array}{rcl}
-k_e &=& q_e / v_c \\
-k_{cp} &=& q_i / v_c \\
-k_{pc} &=& q_i / v_p
+\frac{da_g}{dt} &=& -k_a \ a_{gt}+ d_t \\
+\frac{da_c}{dt} &=& k_a \ a_{gt} + \frac{q_i}{v_p} \ a_{pt} - \frac{q_i}{v_c} \ a_{ct} - \frac{q_e}{a_c} \ a_{ct}  \\
+\frac{da_p}{dt} &=& - \frac{q_i}{v_p} \ a_{pt} + \frac{q_i}{v_c} \ a_{ct}
 \end{array}
 $$
 
-So we can write the system of differential equations as follows:
+Righty-ho. Now that we're clear on what our unknowns are, let's make some fictitious data:
 
-$$
-\begin{array}{rcl}
-\frac{dc_g}{dt} &=& -k_a \ c_g \\
-\frac{dc_c}{dt} &=& k_a \ c_g + \frac{q_i}{v_p} \ c_p - \frac{q_i}{v_c} \ c_c - \frac{q_e}{v_c} \ c_c  \\
-\frac{dc_p}{dt} &=& - \frac{q_i}{v_p} \ c_p + \frac{q_i}{v_c} \ c_c
-\end{array}
-$$
+```{r}
+#| label: "data-two-cpt"
+obs <- tibble::tibble(
+  t_obs = 1:20,
+  c_obs = c(
+    13.48, 23.66, 28.17, 29.34, 28.02, 25.56, 23.25, 
+    21.52, 21.21, 19.30, 14.54, 14.62, 11.71, 12.21, 
+    10.21, 10.82, 8.43, 8.79, 7.60, 6.03
+  )
+)
+obs
+```
 
-Presumably you could take this a step further and express the absorption rate from the gut $k_a$ in terms of a clearance rate and a gut volume, but it doesn't seem like that adds anything useful since the gut doesn't play any other role in this system, so even if you knew the gut volume precisely you'd still be trading one unknown parameter for another. The benefits to using this parameterisation seem to follow from the fact that the volumetric parameters $v_c$ and $v_p$ are things that you can have sensible prior intuitions about (especially $v_c$ since that follows from blood volume, roughly) and that leads to a better model. 
+Here's a picture of said data:
 
-Righty-ho. Now that we're clear on what our unknowns are, let's specify some priors. 
+```{r}
+#| label: "plot-two-cpt-data"
+ggplot(obs, aes(t_obs, c_obs)) + 
+  geom_point(size = 2) +
+  labs(x = "time", y = "concentration")
+```
 
-**MORE OF MY BULLSHIT HERE**
+Okay fine yes that looks like data. It's quite fictitious of course, but whatever. This is a learning exercise for me, not a serious attempt at modelling. Let's move on, shall we?
 
+
+### Two compartment model
+
+At this point I want to be completely honest. When I started writing this post I really didn't think I'd reach the point of writing a multi-compartment model with repeated dosing. Nevertheless, here we are. On the one hand, I'm pretty pleased with my progress: I set myself a goal and I went well beyond my goal in this post. On the other hand, I am well aware that when I write, I have an audience. So it's important to recognise that this part of the post is really pushing the boundaries of my current knowledge. Nevertheless, it sorta kinda works. So let's go with it yeah? This post is long, and we need to finish it somehow. So. Here's the code:
+
+```{stan}
+#| filename: two_cpt
+#| output.var: "two_cpt"
+#| code-line-numbers: true
+#| label: two-cpt
+functions {
+  vector two_cpt(real time,
+                 vector state,
+                 real qe,
+                 real qi,
+                 real vc,
+                 real vp,
+                 real ka) {
+
+    // convenience...
+    real ag = state[1]; // gut amount
+    real ac = state[2]; // central amount
+    real ap = state[3]; // peripheral amount
+
+    // derivative of state vector with respect to time
+    vector[3] dadt;
+
+    // compute derivatives
+    dadt[1] = - (ka * ag);
+    dadt[2] = (ka * ag) + (qi / vp) * ap - (qi / vc) * ac - (qe / vc) * ac;
+    dadt[3] = - (qi / vp) * ap + (qi / vc) * ac;
+
+    return dadt;
+  }
+}
+
+data {
+  int<lower=1> n_obs;
+  int<lower=1> n_fit;
+  vector[n_obs] c_obs;
+  array[n_obs] real t_obs;
+  array[n_fit] real t_fit;
+  vector[3] a0;
+  real t0;
+}
+
+parameters {
+  real<lower=.001> qe;
+  real<lower=.001> qi;
+  real<lower=.001> vc;
+  real<lower=.001> vp;
+  real<lower=.001> ka;
+  real<lower=.001> sigma;
+}
+
+transformed parameters {
+  // use ode solver to find all amounts at all event times
+  array[n_obs] vector[3] amount = ode_rk45(two_cpt,
+                                           a0,
+                                           t0,
+                                           t_obs,
+                                           qe,
+                                           qi,
+                                           vc,
+                                           vp,
+                                           ka);
+
+  // vector of central concentrations
+  vector[n_obs] mu;
+  for (j in 1:n_obs) {
+    mu[j] = amount[j, 2] / vc;
+  }
+}
+
+model {
+  // priors (adapted from Margossian et al 2022)
+  qe ~ lognormal(log(10), 0.25); // elimination clearance, aka CL
+  qi ~ lognormal(log(15), 0.5);  // intercompartmental clearance, aka Q
+  vc ~ lognormal(log(35), 0.25); // central compartment volume
+  vp ~ lognormal(log(105), 0.5); // peripheral compartment volume
+  ka ~ lognormal(log(2.5), 1);   // absorption rate
+  sigma ~ normal(0, 1);          // measurement error
+
+  // likelihood of observed central concentrations
+  c_obs ~ normal(mu, sigma);
+}
+
+generated quantities {
+  array[n_fit] vector[3] amt_fit = ode_rk45(two_cpt,
+                                            a0,
+                                            t0,
+                                            t_fit,
+                                            qe,
+                                            qi,
+                                            vc,
+                                            vp,
+                                            ka);
+  
+  vector[n_fit] c_fit;
+  for (j in 1:n_fit) {
+    c_fit[j] = amt_fit[j, 2] / vc;
+  }
+}
+```
+
+Next, we put together a Stan-friendly version of the data, which includes the initial amount of drug `a0` in each compartment (gut, central, peripheral):
+
+```{r}
+#| label: "stan-data-two-cpt"
+t_fit <- seq(0, 20, .2)
+two_cpt_data <- list(
+  n_obs = nrow(obs),
+  c_obs = obs$c_obs,
+  t_obs = obs$t_obs,
+  a0 = c(1000, 0, 0),
+  t0 = -.01,
+  t_fit = t_fit,
+  n_fit = length(t_fit)
+)
+
+two_cpt_data
+```
+
+Thrilling, I know! Let's see if this works when we run it, shall we?
+
+## Fitting the model
+
+Step one, sample from the model...
+
+```{r}
+#| label: "two-cpt-posterior-samples"
+two_cpt_fitted <- two_cpt$sample(
+  data = two_cpt_data, 
+  seed = 100, 
+  chains = 4,
+  parallel_chains = 2,  
+  refresh = 1000,
+  show_messages = FALSE
+)
+```
+
+That's a little time consuming and makes me suspect that I've implemented this poorly.^[Okay, I should be honest. The real reason I suspect there's room for improvement here is that I've had use `show_messages = FALSE` to suppress some warnings messages in order to keep the output visually tidy. It's not terrible: Stan throws some warnings from the ODE solver, especially during the very early stages of warmup, in which it quite rightly screams about being fed insane parameters. It's not ideal, but it's not terrible either. I hid the messages to avoid ugly output, not for more nefarious reasons. I mean, don't get me wrong, this model needs a lot more love than I have given it up to this point. But the hidden warning messages are somewhat boring in this instance.] Oh well. Perhaps I'll revisit later. The important thing is that it sorta works. So let's move on and take a summary:
+
+```{r}
+#| label: "two-cpt-posterior-samples-summary"
+two_cpt_fitted$summary()
+```
+
+As usual, it's useful to take a look at some results visually. To that end we'll again generate posterior predicted time-concentration curves:
+
+```{r}
+#| label: "two-cpt-generated-quantities"
+two_cpt_generated <- two_cpt$generate_quantities(
+  fitted_params = two_cpt_fitted,
+  data = two_cpt_data,
+  seed = 999
+)
+
+two_cpt_generated_summary <- two_cpt_generated$summary() |>
+  dplyr::filter(variable |> stringr::str_detect("^c_fit"))
+
+two_cpt_generated_summary$time <- two_cpt_data$t_fit
+two_cpt_generated_summary
+```
+
+
+```{r}
+#| label: "plot-two-cpt-pk-posterior"
+dat <- data.frame(
+  t_obs = two_cpt_data$t_obs, 
+  c_obs = two_cpt_data$c_obs
+)
+
+ggplot(two_cpt_generated_summary) + 
+  geom_ribbon(aes(time, ymin = q5, ymax = q95), fill = "grey70") +
+  geom_line(aes(time, mean)) + 
+  geom_point(aes(t_obs, c_obs), data = dat, size = 2) + 
+  labs(x = "time", y = "concentration")
+```
+
+That's good enough for today.
+
+It's probably obvious from the context that this is a work in progress. I haven't really thought this stuff through yet, and I'm willing to put a lot of money on the proposition this code could be improved considerably. However, that's quite beside the point for this post. Right now, my goal was to get something to work, and this kinda works. Yay! I am happy. 
 
 ## Things I have not discussed
 
 There are many topics that are adjacent to and highly relevant to this post that I have not discussed. The real reason for this is simply that I have limits, and this is just a blog post. But for the sake of listing some of them, here are a few issues around statistical inference that I omitted:
 
-- MCMC diagnostics: At various points in the process of writing this post Stan was kind enough to yell *very* loudly at me about the possibility that things might be going wrong with the MCMC sampler. Having "earned my bones" by writing some fucking terrible MCMC samplers of my own, I really appreciate the "fail loudly" aesthetic that Stan has going on. Indeed, the only reason that the models I've used here have ended up being... look, let's call them "okay", shall we?... is that every time something went awry Stan screamed at me.
+- **MCMC diagnostics**: At various points in the process of writing this post Stan was kind enough to yell *very* loudly at me about the possibility that things might be going wrong with the MCMC sampler. Having "earned my bones" by writing some fucking terrible MCMC samplers of my own, I really appreciate the "fail loudly" aesthetic that Stan has going on. Indeed, the only reason that the models I've used here have ended up being... look, let's call them "okay", shall we?... is that every time something went awry Stan screamed at me.
 
-- Different kinds of ODE solvers: Throughout the post I've used `ode_rk45()` as my ODE solver in Stan, as if that were the only possible choice. It isn't the only choice, and indeed it's not even the only solver I used in the process of writing the bloody thing. There were periods in the post development where I couldn't get the models to behave, and as a consequence of that the sampler kept proposing parameters that pushed the differential equations into a part of the space where they... aren't pleasant. When that happened the system became "stiff"^[Too easy.] and I had to switch to using `ode_bdf()`. There is probably a whole blog post to be written about stiffness but... yeah nah. Suffice it to say this is one of those things where the mapmaker feels an urge to scribble "here be dragons" and move along.
+- **Different kinds of ODE solvers**: Throughout the post I've used `ode_rk45()` as my ODE solver in Stan, as if that were the only possible choice. It isn't the only choice, and indeed it's not even the only solver I used in the process of writing the bloody thing. There were periods in the post development where I couldn't get the models to behave, and as a consequence of that the sampler kept proposing parameters that pushed the differential equations into a part of the space where they... aren't pleasant. When that happened the system became "stiff"^[Too easy.] and I had to switch to using `ode_bdf()`. There is probably a whole blog post to be written about stiffness but... yeah nah. Suffice it to say this is one of those things where the mapmaker feels an urge to scribble "here be dragons" and move along.
 
-- Model checking, and Bayesian workflow more generally: Stating the obvious really, but at no point have I really dived into model checking, model testing, etc. There's a huge amount that could be said on that. Not gonna say any of it here. 
+- **Model checking, and Bayesian workflow more generally**: Stating the obvious really, but at no point have I really dived into model checking, model testing, etc. There's a huge amount that could be said on that. Not gonna say any of it here. 
 
 There are other things missing too. On the pharmacometric side, I have not discussed:
 
-- The logic for choosing one model structure over another. When do you need multiple compartments? When do you need to assume saturating elimination processes? Etc. There's a very good reason I haven't spoken about those things: I am not even slightly qualified to do so. That's something that requires substantive domain knowledge and I'm not there yet. 
-- Individual differences (i.e., population pharmacokinetics). In real life you really need to consider variability across people. That's something we can address with hierarchical models, by assuming the population defines distributions over parameters. I omitted that for simplicity: I'll get to that later. 
-- Covariates. Another super important thing in real life is modelling systematic variation across individuals as well as random variation. Predicting the way in which parameters of the process vary across people as a function of other measured characteristics (age, sex, etc) matters hugely. Again, that's a future topic.
-- Modelling the effect of the drug (pharmacodynamics): there's more to these models than simply tracking the drug concentration. Often you need to consider downstream effects... what does the drug *do* physiologically, or psychologically, and how do those effects persist over time. Future topic babes. 
+- The logic for choosing one **model structure** over another. When do you need multiple compartments? When do you need to assume saturating elimination processes? Etc. There's a very good reason I haven't spoken about those things: I am not even slightly qualified to do so. That's something that requires substantive domain knowledge and I'm not there yet. 
+- Individual differences (i.e., **population pharmacokinetics**). In real life you really need to consider variability across people. That's something we can address with hierarchical models, by assuming the population defines distributions over parameters. I omitted that for simplicity: I'll get to that later. 
+- **Covariates**. Another super important thing in real life is modelling systematic variation across individuals as well as random variation. Predicting the way in which parameters of the process vary across people as a function of other measured characteristics (age, sex, etc) matters hugely. Again, that's a future topic.
+- Modelling the effect of the drug (**pharmacodynamics**): there's more to these models than simply tracking the drug concentration. Often you need to consider downstream effects... what does the drug *do* physiologically, or psychologically, and how do those effects persist over time. Future topic babes. 
 
-Finally, there are things I've missed on the software side. I've not talked about either Torsten or WinNonlin, and at some point I probably should. But... not today. This post is long enough already. I think we can all agree on that! 
+Finally, there are things I've missed on the software side. I've not talked about [Torsten](https://metrumresearchgroup.github.io/Torsten/) and [WinNonlin](https://www.certara.com/software/phoenix-winnonlin/), and at some point I probably should. But... not today. This post is long enough already. I think we can all agree on that! 
 
 ## Resources 
 

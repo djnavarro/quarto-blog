@@ -1,9 +1,11 @@
 data {
   int<lower=1> n_obs;
+  int<lower=1> n_fit;
   real<lower=0> dose;
   real<lower=0> vol_d;
   vector[n_obs] t_obs;
   vector<lower=0>[n_obs] c_obs;
+  vector[n_fit] t_fit;
 }
 
 parameters {
@@ -17,4 +19,8 @@ model {
   sigma ~ normal(0, 1) T[0.01, ];
   vol_d_true ~ normal(vol_d, 1);
   c_obs ~ normal(dose / vol_d_true * exp(-k * t_obs), sigma);
+}
+
+generated quantities {
+  vector<lower=0>[n_fit] c_fit = dose / vol_d_true * exp(-k * t_fit);
 }

@@ -1,23 +1,26 @@
 functions {
-  vector mmk(real t,
-             vector c,
+  vector mmk(real time,
+             vector state,
              real vm,
              real km) {
-    vector[1] dcdt;
-    dcdt[1] = c[1] * vm / (km + c[1]);
-    return dcdt;
+    vector[1] derivative;
+    derivative[1] = - state[1] * vm / (km + state[1]);
+    return derivative;
   }
 }
+
 data {
-  int<lower=1> T;
+  int<lower=1> nt;
   vector[1] c0;
   real t0;
-  array[T] real ts;
+  array[nt] real ts;
   real vm;
   real km;
 }
+
 model {
 }
+
 generated quantities {
-  array[T] vector[1] conc = ode_rk45(mmk, c0, t0, ts, vm, km);
+  array[nt] vector[1] conc = ode_rk45(mmk, c0, t0, ts, vm, km);
 }
