@@ -18,7 +18,7 @@ set.seed(1)
 
 The book I'm currently reading is [Software Design by Example: A Tool-Based Introduction with JavaScript](https://www.routledge.com/Software-Design-by-Example-A-Tool-Based-Introduction-with-JavaScript/Wilson/p/book/9781032330235) by [Greg Wilson](https://third-bit.com/). Greg was kind enough to send me a review copy a little while back, and I've been slowly working my way through it. 
 
-In some ways I'm not the target audience for the book: it's a book about software engineering that uses javascript for the worked examples, not a book designed to teach you javascript. I'm not the worst javascript coder in the world, but I'm not the strongest either, so it's harder work for me than maybe it would have been if javascript were my primary language. That said, I'm finding the book rewarding. The glossary at the end is particularly helpful. I never received a "proper" education in programming, and I commonly have the experience in conversation that software engineers use terms that -- though they are rarely complicated ideas -- no-one has ever explained to me. 
+In some ways I'm not the target audience for the book: it's a book about software engineering that uses javascript for the worked examples, not a book designed to teach you javascript. I'm not the worst javascript coder in the world, but I'm not the strongest either, so it's harder work for me than maybe it would have been if javascript were my primary language. That said, I'm finding the book rewarding. The glossary at the end is particularly helpful. I never received a formal education in programming, and I commonly have the experience in conversation that software engineers use terms that -- though they are rarely complicated ideas -- no-one has ever explained to me. 
 
 As an example, here's a section from the glossary on the top of page 318:
 
@@ -38,10 +38,150 @@ There are other examples of this sort of thing throughout the book, historical a
 
 These historical asides are really valuable. It feels a little bit like one of those "Magician's Secrets Revealed!" shows. Knowing the terminology, conventions, and history behind a thing does so much of the work in making it all feel a bit more coherent. 
 
-## An example goes here
+## Writing a tokenizer
+
+### Preliminaries
+
+```{r}
+#| label: token
+#| file: "token_class.R"
+#| filename: "token_class.R"
+#| code-line-numbers: true
+```
 
 
-<!--------------- appendices go here ----------------->
+### Version 1
 
+```{r}
+#| label: tokenizer_1
+#| file: "tokenizer_1.R"
+#| filename: "tokenizer_1.R"
+#| code-line-numbers: true
+```
+
+
+```{r}
+#| eval: false
+source("token_class.R")
+source("tokenizer_1.R")
+```
+
+```{r}
+tokenize("^(cat|dog)$")
+```
+
+Merging a sequence of literal characters into a single multi-character literal makes the output readable, and in this case is very convenient if I later wanted to write a regular expression matcher that builds on top of this tokenizer:
+
+```{r}
+grepl("^(cat|dog)$", c("cat", "dog", "dag", "ca"))
+```
+
+If my tokenizer represent the literals in `^(cat|dog)$` as the two multicharacter literals `"cat"` and `"dog"` then it's going to be easier for me to write a regex matcher that mirrors the behaviour of `grepl()`.
+
+Unfortunately, there's a problem with this tokenizer. It's trying to be clever, by grouping multiple literals together, and it ends up being too greedy sometimes. Consider the regular expression `"^caa*t$"`. This is a pattern that should match against `"cat"` and `"caaaaat"` but should not match `"caacaat"`, as illustrated below:
+
+```{r}
+grepl("^caa*t$", c("cat", "caaaaat", "caacaat"))
+```
+
+However, let's look at the tokens that are produced by this version of our `tokenizer()` function:
+
+```{r}
+tokenize("^caa*t$")
+```
+
+That's the wrong way to tokenize this input: in this regular expression the `*` operator should be applied only to the preceding character, so it's not correct to treat `"caa"` as a single literal string. What we should have done is split this into literals, `"ca"` and `"a"`. The `"ca"` literal is required and must appear at the beginning of the string (because it follows the start operator `^`), whereas `"a"` is optional and may appear zero or more times (because it precedes the any operator `*`). A tokenizer that collapses these into a single literal `"caa"` will make life hell for any regular expression parser that tries to work with these tokens. 
+
+In essence, this tokenizer fails because it's trying to be a parser as well as a tokenizer, and as a consequence it solves both problems badly.
+
+### Version 2
+
+Okay so that doesn't work. The second approach considered in the chapter simplifies the code a little and produces a token list where every literal character is treated as a distinct token:
+
+```{r}
+#| label: tokenizer_2
+#| file: "tokenizer_2.R"
+#| filename: "tokenizer_2.R"
+#| code-line-numbers: true
+```
+
+
+```{r}
+#| eval: false
+source("token_class.R")
+source("tokenizer_2.R")
+```
+
+Here's the sort of output we get from this version of the tokenizer:
+
+```{r}
+tokenize("^caa*t$")
+```
+
+This output is entirely correct, as long as our goal is *only* to extract and label the tokens in our regular expression. The output correctly labels each literal as a literal and assigns the appropriate label to the non-literals. The problem, however, is that doesn't solve the parsing problem. We've lost the grouping structure that we had in our original version. The tokenizer has no way of expressing the idea that `"ca"` is a syntactically coherent unit in the expression `^caa*t$`, or that `"cat"` is similarly coherent within `^(cat|dog)$`. It's a tokenizer, but not a parser. 
+
+Fortunately, we can build a parser on top of this tokenizer. It requires a little thought, but it's achieveable because the tokenizer is reliable *as* a tokenizer.
+
+### Post-mortem
+
+At this point any competent software engineer is probably screaming internally, because I have not written any unit tests for my code. This is terribly bad practice, and something I would never do when writing actual software. Suffice it to say *Software Design by Example* is at great pains to emphasize the importance of unit tests, and if you were actually following the chapter step by step you'd see that Greg does in fact introduce tests as he develops this example. I've been lazy in this blog post because... well, it's a blog post. It's neither intended to be software nor a chapter in a book on software engineering. 
+
+Anyway... let's return to the development of ideas in the chapter, yes?
+
+## Parsing the tokens
+
+### Version 1
+
+```{r}
+#| label: parser_1
+#| file: "parser_1.R"
+#| filename: "parser_1.R"
+#| code-line-numbers: true
+```
+
+
+```{r}
+source("token_class.R")
+source("parse_class.R")
+source("tokenizer_2.R")
+source("parser_1.R")
+```
+
+```{r}
+#parse("^caa*t$")
+#parse("aa|b")
+#parse("(ab)|c")
+#parse("^(caa*t)|(dog)$")
+#parse("ab|((cd*)|ef)|g")
+parse("x|(y|z)")
+```
+
+
+### Version 2
+
+```{r}
+#| label: parser_2
+#| file: "parser_2.R"
+#| filename: "parser_2.R"
+#| code-line-numbers: true
+```
+
+
+```{r}
+source("token_class.R")
+source("parse_class.R")
+source("tokenizer_2.R")
+source("parser_2.R")
+```
+
+```{r}
+#parse("^caa*t$")
+#parse("aa|b")
+#parse("(ab)|c")
+#parse("^(caa*t)|(dog)$")
+#parse("ab|((cd*)|ef)|g")
+#parse("x|(y|z)z")
+parse("x|(y|z)")
+```
 
 
