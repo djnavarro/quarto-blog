@@ -2,95 +2,99 @@ list_reverse <- function(x) {
   x[length(x):1]
 }
 
-handle <- function(result, token) {
+update_tree <- function(tree, token) {
 
-  # create a subtree with no child nodes
+  # For some kinds of token, we simply append them to the tree
   if(token$kind %in% c("Literal", "Start", "End", "GroupStart")) {
-    result[[length(result) + 1]] <- subtree(token)
+    tree[[length(tree) + 1]] <- subtree(token)
   }
 
-  # when end group is encountered, find corresponding start group and
-  # create a subtree with parent of kind group with the appropriate children
+  # When GroupEnd is encountered, find the most recent GroupStart and
+  # make the tokens between them the children of a Group
   if (token$kind == "GroupEnd") {
     children <- list()
     while(TRUE) {
-      last <- result[[length(result)]]
-      result <- result[-length(result)]
+      last <- tree[[length(tree)]]
+      tree <- tree[-length(tree)]
       if(last$parent$kind == "GroupStart") {
         break
       }
       children[[length(children) + 1]] <- last
     }
-    result[[length(result) + 1]] <- subtree(
+    tree[[length(tree) + 1]] <- subtree(
       parent = token("Group", last$parent$loc),
       children = list_reverse(children)
     )
   }
 
-  # when an any token is encountered, create a subtree with the any token
-  # as the parent, and the preceding subtree as the child
+  # When Any is encountered, make the preceding token (or subtree)
+  # the child of the Any token
   if (token$kind == "Any") {
-    last <- result[[length(result)]]
-    result[[length(result)]] <- subtree(
+    last <- tree[[length(tree)]]
+    tree[[length(tree)]] <- subtree(
       parent = token,
       children = list(last)
     )
   }
 
-  # when an or token is encountered, create a subtree with the or token
-  # as the parent, and two children: one from the preceding subtree, and
-  # one "missing" token that will be filled later
+  # When Or is encountered, create a subtree with two children. The
+  # first (or left) child is taken by moving it from the previous
+  # token/subtree in our list. The second child is tagged as "Missing"
+  # and will be filled in later
   if (token$kind == "Or") {
-    last <- result[[length(result)]]
-    result[[length(result)]] <- subtree(
+    last <- tree[[length(tree)]]
+    tree[[length(tree)]] <- subtree(
       parent = token,
       children = list(last, subtree(token(kind = "Missing", loc = 0)))
     )
   }
 
-  return(result)
+  return(tree)
 }
 
-childless <- function(x) {
-  is.null(x$children) || length(x$children) == 0
+has_children <- function(x) {
+  !is.null(x$children) && length(x$children) > 0
 }
 
-compress <- function(raw) {
-  if(length(raw) == 1) {
-    return(raw)
+compress_or_skip <- function(tree, location) {
+  if (has_children(tree[[location - 1]])) {
+    n <- length(tree[[location - 1]]$children)
+    if (tree[[location - 1]]$children[[n]]$parent$kind == "Missing") {
+      tree[[location - 1]]$children[[n]] <- tree[[location]]
+      tree[[location]] <- NULL
+    }
   }
-  loc <- length(raw)
-  while(loc > 1) {
-    el_1 <- raw[[loc - 1]]
-    el_2 <- compress(raw[[loc]])
-    if(!childless(el_2)) {
-      el_2$children <- compress(el_2$children)
-    }
-    if(!childless(el_1)) {
-      n_children <- length(el_1$children)
-      last <- el_1$children[[n_children]]
-      if(last$parent$kind == "Missing") {
-        el_1$children[[n_children]] <- el_2
-        raw[[loc]] <- NULL
-      }
-      el_1 <- compress(el_1)
-      el_1$children <- compress(el_1$children)
-      raw[[loc - 1]] <- compress(el_1)
-    }
+  return(tree)
+}
+
+compress_tree <- function(tree) {
+  if (length(tree) <= 1) {
+    return(tree)
+  }
+
+  # Compress branches of the top-level tree
+  loc <- length(tree)
+  while (loc > 1) {
+    tree <- compress_or_skip(tree, loc)
     loc <- loc - 1
   }
-  return(raw)
+
+  # Recursively compress branches of children subtrees
+  for (loc in 1:length(tree)) {
+    tree[[loc]]$children <- compress_tree(tree[[loc]]$children)
+  }
+
+  return(tree)
 }
 
 parse <- function(text) {
-  result <- token_list()
+  tree <- list()
   tokens <- tokenize(text)
-  for(i in 1:length(tokens)) {
-    token <- tokens[[i]]
-    result <- handle(result, token)
+  for(token in tokens) {
+    tree <- update_tree(tree, token)
   }
-  result <- compress(result)
-  class(result) <- "token_list"
-  return(result)
+  tree <- compress_tree(tree)
+  class(tree) <- "token_list" # allows pretty printing
+  return(tree)
 }
 

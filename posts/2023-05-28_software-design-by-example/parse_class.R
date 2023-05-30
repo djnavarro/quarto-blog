@@ -9,16 +9,13 @@ print.subtree <- function(x, ...) {
   if(length(x) == 0) {
     cat("<Empty parse_tree>\n")
   } else {
-    cat("- ")
     print(x$parent)
     if(length(x$children) > 0) {
-      cat("[\n")
       for(child in x$children) {
         out <- capture.output(print(child))
         out <- paste("    ", out)
         cat(out, sep = "\n")
       }
-      cat("]\n")
     }
   }
   return(invisible(x))
