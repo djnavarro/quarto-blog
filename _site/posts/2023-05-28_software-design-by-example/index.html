@@ -215,6 +215,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
   <li><a href="#version-1-1" id="toc-version-1-1" class="nav-link" data-scroll-target="#version-1-1">Version 1</a></li>
   <li><a href="#version-2-1" id="toc-version-2-1" class="nav-link" data-scroll-target="#version-2-1">Version 2</a></li>
   </ul></li>
+  <li><a href="#final-thoughts" id="toc-final-thoughts" class="nav-link" data-scroll-target="#final-thoughts">Final thoughts?</a></li>
   </ul>
 </nav>
 </nav>
@@ -635,7 +636,7 @@ expressions</code></pre>
 <li>There are other kinds of token (<code>GroupEnd</code> and <code>Any</code>) that require the parser to restructure the tree, but they rely only on the tokens seen so far, so the parser can reorganise the tree on the fly during this first pass</li>
 <li>There is one annoying token (<code>Or</code>) that depends both on things the parser has already seen <em>and</em> on things that haven’t been observed yet as the parser sweeps forward. What we do here is a partial organisation: we process the bits we know about (e.g., the <code>a</code> on the left hand side of an <code>a|b</code> statement is known even when we’ve only read <code>a|</code> so far) but then leave a “Missing” placeholder token to express the fact that we know that the <code>Or</code> operator <code>|</code> has two children: we know <code>a</code>, but <code>b</code> will need to be filled in later.</li>
 </ul>
-<p>Here’s the R code:</p>
+<p>Here’s the R code, which supplies an <code>update_tree()</code> function that sequentially modifes the parse tree whenever new tokens arrive:<a href="#fn7" class="footnote-ref" id="fnref7" role="doc-noteref"><sup>7</sup></a></p>
 <div class="cell" data-file="parser_1.R">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
@@ -790,6 +791,7 @@ expressions</code></pre>
 </section>
 <section id="version-2-1" class="level3">
 <h3 class="anchored" data-anchor-id="version-2-1">Version 2</h3>
+<p>At this point in the post I’m guessing that the reader is about ready to see the end product. The final version of the code adds a <code>compress_tree()</code> function that is called once the forward pass is complete. For simple trees all it really does is sweep up from bottom to top, but because there are regular expressions in which you can have <code>Or</code> tokens nested quite a long way into the parse tree it also sweeps up through the subtrees when they are encountered:</p>
 <div class="cell" data-file="parser_2.R">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
@@ -896,14 +898,9 @@ expressions</code></pre>
 <span id="cb30-99"><a href="#cb30-99"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 </div>
+<p>For expressions that don’t have an <code>Or</code> token, the output is the same as before:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb31"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb31-1"><a href="#cb31-1" aria-hidden="true" tabindex="-1"></a><span class="fu">source</span>(<span class="st">"token_class.R"</span>)</span>
-<span id="cb31-2"><a href="#cb31-2" aria-hidden="true" tabindex="-1"></a><span class="fu">source</span>(<span class="st">"parse_class.R"</span>)</span>
-<span id="cb31-3"><a href="#cb31-3" aria-hidden="true" tabindex="-1"></a><span class="fu">source</span>(<span class="st">"tokenizer_2.R"</span>)</span>
-<span id="cb31-4"><a href="#cb31-4" aria-hidden="true" tabindex="-1"></a><span class="fu">source</span>(<span class="st">"parser_2.R"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-</div>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb32"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb32-1"><a href="#cb32-1" aria-hidden="true" tabindex="-1"></a><span class="fu">parse</span>(<span class="st">"^caa*t$"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb31"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb31-1"><a href="#cb31-1" aria-hidden="true" tabindex="-1"></a><span class="fu">parse</span>(<span class="st">"^caa*t$"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>&lt;Token at 1&gt; Start
 &lt;Token at 2&gt; Literal: c
@@ -913,38 +910,25 @@ expressions</code></pre>
 &lt;Token at 6&gt; Literal: t
 &lt;Token at 7&gt; End</code></pre>
 </div>
-<div class="sourceCode cell-code" id="cb34"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb34-1"><a href="#cb34-1" aria-hidden="true" tabindex="-1"></a><span class="fu">parse</span>(<span class="st">"aa|b"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>&lt;Token at 1&gt; Literal: a
-&lt;Token at 3&gt; Or
-     &lt;Token at 2&gt; Literal: a
-     &lt;Token at 4&gt; Literal: b</code></pre>
 </div>
-<div class="sourceCode cell-code" id="cb36"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb36-1"><a href="#cb36-1" aria-hidden="true" tabindex="-1"></a><span class="fu">parse</span>(<span class="st">"(ab)|c"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>However, what we see in this version is that the parse tree for expressions like <code>"(cat)|(dog)"</code> now places the right hand side of the either/or expression (i.e., the <code>(dog)</code> group) in the appropriate place:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb33"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb33-1"><a href="#cb33-1" aria-hidden="true" tabindex="-1"></a><span class="fu">parse</span>(<span class="st">"(cat)|(dog)"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
-<pre><code>&lt;Token at 5&gt; Or
+<pre><code>&lt;Token at 6&gt; Or
      &lt;Token at 1&gt; Group
-          &lt;Token at 2&gt; Literal: a
-          &lt;Token at 3&gt; Literal: b
-     &lt;Token at 6&gt; Literal: c</code></pre>
+          &lt;Token at 2&gt; Literal: c
+          &lt;Token at 3&gt; Literal: a
+          &lt;Token at 4&gt; Literal: t
+     &lt;Token at 7&gt; Group
+          &lt;Token at 8&gt; Literal: d
+          &lt;Token at 9&gt; Literal: o
+          &lt;Token at 10&gt; Literal: g</code></pre>
 </div>
-<div class="sourceCode cell-code" id="cb38"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb38-1"><a href="#cb38-1" aria-hidden="true" tabindex="-1"></a><span class="fu">parse</span>(<span class="st">"^(caa*t)|(dog)$"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>&lt;Token at 1&gt; Start
-&lt;Token at 9&gt; Or
-     &lt;Token at 2&gt; Group
-          &lt;Token at 3&gt; Literal: c
-          &lt;Token at 4&gt; Literal: a
-          &lt;Token at 6&gt; Any
-               &lt;Token at 5&gt; Literal: a
-          &lt;Token at 7&gt; Literal: t
-     &lt;Token at 10&gt; Group
-          &lt;Token at 11&gt; Literal: d
-          &lt;Token at 12&gt; Literal: o
-          &lt;Token at 13&gt; Literal: g
-&lt;Token at 15&gt; End</code></pre>
 </div>
-<div class="sourceCode cell-code" id="cb40"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb40-1"><a href="#cb40-1" aria-hidden="true" tabindex="-1"></a><span class="fu">parse</span>(<span class="st">"ab|((cd*)|ef)|g"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>No more of those “Missing” tokens. And because the <code>compress_tree()</code> function is recursively applied to the subtrees, it can also handle uglier expressions like <code>"ab|((cd*)|ef)|g"</code>:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb35"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb35-1"><a href="#cb35-1" aria-hidden="true" tabindex="-1"></a><span class="fu">parse</span>(<span class="st">"ab|((cd*)|ef)|g"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>&lt;Token at 1&gt; Literal: a
 &lt;Token at 3&gt; Or
@@ -960,29 +944,18 @@ expressions</code></pre>
                &lt;Token at 12&gt; Literal: f
           &lt;Token at 15&gt; Literal: g</code></pre>
 </div>
-<div class="sourceCode cell-code" id="cb42"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb42-1"><a href="#cb42-1" aria-hidden="true" tabindex="-1"></a><span class="fu">parse</span>(<span class="st">"x|(y|z)z"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>&lt;Token at 2&gt; Or
-     &lt;Token at 1&gt; Literal: x
-     &lt;Token at 3&gt; Group
-          &lt;Token at 5&gt; Or
-               &lt;Token at 4&gt; Literal: y
-               &lt;Token at 6&gt; Literal: z
-&lt;Token at 8&gt; Literal: z</code></pre>
 </div>
-<div class="sourceCode cell-code" id="cb44"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb44-1"><a href="#cb44-1" aria-hidden="true" tabindex="-1"></a><span class="fu">parse</span>(<span class="st">"x|(y|z)"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>&lt;Token at 2&gt; Or
-     &lt;Token at 1&gt; Literal: x
-     &lt;Token at 3&gt; Group
-          &lt;Token at 5&gt; Or
-               &lt;Token at 4&gt; Literal: y
-               &lt;Token at 6&gt; Literal: z</code></pre>
-</div>
-</div>
-
-
+<p>Neat. I mean… the thing itself is ugly as sin, but the fact that an amateur like myself can spend a day or two working through the relevant chapters in the book and write code that can handle parse trees like these ones… yeah, that’s very neat indeed.</p>
 </section>
+</section>
+<section id="final-thoughts" class="level2">
+<h2 class="anchored" data-anchor-id="final-thoughts">Final thoughts?</h2>
+<p>Back when I was an academic, as opposed to whatever the hell it is I am in my middle aged unemployment era, there was this whole tradition of writing “critical” book reviews that would ostensibly count as scholarly output. This led to this weird thing where you’d read a book and enjoy it, but you’d feel this obligation to write a Proper Academic Review, and like most things in academia that have Prestige Points associated with them, these reviews would be extremely thorough, mind-meltingly boring, and pointlessly cruel. Because that’s what academia is designed to encourage.</p>
+<p>Yeah nah. I’m too old for that shit, and I gave up tenure a lifetime<a href="#fn8" class="footnote-ref" id="fnref8" role="doc-noteref"><sup>8</sup></a> ago.</p>
+<p>Having read most of the book at a superficial level and done a deep dive into the parts that I felt like diving into, I have to say I rather like <em>Software Design by Example</em>. It’s not written the way I would write a book: anyone who knows me understands that I will never choose to write a 200 page book when I could write a 600 page book instead. Greg Wilson doesn’t write like me: the book is brief, it covers a lot of topics concisely, and yet still manages to convey a lot of the “folk knowledge” and other cultural bits and pieces that actually matter in the wild. Honestly that’s an awfully impressive achievement. I quite enjoyed it.</p>
+<p>Totally worth the time I spent reading it. Would recommend to others.</p>
+
+
 </section>
 
 
@@ -995,6 +968,8 @@ expressions</code></pre>
 <li id="fn4"><p>This is not the place for me to talk about my love/hate relationship with the <a href="http://adv-r.had.co.nz/S3.html">S3 object-oriented programming system</a> in R. Suffice it to say, I have <em>feelings</em>. That’s enough for now.<a href="#fnref4" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
 <li id="fn5"><p>Okay, I’ll be honest, I did have a set of informal tests that I wrote to accompany my code, even for this blog post: I was too lazy to bother writing a proper test suite, but the initial drafts of this blog post had a bunch of regular expressions that would be tokenized/parsed every time I rendered the draft, which let me check that the code I was writing was not “total batshit”. I do have <em>some</em> standards, at least when it comes to code. The same cannot be said of my <a href="https://youtu.be/5QML71sBu1E">taste in men</a>, but that’s a different story…<a href="#fnref5" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
 <li id="fn6"><p>Yeah no that will never happen. If you’re waiting for me to attempt something like what Greg has done, then – to quote Paul Kelly and Kev Carmody – <a href="https://youtu.be/dAONlfoNVuY">you don’t stand the chance of a cinder in snow</a>. I know my limits.<a href="#fnref6" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn7"><p>This is analogous to the <code>handle()</code> JavaScript function that appears in the book. What can I say? I’m a perverse woman who likes to use her own names for things.<a href="#fnref7" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn8"><p>Two years, but that’s a lifetime in tranny-years. We age fast, you know.<a href="#fnref8" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
 </ol>
 </section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div id="quarto-reuse" class="quarto-appendix-contents"><div><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2023,
   author = {Navarro, Danielle},
