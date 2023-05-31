@@ -211,6 +211,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
   </ul></li>
   <li><a href="#parsing-the-tokens" id="toc-parsing-the-tokens" class="nav-link" data-scroll-target="#parsing-the-tokens">Parsing the tokens</a>
   <ul class="collapse">
+  <li><a href="#preliminaries-1" id="toc-preliminaries-1" class="nav-link" data-scroll-target="#preliminaries-1">Preliminaries</a></li>
   <li><a href="#version-1-1" id="toc-version-1-1" class="nav-link" data-scroll-target="#version-1-1">Version 1</a></li>
   <li><a href="#version-2-1" id="toc-version-2-1" class="nav-link" data-scroll-target="#version-2-1">Version 2</a></li>
   </ul></li>
@@ -279,10 +280,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </blockquote>
 <p>A little honesty when writing blog posts is important, I feel. When reading the book I did not, in fact, attempt all the exercises or work through all the code examples. I tinkered with a few of the examples, read some parts thoroughly, and skimmed other parts. That’s pretty representative of how I read technical books, really. I’ll pick a few parts that I want to understand properly and do a deep dive in those sections, and read the rest of it in a much more superficial way.</p>
 <p>The parts that I did read fairly deeply are Chapters 7 and 8, which talk about how <a href="https://en.wikipedia.org/wiki/Parsing">parse</a> a <a href="https://en.wikipedia.org/wiki/Regular_expression">regular expression</a> and how to write the code that does <a href="https://en.wikipedia.org/wiki/Pattern_matching">pattern matching</a> using them. Actually, if I’m super honest the part I spent most time with is Chapter 8, which shows you how to extract <a href="https://en.wikipedia.org/wiki/Lexical_analysis#Token">tokens</a> and an a <a href="https://en.wikipedia.org/wiki/Parse_tree">parse tree</a> for a restricted form of regular expression syntax. For that chapter, I worked through the examples and translated (most of) the code in R. In the rest of the post I’ll show the code that I wrote, tie it back to the structure of Chapter 8 in the book, and at the end I’ll say a little about what I learned from this exercise.</p>
-</section>
-<section id="writing-the-tokenizer" class="level2">
-<h2 class="anchored" data-anchor-id="writing-the-tokenizer">Writing the tokenizer</h2>
-<p>The subset of regular expression syntax that we’re going to consider uses the following characters:</p>
+<p>The subset of regular expression syntax that the book uses for this chapter uses the following rules:</p>
 <table class="table">
 <colgroup>
 <col style="width: 16%">
@@ -330,104 +328,108 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </tbody>
 </table>
 <p>It’s a very small subset of the regular expression grammar available for pattern matching in R, javascript, and pretty much every language these days, but it’s a handy one. It’s certainly rich enough to make it an interesting exercise to write a parser. Not that it’s particularly important to write my own parser: the purpose of doing so is to wrap my head around the basics of how parsers work and nothing more. As Greg helpfully reminds us on page 99, if a format is commonly known there will be good tools already, and if you find yourself wanting to roll your own parser to interpret some new file format you just invented for something… there’s a good chance you shouldn’t do it. The world has enough file formats already.</p>
+</section>
+<section id="writing-the-tokenizer" class="level2">
+<h2 class="anchored" data-anchor-id="writing-the-tokenizer">Writing the tokenizer</h2>
+<p>If you want to write a regular expression parser, or any other parser for that matter, you actually have two distinct but interrelated problems to solve. Your data takes the form of an input string that you need to process. In English text, an input string might look like <code>"Danielle hates regular expressions"</code> but in a regular expression you’re more likely to have something that looks like <code>"^caa*t$</code>. To interpret these strings – in a purely <a href="https://en.wikipedia.org/wiki/Syntax">syntactic</a> sense, not a <a href="https://en.wikipedia.org/wiki/Semantics">semantic</a> one – you need to</p>
+<ul>
+<li><p>Carve the string up into a sequence of distinct (and possibly labelled) <strong>tokens</strong>. My English expression could be divided into a sequence of four tokens corresponding to the four words: <code>"Danielle"</code>, <code>"hates"</code>, <code>"regular"</code>, <code>"expressions"</code>. This <strong>tokenization</strong> process is not uniquely defined. For instance, I might choose to acknowledge that the <code>"-s"</code> ending in some words is in fact a distinct unit. While this is absolutely not the post to talk about <a href="https://en.wikipedia.org/wiki/Inflection">inflexional morphology</a> in linguistics, it’s important to recognise that in some contexts you might want to tokenize my sentence as <code>"Danielle"</code>, <code>"hate"</code>, <code>"-s"</code>, <code>"regular"</code>, <code>"expression"</code>, <code>"-s"</code>.</p></li>
+<li><p>Organise (or <strong>parse</strong>) the tokens into a structured format that explicitly acknowledges the way they relate to each other grammatically. For my English sentence this parsing might be something like this <code>[Danielle] [[hates] [regular expressions]]</code>, where I’m using the square brackets to illustrate the organisation: <code>"regular expressions"</code> and <code>"Danielle"</code> are both <a href="https://en.wikipedia.org/wiki/Noun_phrase">noun phrases</a>, <code>[hates]</code> is a verb, and <code>[hates regular expressions]</code> is a <a href="https://en.wikipedia.org/wiki/Verb_phrase">verb phrase</a>.</p></li>
+</ul>
+<p>The difference between the two is visually apparent when you try to draw them. When you tokenize the input you end up with a list of tokens:</p>
+<div class="cell">
+<div class="cell-output cell-output-stdout">
+<pre><code>Danielle
+hates
+regular
+expressions</code></pre>
+</div>
+</div>
+<p>After parsing this list of tokens, you end up with a tree. There’s lots of ways you could visualise this tree, but something like this is good enough for my purposes:</p>
+<div class="cell">
+<div class="cell-output cell-output-stdout">
+<pre><code>[
+  Danielle
+]
+[
+  [
+    hates
+  ]
+  [
+    regular
+    expressions
+  ]
+]</code></pre>
+</div>
+</div>
+<p>I could probably take this a bit further and annotate each part of the tree the way that linguists like to do, but it’s not necessary to get the basic idea.</p>
+<p>The key thing to realise is that these two problems aren’t independent. If you tokenize the string in a way that isn’t suited to your problem, you’re going to make life harder when you try to write the parser. As it happens, <em>Software Design by Example</em> gives you a very gentle example of how this happens, which I’ll get to in moment when I try to write some code that automatically parses regular expressions like <code>^caa*t$</code>.</p>
 <section id="preliminaries" class="level3">
 <h3 class="anchored" data-anchor-id="preliminaries">Preliminaries</h3>
+<p>In the book, all the examples are – obviously!!! – written in javascript, and my code is going to be written in R. This matters somewhat since R and javascript are different languages with different assumptions about how you write code.<a href="#fn3" class="footnote-ref" id="fnref3" role="doc-noteref"><sup>3</sup></a> To make my life a little easier, I’m going to define some extremely informal R classes<a href="#fn4" class="footnote-ref" id="fnref4" role="doc-noteref"><sup>4</sup></a> that don’t actually do much. In my code, a “token” is just a list that has three fields: the <code>kind</code> of token referred to, the <code>loc</code> (location) of the token within the original string, and (optionally) a <code>value</code> that specifies the character (or characters) that represent the token in that string. Relatedly, the “token list” class is literally just a list:</p>
 <div class="cell" data-file="token_class.R">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
 <pre><strong>token_class.R</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb1"><pre class="sourceCode numberSource r number-lines code-with-copy"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1"></a>token <span class="ot">&lt;-</span> <span class="cf">function</span>(kind, loc, <span class="at">value =</span> <span class="cn">NULL</span>) {</span>
-<span id="cb1-2"><a href="#cb1-2"></a>  <span class="fu">structure</span>(</span>
-<span id="cb1-3"><a href="#cb1-3"></a>    <span class="fu">list</span>(<span class="at">kind =</span> kind, <span class="at">loc =</span> loc, <span class="at">value =</span> value),</span>
-<span id="cb1-4"><a href="#cb1-4"></a>    <span class="at">class =</span> <span class="st">"token"</span></span>
-<span id="cb1-5"><a href="#cb1-5"></a>  )</span>
-<span id="cb1-6"><a href="#cb1-6"></a>}</span>
-<span id="cb1-7"><a href="#cb1-7"></a></span>
-<span id="cb1-8"><a href="#cb1-8"></a>token_list <span class="ot">&lt;-</span> <span class="cf">function</span>(...) {</span>
-<span id="cb1-9"><a href="#cb1-9"></a>  <span class="fu">structure</span>(</span>
-<span id="cb1-10"><a href="#cb1-10"></a>    <span class="fu">list</span>(...),</span>
-<span id="cb1-11"><a href="#cb1-11"></a>    <span class="at">class =</span> <span class="st">"token_list"</span></span>
-<span id="cb1-12"><a href="#cb1-12"></a>  )</span>
-<span id="cb1-13"><a href="#cb1-13"></a>}</span>
-<span id="cb1-14"><a href="#cb1-14"></a></span>
-<span id="cb1-15"><a href="#cb1-15"></a>print.token <span class="ot">&lt;-</span> <span class="cf">function</span>(x, ...) {</span>
-<span id="cb1-16"><a href="#cb1-16"></a>  <span class="fu">cat</span>(<span class="st">"&lt;Token at "</span>,  x<span class="sc">$</span>loc, <span class="st">"&gt; "</span>, x<span class="sc">$</span>kind, <span class="at">sep =</span> <span class="st">""</span>)</span>
-<span id="cb1-17"><a href="#cb1-17"></a>  <span class="cf">if</span>(<span class="sc">!</span><span class="fu">is.null</span>(x<span class="sc">$</span>value)) {</span>
-<span id="cb1-18"><a href="#cb1-18"></a>    <span class="fu">cat</span>(<span class="st">":"</span>, x<span class="sc">$</span>value)</span>
-<span id="cb1-19"><a href="#cb1-19"></a>  }</span>
-<span id="cb1-20"><a href="#cb1-20"></a>  <span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span>
-<span id="cb1-21"><a href="#cb1-21"></a>  <span class="fu">return</span>(<span class="fu">invisible</span>(x))</span>
-<span id="cb1-22"><a href="#cb1-22"></a>}</span>
-<span id="cb1-23"><a href="#cb1-23"></a></span>
-<span id="cb1-24"><a href="#cb1-24"></a>print.token_list <span class="ot">&lt;-</span> <span class="cf">function</span>(x, ...) {</span>
-<span id="cb1-25"><a href="#cb1-25"></a>  <span class="cf">if</span>(<span class="fu">length</span>(x) <span class="sc">==</span> <span class="dv">0</span>) {</span>
-<span id="cb1-26"><a href="#cb1-26"></a>    <span class="fu">cat</span>(<span class="st">"&lt;Empty token list&gt;</span><span class="sc">\n</span><span class="st">"</span>)</span>
-<span id="cb1-27"><a href="#cb1-27"></a>  } <span class="cf">else</span> {</span>
-<span id="cb1-28"><a href="#cb1-28"></a>    <span class="cf">for</span>(token <span class="cf">in</span> x) {</span>
-<span id="cb1-29"><a href="#cb1-29"></a>      <span class="fu">print</span>(token)</span>
-<span id="cb1-30"><a href="#cb1-30"></a>    }</span>
-<span id="cb1-31"><a href="#cb1-31"></a>  }</span>
-<span id="cb1-32"><a href="#cb1-32"></a>  <span class="fu">return</span>(<span class="fu">invisible</span>(x))</span>
-<span id="cb1-33"><a href="#cb1-33"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb3"><pre class="sourceCode numberSource r number-lines code-with-copy"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1"></a>token <span class="ot">&lt;-</span> <span class="cf">function</span>(kind, loc, <span class="at">value =</span> <span class="cn">NULL</span>) {</span>
+<span id="cb3-2"><a href="#cb3-2"></a>  <span class="fu">structure</span>(</span>
+<span id="cb3-3"><a href="#cb3-3"></a>    <span class="fu">list</span>(<span class="at">kind =</span> kind, <span class="at">loc =</span> loc, <span class="at">value =</span> value),</span>
+<span id="cb3-4"><a href="#cb3-4"></a>    <span class="at">class =</span> <span class="st">"token"</span></span>
+<span id="cb3-5"><a href="#cb3-5"></a>  )</span>
+<span id="cb3-6"><a href="#cb3-6"></a>}</span>
+<span id="cb3-7"><a href="#cb3-7"></a></span>
+<span id="cb3-8"><a href="#cb3-8"></a>token_list <span class="ot">&lt;-</span> <span class="cf">function</span>(...) {</span>
+<span id="cb3-9"><a href="#cb3-9"></a>  <span class="fu">structure</span>(</span>
+<span id="cb3-10"><a href="#cb3-10"></a>    <span class="fu">list</span>(...),</span>
+<span id="cb3-11"><a href="#cb3-11"></a>    <span class="at">class =</span> <span class="st">"token_list"</span></span>
+<span id="cb3-12"><a href="#cb3-12"></a>  )</span>
+<span id="cb3-13"><a href="#cb3-13"></a>}</span>
+<span id="cb3-14"><a href="#cb3-14"></a></span>
+<span id="cb3-15"><a href="#cb3-15"></a>print.token <span class="ot">&lt;-</span> <span class="cf">function</span>(x, ...) {</span>
+<span id="cb3-16"><a href="#cb3-16"></a>  <span class="fu">cat</span>(<span class="st">"&lt;Token at "</span>,  x<span class="sc">$</span>loc, <span class="st">"&gt; "</span>, x<span class="sc">$</span>kind, <span class="at">sep =</span> <span class="st">""</span>)</span>
+<span id="cb3-17"><a href="#cb3-17"></a>  <span class="cf">if</span>(<span class="sc">!</span><span class="fu">is.null</span>(x<span class="sc">$</span>value)) {</span>
+<span id="cb3-18"><a href="#cb3-18"></a>    <span class="fu">cat</span>(<span class="st">":"</span>, x<span class="sc">$</span>value)</span>
+<span id="cb3-19"><a href="#cb3-19"></a>  }</span>
+<span id="cb3-20"><a href="#cb3-20"></a>  <span class="fu">cat</span>(<span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span>
+<span id="cb3-21"><a href="#cb3-21"></a>  <span class="fu">return</span>(<span class="fu">invisible</span>(x))</span>
+<span id="cb3-22"><a href="#cb3-22"></a>}</span>
+<span id="cb3-23"><a href="#cb3-23"></a></span>
+<span id="cb3-24"><a href="#cb3-24"></a>print.token_list <span class="ot">&lt;-</span> <span class="cf">function</span>(x, ...) {</span>
+<span id="cb3-25"><a href="#cb3-25"></a>  <span class="cf">if</span>(<span class="fu">length</span>(x) <span class="sc">==</span> <span class="dv">0</span>) {</span>
+<span id="cb3-26"><a href="#cb3-26"></a>    <span class="fu">cat</span>(<span class="st">"&lt;Empty token list&gt;</span><span class="sc">\n</span><span class="st">"</span>)</span>
+<span id="cb3-27"><a href="#cb3-27"></a>  } <span class="cf">else</span> {</span>
+<span id="cb3-28"><a href="#cb3-28"></a>    <span class="cf">for</span>(token <span class="cf">in</span> x) {</span>
+<span id="cb3-29"><a href="#cb3-29"></a>      <span class="fu">print</span>(token)</span>
+<span id="cb3-30"><a href="#cb3-30"></a>    }</span>
+<span id="cb3-31"><a href="#cb3-31"></a>  }</span>
+<span id="cb3-32"><a href="#cb3-32"></a>  <span class="fu">return</span>(<span class="fu">invisible</span>(x))</span>
+<span id="cb3-33"><a href="#cb3-33"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 </div>
+<p>The reason I decided to write this code for this post is that it also defines <code>print()</code> methods for these objects that make the printed output a little prettier:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb4"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="fu">token</span>(<span class="at">kind =</span> <span class="st">"Noun"</span>, <span class="at">loc =</span> <span class="dv">1</span>, <span class="at">value =</span> <span class="st">"Danielle"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>&lt;Token at 1&gt; Noun: Danielle</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb6"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="fu">token_list</span>(</span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">token</span>(<span class="at">kind =</span> <span class="st">"Noun"</span>, <span class="at">loc =</span> <span class="dv">1</span>, <span class="at">value =</span> <span class="st">"Danielle"</span>),</span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">token</span>(<span class="at">kind =</span> <span class="st">"Verb"</span>, <span class="at">loc =</span> <span class="dv">10</span>, <span class="at">value =</span> <span class="st">"hates"</span>)</span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>&lt;Token at 1&gt; Noun: Danielle
+&lt;Token at 10&gt; Verb: hates</code></pre>
+</div>
+</div>
+<p>Without the print methods, you’d see each token printed as a list, and the list of tokens printed as a list of lists. It’s not super-important, but it does help me stay sane as I write. But whatever, let’s move on and start writing a tokenizer for (very restricted!) regular expressions…</p>
 </section>
 <section id="version-1" class="level3">
 <h3 class="anchored" data-anchor-id="version-1">Version 1</h3>
-<div class="cell" data-file="tokenizer_1.R">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>tokenizer_1.R</strong></pre>
-</div>
-<div class="sourceCode cell-code" id="cb2"><pre class="sourceCode numberSource r number-lines code-with-copy"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1"></a>simple <span class="ot">&lt;-</span> <span class="fu">list</span>(</span>
-<span id="cb2-2"><a href="#cb2-2"></a>  <span class="st">"*"</span> <span class="ot">=</span> <span class="st">"Any"</span>,</span>
-<span id="cb2-3"><a href="#cb2-3"></a>  <span class="st">"|"</span> <span class="ot">=</span> <span class="st">"Or"</span>,</span>
-<span id="cb2-4"><a href="#cb2-4"></a>  <span class="st">"("</span> <span class="ot">=</span> <span class="st">"GroupStart"</span>,</span>
-<span id="cb2-5"><a href="#cb2-5"></a>  <span class="st">")"</span> <span class="ot">=</span> <span class="st">"GroupEnd"</span></span>
-<span id="cb2-6"><a href="#cb2-6"></a>)</span>
-<span id="cb2-7"><a href="#cb2-7"></a></span>
-<span id="cb2-8"><a href="#cb2-8"></a>tokenize <span class="ot">&lt;-</span> <span class="cf">function</span>(text) {</span>
-<span id="cb2-9"><a href="#cb2-9"></a>  result <span class="ot">&lt;-</span> <span class="fu">token_list</span>()</span>
-<span id="cb2-10"><a href="#cb2-10"></a>  n <span class="ot">&lt;-</span> <span class="dv">0</span></span>
-<span id="cb2-11"><a href="#cb2-11"></a>  <span class="cf">for</span> (i <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span><span class="fu">nchar</span>(text)) {</span>
-<span id="cb2-12"><a href="#cb2-12"></a>    chr <span class="ot">&lt;-</span> <span class="fu">substr</span>(text, <span class="at">start =</span> i, <span class="at">stop =</span> i)</span>
-<span id="cb2-13"><a href="#cb2-13"></a></span>
-<span id="cb2-14"><a href="#cb2-14"></a>    <span class="co"># simple cases are always added as non-literal tokens</span></span>
-<span id="cb2-15"><a href="#cb2-15"></a>    <span class="cf">if</span> (chr <span class="sc">%in%</span> <span class="fu">names</span>(simple)) {</span>
-<span id="cb2-16"><a href="#cb2-16"></a>      result[[n <span class="sc">+</span> <span class="dv">1</span>]] <span class="ot">&lt;-</span> <span class="fu">token</span>(simple[[chr]], i)</span>
-<span id="cb2-17"><a href="#cb2-17"></a>      n <span class="ot">&lt;-</span> n <span class="sc">+</span> <span class="dv">1</span></span>
-<span id="cb2-18"><a href="#cb2-18"></a></span>
-<span id="cb2-19"><a href="#cb2-19"></a>    <span class="co"># the ^ character is non-literal if position is 1</span></span>
-<span id="cb2-20"><a href="#cb2-20"></a>    } <span class="cf">else</span> <span class="cf">if</span> (chr <span class="sc">==</span> <span class="st">"^"</span> <span class="sc">&amp;</span> i <span class="sc">==</span> <span class="dv">1</span>) {</span>
-<span id="cb2-21"><a href="#cb2-21"></a>      result[[n <span class="sc">+</span> <span class="dv">1</span>]] <span class="ot">&lt;-</span> <span class="fu">token</span>(<span class="st">"Start"</span>, i)</span>
-<span id="cb2-22"><a href="#cb2-22"></a>      n <span class="ot">&lt;-</span> n <span class="sc">+</span> <span class="dv">1</span></span>
-<span id="cb2-23"><a href="#cb2-23"></a></span>
-<span id="cb2-24"><a href="#cb2-24"></a>    <span class="co"># the $ character is non-literal if it's the last character</span></span>
-<span id="cb2-25"><a href="#cb2-25"></a>    } <span class="cf">else</span> <span class="cf">if</span> (chr <span class="sc">==</span> <span class="st">"$"</span> <span class="sc">&amp;</span> i <span class="sc">==</span> <span class="fu">nchar</span>(text)) {</span>
-<span id="cb2-26"><a href="#cb2-26"></a>      result[[n <span class="sc">+</span> <span class="dv">1</span>]] <span class="ot">&lt;-</span> <span class="fu">token</span>(<span class="st">"End"</span>, i)</span>
-<span id="cb2-27"><a href="#cb2-27"></a>      n <span class="ot">&lt;-</span> n <span class="sc">+</span> <span class="dv">1</span></span>
-<span id="cb2-28"><a href="#cb2-28"></a></span>
-<span id="cb2-29"><a href="#cb2-29"></a>    <span class="co"># literals that follow a non-literal create a new token</span></span>
-<span id="cb2-30"><a href="#cb2-30"></a>    } <span class="cf">else</span> <span class="cf">if</span> (n <span class="sc">&gt;</span> <span class="dv">0</span> <span class="sc">&amp;&amp;</span> result[[n]]<span class="sc">$</span>kind <span class="sc">!=</span> <span class="st">"Literal"</span>){</span>
-<span id="cb2-31"><a href="#cb2-31"></a>      result[[n <span class="sc">+</span> <span class="dv">1</span>]] <span class="ot">&lt;-</span> <span class="fu">token</span>(<span class="st">"Literal"</span>, i, <span class="at">value =</span> chr)</span>
-<span id="cb2-32"><a href="#cb2-32"></a>      n <span class="ot">&lt;-</span> n <span class="sc">+</span> <span class="dv">1</span></span>
-<span id="cb2-33"><a href="#cb2-33"></a></span>
-<span id="cb2-34"><a href="#cb2-34"></a>    <span class="co"># literals that follow a literal are combined with it</span></span>
-<span id="cb2-35"><a href="#cb2-35"></a>    } <span class="cf">else</span> {</span>
-<span id="cb2-36"><a href="#cb2-36"></a>      result[[n]]<span class="sc">$</span>value <span class="ot">&lt;-</span> <span class="fu">paste0</span>(result[[n]]<span class="sc">$</span>value, chr)</span>
-<span id="cb2-37"><a href="#cb2-37"></a>    }</span>
-<span id="cb2-38"><a href="#cb2-38"></a>  }</span>
-<span id="cb2-39"><a href="#cb2-39"></a>  <span class="fu">return</span>(result)</span>
-<span id="cb2-40"><a href="#cb2-40"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-</div>
-</div>
+<p>A hallmark of good teaching – in my not-entirely-humble opinion – is when the instructor designs material in a way that gently encourages the learner to discover things on your own. Chapter 8 of <em>Software Design by Example</em> does this rather nicely at the beginning, by having the reader start out by writing a simple tokenizer that is later revealed to be “readable, efficient, and wrong”. At the risk of revealing the instructional magic that Greg is so terribly good at, I’ll explicitly state the flawed intuition that might lead you to write a tokenizer like this.</p>
+<p>Suppose I were to think about my tokenizer by considering a regular expression like <code>"^(cat)|(dog)$"</code>. There’s a real trap you can fall into here, because this regular expression has natural language words, and you might be tempted to write a tokenizer that treats <code>"cat"</code> and <code>"dog"</code> as tokens. Or, to be slightly more precise, you might decide that to create tokens that allow “Literals” to contain multiple characters, like this:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb3"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="fu">source</span>(<span class="st">"token_class.R"</span>)</span>
-<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="fu">source</span>(<span class="st">"tokenizer_1.R"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-</div>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb4"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tokenize</span>(<span class="st">"^(cat|dog)$"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb8"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tokenize</span>(<span class="st">"^(cat|dog)$"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>&lt;Token at 1&gt; Start
 &lt;Token at 2&gt; GroupStart
@@ -438,24 +440,75 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 &lt;Token at 11&gt; End</code></pre>
 </div>
 </div>
-<p>Merging a sequence of literal characters into a single multi-character literal makes the output readable, and in this case is very convenient if I later wanted to write a regular expression matcher that builds on top of this tokenizer:</p>
+<p>Merging a sequence of literal characters into a single multi-character literal makes the output readable, and who doesn’t love it when the tokenizer informs you that you have a “Literal cat” in your string?</p>
+<p>The book then walks you through the process of writing a <code>tokenize()</code> function that behaves exactly like this. Obviously, the original is in JavaScript, but here’s an R version:</p>
+<div class="cell" data-file="tokenizer_1.R">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>tokenizer_1.R</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb10"><pre class="sourceCode numberSource r number-lines code-with-copy"><code class="sourceCode r"><span id="cb10-1"><a href="#cb10-1"></a>simple <span class="ot">&lt;-</span> <span class="fu">list</span>(</span>
+<span id="cb10-2"><a href="#cb10-2"></a>  <span class="st">"*"</span> <span class="ot">=</span> <span class="st">"Any"</span>,</span>
+<span id="cb10-3"><a href="#cb10-3"></a>  <span class="st">"|"</span> <span class="ot">=</span> <span class="st">"Or"</span>,</span>
+<span id="cb10-4"><a href="#cb10-4"></a>  <span class="st">"("</span> <span class="ot">=</span> <span class="st">"GroupStart"</span>,</span>
+<span id="cb10-5"><a href="#cb10-5"></a>  <span class="st">")"</span> <span class="ot">=</span> <span class="st">"GroupEnd"</span></span>
+<span id="cb10-6"><a href="#cb10-6"></a>)</span>
+<span id="cb10-7"><a href="#cb10-7"></a></span>
+<span id="cb10-8"><a href="#cb10-8"></a>tokenize <span class="ot">&lt;-</span> <span class="cf">function</span>(text) {</span>
+<span id="cb10-9"><a href="#cb10-9"></a>  result <span class="ot">&lt;-</span> <span class="fu">token_list</span>()</span>
+<span id="cb10-10"><a href="#cb10-10"></a>  n <span class="ot">&lt;-</span> <span class="dv">0</span></span>
+<span id="cb10-11"><a href="#cb10-11"></a>  <span class="cf">for</span> (i <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span><span class="fu">nchar</span>(text)) {</span>
+<span id="cb10-12"><a href="#cb10-12"></a>    chr <span class="ot">&lt;-</span> <span class="fu">substr</span>(text, <span class="at">start =</span> i, <span class="at">stop =</span> i)</span>
+<span id="cb10-13"><a href="#cb10-13"></a></span>
+<span id="cb10-14"><a href="#cb10-14"></a>    <span class="co"># simple cases are always added as non-literal tokens</span></span>
+<span id="cb10-15"><a href="#cb10-15"></a>    <span class="cf">if</span> (chr <span class="sc">%in%</span> <span class="fu">names</span>(simple)) {</span>
+<span id="cb10-16"><a href="#cb10-16"></a>      result[[n <span class="sc">+</span> <span class="dv">1</span>]] <span class="ot">&lt;-</span> <span class="fu">token</span>(simple[[chr]], i)</span>
+<span id="cb10-17"><a href="#cb10-17"></a>      n <span class="ot">&lt;-</span> n <span class="sc">+</span> <span class="dv">1</span></span>
+<span id="cb10-18"><a href="#cb10-18"></a></span>
+<span id="cb10-19"><a href="#cb10-19"></a>    <span class="co"># the ^ character is non-literal if position is 1</span></span>
+<span id="cb10-20"><a href="#cb10-20"></a>    } <span class="cf">else</span> <span class="cf">if</span> (chr <span class="sc">==</span> <span class="st">"^"</span> <span class="sc">&amp;</span> i <span class="sc">==</span> <span class="dv">1</span>) {</span>
+<span id="cb10-21"><a href="#cb10-21"></a>      result[[n <span class="sc">+</span> <span class="dv">1</span>]] <span class="ot">&lt;-</span> <span class="fu">token</span>(<span class="st">"Start"</span>, i)</span>
+<span id="cb10-22"><a href="#cb10-22"></a>      n <span class="ot">&lt;-</span> n <span class="sc">+</span> <span class="dv">1</span></span>
+<span id="cb10-23"><a href="#cb10-23"></a></span>
+<span id="cb10-24"><a href="#cb10-24"></a>    <span class="co"># the $ character is non-literal if it's the last character</span></span>
+<span id="cb10-25"><a href="#cb10-25"></a>    } <span class="cf">else</span> <span class="cf">if</span> (chr <span class="sc">==</span> <span class="st">"$"</span> <span class="sc">&amp;</span> i <span class="sc">==</span> <span class="fu">nchar</span>(text)) {</span>
+<span id="cb10-26"><a href="#cb10-26"></a>      result[[n <span class="sc">+</span> <span class="dv">1</span>]] <span class="ot">&lt;-</span> <span class="fu">token</span>(<span class="st">"End"</span>, i)</span>
+<span id="cb10-27"><a href="#cb10-27"></a>      n <span class="ot">&lt;-</span> n <span class="sc">+</span> <span class="dv">1</span></span>
+<span id="cb10-28"><a href="#cb10-28"></a></span>
+<span id="cb10-29"><a href="#cb10-29"></a>    <span class="co"># literals that follow a non-literal create a new token</span></span>
+<span id="cb10-30"><a href="#cb10-30"></a>    } <span class="cf">else</span> <span class="cf">if</span> (n <span class="sc">&gt;</span> <span class="dv">0</span> <span class="sc">&amp;&amp;</span> result[[n]]<span class="sc">$</span>kind <span class="sc">!=</span> <span class="st">"Literal"</span>){</span>
+<span id="cb10-31"><a href="#cb10-31"></a>      result[[n <span class="sc">+</span> <span class="dv">1</span>]] <span class="ot">&lt;-</span> <span class="fu">token</span>(<span class="st">"Literal"</span>, i, <span class="at">value =</span> chr)</span>
+<span id="cb10-32"><a href="#cb10-32"></a>      n <span class="ot">&lt;-</span> n <span class="sc">+</span> <span class="dv">1</span></span>
+<span id="cb10-33"><a href="#cb10-33"></a></span>
+<span id="cb10-34"><a href="#cb10-34"></a>    <span class="co"># literals that follow a literal are combined with it</span></span>
+<span id="cb10-35"><a href="#cb10-35"></a>    } <span class="cf">else</span> {</span>
+<span id="cb10-36"><a href="#cb10-36"></a>      result[[n]]<span class="sc">$</span>value <span class="ot">&lt;-</span> <span class="fu">paste0</span>(result[[n]]<span class="sc">$</span>value, chr)</span>
+<span id="cb10-37"><a href="#cb10-37"></a>    }</span>
+<span id="cb10-38"><a href="#cb10-38"></a>  }</span>
+<span id="cb10-39"><a href="#cb10-39"></a>  <span class="fu">return</span>(result)</span>
+<span id="cb10-40"><a href="#cb10-40"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+<p>I won’t recapitulate all the steps that go into writing code like this – read the book if you want to know things at this level of detail – but suffice it to say that if I were better at JavaScript I’d have found it very easy to follow.</p>
+<p>The point that matters here is that the reader is being encouraged to consider here is what happens to you later if you tokenize the input this way. Merging a sequence of literal characters into a single multi-character literal makes the output readable, and <em>in this specific case</em> the token list is very convenient if I later wanted to write a regular expression matcher that builds on top of this tokenizer. Using the base R <code>grepl()</code> function, you can see which strings match <code>"^(cat|dog)$"</code> and which don’t:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb6"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="fu">grepl</span>(<span class="st">"^(cat|dog)$"</span>, <span class="fu">c</span>(<span class="st">"cat"</span>, <span class="st">"dog"</span>, <span class="st">"dag"</span>, <span class="st">"ca"</span>))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb11"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="fu">grepl</span>(<span class="st">"^(cat|dog)$"</span>, <span class="fu">c</span>(<span class="st">"cat"</span>, <span class="st">"dog"</span>, <span class="st">"dag"</span>, <span class="st">"ca"</span>))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>[1]  TRUE  TRUE FALSE FALSE</code></pre>
 </div>
 </div>
-<p>If my tokenizer represent the literals in <code>^(cat|dog)$</code> as the two multicharacter literals <code>"cat"</code> and <code>"dog"</code> then it’s going to be easier for me to write a regex matcher that mirrors the behaviour of <code>grepl()</code>.</p>
-<p>Unfortunately, there’s a problem with this tokenizer. It’s trying to be clever, by grouping multiple literals together, and it ends up being too greedy sometimes. Consider the regular expression <code>"^caa*t$"</code>. This is a pattern that should match against <code>"cat"</code> and <code>"caaaaat"</code> but should not match <code>"caacaat"</code>, as illustrated below:</p>
+<p>If my tokenizer represent the literals in <code>^(cat|dog)$</code> as the two multicharacter literals <code>"cat"</code> and <code>"dog"</code> then – in this instance – it’s going to be easier for me to write a regex matcher that mirrors the behaviour of <code>grepl()</code>.</p>
+<p>Very nice.</p>
+<p>Unfortunately, once you start thinking about regular expressions more generally, there’s a big problem with this tokenizer. It’s trying to be clever, by grouping multiple literals together without considering how those literals will be used later on by the parser, and it ends up being too greedy sometimes. Consider the regular expression <code>"^caa*t$"</code>. This is a pattern that should match against <code>"cat"</code> and <code>"caaaaat"</code> but should not match <code>"caacaat"</code>, as illustrated below:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb8"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="fu">grepl</span>(<span class="st">"^caa*t$"</span>, <span class="fu">c</span>(<span class="st">"cat"</span>, <span class="st">"caaaaat"</span>, <span class="st">"caacaat"</span>))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb13"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="fu">grepl</span>(<span class="st">"^caa*t$"</span>, <span class="fu">c</span>(<span class="st">"cat"</span>, <span class="st">"caaaaat"</span>, <span class="st">"caacaat"</span>))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>[1]  TRUE  TRUE FALSE</code></pre>
 </div>
 </div>
-<p>However, let’s look at the tokens that are produced by this version of our <code>tokenizer()</code> function:</p>
+<p>However, let’s look at the tokens produced by our <code>tokenizer()</code> function:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb10"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tokenize</span>(<span class="st">"^caa*t$"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb15"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tokenize</span>(<span class="st">"^caa*t$"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>&lt;Token at 1&gt; Start
 &lt;Token at 2&gt; Literal: caa
@@ -464,62 +517,59 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 &lt;Token at 7&gt; End</code></pre>
 </div>
 </div>
-<p>That’s the wrong way to tokenize this input: in this regular expression the <code>*</code> operator should be applied only to the preceding character, so it’s not correct to treat <code>"caa"</code> as a single literal string. What we should have done is split this into literals, <code>"ca"</code> and <code>"a"</code>. The <code>"ca"</code> literal is required and must appear at the beginning of the string (because it follows the start operator <code>^</code>), whereas <code>"a"</code> is optional and may appear zero or more times (because it precedes the any operator <code>*</code>). A tokenizer that collapses these into a single literal <code>"caa"</code> will make life hell for any regular expression parser that tries to work with these tokens.</p>
-<p>In essence, this tokenizer fails because it’s trying to be a parser as well as a tokenizer, and as a consequence it solves both problems badly.</p>
+<p>Yeah, we’re in big trouble here.</p>
+<p>That’s the wrong way to tokenize this input: in this regular expression the <code>*</code> operator (i.e., the <code>Any</code> token in our token list) needs to be applied only to the preceding character, so it’s not correct to treat <code>"caa"</code> as a single literal string. To write a functioning parser on top of this tokenizer would be a nightmare, because the parser would need to inspect the internal contents of the tokens: in order to parse the <code>*</code> character (the <code>Any</code> token), it would need to grab the <code>Literal caa</code> token and split it into two parts, a prefix <code>"ca"</code> and a suffix <code>"a"</code>, because <code>*</code> applies only to the suffix.</p>
+<p>What this is telling us is that we’ve chosen a poor tokenizing scheme. The book is quite gentle in leading the reader to this conclusion, but when you’re actually writing the code yourself you can’t avoid discovering it. If your parser has to break apart your tokens to organise the input, then really you should be rethinking the tokenizer.</p>
 </section>
 <section id="version-2" class="level3">
 <h3 class="anchored" data-anchor-id="version-2">Version 2</h3>
-<p>Okay so that doesn’t work. The second approach considered in the chapter simplifies the code a little and produces a token list where every literal character is treated as a distinct token:</p>
+<p>Okay so that doesn’t work. The second approach considered in the chapter simplifies the code a little and produces a token list where every literal character is treated as a distinct token. The code is only a minor modification of the previous version:</p>
 <div class="cell" data-file="tokenizer_2.R">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
 <pre><strong>tokenizer_2.R</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb12"><pre class="sourceCode numberSource r number-lines code-with-copy"><code class="sourceCode r"><span id="cb12-1"><a href="#cb12-1"></a>simple <span class="ot">&lt;-</span> <span class="fu">list</span>(</span>
-<span id="cb12-2"><a href="#cb12-2"></a>  <span class="st">"*"</span> <span class="ot">=</span> <span class="st">"Any"</span>,</span>
-<span id="cb12-3"><a href="#cb12-3"></a>  <span class="st">"|"</span> <span class="ot">=</span> <span class="st">"Or"</span>,</span>
-<span id="cb12-4"><a href="#cb12-4"></a>  <span class="st">"("</span> <span class="ot">=</span> <span class="st">"GroupStart"</span>,</span>
-<span id="cb12-5"><a href="#cb12-5"></a>  <span class="st">")"</span> <span class="ot">=</span> <span class="st">"GroupEnd"</span></span>
-<span id="cb12-6"><a href="#cb12-6"></a>)</span>
-<span id="cb12-7"><a href="#cb12-7"></a></span>
-<span id="cb12-8"><a href="#cb12-8"></a>tokenize <span class="ot">&lt;-</span> <span class="cf">function</span>(text) {</span>
-<span id="cb12-9"><a href="#cb12-9"></a>  result <span class="ot">&lt;-</span> <span class="fu">token_list</span>()</span>
-<span id="cb12-10"><a href="#cb12-10"></a>  n <span class="ot">&lt;-</span> <span class="dv">0</span></span>
-<span id="cb12-11"><a href="#cb12-11"></a>  <span class="cf">for</span> (i <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span><span class="fu">nchar</span>(text)) {</span>
-<span id="cb12-12"><a href="#cb12-12"></a>    chr <span class="ot">&lt;-</span> <span class="fu">substr</span>(text, <span class="at">start =</span> i, <span class="at">stop =</span> i)</span>
-<span id="cb12-13"><a href="#cb12-13"></a></span>
-<span id="cb12-14"><a href="#cb12-14"></a>    <span class="co"># simple cases are always added as non-literal tokens</span></span>
-<span id="cb12-15"><a href="#cb12-15"></a>    <span class="cf">if</span> (chr <span class="sc">%in%</span> <span class="fu">names</span>(simple)) {</span>
-<span id="cb12-16"><a href="#cb12-16"></a>      result[[n <span class="sc">+</span> <span class="dv">1</span>]] <span class="ot">&lt;-</span> <span class="fu">token</span>(simple[[chr]], i)</span>
-<span id="cb12-17"><a href="#cb12-17"></a>      n <span class="ot">&lt;-</span> n <span class="sc">+</span> <span class="dv">1</span></span>
-<span id="cb12-18"><a href="#cb12-18"></a></span>
-<span id="cb12-19"><a href="#cb12-19"></a>    <span class="co"># the ^ character is non-literal if position is 1</span></span>
-<span id="cb12-20"><a href="#cb12-20"></a>    } <span class="cf">else</span> <span class="cf">if</span> (chr <span class="sc">==</span> <span class="st">"^"</span> <span class="sc">&amp;</span> i <span class="sc">==</span> <span class="dv">1</span>) {</span>
-<span id="cb12-21"><a href="#cb12-21"></a>      result[[n <span class="sc">+</span> <span class="dv">1</span>]] <span class="ot">&lt;-</span> <span class="fu">token</span>(<span class="st">"Start"</span>, i)</span>
-<span id="cb12-22"><a href="#cb12-22"></a>      n <span class="ot">&lt;-</span> n <span class="sc">+</span> <span class="dv">1</span></span>
-<span id="cb12-23"><a href="#cb12-23"></a></span>
-<span id="cb12-24"><a href="#cb12-24"></a>    <span class="co"># the $ character is non-literal if it's the last character</span></span>
-<span id="cb12-25"><a href="#cb12-25"></a>    } <span class="cf">else</span> <span class="cf">if</span> (chr <span class="sc">==</span> <span class="st">"$"</span> <span class="sc">&amp;</span> i <span class="sc">==</span> <span class="fu">nchar</span>(text)) {</span>
-<span id="cb12-26"><a href="#cb12-26"></a>      result[[n <span class="sc">+</span> <span class="dv">1</span>]] <span class="ot">&lt;-</span> <span class="fu">token</span>(<span class="st">"End"</span>, i)</span>
-<span id="cb12-27"><a href="#cb12-27"></a>      n <span class="ot">&lt;-</span> n <span class="sc">+</span> <span class="dv">1</span></span>
-<span id="cb12-28"><a href="#cb12-28"></a></span>
-<span id="cb12-29"><a href="#cb12-29"></a>    <span class="co"># literals always create a new token</span></span>
-<span id="cb12-30"><a href="#cb12-30"></a>    } <span class="cf">else</span> {</span>
-<span id="cb12-31"><a href="#cb12-31"></a>      result[[n <span class="sc">+</span> <span class="dv">1</span>]] <span class="ot">&lt;-</span> <span class="fu">token</span>(<span class="st">"Literal"</span>, i, <span class="at">value =</span> chr)</span>
-<span id="cb12-32"><a href="#cb12-32"></a>      n <span class="ot">&lt;-</span> n <span class="sc">+</span> <span class="dv">1</span></span>
-<span id="cb12-33"><a href="#cb12-33"></a>    }</span>
-<span id="cb12-34"><a href="#cb12-34"></a>  }</span>
-<span id="cb12-35"><a href="#cb12-35"></a>  <span class="fu">return</span>(result)</span>
-<span id="cb12-36"><a href="#cb12-36"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb17"><pre class="sourceCode numberSource r number-lines code-with-copy"><code class="sourceCode r"><span id="cb17-1"><a href="#cb17-1"></a>simple <span class="ot">&lt;-</span> <span class="fu">list</span>(</span>
+<span id="cb17-2"><a href="#cb17-2"></a>  <span class="st">"*"</span> <span class="ot">=</span> <span class="st">"Any"</span>,</span>
+<span id="cb17-3"><a href="#cb17-3"></a>  <span class="st">"|"</span> <span class="ot">=</span> <span class="st">"Or"</span>,</span>
+<span id="cb17-4"><a href="#cb17-4"></a>  <span class="st">"("</span> <span class="ot">=</span> <span class="st">"GroupStart"</span>,</span>
+<span id="cb17-5"><a href="#cb17-5"></a>  <span class="st">")"</span> <span class="ot">=</span> <span class="st">"GroupEnd"</span></span>
+<span id="cb17-6"><a href="#cb17-6"></a>)</span>
+<span id="cb17-7"><a href="#cb17-7"></a></span>
+<span id="cb17-8"><a href="#cb17-8"></a>tokenize <span class="ot">&lt;-</span> <span class="cf">function</span>(text) {</span>
+<span id="cb17-9"><a href="#cb17-9"></a>  result <span class="ot">&lt;-</span> <span class="fu">token_list</span>()</span>
+<span id="cb17-10"><a href="#cb17-10"></a>  n <span class="ot">&lt;-</span> <span class="dv">0</span></span>
+<span id="cb17-11"><a href="#cb17-11"></a>  <span class="cf">for</span> (i <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span><span class="fu">nchar</span>(text)) {</span>
+<span id="cb17-12"><a href="#cb17-12"></a>    chr <span class="ot">&lt;-</span> <span class="fu">substr</span>(text, <span class="at">start =</span> i, <span class="at">stop =</span> i)</span>
+<span id="cb17-13"><a href="#cb17-13"></a></span>
+<span id="cb17-14"><a href="#cb17-14"></a>    <span class="co"># simple cases are always added as non-literal tokens</span></span>
+<span id="cb17-15"><a href="#cb17-15"></a>    <span class="cf">if</span> (chr <span class="sc">%in%</span> <span class="fu">names</span>(simple)) {</span>
+<span id="cb17-16"><a href="#cb17-16"></a>      result[[n <span class="sc">+</span> <span class="dv">1</span>]] <span class="ot">&lt;-</span> <span class="fu">token</span>(simple[[chr]], i)</span>
+<span id="cb17-17"><a href="#cb17-17"></a>      n <span class="ot">&lt;-</span> n <span class="sc">+</span> <span class="dv">1</span></span>
+<span id="cb17-18"><a href="#cb17-18"></a></span>
+<span id="cb17-19"><a href="#cb17-19"></a>    <span class="co"># the ^ character is non-literal if position is 1</span></span>
+<span id="cb17-20"><a href="#cb17-20"></a>    } <span class="cf">else</span> <span class="cf">if</span> (chr <span class="sc">==</span> <span class="st">"^"</span> <span class="sc">&amp;</span> i <span class="sc">==</span> <span class="dv">1</span>) {</span>
+<span id="cb17-21"><a href="#cb17-21"></a>      result[[n <span class="sc">+</span> <span class="dv">1</span>]] <span class="ot">&lt;-</span> <span class="fu">token</span>(<span class="st">"Start"</span>, i)</span>
+<span id="cb17-22"><a href="#cb17-22"></a>      n <span class="ot">&lt;-</span> n <span class="sc">+</span> <span class="dv">1</span></span>
+<span id="cb17-23"><a href="#cb17-23"></a></span>
+<span id="cb17-24"><a href="#cb17-24"></a>    <span class="co"># the $ character is non-literal if it's the last character</span></span>
+<span id="cb17-25"><a href="#cb17-25"></a>    } <span class="cf">else</span> <span class="cf">if</span> (chr <span class="sc">==</span> <span class="st">"$"</span> <span class="sc">&amp;</span> i <span class="sc">==</span> <span class="fu">nchar</span>(text)) {</span>
+<span id="cb17-26"><a href="#cb17-26"></a>      result[[n <span class="sc">+</span> <span class="dv">1</span>]] <span class="ot">&lt;-</span> <span class="fu">token</span>(<span class="st">"End"</span>, i)</span>
+<span id="cb17-27"><a href="#cb17-27"></a>      n <span class="ot">&lt;-</span> n <span class="sc">+</span> <span class="dv">1</span></span>
+<span id="cb17-28"><a href="#cb17-28"></a></span>
+<span id="cb17-29"><a href="#cb17-29"></a>    <span class="co"># literals always create a new token</span></span>
+<span id="cb17-30"><a href="#cb17-30"></a>    } <span class="cf">else</span> {</span>
+<span id="cb17-31"><a href="#cb17-31"></a>      result[[n <span class="sc">+</span> <span class="dv">1</span>]] <span class="ot">&lt;-</span> <span class="fu">token</span>(<span class="st">"Literal"</span>, i, <span class="at">value =</span> chr)</span>
+<span id="cb17-32"><a href="#cb17-32"></a>      n <span class="ot">&lt;-</span> n <span class="sc">+</span> <span class="dv">1</span></span>
+<span id="cb17-33"><a href="#cb17-33"></a>    }</span>
+<span id="cb17-34"><a href="#cb17-34"></a>  }</span>
+<span id="cb17-35"><a href="#cb17-35"></a>  <span class="fu">return</span>(result)</span>
+<span id="cb17-36"><a href="#cb17-36"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
-</div>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb13"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="fu">source</span>(<span class="st">"token_class.R"</span>)</span>
-<span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a><span class="fu">source</span>(<span class="st">"tokenizer_2.R"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <p>Here’s the sort of output we get from this version of the tokenizer:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb14"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tokenize</span>(<span class="st">"^caa*t$"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb18"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tokenize</span>(<span class="st">"^caa*t$"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>&lt;Token at 1&gt; Start
 &lt;Token at 2&gt; Literal: c
@@ -530,97 +580,135 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 &lt;Token at 7&gt; End</code></pre>
 </div>
 </div>
-<p>This output is entirely correct, as long as our goal is <em>only</em> to extract and label the tokens in our regular expression. The output correctly labels each literal as a literal and assigns the appropriate label to the non-literals. The problem, however, is that doesn’t solve the parsing problem. We’ve lost the grouping structure that we had in our original version. The tokenizer has no way of expressing the idea that <code>"ca"</code> is a syntactically coherent unit in the expression <code>^caa*t$</code>, or that <code>"cat"</code> is similarly coherent within <code>^(cat|dog)$</code>. It’s a tokenizer, but not a parser.</p>
-<p>Fortunately, we can build a parser on top of this tokenizer. It requires a little thought, but it’s achieveable because the tokenizer is reliable <em>as</em> a tokenizer.</p>
+<p>This output is entirely correct, as long as our goal is <em>only</em> to extract and label the tokens in our regular expression. The output correctly labels each literal as a literal and assigns the appropriate label to the non-literals. What is very clear, though, when you look at the output from this version of <code>tokenize()</code> is that it is absolutely <em>not</em> a parser. We’ve lost the grouping structure that we had in our original version. The tokenizer has no way of expressing the idea that <code>"ca"</code> is a syntactically coherent unit in the expression <code>^caa*t$</code>, or that <code>"cat"</code> is similarly coherent within <code>^(cat|dog)$</code>. It’s a good tokenizer, but a bad parser.</p>
+<p>That’s okay: it’s not meant to be a parser. The tokenizer does its job perfectly well, and importantly it provides output that a good parser can work with. It requires a little thought, but it’s going to work out okay because the tokenizer is reliable <em>as</em> a tokenizer. Each tool does one job and only that job: you don’t need your tokenizer to parse the syntax, and you don’t want your parser to mess around with the internal contents of the tokens.</p>
+<p>Gosh… I wonder if that’s one of those software engineering principles?</p>
 </section>
 <section id="post-mortem" class="level3">
 <h3 class="anchored" data-anchor-id="post-mortem">Post-mortem</h3>
-<p>At this point any competent software engineer is probably screaming internally, because I have not written any unit tests for my code. This is terribly bad practice, and something I would never do when writing actual software. Suffice it to say <em>Software Design by Example</em> is at great pains to emphasize the importance of unit tests, and if you were actually following the chapter step by step you’d see that Greg does in fact introduce tests as he develops this example. I’ve been lazy in this blog post because… well, it’s a blog post. It’s neither intended to be software nor a chapter in a book on software engineering.</p>
+<p>At this point any competent software engineer is probably screaming internally, because I have not written any unit tests for my code. This is terribly bad practice, and something I would never do when writing actual software.<a href="#fn5" class="footnote-ref" id="fnref5" role="doc-noteref"><sup>5</sup></a> Suffice it to say <em>Software Design by Example</em> is at great pains to emphasize the importance of unit tests, and if you were actually following the chapter step by step you’d see that Greg does in fact introduce tests as he develops this example. I’ve been lazy in this blog post because… well, it’s a blog post. It’s neither intended to be software nor a chapter in a book on software engineering.</p>
 <p>Anyway… let’s return to the development of ideas in the chapter, yes?</p>
 </section>
 </section>
 <section id="parsing-the-tokens" class="level2">
 <h2 class="anchored" data-anchor-id="parsing-the-tokens">Parsing the tokens</h2>
+<p>The second half of chapter 8 in <em>Software Design by Example</em> focuses on the parser, and again I’m not going to try to recapitulate all the logic that the book walks you through. It walks the reader through an intuitive process of thinking about how you want to write the parser, but the key thing I want to highlight here is that when you’re reading the book you get a strong sense of why you want to write the parser in two parts: there’s a “forward pass” where the parser sweeps through the token list from first to last, constructing the parts of the parse tree that it can handle on the basis of “what it has seen so far”, and then a subsequent clean up phase where it sweeps back and fixes all the incomplete parts. When I came to implement it in R myself I made some small departures from the way Greg has done it in the book, but the essence is the same. What I’ll do here is present two versions of the parser, one that <em>only</em> does the forward pass (so you can see all the missing bits), and then a second version that does the clean up afterwards.</p>
+<section id="preliminaries-1" class="level3">
+<h3 class="anchored" data-anchor-id="preliminaries-1">Preliminaries</h3>
+<p>As before, I’ll do some preliminary work that isn’t really essential for the purposes of the book, but I find helpful for writing this blog post. Specifically, I’ll define a <code>subtree()</code> function that provides a “subtree” class. All it does is capture the fundamental structure of a tree: each node is defined by a <code>parent</code> element, and that parent can have zero, one, or more <code>children</code>. This isn’t really necessary for our parser, but it does allow me to define a <code>print()</code> method that makes the parse trees in this post look a little prettier:</p>
+<div class="cell" data-file="parse_class.R">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>parse_class.R</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb20"><pre class="sourceCode numberSource r number-lines code-with-copy"><code class="sourceCode r"><span id="cb20-1"><a href="#cb20-1"></a>subtree <span class="ot">&lt;-</span> <span class="cf">function</span>(parent, <span class="at">children =</span> <span class="fu">list</span>()) {</span>
+<span id="cb20-2"><a href="#cb20-2"></a>  <span class="fu">structure</span>(</span>
+<span id="cb20-3"><a href="#cb20-3"></a>    <span class="fu">list</span>(<span class="at">parent =</span> parent, <span class="at">children =</span> children),</span>
+<span id="cb20-4"><a href="#cb20-4"></a>    <span class="at">class =</span> <span class="st">"subtree"</span></span>
+<span id="cb20-5"><a href="#cb20-5"></a>  )</span>
+<span id="cb20-6"><a href="#cb20-6"></a>}</span>
+<span id="cb20-7"><a href="#cb20-7"></a></span>
+<span id="cb20-8"><a href="#cb20-8"></a>print.subtree <span class="ot">&lt;-</span> <span class="cf">function</span>(x, ...) {</span>
+<span id="cb20-9"><a href="#cb20-9"></a>  <span class="cf">if</span>(<span class="fu">length</span>(x) <span class="sc">==</span> <span class="dv">0</span>) {</span>
+<span id="cb20-10"><a href="#cb20-10"></a>    <span class="fu">cat</span>(<span class="st">"&lt;Empty parse_tree&gt;</span><span class="sc">\n</span><span class="st">"</span>)</span>
+<span id="cb20-11"><a href="#cb20-11"></a>  } <span class="cf">else</span> {</span>
+<span id="cb20-12"><a href="#cb20-12"></a>    <span class="fu">print</span>(x<span class="sc">$</span>parent)</span>
+<span id="cb20-13"><a href="#cb20-13"></a>    <span class="cf">if</span>(<span class="fu">length</span>(x<span class="sc">$</span>children) <span class="sc">&gt;</span> <span class="dv">0</span>) {</span>
+<span id="cb20-14"><a href="#cb20-14"></a>      <span class="cf">for</span>(child <span class="cf">in</span> x<span class="sc">$</span>children) {</span>
+<span id="cb20-15"><a href="#cb20-15"></a>        out <span class="ot">&lt;-</span> <span class="fu">capture.output</span>(<span class="fu">print</span>(child))</span>
+<span id="cb20-16"><a href="#cb20-16"></a>        out <span class="ot">&lt;-</span> <span class="fu">paste</span>(<span class="st">"    "</span>, out)</span>
+<span id="cb20-17"><a href="#cb20-17"></a>        <span class="fu">cat</span>(out, <span class="at">sep =</span> <span class="st">"</span><span class="sc">\n</span><span class="st">"</span>)</span>
+<span id="cb20-18"><a href="#cb20-18"></a>      }</span>
+<span id="cb20-19"><a href="#cb20-19"></a>    }</span>
+<span id="cb20-20"><a href="#cb20-20"></a>  }</span>
+<span id="cb20-21"><a href="#cb20-21"></a>  <span class="fu">return</span>(<span class="fu">invisible</span>(x))</span>
+<span id="cb20-22"><a href="#cb20-22"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+<p>Whatevs. That’s not really the point of the book, and frankly if I were writing a book on software design<a href="#fn6" class="footnote-ref" id="fnref6" role="doc-noteref"><sup>6</sup></a> I would probably make the same choice that Greg has made: for the blog post I want pretty output because it’s supposed to be an easy read. For a book that is intended to help you think about software design? For that you actually want the reader to engage deeply with the “list of lists of lists of…” data structure that my print methods are glossing over.</p>
+</section>
 <section id="version-1-1" class="level3">
 <h3 class="anchored" data-anchor-id="version-1-1">Version 1</h3>
+<p>With that out of the way, let’s have a look at the code for a parser that only does the forward sweep. The key insight that the book walks you through is that there are three distinct types of action the parser takes at this step:</p>
+<ul>
+<li>There are kinds of token (<code>Literal</code>, <code>Start</code>, <code>End</code>, and <code>GroupStart</code>) that the parser can process simply by appending the token to the bottom of the tree the moment it encounters them.</li>
+<li>There are other kinds of token (<code>GroupEnd</code> and <code>Any</code>) that require the parser to restructure the tree, but they rely only on the tokens seen so far, so the parser can reorganise the tree on the fly during this first pass</li>
+<li>There is one annoying token (<code>Or</code>) that depends both on things the parser has already seen <em>and</em> on things that haven’t been observed yet as the parser sweeps forward. What we do here is a partial organisation: we process the bits we know about (e.g., the <code>a</code> on the left hand side of an <code>a|b</code> statement is known even when we’ve only read <code>a|</code> so far) but then leave a “Missing” placeholder token to express the fact that we know that the <code>Or</code> operator <code>|</code> has two children: we know <code>a</code>, but <code>b</code> will need to be filled in later.</li>
+</ul>
+<p>Here’s the R code:</p>
 <div class="cell" data-file="parser_1.R">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
 <pre><strong>parser_1.R</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb16"><pre class="sourceCode numberSource r number-lines code-with-copy"><code class="sourceCode r"><span id="cb16-1"><a href="#cb16-1"></a>list_reverse <span class="ot">&lt;-</span> <span class="cf">function</span>(x) {</span>
-<span id="cb16-2"><a href="#cb16-2"></a>  x[<span class="fu">length</span>(x)<span class="sc">:</span><span class="dv">1</span>]</span>
-<span id="cb16-3"><a href="#cb16-3"></a>}</span>
-<span id="cb16-4"><a href="#cb16-4"></a></span>
-<span id="cb16-5"><a href="#cb16-5"></a>update_tree <span class="ot">&lt;-</span> <span class="cf">function</span>(tree, token) {</span>
-<span id="cb16-6"><a href="#cb16-6"></a></span>
-<span id="cb16-7"><a href="#cb16-7"></a>  <span class="co"># For some kinds of token, we simply append them to the tree</span></span>
-<span id="cb16-8"><a href="#cb16-8"></a>  <span class="cf">if</span>(token<span class="sc">$</span>kind <span class="sc">%in%</span> <span class="fu">c</span>(<span class="st">"Literal"</span>, <span class="st">"Start"</span>, <span class="st">"End"</span>, <span class="st">"GroupStart"</span>)) {</span>
-<span id="cb16-9"><a href="#cb16-9"></a>    tree[[<span class="fu">length</span>(tree) <span class="sc">+</span> <span class="dv">1</span>]] <span class="ot">&lt;-</span> <span class="fu">subtree</span>(token)</span>
-<span id="cb16-10"><a href="#cb16-10"></a>  }</span>
-<span id="cb16-11"><a href="#cb16-11"></a></span>
-<span id="cb16-12"><a href="#cb16-12"></a>  <span class="co"># When GroupEnd is encountered, find the most recent GroupStart and</span></span>
-<span id="cb16-13"><a href="#cb16-13"></a>  <span class="co"># make the tokens between them the children of a Group</span></span>
-<span id="cb16-14"><a href="#cb16-14"></a>  <span class="cf">if</span> (token<span class="sc">$</span>kind <span class="sc">==</span> <span class="st">"GroupEnd"</span>) {</span>
-<span id="cb16-15"><a href="#cb16-15"></a>    children <span class="ot">&lt;-</span> <span class="fu">list</span>()</span>
-<span id="cb16-16"><a href="#cb16-16"></a>    <span class="cf">while</span>(<span class="cn">TRUE</span>) {</span>
-<span id="cb16-17"><a href="#cb16-17"></a>      last <span class="ot">&lt;-</span> tree[[<span class="fu">length</span>(tree)]]</span>
-<span id="cb16-18"><a href="#cb16-18"></a>      tree <span class="ot">&lt;-</span> tree[<span class="sc">-</span><span class="fu">length</span>(tree)]</span>
-<span id="cb16-19"><a href="#cb16-19"></a>      <span class="cf">if</span>(last<span class="sc">$</span>parent<span class="sc">$</span>kind <span class="sc">==</span> <span class="st">"GroupStart"</span>) {</span>
-<span id="cb16-20"><a href="#cb16-20"></a>        <span class="cf">break</span></span>
-<span id="cb16-21"><a href="#cb16-21"></a>      }</span>
-<span id="cb16-22"><a href="#cb16-22"></a>      children[[<span class="fu">length</span>(children) <span class="sc">+</span> <span class="dv">1</span>]] <span class="ot">&lt;-</span> last</span>
-<span id="cb16-23"><a href="#cb16-23"></a>    }</span>
-<span id="cb16-24"><a href="#cb16-24"></a>    tree[[<span class="fu">length</span>(tree) <span class="sc">+</span> <span class="dv">1</span>]] <span class="ot">&lt;-</span> <span class="fu">subtree</span>(</span>
-<span id="cb16-25"><a href="#cb16-25"></a>      <span class="at">parent =</span> <span class="fu">token</span>(<span class="st">"Group"</span>, last<span class="sc">$</span>parent<span class="sc">$</span>loc),</span>
-<span id="cb16-26"><a href="#cb16-26"></a>      <span class="at">children =</span> <span class="fu">list_reverse</span>(children)</span>
-<span id="cb16-27"><a href="#cb16-27"></a>    )</span>
-<span id="cb16-28"><a href="#cb16-28"></a>  }</span>
-<span id="cb16-29"><a href="#cb16-29"></a></span>
-<span id="cb16-30"><a href="#cb16-30"></a>  <span class="co"># When Any is encountered, make the preceding token (or subtree)</span></span>
-<span id="cb16-31"><a href="#cb16-31"></a>  <span class="co"># the child of the Any token</span></span>
-<span id="cb16-32"><a href="#cb16-32"></a>  <span class="cf">if</span> (token<span class="sc">$</span>kind <span class="sc">==</span> <span class="st">"Any"</span>) {</span>
-<span id="cb16-33"><a href="#cb16-33"></a>    last <span class="ot">&lt;-</span> tree[[<span class="fu">length</span>(tree)]]</span>
-<span id="cb16-34"><a href="#cb16-34"></a>    tree[[<span class="fu">length</span>(tree)]] <span class="ot">&lt;-</span> <span class="fu">subtree</span>(</span>
-<span id="cb16-35"><a href="#cb16-35"></a>      <span class="at">parent =</span> token,</span>
-<span id="cb16-36"><a href="#cb16-36"></a>      <span class="at">children =</span> <span class="fu">list</span>(last)</span>
-<span id="cb16-37"><a href="#cb16-37"></a>    )</span>
-<span id="cb16-38"><a href="#cb16-38"></a>  }</span>
-<span id="cb16-39"><a href="#cb16-39"></a></span>
-<span id="cb16-40"><a href="#cb16-40"></a>  <span class="co"># When Or is encountered, create a subtree with two children. The</span></span>
-<span id="cb16-41"><a href="#cb16-41"></a>  <span class="co"># first (or left) child is taken by moving it from the previous</span></span>
-<span id="cb16-42"><a href="#cb16-42"></a>  <span class="co"># token/subtree in our list. The second child is tagged as "Missing"</span></span>
-<span id="cb16-43"><a href="#cb16-43"></a>  <span class="co"># and will be filled in later</span></span>
-<span id="cb16-44"><a href="#cb16-44"></a>  <span class="cf">if</span> (token<span class="sc">$</span>kind <span class="sc">==</span> <span class="st">"Or"</span>) {</span>
-<span id="cb16-45"><a href="#cb16-45"></a>    last <span class="ot">&lt;-</span> tree[[<span class="fu">length</span>(tree)]]</span>
-<span id="cb16-46"><a href="#cb16-46"></a>    tree[[<span class="fu">length</span>(tree)]] <span class="ot">&lt;-</span> <span class="fu">subtree</span>(</span>
-<span id="cb16-47"><a href="#cb16-47"></a>      <span class="at">parent =</span> token,</span>
-<span id="cb16-48"><a href="#cb16-48"></a>      <span class="at">children =</span> <span class="fu">list</span>(last, <span class="fu">subtree</span>(<span class="fu">token</span>(<span class="at">kind =</span> <span class="st">"Missing"</span>, <span class="at">loc =</span> <span class="dv">0</span>)))</span>
-<span id="cb16-49"><a href="#cb16-49"></a>    )</span>
-<span id="cb16-50"><a href="#cb16-50"></a>  }</span>
-<span id="cb16-51"><a href="#cb16-51"></a></span>
-<span id="cb16-52"><a href="#cb16-52"></a>  <span class="fu">return</span>(tree)</span>
-<span id="cb16-53"><a href="#cb16-53"></a>}</span>
-<span id="cb16-54"><a href="#cb16-54"></a></span>
-<span id="cb16-55"><a href="#cb16-55"></a>parse <span class="ot">&lt;-</span> <span class="cf">function</span>(text) {</span>
-<span id="cb16-56"><a href="#cb16-56"></a>  tree <span class="ot">&lt;-</span> <span class="fu">list</span>()</span>
-<span id="cb16-57"><a href="#cb16-57"></a>  tokens <span class="ot">&lt;-</span> <span class="fu">tokenize</span>(text)</span>
-<span id="cb16-58"><a href="#cb16-58"></a>  <span class="cf">for</span>(token <span class="cf">in</span> tokens) {</span>
-<span id="cb16-59"><a href="#cb16-59"></a>    tree <span class="ot">&lt;-</span> <span class="fu">update_tree</span>(tree, token)</span>
-<span id="cb16-60"><a href="#cb16-60"></a>  }</span>
-<span id="cb16-61"><a href="#cb16-61"></a>  <span class="fu">class</span>(tree) <span class="ot">&lt;-</span> <span class="st">"token_list"</span> <span class="co"># allows pretty printing</span></span>
-<span id="cb16-62"><a href="#cb16-62"></a>  <span class="fu">return</span>(tree)</span>
-<span id="cb16-63"><a href="#cb16-63"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb21"><pre class="sourceCode numberSource r number-lines code-with-copy"><code class="sourceCode r"><span id="cb21-1"><a href="#cb21-1"></a>list_reverse <span class="ot">&lt;-</span> <span class="cf">function</span>(x) {</span>
+<span id="cb21-2"><a href="#cb21-2"></a>  x[<span class="fu">length</span>(x)<span class="sc">:</span><span class="dv">1</span>]</span>
+<span id="cb21-3"><a href="#cb21-3"></a>}</span>
+<span id="cb21-4"><a href="#cb21-4"></a></span>
+<span id="cb21-5"><a href="#cb21-5"></a>update_tree <span class="ot">&lt;-</span> <span class="cf">function</span>(tree, token) {</span>
+<span id="cb21-6"><a href="#cb21-6"></a></span>
+<span id="cb21-7"><a href="#cb21-7"></a>  <span class="co"># For some kinds of token, we simply append them to the tree</span></span>
+<span id="cb21-8"><a href="#cb21-8"></a>  <span class="cf">if</span>(token<span class="sc">$</span>kind <span class="sc">%in%</span> <span class="fu">c</span>(<span class="st">"Literal"</span>, <span class="st">"Start"</span>, <span class="st">"End"</span>, <span class="st">"GroupStart"</span>)) {</span>
+<span id="cb21-9"><a href="#cb21-9"></a>    tree[[<span class="fu">length</span>(tree) <span class="sc">+</span> <span class="dv">1</span>]] <span class="ot">&lt;-</span> <span class="fu">subtree</span>(token)</span>
+<span id="cb21-10"><a href="#cb21-10"></a>  }</span>
+<span id="cb21-11"><a href="#cb21-11"></a></span>
+<span id="cb21-12"><a href="#cb21-12"></a>  <span class="co"># When GroupEnd is encountered, find the most recent GroupStart and</span></span>
+<span id="cb21-13"><a href="#cb21-13"></a>  <span class="co"># make the tokens between them the children of a Group</span></span>
+<span id="cb21-14"><a href="#cb21-14"></a>  <span class="cf">if</span> (token<span class="sc">$</span>kind <span class="sc">==</span> <span class="st">"GroupEnd"</span>) {</span>
+<span id="cb21-15"><a href="#cb21-15"></a>    children <span class="ot">&lt;-</span> <span class="fu">list</span>()</span>
+<span id="cb21-16"><a href="#cb21-16"></a>    <span class="cf">while</span>(<span class="cn">TRUE</span>) {</span>
+<span id="cb21-17"><a href="#cb21-17"></a>      last <span class="ot">&lt;-</span> tree[[<span class="fu">length</span>(tree)]]</span>
+<span id="cb21-18"><a href="#cb21-18"></a>      tree <span class="ot">&lt;-</span> tree[<span class="sc">-</span><span class="fu">length</span>(tree)]</span>
+<span id="cb21-19"><a href="#cb21-19"></a>      <span class="cf">if</span>(last<span class="sc">$</span>parent<span class="sc">$</span>kind <span class="sc">==</span> <span class="st">"GroupStart"</span>) {</span>
+<span id="cb21-20"><a href="#cb21-20"></a>        <span class="cf">break</span></span>
+<span id="cb21-21"><a href="#cb21-21"></a>      }</span>
+<span id="cb21-22"><a href="#cb21-22"></a>      children[[<span class="fu">length</span>(children) <span class="sc">+</span> <span class="dv">1</span>]] <span class="ot">&lt;-</span> last</span>
+<span id="cb21-23"><a href="#cb21-23"></a>    }</span>
+<span id="cb21-24"><a href="#cb21-24"></a>    tree[[<span class="fu">length</span>(tree) <span class="sc">+</span> <span class="dv">1</span>]] <span class="ot">&lt;-</span> <span class="fu">subtree</span>(</span>
+<span id="cb21-25"><a href="#cb21-25"></a>      <span class="at">parent =</span> <span class="fu">token</span>(<span class="st">"Group"</span>, last<span class="sc">$</span>parent<span class="sc">$</span>loc),</span>
+<span id="cb21-26"><a href="#cb21-26"></a>      <span class="at">children =</span> <span class="fu">list_reverse</span>(children)</span>
+<span id="cb21-27"><a href="#cb21-27"></a>    )</span>
+<span id="cb21-28"><a href="#cb21-28"></a>  }</span>
+<span id="cb21-29"><a href="#cb21-29"></a></span>
+<span id="cb21-30"><a href="#cb21-30"></a>  <span class="co"># When Any is encountered, make the preceding token (or subtree)</span></span>
+<span id="cb21-31"><a href="#cb21-31"></a>  <span class="co"># the child of the Any token</span></span>
+<span id="cb21-32"><a href="#cb21-32"></a>  <span class="cf">if</span> (token<span class="sc">$</span>kind <span class="sc">==</span> <span class="st">"Any"</span>) {</span>
+<span id="cb21-33"><a href="#cb21-33"></a>    last <span class="ot">&lt;-</span> tree[[<span class="fu">length</span>(tree)]]</span>
+<span id="cb21-34"><a href="#cb21-34"></a>    tree[[<span class="fu">length</span>(tree)]] <span class="ot">&lt;-</span> <span class="fu">subtree</span>(</span>
+<span id="cb21-35"><a href="#cb21-35"></a>      <span class="at">parent =</span> token,</span>
+<span id="cb21-36"><a href="#cb21-36"></a>      <span class="at">children =</span> <span class="fu">list</span>(last)</span>
+<span id="cb21-37"><a href="#cb21-37"></a>    )</span>
+<span id="cb21-38"><a href="#cb21-38"></a>  }</span>
+<span id="cb21-39"><a href="#cb21-39"></a></span>
+<span id="cb21-40"><a href="#cb21-40"></a>  <span class="co"># When Or is encountered, create a subtree with two children. The</span></span>
+<span id="cb21-41"><a href="#cb21-41"></a>  <span class="co"># first (or left) child is taken by moving it from the previous</span></span>
+<span id="cb21-42"><a href="#cb21-42"></a>  <span class="co"># token/subtree in our list. The second child is tagged as "Missing"</span></span>
+<span id="cb21-43"><a href="#cb21-43"></a>  <span class="co"># and will be filled in later</span></span>
+<span id="cb21-44"><a href="#cb21-44"></a>  <span class="cf">if</span> (token<span class="sc">$</span>kind <span class="sc">==</span> <span class="st">"Or"</span>) {</span>
+<span id="cb21-45"><a href="#cb21-45"></a>    last <span class="ot">&lt;-</span> tree[[<span class="fu">length</span>(tree)]]</span>
+<span id="cb21-46"><a href="#cb21-46"></a>    tree[[<span class="fu">length</span>(tree)]] <span class="ot">&lt;-</span> <span class="fu">subtree</span>(</span>
+<span id="cb21-47"><a href="#cb21-47"></a>      <span class="at">parent =</span> token,</span>
+<span id="cb21-48"><a href="#cb21-48"></a>      <span class="at">children =</span> <span class="fu">list</span>(last, <span class="fu">subtree</span>(<span class="fu">token</span>(<span class="at">kind =</span> <span class="st">"Missing"</span>, <span class="at">loc =</span> <span class="dv">0</span>)))</span>
+<span id="cb21-49"><a href="#cb21-49"></a>    )</span>
+<span id="cb21-50"><a href="#cb21-50"></a>  }</span>
+<span id="cb21-51"><a href="#cb21-51"></a></span>
+<span id="cb21-52"><a href="#cb21-52"></a>  <span class="fu">return</span>(tree)</span>
+<span id="cb21-53"><a href="#cb21-53"></a>}</span>
+<span id="cb21-54"><a href="#cb21-54"></a></span>
+<span id="cb21-55"><a href="#cb21-55"></a>parse <span class="ot">&lt;-</span> <span class="cf">function</span>(text) {</span>
+<span id="cb21-56"><a href="#cb21-56"></a>  tree <span class="ot">&lt;-</span> <span class="fu">list</span>()</span>
+<span id="cb21-57"><a href="#cb21-57"></a>  tokens <span class="ot">&lt;-</span> <span class="fu">tokenize</span>(text)</span>
+<span id="cb21-58"><a href="#cb21-58"></a>  <span class="cf">for</span>(token <span class="cf">in</span> tokens) {</span>
+<span id="cb21-59"><a href="#cb21-59"></a>    tree <span class="ot">&lt;-</span> <span class="fu">update_tree</span>(tree, token)</span>
+<span id="cb21-60"><a href="#cb21-60"></a>  }</span>
+<span id="cb21-61"><a href="#cb21-61"></a>  <span class="fu">class</span>(tree) <span class="ot">&lt;-</span> <span class="st">"token_list"</span> <span class="co"># allows pretty printing</span></span>
+<span id="cb21-62"><a href="#cb21-62"></a>  <span class="fu">return</span>(tree)</span>
+<span id="cb21-63"><a href="#cb21-63"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 </div>
+<p>For expressions like <code>"^caa*t$</code> that don’t have a <code>|</code>, this version of the parser constructs a completed parse tree:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb17"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="fu">source</span>(<span class="st">"token_class.R"</span>)</span>
-<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a><span class="fu">source</span>(<span class="st">"parse_class.R"</span>)</span>
-<span id="cb17-3"><a href="#cb17-3" aria-hidden="true" tabindex="-1"></a><span class="fu">source</span>(<span class="st">"tokenizer_2.R"</span>)</span>
-<span id="cb17-4"><a href="#cb17-4" aria-hidden="true" tabindex="-1"></a><span class="fu">source</span>(<span class="st">"parser_1.R"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-</div>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb18"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="fu">parse</span>(<span class="st">"^caa*t$"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb22"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a><span class="fu">parse</span>(<span class="st">"^caa*t$"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>&lt;Token at 1&gt; Start
 &lt;Token at 2&gt; Literal: c
@@ -630,41 +718,54 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 &lt;Token at 6&gt; Literal: t
 &lt;Token at 7&gt; End</code></pre>
 </div>
-<div class="sourceCode cell-code" id="cb20"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a><span class="fu">parse</span>(<span class="st">"aa|b"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>&lt;Token at 1&gt; Literal: a
-&lt;Token at 3&gt; Or
-     &lt;Token at 2&gt; Literal: a
-     &lt;Token at 0&gt; Missing
-&lt;Token at 4&gt; Literal: b</code></pre>
 </div>
-<div class="sourceCode cell-code" id="cb22"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a><span class="fu">parse</span>(<span class="st">"(ab)|c"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>Notice that the ordering of the tokens has changed: to represent the subexpression <code>a*</code>, the parser creates an <code>Any</code> token corresponding to the <code>*</code> character and ensures that the <code>Literal</code> <code>a</code> token is a child of the <code>Any</code> operator.</p>
+<p>A similar thing happens where <code>GroupStart</code> and <code>GroupEnd</code> tokens are collapsed into a single <code>Group</code> token that has all tokens within the group as children:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb24"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb24-1"><a href="#cb24-1" aria-hidden="true" tabindex="-1"></a><span class="fu">parse</span>(<span class="st">"(na)* hey yeah goodbye"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
-<pre><code>&lt;Token at 5&gt; Or
+<pre><code>&lt;Token at 5&gt; Any
      &lt;Token at 1&gt; Group
-          &lt;Token at 2&gt; Literal: a
-          &lt;Token at 3&gt; Literal: b
-     &lt;Token at 0&gt; Missing
-&lt;Token at 6&gt; Literal: c</code></pre>
+          &lt;Token at 2&gt; Literal: n
+          &lt;Token at 3&gt; Literal: a
+&lt;Token at 6&gt; Literal:  
+&lt;Token at 7&gt; Literal: h
+&lt;Token at 8&gt; Literal: e
+&lt;Token at 9&gt; Literal: y
+&lt;Token at 10&gt; Literal:  
+&lt;Token at 11&gt; Literal: y
+&lt;Token at 12&gt; Literal: e
+&lt;Token at 13&gt; Literal: a
+&lt;Token at 14&gt; Literal: h
+&lt;Token at 15&gt; Literal:  
+&lt;Token at 16&gt; Literal: g
+&lt;Token at 17&gt; Literal: o
+&lt;Token at 18&gt; Literal: o
+&lt;Token at 19&gt; Literal: d
+&lt;Token at 20&gt; Literal: b
+&lt;Token at 21&gt; Literal: y
+&lt;Token at 22&gt; Literal: e</code></pre>
 </div>
-<div class="sourceCode cell-code" id="cb24"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb24-1"><a href="#cb24-1" aria-hidden="true" tabindex="-1"></a><span class="fu">parse</span>(<span class="st">"^(caa*t)|(dog)$"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>For expressions that contain an either/or operation, we end up with a parse tree that contains a lot of <code>Missing</code> tokens. That’s my way of expressing the fact that the parser needs to come back and clean up afterwards:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb26"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb26-1"><a href="#cb26-1" aria-hidden="true" tabindex="-1"></a><span class="fu">parse</span>(<span class="st">"(cat)|(dog)"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
-<pre><code>&lt;Token at 1&gt; Start
-&lt;Token at 9&gt; Or
-     &lt;Token at 2&gt; Group
-          &lt;Token at 3&gt; Literal: c
-          &lt;Token at 4&gt; Literal: a
-          &lt;Token at 6&gt; Any
-               &lt;Token at 5&gt; Literal: a
-          &lt;Token at 7&gt; Literal: t
+<pre><code>&lt;Token at 6&gt; Or
+     &lt;Token at 1&gt; Group
+          &lt;Token at 2&gt; Literal: c
+          &lt;Token at 3&gt; Literal: a
+          &lt;Token at 4&gt; Literal: t
      &lt;Token at 0&gt; Missing
-&lt;Token at 10&gt; Group
-     &lt;Token at 11&gt; Literal: d
-     &lt;Token at 12&gt; Literal: o
-     &lt;Token at 13&gt; Literal: g
-&lt;Token at 15&gt; End</code></pre>
+&lt;Token at 7&gt; Group
+     &lt;Token at 8&gt; Literal: d
+     &lt;Token at 9&gt; Literal: o
+     &lt;Token at 10&gt; Literal: g</code></pre>
 </div>
-<div class="sourceCode cell-code" id="cb26"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb26-1"><a href="#cb26-1" aria-hidden="true" tabindex="-1"></a><span class="fu">parse</span>(<span class="st">"ab|((cd*)|ef)|g"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>Notice that there are some kinds of regular expressions for which this clean-up might require us to dive deep into the tree to fix the incomplete parts:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb28"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb28-1"><a href="#cb28-1" aria-hidden="true" tabindex="-1"></a><span class="fu">parse</span>(<span class="st">"ab|((cd*)|ef)|g"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>&lt;Token at 1&gt; Literal: a
 &lt;Token at 3&gt; Or
@@ -683,18 +784,9 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
      &lt;Token at 0&gt; Missing
 &lt;Token at 15&gt; Literal: g</code></pre>
 </div>
-<div class="sourceCode cell-code" id="cb28"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb28-1"><a href="#cb28-1" aria-hidden="true" tabindex="-1"></a><span class="fu">parse</span>(<span class="st">"x|(y|z)"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>&lt;Token at 2&gt; Or
-     &lt;Token at 1&gt; Literal: x
-     &lt;Token at 0&gt; Missing
-&lt;Token at 3&gt; Group
-     &lt;Token at 5&gt; Or
-          &lt;Token at 4&gt; Literal: y
-          &lt;Token at 0&gt; Missing
-     &lt;Token at 6&gt; Literal: z</code></pre>
 </div>
-</div>
+<p>Again, there’s a kind of principle here: each part of the tool has its own job to do. The forward pass does the parts that it can do, and delegates the unfinished work to the clean-up process. When reading the book, and especially when implementing it yourself, the learner is invited to think about the importance of carving up the software into sensible parts.</p>
+<p>Seems like a thing worth knowing.</p>
 </section>
 <section id="version-2-1" class="level3">
 <h3 class="anchored" data-anchor-id="version-2-1">Version 2</h3>
@@ -899,6 +991,10 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <ol>
 <li id="fn1"><p>Something that you’d think I’d have been taught back when I was an academic and had to do it for a living. Universities, however, are utterly useless at this kind of thing. They tend to throw professors in the deep end with this expectation that someone who has made a career as a good researcher will automatically work out how to be a good teacher. Suffice it to say, this widespread practice has not been the best thing for higher education.<a href="#fnref1" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
 <li id="fn2"><p>As an aside, this is hardly unique to the tech world. Academia is just as bad. Probably worse, actually.<a href="#fnref2" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn3"><p>Example: Greg’s code relies heavily on javascript <code>.push()</code> and <code>.pop()</code> methods that make it very easy to treat an array as a <a href="https://en.wikipedia.org/wiki/Stack_(abstract_data_type)">stack</a>. I’m going to work with R lists that don’t have these little niceties. It’s going to make some of my code later a little ugly, I’m afraid. Oh well.<a href="#fnref3" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn4"><p>This is not the place for me to talk about my love/hate relationship with the <a href="http://adv-r.had.co.nz/S3.html">S3 object-oriented programming system</a> in R. Suffice it to say, I have <em>feelings</em>. That’s enough for now.<a href="#fnref4" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn5"><p>Okay, I’ll be honest, I did have a set of informal tests that I wrote to accompany my code, even for this blog post: I was too lazy to bother writing a proper test suite, but the initial drafts of this blog post had a bunch of regular expressions that would be tokenized/parsed every time I rendered the draft, which let me check that the code I was writing was not “total batshit”. I do have <em>some</em> standards, at least when it comes to code. The same cannot be said of my <a href="https://youtu.be/5QML71sBu1E">taste in men</a>, but that’s a different story…<a href="#fnref5" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn6"><p>Yeah no that will never happen. If you’re waiting for me to attempt something like what Greg has done, then – to quote Paul Kelly and Kev Carmody – <a href="https://youtu.be/dAONlfoNVuY">you don’t stand the chance of a cinder in snow</a>. I know my limits.<a href="#fnref6" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
 </ol>
 </section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div id="quarto-reuse" class="quarto-appendix-contents"><div><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2023,
   author = {Navarro, Danielle},

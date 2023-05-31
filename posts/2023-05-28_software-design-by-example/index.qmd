@@ -81,9 +81,7 @@ A little honesty when writing blog posts is important, I feel. When reading the 
 
 The parts that I did read fairly deeply are Chapters 7 and 8, which talk about how [parse](https://en.wikipedia.org/wiki/Parsing) a [regular expression](https://en.wikipedia.org/wiki/Regular_expression) and how to write the code that does [pattern matching](https://en.wikipedia.org/wiki/Pattern_matching) using them. Actually, if I'm super honest the part I spent most time with is Chapter 8, which shows you how to extract [tokens](https://en.wikipedia.org/wiki/Lexical_analysis#Token) and an a [parse tree](https://en.wikipedia.org/wiki/Parse_tree) for a restricted form of regular expression syntax. For that chapter, I worked through the examples and translated (most of) the code in R. In the rest of the post I'll show the code that I wrote, tie it back to the structure of Chapter 8 in the book, and at the end I'll say a little about what I learned from this exercise.
 
-## Writing the tokenizer
-
-The subset of regular expression syntax that we're going to consider uses the following characters:
+The subset of regular expression syntax that the book uses for this chapter uses the following rules:
 
 | Token Kind  | Meaning                                    | Characters used    |
 |:------------|:-------------------------------------------|:-------------------:
@@ -96,7 +94,35 @@ The subset of regular expression syntax that we're going to consider uses the fo
 
 It's a very small subset of the regular expression grammar available for pattern matching in R, javascript, and pretty much every language these days, but it's a handy one. It's certainly rich enough to make it an interesting exercise to write a parser. Not that it's particularly important to write my own parser: the purpose of doing so is to wrap my head around the basics of how parsers work and nothing more. As Greg helpfully reminds us on page 99, if a format is commonly known there will be good tools already, and if you find yourself wanting to roll your own parser to interpret some new file format you just invented for something... there's a good chance you shouldn't do it. The world has enough file formats already.
 
+## Writing the tokenizer
+
+If you want to write a regular expression parser, or any other parser for that matter, you actually have two distinct but interrelated problems to solve. Your data takes the form of an input string that you need to process. In English text, an input string might look like `"Danielle hates regular expressions"` but in a regular expression you're more likely to have something that looks like `"^caa*t$`. To interpret these strings -- in a purely [syntactic](https://en.wikipedia.org/wiki/Syntax) sense, not a [semantic](https://en.wikipedia.org/wiki/Semantics) one -- you need to
+
+- Carve the string up into a sequence of distinct (and possibly labelled) **tokens**. My English expression could be divided into a sequence of four tokens corresponding to the four words: `"Danielle"`, `"hates"`, `"regular"`, `"expressions"`. This **tokenization** process is not uniquely defined. For instance, I might choose to acknowledge that the `"-s"` ending in some words is in fact a distinct unit. While this is absolutely not the post to talk about [inflexional morphology](https://en.wikipedia.org/wiki/Inflection) in linguistics, it's important to recognise that in some contexts you might want to tokenize my sentence as `"Danielle"`, `"hate"`, `"-s"`, `"regular"`, `"expression"`, `"-s"`. 
+
+- Organise (or **parse**) the tokens into a structured format that explicitly acknowledges the way they relate to each other grammatically. For my English sentence this parsing might be something like this `[Danielle] [[hates] [regular expressions]]`, where I'm using the square brackets to illustrate the organisation: `"regular expressions"` and `"Danielle"` are both [noun phrases](https://en.wikipedia.org/wiki/Noun_phrase), `[hates]` is a verb, and `[hates regular expressions]` is a [verb phrase](https://en.wikipedia.org/wiki/Verb_phrase).
+
+The difference between the two is visually apparent when you try to draw them. When you tokenize the input you end up with a list of tokens:
+
+```{r}
+#| echo: false
+cat("Danielle\nhates\nregular\nexpressions\n")
+```
+
+After parsing this list of tokens, you end up with a tree. There's lots of ways you could visualise this tree, but something like this is good enough for my purposes:
+
+```{r}
+#| echo: false
+cat("[\n  Danielle\n]\n[\n  [\n    hates\n  ]\n  [\n    regular\n    expressions\n  ]\n]\n")
+```
+
+I could probably take this a bit further and annotate each part of the tree the way that linguists like to do, but it's not necessary to get the basic idea.
+
+The key thing to realise is that these two problems aren't independent. If you tokenize the string in a way that isn't suited to your problem, you're going to make life harder when you try to write the parser. As it happens, *Software Design by Example* gives you a very gentle example of how this happens, which I'll get to in moment when I try to write some code that automatically parses regular expressions like `^caa*t$`. 
+
 ### Preliminaries
+
+In the book, all the examples are -- obviously!!! -- written in javascript, and my code is going to be written in R. This matters somewhat since R and javascript are different languages with different assumptions about how you write code.^[Example: Greg's code relies heavily on javascript `.push()` and `.pop()` methods that make it very easy to treat an array as a [stack](https://en.wikipedia.org/wiki/Stack_(abstract_data_type)). I'm going to work with R lists that don't have these little niceties. It's going to make some of my code later a little ugly, I'm afraid. Oh well.] To make my life a little easier, I'm going to define some extremely informal R classes^[This is not the place for me to talk about my love/hate relationship with the [S3 object-oriented programming system](http://adv-r.had.co.nz/S3.html) in R. Suffice it to say, I have *feelings*. That's enough for now.] that don't actually do much. In my code, a "token" is just a list that has three fields: the `kind` of token referred to, the `loc` (location) of the token within the original string, and (optionally) a `value` that specifies the character (or characters) that represent the token in that string. Relatedly, the "token list" class is literally just a list:
 
 ```{r}
 #| label: token
@@ -105,19 +131,27 @@ It's a very small subset of the regular expression grammar available for pattern
 #| code-line-numbers: true
 ```
 
+The reason I decided to write this code for this post is that it also defines `print()` methods for these objects that make the printed output a little prettier:
+
+```{r}
+token(kind = "Noun", loc = 1, value = "Danielle")
+
+token_list(
+  token(kind = "Noun", loc = 1, value = "Danielle"),
+  token(kind = "Verb", loc = 10, value = "hates")
+)
+```
+
+Without the print methods, you'd see each token printed as a list, and the list of tokens printed as a list of lists. It's not super-important, but it does help me stay sane as I write. But whatever, let's move on and start writing a tokenizer for (very restricted!) regular expressions...
 
 ### Version 1
 
-```{r}
-#| label: tokenizer_1
-#| file: "tokenizer_1.R"
-#| filename: "tokenizer_1.R"
-#| code-line-numbers: true
-```
+A hallmark of good teaching -- in my not-entirely-humble opinion -- is when the instructor designs material in a way that gently encourages the learner to discover things on your own. Chapter 8 of *Software Design by Example* does this rather nicely at the beginning, by having the reader start out by writing a simple tokenizer that is later revealed to be "readable, efficient, and wrong". At the risk of revealing the instructional magic that Greg is so terribly good at, I'll explicitly state the flawed intuition that might lead you to write a tokenizer like this.
 
+Suppose I were to think about my tokenizer by considering a regular expression like `"^(cat)|(dog)$"`. There's a real trap you can fall into here, because this regular expression has natural language words, and you might be tempted to write a tokenizer that treats `"cat"` and `"dog"` as tokens. Or, to be slightly more precise, you might decide that to create tokens that allow "Literals" to contain multiple characters, like this: 
 
 ```{r}
-#| eval: false
+#| echo: false
 source("token_class.R")
 source("tokenizer_1.R")
 ```
@@ -126,33 +160,50 @@ source("tokenizer_1.R")
 tokenize("^(cat|dog)$")
 ```
 
-Merging a sequence of literal characters into a single multi-character literal makes the output readable, and in this case is very convenient if I later wanted to write a regular expression matcher that builds on top of this tokenizer:
+Merging a sequence of literal characters into a single multi-character literal makes the output readable, and who doesn't love it when the tokenizer informs you that you have a "Literal cat" in your string? 
+
+The book then walks you through the process of writing a `tokenize()` function that behaves exactly like this. Obviously, the original is in JavaScript, but here's an R version:
+
+```{r}
+#| label: tokenizer_1
+#| file: "tokenizer_1.R"
+#| filename: "tokenizer_1.R"
+#| code-line-numbers: true
+```
+
+I won't recapitulate all the steps that go into writing code like this -- read the book if you want to know things at this level of detail -- but suffice it to say that if I were better at JavaScript I'd have found it very easy to follow. 
+
+The point that matters here is that the reader is being encouraged to consider here is what happens to you later if you tokenize the input this way. Merging a sequence of literal characters into a single multi-character literal makes the output readable, and *in this specific case* the token list is very convenient if I later wanted to write a regular expression matcher that builds on top of this tokenizer. Using the base R `grepl()` function, you can see which strings match `"^(cat|dog)$"` and which don't:
 
 ```{r}
 grepl("^(cat|dog)$", c("cat", "dog", "dag", "ca"))
 ```
 
-If my tokenizer represent the literals in `^(cat|dog)$` as the two multicharacter literals `"cat"` and `"dog"` then it's going to be easier for me to write a regex matcher that mirrors the behaviour of `grepl()`.
+If my tokenizer represent the literals in `^(cat|dog)$` as the two multicharacter literals `"cat"` and `"dog"` then -- in this instance -- it's going to be easier for me to write a regex matcher that mirrors the behaviour of `grepl()`. 
 
-Unfortunately, there's a problem with this tokenizer. It's trying to be clever, by grouping multiple literals together, and it ends up being too greedy sometimes. Consider the regular expression `"^caa*t$"`. This is a pattern that should match against `"cat"` and `"caaaaat"` but should not match `"caacaat"`, as illustrated below:
+Very nice. 
+
+Unfortunately, once you start thinking about regular expressions more generally, there's a big problem with this tokenizer. It's trying to be clever, by grouping multiple literals together without considering how those literals will be used later on by the parser, and it ends up being too greedy sometimes. Consider the regular expression `"^caa*t$"`. This is a pattern that should match against `"cat"` and `"caaaaat"` but should not match `"caacaat"`, as illustrated below:
 
 ```{r}
 grepl("^caa*t$", c("cat", "caaaaat", "caacaat"))
 ```
 
-However, let's look at the tokens that are produced by this version of our `tokenizer()` function:
+However, let's look at the tokens produced by our `tokenizer()` function:
 
 ```{r}
 tokenize("^caa*t$")
 ```
 
-That's the wrong way to tokenize this input: in this regular expression the `*` operator should be applied only to the preceding character, so it's not correct to treat `"caa"` as a single literal string. What we should have done is split this into literals, `"ca"` and `"a"`. The `"ca"` literal is required and must appear at the beginning of the string (because it follows the start operator `^`), whereas `"a"` is optional and may appear zero or more times (because it precedes the any operator `*`). A tokenizer that collapses these into a single literal `"caa"` will make life hell for any regular expression parser that tries to work with these tokens. 
+Yeah, we're in big trouble here. 
 
-In essence, this tokenizer fails because it's trying to be a parser as well as a tokenizer, and as a consequence it solves both problems badly.
+That's the wrong way to tokenize this input: in this regular expression the `*` operator (i.e., the `Any` token in our token list) needs to be applied only to the preceding character, so it's not correct to treat `"caa"` as a single literal string. To write a functioning parser on top of this tokenizer would be a nightmare, because the parser would need to inspect the internal contents of the tokens: in order to parse the `*` character (the `Any` token), it would need to grab the `Literal caa` token and split it into two parts, a prefix `"ca"` and a suffix `"a"`, because `*` applies only to the suffix. 
+
+What this is telling us is that we've chosen a poor tokenizing scheme. The book is quite gentle in leading the reader to this conclusion, but when you're actually writing the code yourself you can't avoid discovering it. If your parser has to break apart your tokens to organise the input, then really you should be rethinking the tokenizer. 
 
 ### Version 2
 
-Okay so that doesn't work. The second approach considered in the chapter simplifies the code a little and produces a token list where every literal character is treated as a distinct token:
+Okay so that doesn't work. The second approach considered in the chapter simplifies the code a little and produces a token list where every literal character is treated as a distinct token. The code is only a minor modification of the previous version:
 
 ```{r}
 #| label: tokenizer_2
@@ -163,7 +214,7 @@ Okay so that doesn't work. The second approach considered in the chapter simplif
 
 
 ```{r}
-#| eval: false
+#| echo: false
 source("token_class.R")
 source("tokenizer_2.R")
 ```
@@ -174,19 +225,44 @@ Here's the sort of output we get from this version of the tokenizer:
 tokenize("^caa*t$")
 ```
 
-This output is entirely correct, as long as our goal is *only* to extract and label the tokens in our regular expression. The output correctly labels each literal as a literal and assigns the appropriate label to the non-literals. The problem, however, is that doesn't solve the parsing problem. We've lost the grouping structure that we had in our original version. The tokenizer has no way of expressing the idea that `"ca"` is a syntactically coherent unit in the expression `^caa*t$`, or that `"cat"` is similarly coherent within `^(cat|dog)$`. It's a tokenizer, but not a parser. 
+This output is entirely correct, as long as our goal is *only* to extract and label the tokens in our regular expression. The output correctly labels each literal as a literal and assigns the appropriate label to the non-literals. What is very clear, though, when you look at the output from this version of `tokenize()` is that it is absolutely *not* a parser. We've lost the grouping structure that we had in our original version. The tokenizer has no way of expressing the idea that `"ca"` is a syntactically coherent unit in the expression `^caa*t$`, or that `"cat"` is similarly coherent within `^(cat|dog)$`. It's a good tokenizer, but a bad parser.
 
-Fortunately, we can build a parser on top of this tokenizer. It requires a little thought, but it's achieveable because the tokenizer is reliable *as* a tokenizer.
+That's okay: it's not meant to be a parser. The tokenizer does its job perfectly well, and importantly it provides output that a good parser can work with. It requires a little thought, but it's going to work out okay because the tokenizer is reliable *as* a tokenizer. Each tool does one job and only that job: you don't need your tokenizer to parse the syntax, and you don't want your parser to mess around with the internal contents of the tokens. 
+
+Gosh... I wonder if that's one of those software engineering principles?
 
 ### Post-mortem
 
-At this point any competent software engineer is probably screaming internally, because I have not written any unit tests for my code. This is terribly bad practice, and something I would never do when writing actual software. Suffice it to say *Software Design by Example* is at great pains to emphasize the importance of unit tests, and if you were actually following the chapter step by step you'd see that Greg does in fact introduce tests as he develops this example. I've been lazy in this blog post because... well, it's a blog post. It's neither intended to be software nor a chapter in a book on software engineering. 
+At this point any competent software engineer is probably screaming internally, because I have not written any unit tests for my code. This is terribly bad practice, and something I would never do when writing actual software.^[Okay, I'll be honest, I did have a set of informal tests that I wrote to accompany my code, even for this blog post: I was too lazy to bother writing a proper test suite, but the initial drafts of this blog post had a bunch of regular expressions that would be tokenized/parsed every time I rendered the draft, which let me check that the code I was writing was not "total batshit". I do have *some* standards, at least when it comes to code. The same cannot be said of my [taste in men](https://youtu.be/5QML71sBu1E), but that's a different story...] Suffice it to say *Software Design by Example* is at great pains to emphasize the importance of unit tests, and if you were actually following the chapter step by step you'd see that Greg does in fact introduce tests as he develops this example. I've been lazy in this blog post because... well, it's a blog post. It's neither intended to be software nor a chapter in a book on software engineering. 
 
 Anyway... let's return to the development of ideas in the chapter, yes?
 
 ## Parsing the tokens
 
+The second half of chapter 8 in *Software Design by Example* focuses on the parser, and again I'm not going to try to recapitulate all the logic that the book walks you through. It walks the reader through an intuitive process of thinking about how you want to write the parser, but the key thing I want to highlight here is that when you're reading the book you get a strong sense of why you want to write the parser in two parts: there's a "forward pass" where the parser sweeps through the token list from first to last, constructing the parts of the parse tree that it can handle on the basis of "what it has seen so far", and then a subsequent clean up phase where it sweeps back and fixes all the incomplete parts. When I came to implement it in R myself I made some small departures from the way Greg has done it in the book, but the essence is the same. What I'll do here is present two versions of the parser, one that *only* does the forward pass (so you can see all the missing bits), and then a second version that does the clean up afterwards. 
+
+### Preliminaries
+
+As before, I'll do some preliminary work that isn't really essential for the purposes of the book, but I find helpful for writing this blog post. Specifically, I'll define a `subtree()` function that provides a "subtree" class. All it does is capture the fundamental structure of a tree: each node is defined by a `parent` element, and that parent can have zero, one, or more `children`. This isn't really necessary for our parser, but it does allow me to define a `print()` method that makes the parse trees in this post look a little prettier:
+
+```{r}
+#| label: parse
+#| file: "parse_class.R"
+#| filename: "parse_class.R"
+#| code-line-numbers: true
+```
+
+Whatevs. That's not really the point of the book, and frankly if I were writing a book on software design^[Yeah no that will never happen. If you're waiting for me to attempt something like what Greg has done, then -- to quote Paul Kelly and Kev Carmody -- [you don't stand the chance of a cinder in snow](https://youtu.be/dAONlfoNVuY). I know my limits.] I would probably make the same choice that Greg has made: for the blog post I want pretty output because it's supposed to be an easy read. For a book that is intended to help you think about software design? For that you actually want the reader to engage deeply with the "list of lists of lists of..." data structure that my print methods are glossing over. 
+ 
 ### Version 1
+
+With that out of the way, let's have a look at the code for a parser that only does the forward sweep. The key insight that the book walks you through is that there are three distinct types of action the parser takes at this step:
+
+- There are kinds of token (`Literal`, `Start`, `End`, and `GroupStart`) that the parser can process simply by appending the token to the bottom of the tree the moment it encounters them. 
+- There are other kinds of token (`GroupEnd` and `Any`) that require the parser to restructure the tree, but they rely only on the tokens seen so far, so the parser can reorganise the tree on the fly during this first pass
+- There is one annoying token (`Or`) that depends both on things the parser has already seen *and* on things that haven't been observed yet as the parser sweeps forward. What we do here is a partial organisation: we process the bits we know about (e.g., the `a` on the left hand side of an `a|b` statement is known even when we've only read `a|` so far) but then leave a "Missing" placeholder token to express the fact that we know that the `Or` operator `|` has two children: we know `a`, but `b` will need to be filled in later. 
+
+Here's the R code:
 
 ```{r}
 #| label: parser_1
@@ -197,21 +273,42 @@ Anyway... let's return to the development of ideas in the chapter, yes?
 
 
 ```{r}
+#| echo: false
 source("token_class.R")
 source("parse_class.R")
 source("tokenizer_2.R")
 source("parser_1.R")
 ```
 
+For expressions like `"^caa*t$` that don't have a `|`, this version of the parser constructs a completed parse tree:
+
 ```{r}
 parse("^caa*t$")
-parse("aa|b")
-parse("(ab)|c")
-parse("^(caa*t)|(dog)$")
-parse("ab|((cd*)|ef)|g")
-parse("x|(y|z)")
 ```
 
+Notice that the ordering of the tokens has changed: to represent the subexpression `a*`, the parser creates an `Any` token corresponding to the `*` character and ensures that the `Literal` `a` token is a child of the `Any` operator. 
+
+A similar thing happens where `GroupStart` and `GroupEnd` tokens are collapsed into a single `Group` token that has all tokens within the group as children:
+
+```{r}
+parse("(na)* hey yeah goodbye")
+```
+
+For expressions that contain an either/or operation, we end up with a parse tree that contains a lot of `Missing` tokens. That's my way of expressing the fact that the parser needs to come back and clean up afterwards:
+
+```{r}
+parse("(cat)|(dog)")
+```
+
+Notice that there are some kinds of regular expressions for which this clean-up might require us to dive deep into the tree to fix the incomplete parts:
+
+```{r}
+parse("ab|((cd*)|ef)|g")
+```
+
+Again, there's a kind of principle here: each part of the tool has its own job to do. The forward pass does the parts that it can do, and delegates the unfinished work to the clean-up process. When reading the book, and especially when implementing it yourself, the learner is invited to think about the importance of carving up the software into sensible parts. 
+
+Seems like a thing worth knowing.
 
 ### Version 2
 
