@@ -418,7 +418,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <li>Population mean parameters are denoted <span class="math inline">\(\theta\)</span></li>
 <li>Population variance parameters are denoted <span class="math inline">\(\omega\)</span></li>
 <li>Individual departures from population mean and for <span class="math inline">\(i\)</span>-th individual, <span class="math inline">\(\eta_i\)</span></li>
-<li>Standard deviation of error terms is denoted <span class="math inline">\(\sigma\)</span> (i.e., variance <span class="math inline">\(sigma\)</span>^2)</li>
+<li>Standard deviation of error terms is denoted <span class="math inline">\(\sigma\)</span> (i.e., variance <span class="math inline">\(\sigma^2\)</span>)</li>
 <li>Difference between individual subject expected value and observation, <span class="math inline">\(\epsilon_{ij}\)</span>`</li>
 </ul>
 <p>As an example, consider a simple one-compartment IV bolus model with first-order elimination, given dose <span class="math inline">\(D\)</span>. If we let the function <span class="math inline">\(f(t, k, V)\)</span> denote the function describing how drug concentration changes as a function of time <span class="math inline">\(t\)</span>, elimination rate <span class="math inline">\(k\)</span>, and volume of distribution <span class="math inline">\(V\)</span>. For this model,</p>
@@ -517,6 +517,31 @@ y_{ij} = f(t_j, \boldsymbol\eta_i, \boldsymbol\theta, D_i) + \epsilon_{ij}
 </section>
 <section id="implementation-in-stan" class="level2">
 <h2 class="anchored" data-anchor-id="implementation-in-stan">Implementation in Stan</h2>
+<p>Last time around I wrote my ODEs using notation that made sense to me. This time around I’ll try to bring my notation a little closer to the terminology used in the NONMEM control file I was working from. There are two drug amounts that we need to keep track of, the amount <span class="math inline">\(\mbox{A}_g\)</span> in the gut that has not yet been absorbed into systemic circulation, and the amount <span class="math inline">\(\mbox{A}_c\)</span> currently in circulation (in the central/only compartment). The derivatives of these two quantities with respect to time form a system of differential quations:</p>
+<p><span class="math display">\[
+\begin{array}{rcl}
+\displaystyle \frac{d\mbox{A}_g}{dt} &amp;=&amp; -\mbox{KA} \times \mbox{A}_{g} \\ \\
+\displaystyle \frac{d\mbox{A}_c}{dt} &amp;=&amp; \displaystyle \mbox{KA} \times \mbox{A}_{g} - \frac{\mbox{CL}}{\mbox{V}} \ \mbox{A}_{c}
+\end{array}
+\]</span></p>
+<p>When we implement the full model in Stan what we actually want to model is the drug <em>concentration</em> in the central compartment as a function of time, and for that we’ll need to solve for <span class="math inline">\(\mbox{A}_c\)</span>. The first step, however, is to write a Stan function that calculates these derivatives:</p>
+<div class="sourceCode" id="cb19"><pre class="sourceCode stan code-with-copy"><code class="sourceCode stan"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a><span class="dt">vector</span> amount_change(<span class="dt">real</span> time,</span>
+<span id="cb19-2"><a href="#cb19-2" aria-hidden="true" tabindex="-1"></a>                     <span class="dt">vector</span> state,</span>
+<span id="cb19-3"><a href="#cb19-3" aria-hidden="true" tabindex="-1"></a>                     <span class="dt">real</span> KA,</span>
+<span id="cb19-4"><a href="#cb19-4" aria-hidden="true" tabindex="-1"></a>                     <span class="dt">real</span> CL,</span>
+<span id="cb19-5"><a href="#cb19-5" aria-hidden="true" tabindex="-1"></a>                     <span class="dt">real</span> V) {</span>
+<span id="cb19-6"><a href="#cb19-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb19-7"><a href="#cb19-7" aria-hidden="true" tabindex="-1"></a>    <span class="dt">real</span> Ag = state[<span class="dv">1</span>]; <span class="co">// gut amount</span></span>
+<span id="cb19-8"><a href="#cb19-8" aria-hidden="true" tabindex="-1"></a>    <span class="dt">real</span> Ac = state[<span class="dv">2</span>]; <span class="co">// central amount</span></span>
+<span id="cb19-9"><a href="#cb19-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb19-10"><a href="#cb19-10" aria-hidden="true" tabindex="-1"></a>    <span class="co">// compute derivatives</span></span>
+<span id="cb19-11"><a href="#cb19-11" aria-hidden="true" tabindex="-1"></a>    <span class="dt">vector</span>[<span class="dv">2</span>] dadt;</span>
+<span id="cb19-12"><a href="#cb19-12" aria-hidden="true" tabindex="-1"></a>    dadt[<span class="dv">1</span>] = - (KA * Ag);</span>
+<span id="cb19-13"><a href="#cb19-13" aria-hidden="true" tabindex="-1"></a>    dadt[<span class="dv">2</span>] = (KA * Ag) - (CL / V) * Ac;</span>
+<span id="cb19-14"><a href="#cb19-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb19-15"><a href="#cb19-15" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> dadt;</span>
+<span id="cb19-16"><a href="#cb19-16" aria-hidden="true" tabindex="-1"></a>  }</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>Later, we can pass the <code>amount_change()</code> function to one of the Stan ODE solvers.</p>
 </section>
 <section id="resources" class="level2">
 <h2 class="anchored" data-anchor-id="resources">Resources</h2>

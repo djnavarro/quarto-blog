@@ -359,7 +359,7 @@ font-style: inherit;">"Plasma concentration (mg/L)"</span></span>
 <li>Population mean parameters are denoted <img src="https://latex.codecogs.com/png.latex?%5Ctheta"></li>
 <li>Population variance parameters are denoted <img src="https://latex.codecogs.com/png.latex?%5Comega"></li>
 <li>Individual departures from population mean and for <img src="https://latex.codecogs.com/png.latex?i">-th individual, <img src="https://latex.codecogs.com/png.latex?%5Ceta_i"></li>
-<li>Standard deviation of error terms is denoted <img src="https://latex.codecogs.com/png.latex?%5Csigma"> (i.e., variance <img src="https://latex.codecogs.com/png.latex?sigma">^2)</li>
+<li>Standard deviation of error terms is denoted <img src="https://latex.codecogs.com/png.latex?%5Csigma"> (i.e., variance <img src="https://latex.codecogs.com/png.latex?%5Csigma%5E2">)</li>
 <li>Difference between individual subject expected value and observation, <img src="https://latex.codecogs.com/png.latex?%5Cepsilon_%7Bij%7D">`</li>
 </ul>
 <p>As an example, consider a simple one-compartment IV bolus model with first-order elimination, given dose <img src="https://latex.codecogs.com/png.latex?D">. If we let the function <img src="https://latex.codecogs.com/png.latex?f(t,%20k,%20V)"> denote the function describing how drug concentration changes as a function of time <img src="https://latex.codecogs.com/png.latex?t">, elimination rate <img src="https://latex.codecogs.com/png.latex?k">, and volume of distribution <img src="https://latex.codecogs.com/png.latex?V">. For this model,</p>
@@ -493,6 +493,62 @@ font-style: inherit;">=</span>F</span></code></pre></div>
 </section>
 <section id="implementation-in-stan" class="level2">
 <h2 class="anchored" data-anchor-id="implementation-in-stan">Implementation in Stan</h2>
+<p>Last time around I wrote my ODEs using notation that made sense to me. This time around I’ll try to bring my notation a little closer to the terminology used in the NONMEM control file I was working from. There are two drug amounts that we need to keep track of, the amount <img src="https://latex.codecogs.com/png.latex?%5Cmbox%7BA%7D_g"> in the gut that has not yet been absorbed into systemic circulation, and the amount <img src="https://latex.codecogs.com/png.latex?%5Cmbox%7BA%7D_c"> currently in circulation (in the central/only compartment). The derivatives of these two quantities with respect to time form a system of differential quations:</p>
+<p><img src="https://latex.codecogs.com/png.latex?%0A%5Cbegin%7Barray%7D%7Brcl%7D%0A%5Cdisplaystyle%20%5Cfrac%7Bd%5Cmbox%7BA%7D_g%7D%7Bdt%7D%20&amp;=&amp;%20-%5Cmbox%7BKA%7D%20%5Ctimes%20%5Cmbox%7BA%7D_%7Bg%7D%20%5C%5C%20%5C%5C%0A%5Cdisplaystyle%20%5Cfrac%7Bd%5Cmbox%7BA%7D_c%7D%7Bdt%7D%20&amp;=&amp;%20%5Cdisplaystyle%20%5Cmbox%7BKA%7D%20%5Ctimes%20%5Cmbox%7BA%7D_%7Bg%7D%20-%20%5Cfrac%7B%5Cmbox%7BCL%7D%7D%7B%5Cmbox%7BV%7D%7D%20%5C%20%5Cmbox%7BA%7D_%7Bc%7D%0A%5Cend%7Barray%7D%0A"></p>
+<p>When we implement the full model in Stan what we actually want to model is the drug <em>concentration</em> in the central compartment as a function of time, and for that we’ll need to solve for <img src="https://latex.codecogs.com/png.latex?%5Cmbox%7BA%7D_c">. The first step, however, is to write a Stan function that calculates these derivatives:</p>
+<div class="sourceCode" id="cb19" style="background: #f1f3f5;"><pre class="sourceCode stan code-with-copy"><code class="sourceCode stan"><span id="cb19-1"><span class="dt" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">vector</span> amount_change(<span class="dt" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">real</span> time,</span>
+<span id="cb19-2">                     <span class="dt" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">vector</span> state,</span>
+<span id="cb19-3">                     <span class="dt" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">real</span> KA,</span>
+<span id="cb19-4">                     <span class="dt" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">real</span> CL,</span>
+<span id="cb19-5">                     <span class="dt" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">real</span> V) {</span>
+<span id="cb19-6"></span>
+<span id="cb19-7">    <span class="dt" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">real</span> Ag = state[<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">1</span>]; <span class="co" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">// gut amount</span></span>
+<span id="cb19-8">    <span class="dt" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">real</span> Ac = state[<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">2</span>]; <span class="co" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">// central amount</span></span>
+<span id="cb19-9"></span>
+<span id="cb19-10">    <span class="co" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">// compute derivatives</span></span>
+<span id="cb19-11">    <span class="dt" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">vector</span>[<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">2</span>] dadt;</span>
+<span id="cb19-12">    dadt[<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">1</span>] = - (KA * Ag);</span>
+<span id="cb19-13">    dadt[<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">2</span>] = (KA * Ag) - (CL / V) * Ac;</span>
+<span id="cb19-14"></span>
+<span id="cb19-15">    <span class="cf" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">return</span> dadt;</span>
+<span id="cb19-16">  }</span></code></pre></div>
+<p>Later, we can pass the <code>amount_change()</code> function to one of the Stan ODE solvers.</p>
 </section>
 <section id="resources" class="level2">
 <h2 class="anchored" data-anchor-id="resources">Resources</h2>
