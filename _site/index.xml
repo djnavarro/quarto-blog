@@ -28,10 +28,356 @@
 <!--------------- my typical setup ----------------->
 <!--------------- post begins here ----------------->
 <p>The <a href="https://www.paganz.org/">Population Approach Group of Australia and New Zealand</a> host some useful <a href="https://www.paganz.org/resources/">resources</a> for folks interested in pharmacometric modelling. Specifically they have a series of workshops are pretty handy. There’s a beginner workshop in 2019 that covers the core approach, and then two intermediate workshops in 2021 and 2022. I’ll work through the <a href="https://www.paganz.org/wp-content/uploads/2016/06/PAWs-Beginners-2019.zip">2019 workshop materials</a> in this blog post, translating the code from NONMEM to Stan and R as needed.</p>
+<section id="lecture-1-introduction-to-the-topic" class="level2">
+<h2 class="anchored" data-anchor-id="lecture-1-introduction-to-the-topic">Lecture 1: Introduction to the topic</h2>
+</section>
+<section id="lecture-2-hands-on-exercises" class="level2">
+<h2 class="anchored" data-anchor-id="lecture-2-hands-on-exercises">Lecture 2: Hands-on exercises</h2>
+<section id="parsing-the-warfarin-data" class="level3">
+<h3 class="anchored" data-anchor-id="parsing-the-warfarin-data">Parsing the warfarin data</h3>
+<p>Load the data. The csv file uses <code>"."</code> to specify missing values, which I’ll need to state explicitly when reading the data into R, thereby ensuring numeric variables end up as numeric:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1">warfpk <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> readr<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">read_csv</span>(<span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"warfpk.csv"</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">na =</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"."</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">show_col_types =</span> <span class="cn" style="color: #8f5902;
+background-color: null;
+font-style: inherit;">FALSE</span>)</span>
+<span id="cb1-2">warfpk</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 289 × 10
+   `#ID`  time    wt   age   sex   amt  rate  dvid    dv   mdv
+   &lt;chr&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;
+ 1 0       0    66.7    50     1   100    -2     0  NA       1
+ 2 0       0.5  66.7    50     1    NA    NA     1   0       0
+ 3 0       1    66.7    50     1    NA    NA     1   1.9     0
+ 4 0       2    66.7    50     1    NA    NA     1   3.3     0
+ 5 0       3    66.7    50     1    NA    NA     1   6.6     0
+ 6 0       6    66.7    50     1    NA    NA     1   9.1     0
+ 7 0       9    66.7    50     1    NA    NA     1  10.8     0
+ 8 0      12    66.7    50     1    NA    NA     1   8.6     0
+ 9 0      24    66.7    50     1    NA    NA     1   5.6     0
+10 0      36    66.7    50     1    NA    NA     1   4       0
+# ℹ 279 more rows</code></pre>
+</div>
+</div>
+<p>The first column name is a little awkward for R, and ordinarily I’d use <code>janitor::clean_names()</code> to tidy them, but in this case it’s just one column to rename so I’ll use dplyr:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb3" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1">warfpk <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> warfpk <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span> dplyr<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">rename</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">id =</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">`</span><span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">#ID</span><span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">`</span>)</span>
+<span id="cb3-2">warfpk</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 289 × 10
+   id     time    wt   age   sex   amt  rate  dvid    dv   mdv
+   &lt;chr&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;
+ 1 0       0    66.7    50     1   100    -2     0  NA       1
+ 2 0       0.5  66.7    50     1    NA    NA     1   0       0
+ 3 0       1    66.7    50     1    NA    NA     1   1.9     0
+ 4 0       2    66.7    50     1    NA    NA     1   3.3     0
+ 5 0       3    66.7    50     1    NA    NA     1   6.6     0
+ 6 0       6    66.7    50     1    NA    NA     1   9.1     0
+ 7 0       9    66.7    50     1    NA    NA     1  10.8     0
+ 8 0      12    66.7    50     1    NA    NA     1   8.6     0
+ 9 0      24    66.7    50     1    NA    NA     1   5.6     0
+10 0      36    66.7    50     1    NA    NA     1   4       0
+# ℹ 279 more rows</code></pre>
+</div>
+</div>
+<p>There’s one slightly puzzling thing here: the <code>id</code> column looks like it’s supposed to be a numeric id for the study participants, but it’s been parsed as a character vector. That’s usually a sign that there’s a typo somewhere in the data. A bit of digging reveals there’s a problem for subject 12:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb5" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1">warfpk <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span> dplyr<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">filter</span>(id <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span> stringr<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">str_detect</span>(<span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"12"</span>))</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 11 × 10
+   id     time    wt   age   sex   amt  rate  dvid    dv   mdv
+   &lt;chr&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;
+ 1 12      0    75.3    32     1   113    -2     0  NA       1
+ 2 12      1.5  75.3    32     1    NA    NA     1   0.6     0
+ 3 #12     3    75.3    32     1    NA    NA     1   2.8     0
+ 4 12      6    75.3    32     1    NA    NA     1  13.8     0
+ 5 12      9    75.3    32     1    NA    NA     1  15       0
+ 6 12     24    75.3    32     1    NA    NA     1  10.5     0
+ 7 12     36    75.3    32     1    NA    NA     1   9.1     0
+ 8 12     48    75.3    32     1    NA    NA     1   6.6     0
+ 9 12     72    75.3    32     1    NA    NA     1   4.9     0
+10 12     96    75.3    32     1    NA    NA     1   2.4     0
+11 12    120    75.3    32     1    NA    NA     1   1.9     0</code></pre>
+</div>
+</div>
+<p>Ah. Okay, that’s an easy fix:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb7" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1">warfpk <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> warfpk <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span> </span>
+<span id="cb7-2">  dplyr<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">mutate</span>(</span>
+<span id="cb7-3">    <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">id =</span> id <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span> </span>
+<span id="cb7-4">      stringr<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">str_remove_all</span>(<span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"#"</span>) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span> </span>
+<span id="cb7-5">      <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">as.numeric</span>()</span>
+<span id="cb7-6">  )</span>
+<span id="cb7-7">warfpk</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 289 × 10
+      id  time    wt   age   sex   amt  rate  dvid    dv   mdv
+   &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;
+ 1     0   0    66.7    50     1   100    -2     0  NA       1
+ 2     0   0.5  66.7    50     1    NA    NA     1   0       0
+ 3     0   1    66.7    50     1    NA    NA     1   1.9     0
+ 4     0   2    66.7    50     1    NA    NA     1   3.3     0
+ 5     0   3    66.7    50     1    NA    NA     1   6.6     0
+ 6     0   6    66.7    50     1    NA    NA     1   9.1     0
+ 7     0   9    66.7    50     1    NA    NA     1  10.8     0
+ 8     0  12    66.7    50     1    NA    NA     1   8.6     0
+ 9     0  24    66.7    50     1    NA    NA     1   5.6     0
+10     0  36    66.7    50     1    NA    NA     1   4       0
+# ℹ 279 more rows</code></pre>
+</div>
+</div>
+</section>
+<section id="interpreting-the-data" class="level3">
+<h3 class="anchored" data-anchor-id="interpreting-the-data">Interpreting the data</h3>
+<p>The csv file doesn’t say give much information about the variables. However, digging into the output files included in the workshop reveals the citations for the original papers. The data originate in papers by O’Reilly and colleagues, published in 1963 and 1968. Both papers are available online in full text, and after reading through them, we can reverse engineer (most of!) a data dictionary:</p>
+<ul>
+<li><code>id</code>: Numeric value specifying the arbitrary identifier for each person</li>
+<li><code>time</code>: Time elapsed since dose was administered (in hours)</li>
+<li><code>wt</code>: Weight of each person (in kilograms)</li>
+<li><code>age</code>: Age of each person (in years)</li>
+<li><code>sex</code>: Biological sex of each person (0 = female, 1 = male)<sup>1</sup></li>
+<li><code>amt</code>: Dose administered to this person at this time point (in milligrams)</li>
+<li><code>rate</code>: Uncertain what this refers to, but it has value -2 when drug is administered and missing otherwise</li>
+<li><code>dvid</code>: Appears to be a dummy variable indicating whether the dependent variable was measured at this time point (0 = false, 1 = true)</li>
+<li><code>dv</code>: Measured value of the dependent variable (plasma warfarin concentration, in mg/L)</li>
+<li><code>mdv</code>: Appears to be a dummy variable that is the reverse of <code>dvid</code>, and is presumably an indicator variable whose meaning is “missing dependent variable” (0 = false, 1 = true)</li>
+</ul>
+<p>We can see the dosing information by filtering the data on <code>dvid</code>:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb9" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1">warfpk <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span> dplyr<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">filter</span>(dvid <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">==</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">0</span>)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 32 × 10
+      id  time    wt   age   sex   amt  rate  dvid    dv   mdv
+   &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;
+ 1     0     0  66.7    50     1   100    -2     0    NA     1
+ 2     1     0  66.7    50     1   100    -2     0    NA     1
+ 3     2     0  66.7    31     1   100    -2     0    NA     1
+ 4     3     0  80      40     1   120    -2     0    NA     1
+ 5     4     0  40      46     0    60    -2     0    NA     1
+ 6     5     0  75.3    43     1   113    -2     0    NA     1
+ 7     6     0  60      36     0    90    -2     0    NA     1
+ 8     7     0  90      41     1   135    -2     0    NA     1
+ 9     8     0  50      27     0    75    -2     0    NA     1
+10     9     0  70      28     1   105    -2     0    NA     1
+# ℹ 22 more rows</code></pre>
+</div>
+</div>
+<p>Similarly we can see the data from a single person by filtering on <code>id</code>:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb11" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb11-1">warfpk <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span> dplyr<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">filter</span>(id <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">==</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">1</span>)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 7 × 10
+     id  time    wt   age   sex   amt  rate  dvid    dv   mdv
+  &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;
+1     1     0  66.7    50     1   100    -2     0  NA       1
+2     1    24  66.7    50     1    NA    NA     1   9.2     0
+3     1    36  66.7    50     1    NA    NA     1   8.5     0
+4     1    48  66.7    50     1    NA    NA     1   6.4     0
+5     1    72  66.7    50     1    NA    NA     1   4.8     0
+6     1    96  66.7    50     1    NA    NA     1   3.1     0
+7     1   120  66.7    50     1    NA    NA     1   2.5     0</code></pre>
+</div>
+</div>
+</section>
+<section id="plotting-the-data" class="level3">
+<h3 class="anchored" data-anchor-id="plotting-the-data">Plotting the data</h3>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb13" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">library</span>(ggplot2)</span>
+<span id="cb13-2">warfpk <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span> </span>
+<span id="cb13-3">  dplyr<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">filter</span>(</span>
+<span id="cb13-4">    dvid <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">==</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">1</span>, <span class="co" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;"># only include measured times</span></span>
+<span id="cb13-5">    <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">!</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">is.na</span>(dv) <span class="co" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;"># ignore missing dv cases</span></span>
+<span id="cb13-6">  ) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span></span>
+<span id="cb13-7">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">ggplot</span>(<span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">aes</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">x =</span> time, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">y =</span> dv, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">group =</span> id)) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">+</span> </span>
+<span id="cb13-8">    <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">geom_line</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">color =</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"grey50"</span>) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">+</span></span>
+<span id="cb13-9">    <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">geom_point</span>() <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">+</span></span>
+<span id="cb13-10">    <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">labs</span>(</span>
+<span id="cb13-11">      <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">x =</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"Time since dose (hours)"</span>, </span>
+<span id="cb13-12">      <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">y =</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"Plasma concentration (mg/L)"</span></span>
+<span id="cb13-13">    )</span></code></pre></div>
+<div class="cell-output-display">
+<p><img src="https://blog.djnavarro.net/posts/2023-06-05_pop-pk-models/index_files/figure-html/unnamed-chunk-7-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+</section>
+<section id="notation-from-nonmem" class="level3">
+<h3 class="anchored" data-anchor-id="notation-from-nonmem">Notation from NONMEM</h3>
+<p>The original workshop is designed to be conducted using <a href="https://www.iconplc.com/solutions/technologies/nonmem/">NONMEM</a>, and I’ve been told to expect that notation used by NONMEM is pretty standard in the field, so I’ll try my very best to stick to that notation. For scalar quantities, however, I’ll add the subscripts where relevant: <img src="https://latex.codecogs.com/png.latex?i"> refers to the <img src="https://latex.codecogs.com/png.latex?i">-th person in the study, and <img src="https://latex.codecogs.com/png.latex?j"> refers to the <img src="https://latex.codecogs.com/png.latex?j">-th observation (for that person).</p>
+<p>Population level (fixed effect terms):</p>
+<ul>
+<li>Population mean parameters are denoted <img src="https://latex.codecogs.com/png.latex?%5Ctheta"> (or <img src="https://latex.codecogs.com/png.latex?%5CTheta">)</li>
+<li>Population variance parameters are denoted <img src="https://latex.codecogs.com/png.latex?%5Comega"> (or <img src="https://latex.codecogs.com/png.latex?%5COmega">)</li>
+</ul>
+<p>Individual level (random effect terms):</p>
+<ul>
+<li>Difference between the population mean and <img src="https://latex.codecogs.com/png.latex?i">-th individual mean <img src="https://latex.codecogs.com/png.latex?%5Ceta_i"></li>
+</ul>
+<p>Error terms:</p>
+<ul>
+<li>Standard deviation of error terms is denoted <img src="https://latex.codecogs.com/png.latex?%5Csigma"> (or <img src="https://latex.codecogs.com/png.latex?%5CSigma">)</li>
+<li>Difference between individual subject expected value and observation <img src="https://latex.codecogs.com/png.latex?%5Cepsilon_%7Bij%7D">`</li>
+</ul>
+</section>
+</section>
+<section id="resources" class="level2">
+<h2 class="anchored" data-anchor-id="resources">Resources</h2>
+<ul>
+<li><p>Foster, D., Abuhelwa, A. &amp; Hughes, J. (2019). <em>Population Analysis Using NONMEM Beginners Workshop</em>. Retrieved from: <a href="https://www.paganz.org/resources/">www.paganz.org/resources/</a></p></li>
+<li><p>O’Reilly, R. A., &amp; Aggeler, P. M. (1968). Studies on coumarin anticoagulant drugs: initiation of warfarin therapy without a loading dose. <em>Circulation, 38</em>(1), 169-177. <a href="https://doi.org/10.1161/01.CIR.38.1.169">doi.org/10.1161/01.CIR.38.1.169</a></p></li>
+<li><p>O’Reilly, R. A., Aggeler, P. M., &amp; Leong, L. S. (1963). Studies on the coumarin anticoagulant drugs: the pharmacodynamics of warfarin in man. <em>The Journal of Clinical Investigation, 42</em>(10), 1542-1551. <a href="https://doi.org/10.1172%2FJCI104839">doi.org/10.1172%2FJCI104839</a></p></li>
+</ul>
 
 
+</section>
 
-<div id="quarto-appendix" class="default"><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div id="quarto-reuse" class="quarto-appendix-contents"><div><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2023,
+
+<div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
+
+<ol>
+<li id="fn1"><p>Technically I’m guessing the code here, but there’s a lot more 1s in the data than 0s, and a lot more of male subjects reported by O’Reilly &amp; Aggeler, so it seems a safe bet!↩︎</p></li>
+</ol>
+</section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div id="quarto-reuse" class="quarto-appendix-contents"><div><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2023,
   author = {Navarro, Danielle},
   title = {Population Pharmacokinetic Models},
   date = {2023-06-05},

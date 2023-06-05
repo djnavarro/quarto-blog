@@ -19,6 +19,124 @@ set.seed(1)
 
 The [Population Approach Group of Australia and New Zealand](https://www.paganz.org/) host some useful [resources](https://www.paganz.org/resources/) for folks interested in pharmacometric modelling. Specifically they have a series of workshops are pretty handy. There's a beginner workshop in 2019 that covers the core approach, and then two intermediate workshops in 2021 and 2022. I'll work through the [2019 workshop materials](https://www.paganz.org/wp-content/uploads/2016/06/PAWs-Beginners-2019.zip) in this blog post, translating the code from NONMEM to Stan and R as needed.
 
+## Lecture 1: Introduction to the topic
+
+## Lecture 2: Hands-on exercises
+
+
+### Parsing the warfarin data
+
+Load the data. The csv file uses `"."` to specify missing values, which I'll need to state explicitly when reading the data into R, thereby ensuring numeric variables end up as numeric:
+
+```{r}
+#| label: read-warfpk-data
+warfpk <- readr::read_csv("warfpk.csv", na = ".", show_col_types = FALSE)
+warfpk
+```
+
+The first column name is a little awkward for R, and ordinarily I'd use `janitor::clean_names()` to tidy them, but in this case it's just one column to rename so I'll use dplyr:
+
+```{r}
+#| label: clean-warfpk-names
+warfpk <- warfpk |> dplyr::rename(id = `#ID`)
+warfpk
+```
+
+There's one slightly puzzling thing here: the `id` column looks like it's supposed to be a numeric id for the study participants, but it's been parsed as a character vector. That's usually a sign that there's a typo somewhere in the data. A bit of digging reveals there's a problem for subject 12:
+
+```{r}
+#| label: detect-warfpk-typo
+warfpk |> dplyr::filter(id |> stringr::str_detect("12"))
+```
+
+Ah. Okay, that's an easy fix:
+
+```{r}
+#| label: clean-warfpk-id
+warfpk <- warfpk |> 
+  dplyr::mutate(
+    id = id |> 
+      stringr::str_remove_all("#") |> 
+      as.numeric()
+  )
+warfpk
+```
+
+### Interpreting the data
+
+The csv file doesn't say give much information about the variables. However, digging into the output files included in the workshop reveals the citations for the original papers. The data originate in papers by O'Reilly and colleagues, published in 1963 and 1968. Both papers are available online in full text, and after reading through them, we can reverse engineer (most of!) a data dictionary:
+
+- `id`: Numeric value specifying the arbitrary identifier for each person
+- `time`: Time elapsed since dose was administered (in hours)
+- `wt`: Weight of each person (in kilograms)
+- `age`: Age of each person (in years)
+- `sex`: Biological sex of each person (0 = female, 1 = male)^[Technically I'm guessing the code here, but there's a lot more 1s in the data than 0s, and a lot more of male subjects reported by O'Reilly & Aggeler, so it seems a safe bet!]
+- `amt`: Dose administered to this person at this time point (in milligrams)
+- `rate`: Uncertain what this refers to, but it has value -2 when drug is administered and missing otherwise
+- `dvid`: Appears to be a dummy variable indicating whether the dependent variable was measured at this time point (0 = false, 1 = true)
+- `dv`: Measured value of the dependent variable (plasma warfarin concentration, in mg/L)
+- `mdv`: Appears to be a dummy variable that is the reverse of `dvid`, and is presumably an indicator variable whose meaning is "missing dependent variable" (0 = false, 1 = true)
+
+We can see the dosing information by filtering the data on `dvid`:
+
+```{r}
+#| label: "dosing"
+warfpk |> dplyr::filter(dvid == 0)
+```
+
+Similarly we can see the data from a single person by filtering on `id`:
+
+```{r}
+#| label: "one-person"
+warfpk |> dplyr::filter(id == 1)
+```
+
+### Plotting the data
+
+```{r}
+library(ggplot2)
+warfpk |> 
+  dplyr::filter(
+    dvid == 1, # only include measured times
+    !is.na(dv) # ignore missing dv cases
+  ) |>
+  ggplot(aes(x = time, y = dv, group = id)) + 
+    geom_line(color = "grey50") +
+    geom_point() +
+    labs(
+      x = "Time since dose (hours)", 
+      y = "Plasma concentration (mg/L)"
+    )
+```
+
+
+### Notation from NONMEM
+
+The original workshop is designed to be conducted using [NONMEM](https://www.iconplc.com/solutions/technologies/nonmem/), and I've been told to expect that notation used by NONMEM is pretty standard in the field, so I'll try my very best to stick to that notation. For scalar quantities, however, I'll add the subscripts where relevant: $i$ refers to the $i$-th person in the study, and $j$ refers to the $j$-th observation (for that person).
+
+Population level (fixed effect terms):
+
+- Population mean parameters are denoted $\theta$ (or $\Theta$)
+- Population variance parameters are denoted $\omega$ (or $\Omega$)
+
+Individual level (random effect terms):
+
+- Difference between the population mean and $i$-th individual mean $\eta_i$
+
+Error terms:
+
+- Standard deviation of error terms is denoted $\sigma$ (or $\Sigma$)
+- Difference between individual subject expected value and observation $\epsilon_{ij}$`
+
+
+
+## Resources
+
+- Foster, D., Abuhelwa, A. & Hughes, J. (2019). *Population Analysis Using NONMEM Beginners Workshop*. Retrieved from: [www.paganz.org/resources/](https://www.paganz.org/resources/)
+
+- O'Reilly, R. A., & Aggeler, P. M. (1968). Studies on coumarin anticoagulant drugs: initiation of warfarin therapy without a loading dose. *Circulation, 38*(1), 169-177. [doi.org/10.1161/01.CIR.38.1.169](https://doi.org/10.1161/01.CIR.38.1.169)
+
+- O'Reilly, R. A., Aggeler, P. M., & Leong, L. S. (1963). Studies on the coumarin anticoagulant drugs: the pharmacodynamics of warfarin in man. *The Journal of Clinical Investigation, 42*(10), 1542-1551. [doi.org/10.1172%2FJCI104839](https://doi.org/10.1172%2FJCI104839)
 
 
 
