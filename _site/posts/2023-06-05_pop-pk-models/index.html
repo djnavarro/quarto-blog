@@ -204,14 +204,18 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
     <h2 id="toc-title">Table of contents</h2>
    
   <ul>
-  <li><a href="#lecture-1-introduction-to-the-topic" id="toc-lecture-1-introduction-to-the-topic" class="nav-link active" data-scroll-target="#lecture-1-introduction-to-the-topic">Lecture 1: Introduction to the topic</a></li>
-  <li><a href="#lecture-2-hands-on-exercises" id="toc-lecture-2-hands-on-exercises" class="nav-link" data-scroll-target="#lecture-2-hands-on-exercises">Lecture 2: Hands-on exercises</a>
+  <li><a href="#the-warfarin-data-set" id="toc-the-warfarin-data-set" class="nav-link active" data-scroll-target="#the-warfarin-data-set">The warfarin data set</a>
   <ul class="collapse">
-  <li><a href="#parsing-the-warfarin-data" id="toc-parsing-the-warfarin-data" class="nav-link" data-scroll-target="#parsing-the-warfarin-data">Parsing the warfarin data</a></li>
+  <li><a href="#parsing-the-data" id="toc-parsing-the-data" class="nav-link" data-scroll-target="#parsing-the-data">Parsing the data</a></li>
   <li><a href="#interpreting-the-data" id="toc-interpreting-the-data" class="nav-link" data-scroll-target="#interpreting-the-data">Interpreting the data</a></li>
   <li><a href="#plotting-the-data" id="toc-plotting-the-data" class="nav-link" data-scroll-target="#plotting-the-data">Plotting the data</a></li>
-  <li><a href="#notation-from-nonmem" id="toc-notation-from-nonmem" class="nav-link" data-scroll-target="#notation-from-nonmem">Notation from NONMEM</a></li>
   </ul></li>
+  <li><a href="#deciphering-nonmem-specifications" id="toc-deciphering-nonmem-specifications" class="nav-link" data-scroll-target="#deciphering-nonmem-specifications">Deciphering NONMEM specifications</a>
+  <ul class="collapse">
+  <li><a href="#notation-from-nonmem" id="toc-notation-from-nonmem" class="nav-link" data-scroll-target="#notation-from-nonmem">Notation from NONMEM</a></li>
+  <li><a href="#reading-a-nonmem-control-file" id="toc-reading-a-nonmem-control-file" class="nav-link" data-scroll-target="#reading-a-nonmem-control-file">Reading a NONMEM control file</a></li>
+  </ul></li>
+  <li><a href="#implementation-in-stan" id="toc-implementation-in-stan" class="nav-link" data-scroll-target="#implementation-in-stan">Implementation in Stan</a></li>
   <li><a href="#resources" id="toc-resources" class="nav-link" data-scroll-target="#resources">Resources</a></li>
   </ul>
 </nav>
@@ -229,13 +233,10 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <!--------------- my typical setup ----------------->
 <!--------------- post begins here ----------------->
 <p>The <a href="https://www.paganz.org/">Population Approach Group of Australia and New Zealand</a> host some useful <a href="https://www.paganz.org/resources/">resources</a> for folks interested in pharmacometric modelling. Specifically they have a series of workshops are pretty handy. There’s a beginner workshop in 2019 that covers the core approach, and then two intermediate workshops in 2021 and 2022. I’ll work through the <a href="https://www.paganz.org/wp-content/uploads/2016/06/PAWs-Beginners-2019.zip">2019 workshop materials</a> in this blog post, translating the code from NONMEM to Stan and R as needed.</p>
-<section id="lecture-1-introduction-to-the-topic" class="level2">
-<h2 class="anchored" data-anchor-id="lecture-1-introduction-to-the-topic">Lecture 1: Introduction to the topic</h2>
-</section>
-<section id="lecture-2-hands-on-exercises" class="level2">
-<h2 class="anchored" data-anchor-id="lecture-2-hands-on-exercises">Lecture 2: Hands-on exercises</h2>
-<section id="parsing-the-warfarin-data" class="level3">
-<h3 class="anchored" data-anchor-id="parsing-the-warfarin-data">Parsing the warfarin data</h3>
+<section id="the-warfarin-data-set" class="level2">
+<h2 class="anchored" data-anchor-id="the-warfarin-data-set">The warfarin data set</h2>
+<section id="parsing-the-data" class="level3">
+<h3 class="anchored" data-anchor-id="parsing-the-data">Parsing the data</h3>
 <p>Load the data. The csv file uses <code>"."</code> to specify missing values, which I’ll need to state explicitly when reading the data into R, thereby ensuring numeric variables end up as numeric:</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb1"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a>warfpk <span class="ot">&lt;-</span> readr<span class="sc">::</span><span class="fu">read_csv</span>(<span class="st">"warfpk.csv"</span>, <span class="at">na =</span> <span class="st">"."</span>, <span class="at">show_col_types =</span> <span class="cn">FALSE</span>)</span>
@@ -278,7 +279,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 # ℹ 279 more rows</code></pre>
 </div>
 </div>
-<p>There’s one slightly puzzling thing here: the <code>id</code> column looks like it’s supposed to be a numeric id for the study participants, but it’s been parsed as a character vector. That’s usually a sign that there’s a typo somewhere in the data. A bit of digging reveals there’s a problem for subject 12:</p>
+<p>There’s one slightly puzzling thing here: the <code>id</code> column looks like it’s supposed to be a numeric id for the study participants, but it’s been parsed as a character vector. That’s usually a sign that there’s a problem somewhere in the data. A bit of digging reveals there’s something peculiar going on with subject 12:</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb5"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a>warfpk <span class="sc">|&gt;</span> dplyr<span class="sc">::</span><span class="fu">filter</span>(id <span class="sc">|&gt;</span> stringr<span class="sc">::</span><span class="fu">str_detect</span>(<span class="st">"12"</span>))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
@@ -298,7 +299,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 11 12    120    75.3    32     1    NA    NA     1   1.9     0</code></pre>
 </div>
 </div>
-<p>Ah. Okay, that’s an easy fix:</p>
+<p>It’s easy enough to remove the <code>#</code> character and convert the id variable to numeric:</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb7"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a>warfpk <span class="ot">&lt;-</span> warfpk <span class="sc">|&gt;</span> </span>
 <span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">mutate</span>(</span>
@@ -324,6 +325,9 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 # ℹ 279 more rows</code></pre>
 </div>
 </div>
+<p>That said… even more digging revealed that the <code>#</code> character appears to be serving a specific function when used as a prefix in this data file. Later on, it turns out that the NONMEM control file used to specify the model for these data uses the following line to specify the data:</p>
+<div class="sourceCode" id="cb9"><pre class="sourceCode fortran code-with-copy"><code class="sourceCode fortranfixed"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a>$DATA ..\warfpk.csv IGNORE<span class="kw">=</span>#</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>This instruction indicates that lines with the prefix <code>#</code> are ignored. What I’m guessing here is that this observation was dropped from the data set in the tutorial for some reason. It’s not obvious to me why that was the case. It’s possible, then, that what I should be doing instead is filtering out that row in the data.</p>
 </section>
 <section id="interpreting-the-data" class="level3">
 <h3 class="anchored" data-anchor-id="interpreting-the-data">Interpreting the data</h3>
@@ -342,7 +346,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </ul>
 <p>We can see the dosing information by filtering the data on <code>dvid</code>:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb9"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a>warfpk <span class="sc">|&gt;</span> dplyr<span class="sc">::</span><span class="fu">filter</span>(dvid <span class="sc">==</span> <span class="dv">0</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb10"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a>warfpk <span class="sc">|&gt;</span> dplyr<span class="sc">::</span><span class="fu">filter</span>(dvid <span class="sc">==</span> <span class="dv">0</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code># A tibble: 32 × 10
       id  time    wt   age   sex   amt  rate  dvid    dv   mdv
@@ -362,7 +366,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </div>
 <p>Similarly we can see the data from a single person by filtering on <code>id</code>:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb11"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a>warfpk <span class="sc">|&gt;</span> dplyr<span class="sc">::</span><span class="fu">filter</span>(id <span class="sc">==</span> <span class="dv">1</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb12"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a>warfpk <span class="sc">|&gt;</span> dplyr<span class="sc">::</span><span class="fu">filter</span>(id <span class="sc">==</span> <span class="dv">1</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code># A tibble: 7 × 10
      id  time    wt   age   sex   amt  rate  dvid    dv   mdv
@@ -380,46 +384,146 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <section id="plotting-the-data" class="level3">
 <h3 class="anchored" data-anchor-id="plotting-the-data">Plotting the data</h3>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb13"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(ggplot2)</span>
-<span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a>warfpk <span class="sc">|&gt;</span> </span>
-<span id="cb13-3"><a href="#cb13-3" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">filter</span>(</span>
-<span id="cb13-4"><a href="#cb13-4" aria-hidden="true" tabindex="-1"></a>    dvid <span class="sc">==</span> <span class="dv">1</span>, <span class="co"># only include measured times</span></span>
-<span id="cb13-5"><a href="#cb13-5" aria-hidden="true" tabindex="-1"></a>    <span class="sc">!</span><span class="fu">is.na</span>(dv) <span class="co"># ignore missing dv cases</span></span>
-<span id="cb13-6"><a href="#cb13-6" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">|&gt;</span></span>
-<span id="cb13-7"><a href="#cb13-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>(<span class="fu">aes</span>(<span class="at">x =</span> time, <span class="at">y =</span> dv, <span class="at">group =</span> id)) <span class="sc">+</span> </span>
-<span id="cb13-8"><a href="#cb13-8" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_line</span>(<span class="at">color =</span> <span class="st">"grey50"</span>) <span class="sc">+</span></span>
-<span id="cb13-9"><a href="#cb13-9" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_point</span>() <span class="sc">+</span></span>
-<span id="cb13-10"><a href="#cb13-10" aria-hidden="true" tabindex="-1"></a>    <span class="fu">labs</span>(</span>
-<span id="cb13-11"><a href="#cb13-11" aria-hidden="true" tabindex="-1"></a>      <span class="at">x =</span> <span class="st">"Time since dose (hours)"</span>, </span>
-<span id="cb13-12"><a href="#cb13-12" aria-hidden="true" tabindex="-1"></a>      <span class="at">y =</span> <span class="st">"Plasma concentration (mg/L)"</span></span>
-<span id="cb13-13"><a href="#cb13-13" aria-hidden="true" tabindex="-1"></a>    )</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb14"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(ggplot2)</span>
+<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a>warfpk <span class="sc">|&gt;</span> </span>
+<span id="cb14-3"><a href="#cb14-3" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">filter</span>(</span>
+<span id="cb14-4"><a href="#cb14-4" aria-hidden="true" tabindex="-1"></a>    dvid <span class="sc">==</span> <span class="dv">1</span>, <span class="co"># only include measured times</span></span>
+<span id="cb14-5"><a href="#cb14-5" aria-hidden="true" tabindex="-1"></a>    <span class="sc">!</span><span class="fu">is.na</span>(dv) <span class="co"># ignore missing dv cases</span></span>
+<span id="cb14-6"><a href="#cb14-6" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">|&gt;</span></span>
+<span id="cb14-7"><a href="#cb14-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>(<span class="fu">aes</span>(<span class="at">x =</span> time, <span class="at">y =</span> dv, <span class="at">group =</span> id)) <span class="sc">+</span> </span>
+<span id="cb14-8"><a href="#cb14-8" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_line</span>(<span class="at">color =</span> <span class="st">"grey50"</span>) <span class="sc">+</span></span>
+<span id="cb14-9"><a href="#cb14-9" aria-hidden="true" tabindex="-1"></a>    <span class="fu">geom_point</span>() <span class="sc">+</span></span>
+<span id="cb14-10"><a href="#cb14-10" aria-hidden="true" tabindex="-1"></a>    <span class="fu">labs</span>(</span>
+<span id="cb14-11"><a href="#cb14-11" aria-hidden="true" tabindex="-1"></a>      <span class="at">x =</span> <span class="st">"Time since dose (hours)"</span>, </span>
+<span id="cb14-12"><a href="#cb14-12" aria-hidden="true" tabindex="-1"></a>      <span class="at">y =</span> <span class="st">"Plasma concentration (mg/L)"</span></span>
+<span id="cb14-13"><a href="#cb14-13" aria-hidden="true" tabindex="-1"></a>    )</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output-display">
 <p><img src="index_files/figure-html/unnamed-chunk-7-1.png" class="img-fluid" width="672"></p>
 </div>
 </div>
 </section>
+</section>
+<section id="deciphering-nonmem-specifications" class="level2">
+<h2 class="anchored" data-anchor-id="deciphering-nonmem-specifications">Deciphering NONMEM specifications</h2>
 <section id="notation-from-nonmem" class="level3">
 <h3 class="anchored" data-anchor-id="notation-from-nonmem">Notation from NONMEM</h3>
-<p>The original workshop is designed to be conducted using <a href="https://www.iconplc.com/solutions/technologies/nonmem/">NONMEM</a>, and I’ve been told to expect that notation used by NONMEM is pretty standard in the field, so I’ll try my very best to stick to that notation. For scalar quantities, however, I’ll add the subscripts where relevant: <span class="math inline">\(i\)</span> refers to the <span class="math inline">\(i\)</span>-th person in the study, and <span class="math inline">\(j\)</span> refers to the <span class="math inline">\(j\)</span>-th observation (for that person).</p>
-<p>Population level (fixed effect terms):</p>
+<p>The original workshop is designed to be conducted using <a href="https://www.iconplc.com/solutions/technologies/nonmem/">NONMEM</a>, and I’ve been told to expect that notation used by NONMEM is pretty standard in the field, so I’ll try my very best to stick to that notation. The two tutorial papers by Bauer (2019) were helpful for me in figuring this out, as was the older paper by Bauer et al (2007) that is a little more explicit about the statistical formulation of the models. As far as I can tell from the notation in the 2007 paper, the following structural conventions are applied:</p>
 <ul>
-<li>Population mean parameters are denoted <span class="math inline">\(\theta\)</span> (or <span class="math inline">\(\Theta\)</span>)</li>
-<li>Population variance parameters are denoted <span class="math inline">\(\omega\)</span> (or <span class="math inline">\(\Omega\)</span>)</li>
+<li>Italicised lower case Greek symbols refer to scalar parameters: <span class="math inline">\(\theta\)</span>, <span class="math inline">\(\omega\)</span>, <span class="math inline">\(\sigma\)</span>, etc</li>
+<li>Boldfaced upper case Greek symbols denote parameter vectors: <span class="math inline">\(\boldsymbol\theta\)</span>, <span class="math inline">\(\boldsymbol\omega\)</span>, <span class="math inline">\(\boldsymbol\sigma\)</span>, etc</li>
+<li>Boldfaced upper case Greek symbols denote parameter matrices: <span class="math inline">\(\boldsymbol\Theta\)</span>, <span class="math inline">\(\boldsymbol\Omega\)</span>, <span class="math inline">\(\boldsymbol\Sigma\)</span>, etc</li>
 </ul>
-<p>Individual level (random effect terms):</p>
+<p>There is also a convention assigning meaning to the different Greek letters:</p>
 <ul>
-<li>Difference between the population mean and <span class="math inline">\(i\)</span>-th individual mean <span class="math inline">\(\eta_i\)</span></li>
+<li>Population mean parameters are denoted <span class="math inline">\(\theta\)</span></li>
+<li>Population variance parameters are denoted <span class="math inline">\(\omega\)</span></li>
+<li>Individual departures from population mean and for <span class="math inline">\(i\)</span>-th individual, <span class="math inline">\(\eta_i\)</span></li>
+<li>Standard deviation of error terms is denoted <span class="math inline">\(\sigma\)</span> (i.e., variance <span class="math inline">\(sigma\)</span>^2)</li>
+<li>Difference between individual subject expected value and observation, <span class="math inline">\(\epsilon_{ij}\)</span>`</li>
 </ul>
-<p>Error terms:</p>
-<ul>
-<li>Standard deviation of error terms is denoted <span class="math inline">\(\sigma\)</span> (or <span class="math inline">\(\Sigma\)</span>)</li>
-<li>Difference between individual subject expected value and observation <span class="math inline">\(\epsilon_{ij}\)</span>`</li>
-</ul>
+<p>As an example, consider a simple one-compartment IV bolus model with first-order elimination, given dose <span class="math inline">\(D\)</span>. If we let the function <span class="math inline">\(f(t, k, V)\)</span> denote the function describing how drug concentration changes as a function of time <span class="math inline">\(t\)</span>, elimination rate <span class="math inline">\(k\)</span>, and volume of distribution <span class="math inline">\(V\)</span>. For this model,</p>
+<p><span class="math display">\[
+f(t, k, V, D) = \frac{D}{V} \exp(-kt)
+\]</span></p>
+<p>In this model, the measurement time <span class="math inline">\(t\)</span> and dose <span class="math inline">\(D\)</span> (administered at <span class="math inline">\(t = 0\)</span>) are both part of the study design. The other two quantities <span class="math inline">\(k\)</span> and <span class="math inline">\(V\)</span>, are model parameters that can be different for every person. At a population level, then we will have a parameter vector <span class="math inline">\(\boldsymbol{\theta} = (\theta_1, \theta_2)\)</span> where I’ll somewhat arbitrarily say that <span class="math inline">\(\theta_1\)</span> is the typical value for <span class="math inline">\(k\)</span>, and <span class="math inline">\(\theta_2\)</span> is the typical value for <span class="math inline">\(V\)</span>. Since these quantities can vary from person to person, we would also – assuming for the sake of simplicity that there is no population correlation between them<a href="#fn2" class="footnote-ref" id="fnref2" role="doc-noteref"><sup>2</sup></a> – have a variance vector <span class="math inline">\(\boldsymbol{\omega} = (\omega_1, \omega_2)\)</span>.</p>
+<p>In this scenario, then, the parameters for the i-th participant would be some function of the typical values <span class="math inline">\(\theta\)</span> and the random effects <span class="math inline">\(\eta\)</span>. For the moment I’ll just use <span class="math inline">\(g_1()\)</span> and <span class="math inline">\(g_2()\)</span> to denote these transformation functions:</p>
+<p><span class="math display">\[
+\begin{array}{rcl}
+k_i &amp;=&amp; g_1(\theta_1, \eta_{i1}) \\
+V_i &amp;=&amp; g_2(\theta_2, \eta_{i2})
+\end{array}
+\]</span> where the random effect terms <span class="math inline">\(\eta_{ik}\)</span> are presumed to be normally distributed:</p>
+<p><span class="math display">\[
+\eta_{ik} \sim \mbox{Normal}(0, \omega_k)
+\]</span></p>
+<p>Next we have our pharmacokinetic function <span class="math inline">\(f()\)</span> that specifies how the plasma concentration changes as a function of time, dose, and the model parameters. Earlier I wrote out the specific form of this function for a particular model, but we could refer to it generically as <span class="math inline">\(f(t, \boldsymbol\eta_i, \boldsymbol\theta, D_i)\)</span>.</p>
+<p>If measurement errors are assumed to be additive (I’ll come back to that in a moment), the observed concentration <span class="math inline">\(y_{ij}\)</span> for the i-th person at the j-th time point:</p>
+<p><span class="math display">\[
+y_{ij} = f(t_j, \boldsymbol\eta_i, \boldsymbol\theta, D_i) + \epsilon_{ij}
+\]</span></p>
+<p>where <span class="math inline">\(\epsilon_{ij}\)</span> is the error associated with person i and time j, and</p>
+<p><span class="math display">\[
+\epsilon_{ik} \sim \mbox{Normal}(0, \sigma^2)
+\]</span></p>
+<p>With that as preliminary exposition, I think I can now make sense of how the model specification in NONMEM works…</p>
 </section>
+<section id="reading-a-nonmem-control-file" class="level3">
+<h3 class="anchored" data-anchor-id="reading-a-nonmem-control-file">Reading a NONMEM control file</h3>
+<p>Looking at the control file for the model (i.e., the <code>.ctl</code> file), there’s a bit of effort required for me – as someone who doesn’t use NONMEM – to work out what structure of the underlying model is. The key line in the control file is the one specifying the subroutines:</p>
+<div class="sourceCode" id="cb15"><pre class="sourceCode fortran code-with-copy"><code class="sourceCode fortranfixed"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a>$SUBR ADVAN2 TRANS2</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>The workshop notes helpfully explain this. In NONMEM terminology, this refers to two different modules: ADVAN provides a library of pharmacokinetic models that are bundled with the software, and TRANS specifies parameter transformation. Of particular importance: ADVAN2 refers to a one-compartment model with a first order absorption process. Okay that’s super handy because I’ve implemented one of those from scratch in Stan previously!</p>
+<p>The file continues, specifying the pharmacokinetic model (PK) and the error model (ERROR):</p>
+<div class="sourceCode" id="cb16"><pre class="sourceCode fortran code-with-copy"><code class="sourceCode fortranfixed"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a>$PK</span>
+<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a>   ; COVARIATE MODEL</span>
+<span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a>   TVCL<span class="kw">=</span>THETA(<span class="dv">1</span>)</span>
+<span id="cb16-5"><a href="#cb16-5" aria-hidden="true" tabindex="-1"></a>   TVV<span class="kw">=</span>THETA(<span class="dv">2</span>)</span>
+<span id="cb16-6"><a href="#cb16-6" aria-hidden="true" tabindex="-1"></a>   TVKA<span class="kw">=</span>THETA(<span class="dv">3</span>)</span>
+<span id="cb16-7"><a href="#cb16-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-8"><a href="#cb16-8" aria-hidden="true" tabindex="-1"></a>   ; MODEL <span class="kw">FOR</span> RANDOM BETWEEN SUBJECT VARIABILITY</span>
+<span id="cb16-9"><a href="#cb16-9" aria-hidden="true" tabindex="-1"></a>   CL<span class="kw">=</span>TVCL<span class="kw">*</span><span class="bu">EXP</span>(ETA(<span class="dv">1</span>))</span>
+<span id="cb16-10"><a href="#cb16-10" aria-hidden="true" tabindex="-1"></a>   V<span class="kw">=</span>TVV<span class="kw">*</span><span class="bu">EXP</span>(ETA(<span class="dv">2</span>))</span>
+<span id="cb16-11"><a href="#cb16-11" aria-hidden="true" tabindex="-1"></a>   KA<span class="kw">=</span>TVKA<span class="kw">*</span><span class="bu">EXP</span>(ETA(<span class="dv">3</span>))</span>
+<span id="cb16-12"><a href="#cb16-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-13"><a href="#cb16-13" aria-hidden="true" tabindex="-1"></a>   ; <span class="bu">SCALE</span> CONCENTRATIONS</span>
+<span id="cb16-14"><a href="#cb16-14" aria-hidden="true" tabindex="-1"></a>   S2<span class="kw">=</span>V</span>
+<span id="cb16-15"><a href="#cb16-15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-16"><a href="#cb16-16" aria-hidden="true" tabindex="-1"></a>$ERROR</span>
+<span id="cb16-17"><a href="#cb16-17" aria-hidden="true" tabindex="-1"></a>   Y<span class="kw">=</span>F<span class="kw">+</span>EPS(<span class="dv">1</span>)</span>
+<span id="cb16-18"><a href="#cb16-18" aria-hidden="true" tabindex="-1"></a>   IPRED<span class="kw">=</span>F</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>My goal is to re-write this model in Stan, but to do that I need to first express that as a statistical model rather as NONMEM syntax. So let’s start at the population level. We have three parameters here:</p>
+<ul>
+<li>A population typical value for the clearance rate CL, denoted TVCL</li>
+<li>A population typical value for the distribution volume V, denoted TVV</li>
+<li>A population typical value for the absorption rate KA, denoted TVKA</li>
+</ul>
+<p>The mapping here is straightfoward:</p>
+<p><span class="math display">\[
+\begin{array}{rcl}
+\mbox{TVCL} &amp;=&amp; \theta_1 \\
+\mbox{TVV} &amp;=&amp; \theta_2 \\
+\mbox{TVKA} &amp;=&amp; \theta_3
+\end{array}
+\]</span></p>
+<p>Now we consider the individual-subject level. At this level we have three parameters per person. For the i-th person, these parameters are:</p>
+<ul>
+<li>The clearance rate CL<span class="math inline">\(_i\)</span></li>
+<li>The distribution volume V<span class="math inline">\(_i\)</span></li>
+<li>The absorption rate KA<span class="math inline">\(_i\)</span></li>
+</ul>
+<p>As usual, the random effect terms <span class="math inline">\(\eta\)</span> are normally distributed with mean zero and variance <span class="math inline">\(\omega\)</span>, and the <span class="math inline">\(\theta\)</span> values are considered fixed effects. However, the population level and subject level parameters do not combine additively, they combine multiplicatively. Specifically, the <span class="math inline">\(g(\theta, \eta)\)</span> functions for this model are as follows:</p>
+<p><span class="math display">\[
+\begin{array}{rcl}
+\mbox{CL}_i &amp;=&amp; \theta_1 \exp(\eta_{1i}) \\
+\mbox{V}_i &amp;=&amp; \theta_2 \exp(\eta_{2i}) \\
+\mbox{KA}_i &amp;=&amp; \theta_3 \exp(\eta_{3i})
+\end{array}
+\]</span></p>
+<p>So far, so good. This makes sense of most of the model specification, but there are a still some confusing parts that require a bit more digging around to decipher. First off, this strange invocation:</p>
+<div class="sourceCode" id="cb17"><pre class="sourceCode fortran code-with-copy"><code class="sourceCode fortranfixed"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a>   ; <span class="bu">SCALE</span> CONCENTRATIONS</span>
+<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a>   S2<span class="kw">=</span>V</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>This doesn’t make sense unless you know something about the way that NONMEM has implemented the underlying model. In the 1-compartment IV bolus model that I used as my motivating example (previous section), the pharmacokinetic function <span class="math inline">\(f()\)</span> has a closed form expression for the drug <em>concentration</em> in the central (only) compartment. However, when you implement a pharmacokinetic model using a system of ordinary differential equations (like I did in an earlier post), the values produced by solving the ODE typically refer to the <em>amount</em> of drug in the relevant compartment. To convert these amounts to concentrations you need to scale them, generally by dividing by the volume of said compartment. And thus we have our explanation of the mysterious <code>S2=V</code> instruction. The <code>S2</code> parameter is the NONMEM scaling parameter for the central compartment. We set this equal to <code>V</code>, i.e., the estimated volume parameter for each subject.<a href="#fn3" class="footnote-ref" id="fnref3" role="doc-noteref"><sup>3</sup></a></p>
+<p>At last we come to the error model:</p>
+<div class="sourceCode" id="cb18"><pre class="sourceCode fortran code-with-copy"><code class="sourceCode fortranfixed"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a>$ERROR</span>
+<span id="cb18-2"><a href="#cb18-2" aria-hidden="true" tabindex="-1"></a>   Y<span class="kw">=</span>F<span class="kw">+</span>EPS(<span class="dv">1</span>)</span>
+<span id="cb18-3"><a href="#cb18-3" aria-hidden="true" tabindex="-1"></a>   IPRED<span class="kw">=</span>F</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>The relevant part here is the line specifying the relationship between the pharmacokinetic function <code>F</code>, the error terms <code>EPS</code>, and the observed data <code>Y</code>. In this case it’s additive, exactly in keeping with what I assumed in my toy example:</p>
+<p><span class="math display">\[
+y_{ij} = f(t_j, \boldsymbol\eta_i, \boldsymbol\theta, D_i) + \epsilon_{ij}
+\]</span></p>
+<p>It doesn’t have to be. In fact, the hands-on exercise in Lecture 2 of the tutorial I’m working through prepares three versions of this model, one with additive error, one with multiplicative error, and one with a hybrid error model that incorporates additive and multiplicative components. But I’ll get to that later.</p>
+<p>Yay! At long last I think I know the model I need to implement…</p>
+</section>
+</section>
+<section id="implementation-in-stan" class="level2">
+<h2 class="anchored" data-anchor-id="implementation-in-stan">Implementation in Stan</h2>
 </section>
 <section id="resources" class="level2">
 <h2 class="anchored" data-anchor-id="resources">Resources</h2>
 <ul>
+<li><p>Bauer, R. J., Guzy, S., &amp; Ng, C. (2007). A survey of population analysis methods and software for complex pharmacokinetic and pharmacodynamic models with examples. <em>The AAPS Journal, 9</em>, E60-E83. <a href="https://doi.org/10.1208/aapsj0901007">doi.org/10.1208/aapsj0901007</a></p></li>
+<li><p>Bauer, R. J. (2019). NONMEM tutorial part I: Description of commands and options, with simple examples of population analysis. <em>CPT: Pharmacometrics &amp; Systems Pharmacology, 8</em>(8), 525-537. <a href="https://doi.org/10.1002/psp4.12404">doi.org/10.1002/psp4.12404</a></p></li>
+<li><p>Bauer, R. J. (2019). NONMEM tutorial part II: Estimation methods and advanced examples. <em>CPT: Pharmacometrics &amp; Systems Pharmacology, 8</em>(8), 538-556. <a href="https://doi.org/10.1002/psp4.12422">doi.org/10.1002/psp4.12422</a></p></li>
 <li><p>Foster, D., Abuhelwa, A. &amp; Hughes, J. (2019). <em>Population Analysis Using NONMEM Beginners Workshop</em>. Retrieved from: <a href="https://www.paganz.org/resources/">www.paganz.org/resources/</a></p></li>
 <li><p>O’Reilly, R. A., &amp; Aggeler, P. M. (1968). Studies on coumarin anticoagulant drugs: initiation of warfarin therapy without a loading dose. <em>Circulation, 38</em>(1), 169-177. <a href="https://doi.org/10.1161/01.CIR.38.1.169">doi.org/10.1161/01.CIR.38.1.169</a></p></li>
 <li><p>O’Reilly, R. A., Aggeler, P. M., &amp; Leong, L. S. (1963). Studies on the coumarin anticoagulant drugs: the pharmacodynamics of warfarin in man. <em>The Journal of Clinical Investigation, 42</em>(10), 1542-1551. <a href="https://doi.org/10.1172%2FJCI104839">doi.org/10.1172%2FJCI104839</a></p></li>
@@ -433,6 +537,8 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 
 <ol>
 <li id="fn1"><p>Technically I’m guessing the code here, but there’s a lot more 1s in the data than 0s, and a lot more of male subjects reported by O’Reilly &amp; Aggeler, so it seems a safe bet!<a href="#fnref1" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn2"><p>If we wanted to consider this correlation then we’d have a full variance-covariance matrix denoted <span class="math inline">\(\boldsymbol\Omega\)</span>, but I’m not going to go there in this post<a href="#fnref2" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn3"><p>Honestly, I wasn’t 100% certain that my interpretation was correct, but eventually I managed to find copies of the NONMEM user manuals online and they explain it there.<a href="#fnref3" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
 </ol>
 </section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div id="quarto-reuse" class="quarto-appendix-contents"><div><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2023,
   author = {Navarro, Danielle},

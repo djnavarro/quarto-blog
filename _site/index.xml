@@ -28,13 +28,10 @@
 <!--------------- my typical setup ----------------->
 <!--------------- post begins here ----------------->
 <p>The <a href="https://www.paganz.org/">Population Approach Group of Australia and New Zealand</a> host some useful <a href="https://www.paganz.org/resources/">resources</a> for folks interested in pharmacometric modelling. Specifically they have a series of workshops are pretty handy. There’s a beginner workshop in 2019 that covers the core approach, and then two intermediate workshops in 2021 and 2022. I’ll work through the <a href="https://www.paganz.org/wp-content/uploads/2016/06/PAWs-Beginners-2019.zip">2019 workshop materials</a> in this blog post, translating the code from NONMEM to Stan and R as needed.</p>
-<section id="lecture-1-introduction-to-the-topic" class="level2">
-<h2 class="anchored" data-anchor-id="lecture-1-introduction-to-the-topic">Lecture 1: Introduction to the topic</h2>
-</section>
-<section id="lecture-2-hands-on-exercises" class="level2">
-<h2 class="anchored" data-anchor-id="lecture-2-hands-on-exercises">Lecture 2: Hands-on exercises</h2>
-<section id="parsing-the-warfarin-data" class="level3">
-<h3 class="anchored" data-anchor-id="parsing-the-warfarin-data">Parsing the warfarin data</h3>
+<section id="the-warfarin-data-set" class="level2">
+<h2 class="anchored" data-anchor-id="the-warfarin-data-set">The warfarin data set</h2>
+<section id="parsing-the-data" class="level3">
+<h3 class="anchored" data-anchor-id="parsing-the-data">Parsing the data</h3>
 <p>Load the data. The csv file uses <code>"."</code> to specify missing values, which I’ll need to state explicitly when reading the data into R, thereby ensuring numeric variables end up as numeric:</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1">warfpk <span class="ot" style="color: #003B4F;
@@ -109,7 +106,7 @@ font-style: inherit;">`</span>)</span>
 # ℹ 279 more rows</code></pre>
 </div>
 </div>
-<p>There’s one slightly puzzling thing here: the <code>id</code> column looks like it’s supposed to be a numeric id for the study participants, but it’s been parsed as a character vector. That’s usually a sign that there’s a typo somewhere in the data. A bit of digging reveals there’s a problem for subject 12:</p>
+<p>There’s one slightly puzzling thing here: the <code>id</code> column looks like it’s supposed to be a numeric id for the study participants, but it’s been parsed as a character vector. That’s usually a sign that there’s a problem somewhere in the data. A bit of digging reveals there’s something peculiar going on with subject 12:</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb5" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1">warfpk <span class="sc" style="color: #5E5E5E;
 background-color: null;
@@ -143,7 +140,7 @@ font-style: inherit;">"12"</span>))</span></code></pre></div>
 11 12    120    75.3    32     1    NA    NA     1   1.9     0</code></pre>
 </div>
 </div>
-<p>Ah. Okay, that’s an easy fix:</p>
+<p>It’s easy enough to remove the <code>#</code> character and convert the id variable to numeric:</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb7" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1">warfpk <span class="ot" style="color: #003B4F;
 background-color: null;
@@ -191,6 +188,11 @@ font-style: inherit;">as.numeric</span>()</span>
 # ℹ 279 more rows</code></pre>
 </div>
 </div>
+<p>That said… even more digging revealed that the <code>#</code> character appears to be serving a specific function when used as a prefix in this data file. Later on, it turns out that the NONMEM control file used to specify the model for these data uses the following line to specify the data:</p>
+<div class="sourceCode" id="cb9" style="background: #f1f3f5;"><pre class="sourceCode fortran code-with-copy"><code class="sourceCode fortranfixed"><span id="cb9-1">$DATA ..\warfpk.csv IGNORE<span class="kw" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">=</span>#</span></code></pre></div>
+<p>This instruction indicates that lines with the prefix <code>#</code> are ignored. What I’m guessing here is that this observation was dropped from the data set in the tutorial for some reason. It’s not obvious to me why that was the case. It’s possible, then, that what I should be doing instead is filtering out that row in the data.</p>
 </section>
 <section id="interpreting-the-data" class="level3">
 <h3 class="anchored" data-anchor-id="interpreting-the-data">Interpreting the data</h3>
@@ -209,7 +211,7 @@ font-style: inherit;">as.numeric</span>()</span>
 </ul>
 <p>We can see the dosing information by filtering the data on <code>dvid</code>:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb9" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1">warfpk <span class="sc" style="color: #5E5E5E;
+<div class="sourceCode cell-code" id="cb10" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1">warfpk <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">|&gt;</span> dplyr<span class="sc" style="color: #5E5E5E;
 background-color: null;
@@ -239,7 +241,7 @@ font-style: inherit;">0</span>)</span></code></pre></div>
 </div>
 <p>Similarly we can see the data from a single person by filtering on <code>id</code>:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb11" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb11-1">warfpk <span class="sc" style="color: #5E5E5E;
+<div class="sourceCode cell-code" id="cb12" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb12-1">warfpk <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">|&gt;</span> dplyr<span class="sc" style="color: #5E5E5E;
 background-color: null;
@@ -267,35 +269,35 @@ font-style: inherit;">1</span>)</span></code></pre></div>
 <section id="plotting-the-data" class="level3">
 <h3 class="anchored" data-anchor-id="plotting-the-data">Plotting the data</h3>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb13" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1"><span class="fu" style="color: #4758AB;
+<div class="sourceCode cell-code" id="cb14" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb14-1"><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">library</span>(ggplot2)</span>
-<span id="cb13-2">warfpk <span class="sc" style="color: #5E5E5E;
+<span id="cb14-2">warfpk <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">|&gt;</span> </span>
-<span id="cb13-3">  dplyr<span class="sc" style="color: #5E5E5E;
+<span id="cb14-3">  dplyr<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">filter</span>(</span>
-<span id="cb13-4">    dvid <span class="sc" style="color: #5E5E5E;
+<span id="cb14-4">    dvid <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">==</span> <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">1</span>, <span class="co" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;"># only include measured times</span></span>
-<span id="cb13-5">    <span class="sc" style="color: #5E5E5E;
+<span id="cb14-5">    <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">!</span><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">is.na</span>(dv) <span class="co" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;"># ignore missing dv cases</span></span>
-<span id="cb13-6">  ) <span class="sc" style="color: #5E5E5E;
+<span id="cb14-6">  ) <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">|&gt;</span></span>
-<span id="cb13-7">  <span class="fu" style="color: #4758AB;
+<span id="cb14-7">  <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">ggplot</span>(<span class="fu" style="color: #4758AB;
 background-color: null;
@@ -308,7 +310,7 @@ background-color: null;
 font-style: inherit;">group =</span> id)) <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">+</span> </span>
-<span id="cb13-8">    <span class="fu" style="color: #4758AB;
+<span id="cb14-8">    <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">geom_line</span>(<span class="at" style="color: #657422;
 background-color: null;
@@ -317,52 +319,187 @@ background-color: null;
 font-style: inherit;">"grey50"</span>) <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">+</span></span>
-<span id="cb13-9">    <span class="fu" style="color: #4758AB;
+<span id="cb14-9">    <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">geom_point</span>() <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">+</span></span>
-<span id="cb13-10">    <span class="fu" style="color: #4758AB;
+<span id="cb14-10">    <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">labs</span>(</span>
-<span id="cb13-11">      <span class="at" style="color: #657422;
+<span id="cb14-11">      <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">x =</span> <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"Time since dose (hours)"</span>, </span>
-<span id="cb13-12">      <span class="at" style="color: #657422;
+<span id="cb14-12">      <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">y =</span> <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"Plasma concentration (mg/L)"</span></span>
-<span id="cb13-13">    )</span></code></pre></div>
+<span id="cb14-13">    )</span></code></pre></div>
 <div class="cell-output-display">
 <p><img src="https://blog.djnavarro.net/posts/2023-06-05_pop-pk-models/index_files/figure-html/unnamed-chunk-7-1.png" class="img-fluid" width="672"></p>
 </div>
 </div>
 </section>
+</section>
+<section id="deciphering-nonmem-specifications" class="level2">
+<h2 class="anchored" data-anchor-id="deciphering-nonmem-specifications">Deciphering NONMEM specifications</h2>
 <section id="notation-from-nonmem" class="level3">
 <h3 class="anchored" data-anchor-id="notation-from-nonmem">Notation from NONMEM</h3>
-<p>The original workshop is designed to be conducted using <a href="https://www.iconplc.com/solutions/technologies/nonmem/">NONMEM</a>, and I’ve been told to expect that notation used by NONMEM is pretty standard in the field, so I’ll try my very best to stick to that notation. For scalar quantities, however, I’ll add the subscripts where relevant: <img src="https://latex.codecogs.com/png.latex?i"> refers to the <img src="https://latex.codecogs.com/png.latex?i">-th person in the study, and <img src="https://latex.codecogs.com/png.latex?j"> refers to the <img src="https://latex.codecogs.com/png.latex?j">-th observation (for that person).</p>
-<p>Population level (fixed effect terms):</p>
+<p>The original workshop is designed to be conducted using <a href="https://www.iconplc.com/solutions/technologies/nonmem/">NONMEM</a>, and I’ve been told to expect that notation used by NONMEM is pretty standard in the field, so I’ll try my very best to stick to that notation. The two tutorial papers by Bauer (2019) were helpful for me in figuring this out, as was the older paper by Bauer et al (2007) that is a little more explicit about the statistical formulation of the models. As far as I can tell from the notation in the 2007 paper, the following structural conventions are applied:</p>
 <ul>
-<li>Population mean parameters are denoted <img src="https://latex.codecogs.com/png.latex?%5Ctheta"> (or <img src="https://latex.codecogs.com/png.latex?%5CTheta">)</li>
-<li>Population variance parameters are denoted <img src="https://latex.codecogs.com/png.latex?%5Comega"> (or <img src="https://latex.codecogs.com/png.latex?%5COmega">)</li>
+<li>Italicised lower case Greek symbols refer to scalar parameters: <img src="https://latex.codecogs.com/png.latex?%5Ctheta">, <img src="https://latex.codecogs.com/png.latex?%5Comega">, <img src="https://latex.codecogs.com/png.latex?%5Csigma">, etc</li>
+<li>Boldfaced upper case Greek symbols denote parameter vectors: <img src="https://latex.codecogs.com/png.latex?%5Cboldsymbol%5Ctheta">, <img src="https://latex.codecogs.com/png.latex?%5Cboldsymbol%5Comega">, <img src="https://latex.codecogs.com/png.latex?%5Cboldsymbol%5Csigma">, etc</li>
+<li>Boldfaced upper case Greek symbols denote parameter matrices: <img src="https://latex.codecogs.com/png.latex?%5Cboldsymbol%5CTheta">, <img src="https://latex.codecogs.com/png.latex?%5Cboldsymbol%5COmega">, <img src="https://latex.codecogs.com/png.latex?%5Cboldsymbol%5CSigma">, etc</li>
 </ul>
-<p>Individual level (random effect terms):</p>
+<p>There is also a convention assigning meaning to the different Greek letters:</p>
 <ul>
-<li>Difference between the population mean and <img src="https://latex.codecogs.com/png.latex?i">-th individual mean <img src="https://latex.codecogs.com/png.latex?%5Ceta_i"></li>
+<li>Population mean parameters are denoted <img src="https://latex.codecogs.com/png.latex?%5Ctheta"></li>
+<li>Population variance parameters are denoted <img src="https://latex.codecogs.com/png.latex?%5Comega"></li>
+<li>Individual departures from population mean and for <img src="https://latex.codecogs.com/png.latex?i">-th individual, <img src="https://latex.codecogs.com/png.latex?%5Ceta_i"></li>
+<li>Standard deviation of error terms is denoted <img src="https://latex.codecogs.com/png.latex?%5Csigma"> (i.e., variance <img src="https://latex.codecogs.com/png.latex?sigma">^2)</li>
+<li>Difference between individual subject expected value and observation, <img src="https://latex.codecogs.com/png.latex?%5Cepsilon_%7Bij%7D">`</li>
 </ul>
-<p>Error terms:</p>
-<ul>
-<li>Standard deviation of error terms is denoted <img src="https://latex.codecogs.com/png.latex?%5Csigma"> (or <img src="https://latex.codecogs.com/png.latex?%5CSigma">)</li>
-<li>Difference between individual subject expected value and observation <img src="https://latex.codecogs.com/png.latex?%5Cepsilon_%7Bij%7D">`</li>
-</ul>
+<p>As an example, consider a simple one-compartment IV bolus model with first-order elimination, given dose <img src="https://latex.codecogs.com/png.latex?D">. If we let the function <img src="https://latex.codecogs.com/png.latex?f(t,%20k,%20V)"> denote the function describing how drug concentration changes as a function of time <img src="https://latex.codecogs.com/png.latex?t">, elimination rate <img src="https://latex.codecogs.com/png.latex?k">, and volume of distribution <img src="https://latex.codecogs.com/png.latex?V">. For this model,</p>
+<p><img src="https://latex.codecogs.com/png.latex?%0Af(t,%20k,%20V,%20D)%20=%20%5Cfrac%7BD%7D%7BV%7D%20%5Cexp(-kt)%0A"></p>
+<p>In this model, the measurement time <img src="https://latex.codecogs.com/png.latex?t"> and dose <img src="https://latex.codecogs.com/png.latex?D"> (administered at <img src="https://latex.codecogs.com/png.latex?t%20=%200">) are both part of the study design. The other two quantities <img src="https://latex.codecogs.com/png.latex?k"> and <img src="https://latex.codecogs.com/png.latex?V">, are model parameters that can be different for every person. At a population level, then we will have a parameter vector <img src="https://latex.codecogs.com/png.latex?%5Cboldsymbol%7B%5Ctheta%7D%20=%20(%5Ctheta_1,%20%5Ctheta_2)"> where I’ll somewhat arbitrarily say that <img src="https://latex.codecogs.com/png.latex?%5Ctheta_1"> is the typical value for <img src="https://latex.codecogs.com/png.latex?k">, and <img src="https://latex.codecogs.com/png.latex?%5Ctheta_2"> is the typical value for <img src="https://latex.codecogs.com/png.latex?V">. Since these quantities can vary from person to person, we would also – assuming for the sake of simplicity that there is no population correlation between them<sup>2</sup> – have a variance vector <img src="https://latex.codecogs.com/png.latex?%5Cboldsymbol%7B%5Comega%7D%20=%20(%5Comega_1,%20%5Comega_2)">.</p>
+<p>In this scenario, then, the parameters for the i-th participant would be some function of the typical values <img src="https://latex.codecogs.com/png.latex?%5Ctheta"> and the random effects <img src="https://latex.codecogs.com/png.latex?%5Ceta">. For the moment I’ll just use <img src="https://latex.codecogs.com/png.latex?g_1()"> and <img src="https://latex.codecogs.com/png.latex?g_2()"> to denote these transformation functions:</p>
+<p><img src="https://latex.codecogs.com/png.latex?%0A%5Cbegin%7Barray%7D%7Brcl%7D%0Ak_i%20&amp;=&amp;%20g_1(%5Ctheta_1,%20%5Ceta_%7Bi1%7D)%20%5C%5C%0AV_i%20&amp;=&amp;%20g_2(%5Ctheta_2,%20%5Ceta_%7Bi2%7D)%0A%5Cend%7Barray%7D%0A"> where the random effect terms <img src="https://latex.codecogs.com/png.latex?%5Ceta_%7Bik%7D"> are presumed to be normally distributed:</p>
+<p><img src="https://latex.codecogs.com/png.latex?%0A%5Ceta_%7Bik%7D%20%5Csim%20%5Cmbox%7BNormal%7D(0,%20%5Comega_k)%0A"></p>
+<p>Next we have our pharmacokinetic function <img src="https://latex.codecogs.com/png.latex?f()"> that specifies how the plasma concentration changes as a function of time, dose, and the model parameters. Earlier I wrote out the specific form of this function for a particular model, but we could refer to it generically as <img src="https://latex.codecogs.com/png.latex?f(t,%20%5Cboldsymbol%5Ceta_i,%20%5Cboldsymbol%5Ctheta,%20D_i)">.</p>
+<p>If measurement errors are assumed to be additive (I’ll come back to that in a moment), the observed concentration <img src="https://latex.codecogs.com/png.latex?y_%7Bij%7D"> for the i-th person at the j-th time point:</p>
+<p><img src="https://latex.codecogs.com/png.latex?%0Ay_%7Bij%7D%20=%20f(t_j,%20%5Cboldsymbol%5Ceta_i,%20%5Cboldsymbol%5Ctheta,%20D_i)%20+%20%5Cepsilon_%7Bij%7D%0A"></p>
+<p>where <img src="https://latex.codecogs.com/png.latex?%5Cepsilon_%7Bij%7D"> is the error associated with person i and time j, and</p>
+<p><img src="https://latex.codecogs.com/png.latex?%0A%5Cepsilon_%7Bik%7D%20%5Csim%20%5Cmbox%7BNormal%7D(0,%20%5Csigma%5E2)%0A"></p>
+<p>With that as preliminary exposition, I think I can now make sense of how the model specification in NONMEM works…</p>
 </section>
+<section id="reading-a-nonmem-control-file" class="level3">
+<h3 class="anchored" data-anchor-id="reading-a-nonmem-control-file">Reading a NONMEM control file</h3>
+<p>Looking at the control file for the model (i.e., the <code>.ctl</code> file), there’s a bit of effort required for me – as someone who doesn’t use NONMEM – to work out what structure of the underlying model is. The key line in the control file is the one specifying the subroutines:</p>
+<div class="sourceCode" id="cb15" style="background: #f1f3f5;"><pre class="sourceCode fortran code-with-copy"><code class="sourceCode fortranfixed"><span id="cb15-1">$SUBR ADVAN2 TRANS2</span></code></pre></div>
+<p>The workshop notes helpfully explain this. In NONMEM terminology, this refers to two different modules: ADVAN provides a library of pharmacokinetic models that are bundled with the software, and TRANS specifies parameter transformation. Of particular importance: ADVAN2 refers to a one-compartment model with a first order absorption process. Okay that’s super handy because I’ve implemented one of those from scratch in Stan previously!</p>
+<p>The file continues, specifying the pharmacokinetic model (PK) and the error model (ERROR):</p>
+<div class="sourceCode" id="cb16" style="background: #f1f3f5;"><pre class="sourceCode fortran code-with-copy"><code class="sourceCode fortranfixed"><span id="cb16-1">$PK</span>
+<span id="cb16-2"></span>
+<span id="cb16-3">   ; COVARIATE MODEL</span>
+<span id="cb16-4">   TVCL<span class="kw" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">=</span>THETA(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">1</span>)</span>
+<span id="cb16-5">   TVV<span class="kw" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">=</span>THETA(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">2</span>)</span>
+<span id="cb16-6">   TVKA<span class="kw" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">=</span>THETA(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">3</span>)</span>
+<span id="cb16-7"></span>
+<span id="cb16-8">   ; MODEL <span class="kw" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">FOR</span> RANDOM BETWEEN SUBJECT VARIABILITY</span>
+<span id="cb16-9">   CL<span class="kw" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">=</span>TVCL<span class="kw" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">*</span><span class="bu" style="color: null;
+background-color: null;
+font-style: inherit;">EXP</span>(ETA(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">1</span>))</span>
+<span id="cb16-10">   V<span class="kw" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">=</span>TVV<span class="kw" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">*</span><span class="bu" style="color: null;
+background-color: null;
+font-style: inherit;">EXP</span>(ETA(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">2</span>))</span>
+<span id="cb16-11">   KA<span class="kw" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">=</span>TVKA<span class="kw" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">*</span><span class="bu" style="color: null;
+background-color: null;
+font-style: inherit;">EXP</span>(ETA(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">3</span>))</span>
+<span id="cb16-12"></span>
+<span id="cb16-13">   ; <span class="bu" style="color: null;
+background-color: null;
+font-style: inherit;">SCALE</span> CONCENTRATIONS</span>
+<span id="cb16-14">   S2<span class="kw" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">=</span>V</span>
+<span id="cb16-15"></span>
+<span id="cb16-16">$ERROR</span>
+<span id="cb16-17">   Y<span class="kw" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">=</span>F<span class="kw" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">+</span>EPS(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">1</span>)</span>
+<span id="cb16-18">   IPRED<span class="kw" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">=</span>F</span></code></pre></div>
+<p>My goal is to re-write this model in Stan, but to do that I need to first express that as a statistical model rather as NONMEM syntax. So let’s start at the population level. We have three parameters here:</p>
+<ul>
+<li>A population typical value for the clearance rate CL, denoted TVCL</li>
+<li>A population typical value for the distribution volume V, denoted TVV</li>
+<li>A population typical value for the absorption rate KA, denoted TVKA</li>
+</ul>
+<p>The mapping here is straightfoward:</p>
+<p><img src="https://latex.codecogs.com/png.latex?%0A%5Cbegin%7Barray%7D%7Brcl%7D%0A%5Cmbox%7BTVCL%7D%20&amp;=&amp;%20%5Ctheta_1%20%5C%5C%0A%5Cmbox%7BTVV%7D%20&amp;=&amp;%20%5Ctheta_2%20%5C%5C%0A%5Cmbox%7BTVKA%7D%20&amp;=&amp;%20%5Ctheta_3%0A%5Cend%7Barray%7D%0A"></p>
+<p>Now we consider the individual-subject level. At this level we have three parameters per person. For the i-th person, these parameters are:</p>
+<ul>
+<li>The clearance rate CL<img src="https://latex.codecogs.com/png.latex?_i"></li>
+<li>The distribution volume V<img src="https://latex.codecogs.com/png.latex?_i"></li>
+<li>The absorption rate KA<img src="https://latex.codecogs.com/png.latex?_i"></li>
+</ul>
+<p>As usual, the random effect terms <img src="https://latex.codecogs.com/png.latex?%5Ceta"> are normally distributed with mean zero and variance <img src="https://latex.codecogs.com/png.latex?%5Comega">, and the <img src="https://latex.codecogs.com/png.latex?%5Ctheta"> values are considered fixed effects. However, the population level and subject level parameters do not combine additively, they combine multiplicatively. Specifically, the <img src="https://latex.codecogs.com/png.latex?g(%5Ctheta,%20%5Ceta)"> functions for this model are as follows:</p>
+<p><img src="https://latex.codecogs.com/png.latex?%0A%5Cbegin%7Barray%7D%7Brcl%7D%0A%5Cmbox%7BCL%7D_i%20&amp;=&amp;%20%5Ctheta_1%20%5Cexp(%5Ceta_%7B1i%7D)%20%5C%5C%0A%5Cmbox%7BV%7D_i%20&amp;=&amp;%20%5Ctheta_2%20%5Cexp(%5Ceta_%7B2i%7D)%20%5C%5C%0A%5Cmbox%7BKA%7D_i%20&amp;=&amp;%20%5Ctheta_3%20%5Cexp(%5Ceta_%7B3i%7D)%0A%5Cend%7Barray%7D%0A"></p>
+<p>So far, so good. This makes sense of most of the model specification, but there are a still some confusing parts that require a bit more digging around to decipher. First off, this strange invocation:</p>
+<div class="sourceCode" id="cb17" style="background: #f1f3f5;"><pre class="sourceCode fortran code-with-copy"><code class="sourceCode fortranfixed"><span id="cb17-1">   ; <span class="bu" style="color: null;
+background-color: null;
+font-style: inherit;">SCALE</span> CONCENTRATIONS</span>
+<span id="cb17-2">   S2<span class="kw" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">=</span>V</span></code></pre></div>
+<p>This doesn’t make sense unless you know something about the way that NONMEM has implemented the underlying model. In the 1-compartment IV bolus model that I used as my motivating example (previous section), the pharmacokinetic function <img src="https://latex.codecogs.com/png.latex?f()"> has a closed form expression for the drug <em>concentration</em> in the central (only) compartment. However, when you implement a pharmacokinetic model using a system of ordinary differential equations (like I did in an earlier post), the values produced by solving the ODE typically refer to the <em>amount</em> of drug in the relevant compartment. To convert these amounts to concentrations you need to scale them, generally by dividing by the volume of said compartment. And thus we have our explanation of the mysterious <code>S2=V</code> instruction. The <code>S2</code> parameter is the NONMEM scaling parameter for the central compartment. We set this equal to <code>V</code>, i.e., the estimated volume parameter for each subject.<sup>3</sup></p>
+<p>At last we come to the error model:</p>
+<div class="sourceCode" id="cb18" style="background: #f1f3f5;"><pre class="sourceCode fortran code-with-copy"><code class="sourceCode fortranfixed"><span id="cb18-1">$ERROR</span>
+<span id="cb18-2">   Y<span class="kw" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">=</span>F<span class="kw" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">+</span>EPS(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">1</span>)</span>
+<span id="cb18-3">   IPRED<span class="kw" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">=</span>F</span></code></pre></div>
+<p>The relevant part here is the line specifying the relationship between the pharmacokinetic function <code>F</code>, the error terms <code>EPS</code>, and the observed data <code>Y</code>. In this case it’s additive, exactly in keeping with what I assumed in my toy example:</p>
+<p><img src="https://latex.codecogs.com/png.latex?%0Ay_%7Bij%7D%20=%20f(t_j,%20%5Cboldsymbol%5Ceta_i,%20%5Cboldsymbol%5Ctheta,%20D_i)%20+%20%5Cepsilon_%7Bij%7D%0A"></p>
+<p>It doesn’t have to be. In fact, the hands-on exercise in Lecture 2 of the tutorial I’m working through prepares three versions of this model, one with additive error, one with multiplicative error, and one with a hybrid error model that incorporates additive and multiplicative components. But I’ll get to that later.</p>
+<p>Yay! At long last I think I know the model I need to implement…</p>
+</section>
+</section>
+<section id="implementation-in-stan" class="level2">
+<h2 class="anchored" data-anchor-id="implementation-in-stan">Implementation in Stan</h2>
 </section>
 <section id="resources" class="level2">
 <h2 class="anchored" data-anchor-id="resources">Resources</h2>
 <ul>
+<li><p>Bauer, R. J., Guzy, S., &amp; Ng, C. (2007). A survey of population analysis methods and software for complex pharmacokinetic and pharmacodynamic models with examples. <em>The AAPS Journal, 9</em>, E60-E83. <a href="https://doi.org/10.1208/aapsj0901007">doi.org/10.1208/aapsj0901007</a></p></li>
+<li><p>Bauer, R. J. (2019). NONMEM tutorial part I: Description of commands and options, with simple examples of population analysis. <em>CPT: Pharmacometrics &amp; Systems Pharmacology, 8</em>(8), 525-537. <a href="https://doi.org/10.1002/psp4.12404">doi.org/10.1002/psp4.12404</a></p></li>
+<li><p>Bauer, R. J. (2019). NONMEM tutorial part II: Estimation methods and advanced examples. <em>CPT: Pharmacometrics &amp; Systems Pharmacology, 8</em>(8), 538-556. <a href="https://doi.org/10.1002/psp4.12422">doi.org/10.1002/psp4.12422</a></p></li>
 <li><p>Foster, D., Abuhelwa, A. &amp; Hughes, J. (2019). <em>Population Analysis Using NONMEM Beginners Workshop</em>. Retrieved from: <a href="https://www.paganz.org/resources/">www.paganz.org/resources/</a></p></li>
 <li><p>O’Reilly, R. A., &amp; Aggeler, P. M. (1968). Studies on coumarin anticoagulant drugs: initiation of warfarin therapy without a loading dose. <em>Circulation, 38</em>(1), 169-177. <a href="https://doi.org/10.1161/01.CIR.38.1.169">doi.org/10.1161/01.CIR.38.1.169</a></p></li>
 <li><p>O’Reilly, R. A., Aggeler, P. M., &amp; Leong, L. S. (1963). Studies on the coumarin anticoagulant drugs: the pharmacodynamics of warfarin in man. <em>The Journal of Clinical Investigation, 42</em>(10), 1542-1551. <a href="https://doi.org/10.1172%2FJCI104839">doi.org/10.1172%2FJCI104839</a></p></li>
@@ -376,6 +513,8 @@ font-style: inherit;">"Plasma concentration (mg/L)"</span></span>
 
 <ol>
 <li id="fn1"><p>Technically I’m guessing the code here, but there’s a lot more 1s in the data than 0s, and a lot more of male subjects reported by O’Reilly &amp; Aggeler, so it seems a safe bet!↩︎</p></li>
+<li id="fn2"><p>If we wanted to consider this correlation then we’d have a full variance-covariance matrix denoted <img src="https://latex.codecogs.com/png.latex?%5Cboldsymbol%5COmega">, but I’m not going to go there in this post↩︎</p></li>
+<li id="fn3"><p>Honestly, I wasn’t 100% certain that my interpretation was correct, but eventually I managed to find copies of the NONMEM user manuals online and they explain it there.↩︎</p></li>
 </ol>
 </section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div id="quarto-reuse" class="quarto-appendix-contents"><div><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2023,
   author = {Navarro, Danielle},
