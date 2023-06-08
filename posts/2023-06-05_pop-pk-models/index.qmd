@@ -286,29 +286,19 @@ vector amount_change(real time,
                      real KA,
                      real CL,
                      real V) {
-
-    real Ag = state[1]; // gut amount
-    real Ac = state[2]; // central amount
-
-    // compute derivatives
-    vector[2] dadt;
-    dadt[1] = - (KA * Ag);
-    dadt[2] = (KA * Ag) - (CL / V) * Ac;
-
-    return dadt;
-  }
+  vector[2] dadt;
+  dadt[1] = - (KA * state[1]);
+  dadt[2] = (KA * state[1]) - (CL / V) * state[2];
+  return dadt;
+}
 ```
 
 Later, we can pass the `amount_change()` function to one of the Stan ODE solvers.
 
 
-### Handling ragged arrays in Stan
+### Modelling code
 
-https://mc-stan.org/docs/stan-users-guide/ragged-data-structs.html
-
-https://mc-stan.org/docs/2_26/functions-reference/slicing-and-blocking-functions.html
-
-Formatting the data for Stan:
+There's some nuances here in how we format the data for Stan. Stan doesn't permit [ragged arrays](https://mc-stan.org/docs/stan-users-guide/ragged-data-structs.html), so we'll have to pass the observations as one long `c_obs` vector that aggregates across subjects. Within the model (see below), we'll use the `n_obs` vector that records the number of observations per subject to create break points that we can use to extract data from a single person. Here's the R code:
 
 ```{r}
 #| label: stan-data-format
@@ -338,11 +328,34 @@ dat <- list(
 )
 ```
 
+Now let's have a look at the Stan code. At some point I'd like to start using Torsten for these things rather than reinventing the wheel and coding a standard compartmental model from scratch. However, I'm a bottom-up kind of person^[If you believe the testimony of my ex-boyfriends, that is.] and I find it useful to do it myself a few times before I start relying on pre-built model code.  
 
+```{stan}
+#| eval: false
+#| echo: true
+#| label: stan-model-1
+#| file: model1.stan
+#| filename: model1.stan
+#| output.var: mod
+#| code-line-numbers: true
+```
 
-### Building and fitting the model
+Note that I've called `ode_bdf()` here rather than `ode_rk45()`. While there is always the possibility that ODE can remain stiff in the posterior,^[...or so I'm told. Honestly, the last time I had to work so hard to keep a straight face in front of a statistical audience was writing academic papers that required me to talk about posterior Weiner processes.] the real issue here is that I've chosen some absurdly diffuse priors, which means that the ODE can be quite poorly behaved during the warmup period for the sampler. 
 
-Blah blah fit model. Show scripts, don't run inside quarto doc...
+In any case, here's the R code to compile the model, run the sampler, and extract a summary representation:
+
+```{r}
+#| eval: false
+mod <- cmdstanr::cmdstan_model("model1.stan")
+out <- mod$sample(
+  data = dat,
+  chains = 4,
+  refresh = 1,
+  iter_warmup = 1000,
+  iter_sampling = 1000
+)
+out_summary <- out$summary()
+```
 
 ### Results
 
