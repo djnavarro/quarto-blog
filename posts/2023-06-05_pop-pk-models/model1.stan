@@ -14,10 +14,12 @@ functions {
 data {
   int<lower=1> n_ids;
   int<lower=1> n_tot;
+  int<lower=1> n_fit;
   array[n_ids] int n_obs;
   vector[n_ids] dose;
   array[n_tot] real t_obs;
   vector[n_tot] c_obs;
+  array[n_fit] real t_fit;
 }
 
 transformed data {
@@ -38,6 +40,8 @@ transformed data {
     initial_amount[i][1] = dose[i];
     initial_amount[i][2] = 0;
   }
+
+  real initial_time = 0;
 }
 
 parameters {
@@ -73,7 +77,7 @@ transformed parameters {
     amount[start[i]:stop[i]] = ode_bdf(
       amount_change,            // ode function
       initial_amount[i],        // initial state
-      0,                        // initial time
+      initial_time,             // initial time
       t_obs[start[i]:stop[i]],  // observation times
       KA[i],                    // absorption rate
       CL[i],                    // clearance
@@ -110,3 +114,32 @@ model {
   c_obs ~ normal(c_pred, sigma);
 
 }
+
+generated quantities {
+
+  array[n_ids, n_fit] vector[2] a_fit;
+  array[n_ids, n_fit] real c_fit;
+
+  for(i in 1:n_ids) {
+
+    // predicted concentrations for i-th person
+    a_fit[i] = ode_bdf(
+      amount_change,        // ode function
+      initial_amount[i],    // initial state
+      initial_time,         // initial time
+      t_fit,                // observation times
+      KA[i],                // absorption rate
+      CL[i],                // clearance
+      V[i]                  // volume
+    );
+
+    for(j in 1:n_fit) {
+      c_fit[i, j] = a_fit[i, j][2] / V[i];
+    }
+
+  }
+
+}
+
+
+
