@@ -339,7 +339,7 @@ background-color: null;
 font-style: inherit;">"Plasma concentration (mg/L)"</span></span>
 <span id="cb14-13">    )</span></code></pre></div>
 <div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2023-06-05_pop-pk-models/index_files/figure-html/unnamed-chunk-7-1.png" class="img-fluid" width="672"></p>
+<p><img src="https://blog.djnavarro.net/posts/2023-06-05_pop-pk-models/index_files/figure-html/warfarin-data-1.png" class="img-fluid" width="672"></p>
 </div>
 </div>
 </section>
@@ -491,7 +491,7 @@ font-style: inherit;">=</span>F</span></code></pre></div>
 <p>Yay! At long last I think I know the model I need to implement…</p>
 </section>
 </section>
-<section id="implementation-in-stan" class="level2">
+<section id="implementation-in-stan" class="level2 page-columns page-full">
 <h2 class="anchored" data-anchor-id="implementation-in-stan">Implementation in Stan</h2>
 <p>Last time around I wrote my ODEs using notation that made sense to me. This time around I’ll try to bring my notation a little closer to the terminology used in the NONMEM control file I was working from. There are two drug amounts that we need to keep track of, the amount <img src="https://latex.codecogs.com/png.latex?%5Cmbox%7BA%7D_g"> in the gut that has not yet been absorbed into systemic circulation, and the amount <img src="https://latex.codecogs.com/png.latex?%5Cmbox%7BA%7D_c"> currently in circulation (in the central/only compartment). The derivatives of these two quantities with respect to time form a system of differential quations:</p>
 <p><img src="https://latex.codecogs.com/png.latex?%0A%5Cbegin%7Barray%7D%7Brcl%7D%0A%5Cdisplaystyle%20%5Cfrac%7Bd%5Cmbox%7BA%7D_g%7D%7Bdt%7D%20&amp;=&amp;%20-%5Cmbox%7BKA%7D%20%5Ctimes%20%5Cmbox%7BA%7D_%7Bg%7D%20%5C%5C%20%5C%5C%0A%5Cdisplaystyle%20%5Cfrac%7Bd%5Cmbox%7BA%7D_c%7D%7Bdt%7D%20&amp;=&amp;%20%5Cdisplaystyle%20%5Cmbox%7BKA%7D%20%5Ctimes%20%5Cmbox%7BA%7D_%7Bg%7D%20-%20%5Cfrac%7B%5Cmbox%7BCL%7D%7D%7B%5Cmbox%7BV%7D%7D%20%5C%20%5Cmbox%7BA%7D_%7Bc%7D%0A%5Cend%7Barray%7D%0A"></p>
@@ -549,116 +549,466 @@ background-color: null;
 font-style: inherit;">return</span> dadt;</span>
 <span id="cb19-16">  }</span></code></pre></div>
 <p>Later, we can pass the <code>amount_change()</code> function to one of the Stan ODE solvers.</p>
+<section id="handling-ragged-arrays-in-stan" class="level3">
+<h3 class="anchored" data-anchor-id="handling-ragged-arrays-in-stan">Handling ragged arrays in Stan</h3>
+<p>https://mc-stan.org/docs/stan-users-guide/ragged-data-structs.html</p>
+<p>https://mc-stan.org/docs/2_26/functions-reference/slicing-and-blocking-functions.html</p>
 <p>Formatting the data for Stan:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb20" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb20-1">ids <span class="ot" style="color: #003B4F;
+<div class="sourceCode cell-code" id="cb20" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb20-1">warfpk_obs <span class="ot" style="color: #003B4F;
 background-color: null;
-font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">unique</span>(warfpk<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">$</span>id)</span>
-<span id="cb20-2">t_obs <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> purrr<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">map</span>(ids, <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">~</span> warfpk<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">$</span>time[warfpk<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">$</span>id <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">==</span> .x <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">&amp;</span> warfpk<span class="sc" style="color: #5E5E5E;
+font-style: inherit;">&lt;-</span> warfpk[warfpk<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">$</span>mdv <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">==</span> <span class="dv" style="color: #AD0000;
 background-color: null;
-font-style: inherit;">0</span>])</span>
-<span id="cb20-3">c_obs <span class="ot" style="color: #003B4F;
+font-style: inherit;">0</span>, ]</span>
+<span id="cb20-2">warfpk_amt <span class="ot" style="color: #003B4F;
 background-color: null;
-font-style: inherit;">&lt;-</span> purrr<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">map</span>(ids, <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">~</span> warfpk<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">$</span>dv[warfpk<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">$</span>id <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">==</span> .x <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">&amp;</span> warfpk<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">$</span>mdv <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">==</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">0</span>])</span>
-<span id="cb20-4">n_obs <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> purrr<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">map_int</span>(t_obs, length)</span>
-<span id="cb20-5">dose <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> purrr<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">map_dbl</span>(ids, <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">~</span> warfpk<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">$</span>amt[warfpk<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">$</span>id <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">==</span> .x <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">&amp;</span> <span class="sc" style="color: #5E5E5E;
+font-style: inherit;">&lt;-</span> warfpk[<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">!</span><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">is.na</span>(warfpk<span class="sc" style="color: #5E5E5E;
 background-color: null;
-font-style: inherit;">$</span>rate)])</span>
-<span id="cb20-6"></span>
-<span id="cb20-7">dat <span class="ot" style="color: #003B4F;
+font-style: inherit;">$</span>rate), ]</span>
+<span id="cb20-3"></span>
+<span id="cb20-4">t_fit <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">c</span>(</span>
+<span id="cb20-5">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">seq</span>(.<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">1</span>, .<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">9</span>, .<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">1</span>),</span>
+<span id="cb20-6">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">seq</span>(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">1</span>, <span class="fl" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">2.75</span>, .<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">25</span>),</span>
+<span id="cb20-7">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">seq</span>(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">3</span>, <span class="fl" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">9.5</span>, .<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">5</span>),</span>
+<span id="cb20-8">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">seq</span>(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">10</span>, <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">23</span>, <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">1</span>),</span>
+<span id="cb20-9">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">seq</span>(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">24</span>, <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">120</span>, <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">3</span>)</span>
+<span id="cb20-10">)</span>
+<span id="cb20-11"></span>
+<span id="cb20-12">dat <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">list</span>(</span>
-<span id="cb20-8">  <span class="at" style="color: #657422;
+<span id="cb20-13">  <span class="at" style="color: #657422;
 background-color: null;
-font-style: inherit;">n =</span> <span class="fu" style="color: #4758AB;
+font-style: inherit;">n_ids =</span> <span class="fu" style="color: #4758AB;
 background-color: null;
-font-style: inherit;">length</span>(ids),</span>
-<span id="cb20-9">  <span class="at" style="color: #657422;
+font-style: inherit;">nrow</span>(warfpk_amt),</span>
+<span id="cb20-14">  <span class="at" style="color: #657422;
 background-color: null;
-font-style: inherit;">t_obs =</span> t_obs,</span>
-<span id="cb20-10">  <span class="at" style="color: #657422;
+font-style: inherit;">n_tot =</span> <span class="fu" style="color: #4758AB;
 background-color: null;
-font-style: inherit;">c_obs =</span> c_obs,</span>
-<span id="cb20-11">  <span class="at" style="color: #657422;
+font-style: inherit;">nrow</span>(warfpk_obs),</span>
+<span id="cb20-15">  <span class="at" style="color: #657422;
 background-color: null;
-font-style: inherit;">n_obs =</span> n_obs,</span>
-<span id="cb20-12">  <span class="at" style="color: #657422;
+font-style: inherit;">n_obs =</span> purrr<span class="sc" style="color: #5E5E5E;
 background-color: null;
-font-style: inherit;">dose =</span> dose</span>
-<span id="cb20-13">)</span></code></pre></div>
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">map_int</span>(</span>
+<span id="cb20-16">    warfpk_amt<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span>id,</span>
+<span id="cb20-17">    <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">~</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">nrow</span>(warfpk_obs[warfpk_obs<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span>id <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">==</span> .x, ])</span>
+<span id="cb20-18">  ),</span>
+<span id="cb20-19">  <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">t_obs =</span> warfpk_obs<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span>time,</span>
+<span id="cb20-20">  <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">c_obs =</span> warfpk_obs<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span>dv,</span>
+<span id="cb20-21">  <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">dose =</span> warfpk_amt<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span>amt,</span>
+<span id="cb20-22">  <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">t_fit =</span> t_fit,</span>
+<span id="cb20-23">  <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">n_fit =</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">length</span>(t_fit)</span>
+<span id="cb20-24">)</span></code></pre></div>
 </div>
+</section>
+<section id="building-and-fitting-the-model" class="level3">
+<h3 class="anchored" data-anchor-id="building-and-fitting-the-model">Building and fitting the model</h3>
+<p>Blah blah fit model. Show scripts, don’t run inside quarto doc…</p>
+</section>
+<section id="results" class="level3 page-columns page-full">
+<h3 class="anchored" data-anchor-id="results">Results</h3>
+<div class="cell page-columns page-full">
+<div class="sourceCode cell-code" id="cb21" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb21-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">library</span>(ggplot2)</span>
+<span id="cb21-2">res <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> tibble<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">tibble</span>(</span>
+<span id="cb21-3">  <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">y =</span> dat<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span>c_obs,</span>
+<span id="cb21-4">  <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">y_hat =</span> out_summary<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span>mean[<span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">grepl</span>(<span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"c_pred"</span>, out_summary<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span>variable)],</span>
+<span id="cb21-5">  <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">time =</span> warfpk_obs<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span>time,</span>
+<span id="cb21-6">  <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">id =</span> warfpk_obs<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span>id</span>
+<span id="cb21-7">)</span>
+<span id="cb21-8"></span>
+<span id="cb21-9"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">ggplot</span>(res, <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">aes</span>(y_hat, y, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">colour =</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">factor</span>(id))) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">+</span></span>
+<span id="cb21-10">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">geom_abline</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">intercept =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">0</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">slope =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">1</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">colour =</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"grey50"</span>) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">+</span></span>
+<span id="cb21-11">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">geom_point</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">size =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">4</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">show.legend =</span> <span class="cn" style="color: #8f5902;
+background-color: null;
+font-style: inherit;">FALSE</span>) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">+</span></span>
+<span id="cb21-12">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">facet_wrap</span>(<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">~</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">factor</span>(id), <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">nrow =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">4</span>)</span></code></pre></div>
+<div class="cell-output-display column-page">
+<p><img src="https://blog.djnavarro.net/posts/2023-06-05_pop-pk-models/index_files/figure-html/simple-plot-1.png" class="img-fluid" width="1536"></p>
+</div>
+</div>
+<div class="cell page-columns page-full">
+<div class="sourceCode cell-code" id="cb22" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb22-1">prd <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> tibble<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">tibble</span>(</span>
+<span id="cb22-2">  <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">y =</span> out_summary<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span>mean[<span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">grepl</span>(<span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"c_fit"</span>, out_summary<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span>variable)],</span>
+<span id="cb22-3">  <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">q5 =</span> out_summary<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span>q5[<span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">grepl</span>(<span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"c_fit"</span>, out_summary<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span>variable)],</span>
+<span id="cb22-4">  <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">q95 =</span> out_summary<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span>q95[<span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">grepl</span>(<span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"c_fit"</span>, out_summary<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span>variable)],</span>
+<span id="cb22-5">  <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">id =</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">as.vector</span>((<span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">replicate</span>(dat<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span>n_fit, warfpk_amt<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span>id))),</span>
+<span id="cb22-6">  <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">time =</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">as.vector</span>(<span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">t</span>(<span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">replicate</span>(dat<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span>n_ids, dat<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span>t_fit)))</span>
+<span id="cb22-7">)</span>
+<span id="cb22-8"></span>
+<span id="cb22-9"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">ggplot</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">mapping =</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">aes</span>(time, y)) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">+</span></span>
+<span id="cb22-10">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">geom_ribbon</span>(</span>
+<span id="cb22-11">    <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">data =</span> prd, </span>
+<span id="cb22-12">    <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">mapping =</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">aes</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">ymin =</span> q5, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">ymax =</span> q95),</span>
+<span id="cb22-13">    <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">fill =</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"grey80"</span></span>
+<span id="cb22-14">  ) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">+</span></span>
+<span id="cb22-15">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">geom_line</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">data =</span> prd) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">+</span> </span>
+<span id="cb22-16">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">geom_point</span>(</span>
+<span id="cb22-17">    <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">mapping =</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">aes</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">colour =</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">factor</span>(id)), </span>
+<span id="cb22-18">    <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">data =</span> res, </span>
+<span id="cb22-19">    <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">size =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">4</span>, </span>
+<span id="cb22-20">    <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">show.legend =</span> <span class="cn" style="color: #8f5902;
+background-color: null;
+font-style: inherit;">FALSE</span></span>
+<span id="cb22-21">  ) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">+</span></span>
+<span id="cb22-22">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">geom_label</span>(</span>
+<span id="cb22-23">    <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">data =</span> tibble<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">tibble</span>(</span>
+<span id="cb22-24">      <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">time =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">110</span>, </span>
+<span id="cb22-25">      <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">y =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">17</span>, </span>
+<span id="cb22-26">      <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">id =</span> warfpk_amt<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span>id</span>
+<span id="cb22-27">    ),</span>
+<span id="cb22-28">    <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">aes</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">label =</span> id)</span>
+<span id="cb22-29">  )<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">+</span> </span>
+<span id="cb22-30">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">facet_wrap</span>(<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">~</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">factor</span>(id), <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">nrow =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">4</span>) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">+</span> </span>
+<span id="cb22-31">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">theme_bw</span>() <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">+</span> </span>
+<span id="cb22-32">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">theme</span>(</span>
+<span id="cb22-33">    <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">strip.text =</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">element_blank</span>(), </span>
+<span id="cb22-34">    <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">strip.background =</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">element_blank</span>()</span>
+<span id="cb22-35">  ) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">+</span></span>
+<span id="cb22-36">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">labs</span>(</span>
+<span id="cb22-37">    <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">x =</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"Time (hours)"</span>,</span>
+<span id="cb22-38">    <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">y =</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"Warfarin plasma concentration (mg/L)"</span></span>
+<span id="cb22-39">  )</span></code></pre></div>
+<div class="cell-output-display column-page">
+<p><img src="https://blog.djnavarro.net/posts/2023-06-05_pop-pk-models/index_files/figure-html/pk-profiles-1.png" class="img-fluid" width="1536"></p>
+</div>
+</div>
+</section>
 </section>
 <section id="resources" class="level2">
 <h2 class="anchored" data-anchor-id="resources">Resources</h2>
@@ -698,6 +1048,7 @@ Models.”</span> June 5, 2023. <a href="https://blog.djnavarro.net/posts/2023-0
   <category>R</category>
   <guid>https://blog.djnavarro.net/posts/2023-06-05_pop-pk-models/index.html</guid>
   <pubDate>Sun, 04 Jun 2023 14:00:00 GMT</pubDate>
+  <media:content url="https://blog.djnavarro.net/posts/2023-06-05_pop-pk-models/cover.png" medium="image" type="image/png" height="144" width="144"/>
 </item>
 <item>
   <title>Software design by example</title>
