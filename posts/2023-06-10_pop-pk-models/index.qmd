@@ -262,7 +262,7 @@ $$
 y_{ij} = f(t_j, \boldsymbol\eta_i, \boldsymbol\theta, D_i) + \epsilon_{ij}
 $$
 
-It doesn't have to be. In fact, the hands-on exercise in Lecture 2 of the tutorial I'm working through prepares three versions of this model, one with additive error, one with multiplicative error, and one with a hybrid error model that incorporates additive and multiplicative components. But I'll get to that later. 
+It doesn't have to be. In fact, the hands-on exercise in Lecture 2 of the tutorial I'm working through prepares three versions of this model, one with additive error, one with multiplicative error, and one with a hybrid error model that incorporates additive and multiplicative components. I'll get to that later, though probably in a future post.
 
 Yay! At long last I think I know the model I need to implement...
 
@@ -278,23 +278,7 @@ $$
 \end{array}
 $$
 
-When we implement the full model in Stan what we actually want to model is the drug *concentration* in the central compartment as a function of time, and for that we'll need to solve for $\mbox{A}_c$. The first step, however, is to write a Stan function that calculates these derivatives:
-
-``` stan
-vector amount_change(real time,
-vector state,
-real KA,
-real CL,
-real V) {
-vector[2] dadt;
-dadt[1] = - (KA * state[1]);
-dadt[2] = (KA * state[1]) - (CL / V) * state[2];
-return dadt;
-}
-```
-
-Later, we can pass the `amount_change()` function to one of the Stan ODE solvers.
-
+When we implement the full model in Stan what we actually want to model is the drug *concentration* in the central compartment as a function of time, and for that we'll need to solve for $\mbox{A}_c$. 
 
 ### Modelling code
 
@@ -340,7 +324,10 @@ Now let's have a look at the Stan code. At some point I'd like to start using To
 #| code-line-numbers: true
 ```
 
-Note that I've called `ode_bdf()` here rather than `ode_rk45()`. While there is always the possibility that ODE can remain stiff in the posterior,^[...or so I'm told. Honestly, the last time I had to work so hard to keep a straight face in front of a statistical audience was writing academic papers that required me to talk about posterior Weiner processes.] the real issue here is that I've chosen some absurdly diffuse priors, which means that the ODE can be quite poorly behaved during the warmup period for the sampler. 
+Some things to note about this code:
+
+- In all honesty I don't think the ODE code is even needed here. With first-order absorption dynamics and first-order elimination dynamics, you can analytically calculate the pharmacokinetic curve using a [Bateman curve](https://en.wikipedia.org/wiki/Bateman_equation), which I talked about in a [previous post](https://blog.djnavarro.net/posts/2023-04-26_non-compartmental-analysis/). However, one of my goals here was to use the Stan ODE solvers in a population model, so for the purposes of this post I've chosen to do it the hard way.
+- Speaking of doing things the hard way, note that I've called `ode_bdf()` here rather than `ode_rk45()`. This is to avoid any issues of [ODE stiffness](https://en.wikipedia.org/wiki/Stiff_equation). While there is always the possibility that ODE can remain stiff in the posterior,^[...or so I'm told. Honestly, the last time I had to work so hard to keep a straight face in front of a statistical audience was writing academic papers that required me to talk about posterior Weiner processes.] I suspect the real issue here is that (a) I've chosen some absurdly diffuse priors, which means that the ODE can be quite poorly behaved during the warmup period for the sampler, and (b) earlier versions of the model had bugs that made the model do weird things. I strongly suspect that with those issues out of the way I could call `ode_rk45()` and get a considerable speedup. However, for the purposes of this post I'll leave it as is. 
 
 In any case, here's the R code to compile the model, run the sampler, and extract a summary representation:
 
@@ -365,53 +352,31 @@ out_summary <- out$summary()
 out_summary <- readr::read_csv("model1_summary.csv")
 ```
 
+Let's start by taking a look at the summary. For the time being I'm only really interested in the population level parameters $\boldsymbol\theta$, $\boldsymbol\omega$, and $\boldsymbol\eta$, so I'll filter the results so that only those parameters are shown in the output:
+
+
 ```{r}
 #| label: summary-model1
-out_summary |>
-  dplyr::filter(
-    variable |> stringr::str_detect("(theta|omega|sigma)")
-  )
+out_summary |> dplyr::filter(
+  variable |> stringr::str_detect("(theta|omega|sigma|lp)")
+)
 ```
 
-Yikes. Those R-hat values are a bit of a worry.
-
-Point estimates of population-level parameters in the NONMEM output (specifically the `.smr` file):
-
-```
-THETA:      POP_CL      POP_V       POP_KA      
-THETA     = 0.134       7.72        0.59
-
-ETA:        PPV_CL      PPV_V       PPV_KA      
-ETASD     = 0.285       0.222       0.621
-
-EPSSD     = 1.020
-```
-
-These are broadly consistent with the posterior medians returned by my Stan model, particularly when we consider that the uncertainty bands for the Stan model are somewhat wide, as are the standard errors reported by NONMEM:
-
-```
-THETA:se% = 5.4         4.5         22.0
-ETASD:se% = 14.2        14.4        25.4
-EPSSD:se% = 12.8
-```
-
-The discrepancies, such as they are, reflect the fact that the Stan model and the NONMEM model both acknowledge considerable uncertainty about the population level parameters. 
+The R-hat values suggest that the chains are behaving themselves nicely, and all four chains are giving the same answers. Just to check, I'll plot the marginal distributions over all the population level parameters (and the log-probability) separately for each chain. To do that, first I'll extract the relevant columns from the `model1_draws.csv` file that contains all the raw samples:
 
 ```{r}
 #| label: posterior-densities
 draws <- readr::read_csv("model1_draws.csv", show_col_types = FALSE) |>
-  dplyr::select(tidyselect::matches("(theta|sigma|omega|lp)")) |> 
-  dplyr::mutate(
-    id = dplyr::row_number(),
-    chain = ceiling(id/1000)
-  )
+  dplyr::select(tidyselect::matches("(theta|sigma|omega|lp|chain)")) 
+
 draws
 ```
+
 
 ```{r}
 #| column: page
 #| fig-width: 16
-#| fig-height: 8
+#| fig-height: 12
 #| label: posterior-density-plots
 draws_long <- draws |> 
   tidyr::pivot_longer(
@@ -421,27 +386,69 @@ draws_long <- draws |>
   ) 
 
 draws_long |> 
-  dplyr::filter(chain %in% 1:2) |>
-  ggplot(aes(value)) +
-  geom_density(trim = TRUE, fill = "black") + 
-  facet_grid(chain ~ parameter, scales = "free")
-
-draws_long |> 
-  dplyr::filter(chain %in% 3:4) |>
-  ggplot(aes(value)) +
-  geom_density(trim = TRUE, fill = "black") + 
-  facet_grid(chain ~ parameter, scales = "free")
+  ggplot(aes(x = factor(.chain), value, fill = parameter)) +
+  geom_violin(draw_quantiles = c(.25, .5, .75), show.legend = FALSE) + 
+  facet_wrap(~ parameter, scales = "free")
 ```
+
+Here's a truncated version of the table showing the posterior mean and standard deviations for population parameters:
 
 ```{r}
-#| label: posterior-lp-plots
-ggplot(draws, aes(factor(chain), lp__)) + geom_violin() 
+draws_long |> 
+  dplyr::group_by(parameter) |>
+  dplyr::summarise(
+    mean = mean(value),
+    sd = sd(value)
+  )
 ```
+
+For comparison, here are the corresponding estimates and standard errors in the NONMEM output:
+
+```{r}
+#| echo: false
+tibble::tribble(
+  ~parameter, ~estimate, ~pct_std_error,
+  "omega_CL", 0.285    , 14.2,
+  "omega_KA", 0.621    , 25.4,
+  "omega_V" , 0.222    , 14.4,
+  "sigma"   , 1.02     , 12.8,
+  "theta_CL", 0.134    , 5.4,
+  "theta_KA", 0.59     , 22.0,
+  "theta_V" , 7.72     , 4.5
+) |> 
+  dplyr::mutate(std_error = estimate * pct_std_error / 100) |>
+  dplyr::select(-pct_std_error)
+```
+
+They are mostly in agreement, though there are some modest differences in the estimates of the population mean and variability in the absorption rate KA. 
+
+<!-- 
+Note: I feel like there should be a .res file, but apparently there isn't one
+bundled with the tutorial. Fortunately, it looks like everything that matters 
+is also in the .smr file. Here's the cut-and-paste for the relevant bits:
+
+THETA:      POP_CL      POP_V       POP_KA      
+THETA     = 0.134       7.72        0.59
+
+ETA:        PPV_CL      PPV_V       PPV_KA      
+ETASD     = 0.285       0.222       0.621
+
+EPSSD     = 1.020
+
+THETA:se% = 5.4         4.5         22.0
+ETASD:se% = 14.2        14.4        25.4
+EPSSD:se% = 12.8
+
+Judging from the "se%" part, the fact that these numbers are completely
+unhinged if treated as literal standard errors, and the fact that rescaling
+places most of the standard error estimates in alignment with the Bayesian
+output, I'm pretty certain these are reported as percentages.
+-->
 
 
 ### Model fits
 
-Under normal circumstances I could simply use the `$summary()` method to do all the work for me in extracting parameter estimates. However, because in this case I've decided that I only trust chains 3 and 4, I'm going to do it manually from the raw samples:
+Under normal circumstances I could simply use the `$summary()` method to do all the work for me in extracting parameter estimates. However, because I'm having fun playing with the raw samples data, I'm going to do it the long way...
 
 ```{r}
 #| label: manual-summary
@@ -449,11 +456,6 @@ Under normal circumstances I could simply use the `$summary()` method to do all 
 fit <- "model1_draws.csv" |> 
   readr::read_csv(show_col_types = FALSE) |>
   dplyr::select(tidyselect::matches("c_pred")) |>
-  dplyr::mutate(
-    sample = dplyr::row_number(),
-    chain = ceiling(sample/1000)
-  ) |> 
-  dplyr::filter(chain %in% 3:4) |>
   tidyr::pivot_longer(
     cols = tidyselect::matches("c_pred"),
     names_to = "variable",
@@ -501,11 +503,6 @@ ggplot(fit, aes(yh, y, colour = factor(id))) +
 prd <- "model1_draws.csv" |> 
   readr::read_csv(show_col_types = FALSE) |>
   dplyr::select(tidyselect::matches("c_fit")) |>
-  dplyr::mutate(
-    sample = dplyr::row_number(),
-    chain = ceiling(sample/1000)
-  ) |> 
-  dplyr::filter(chain %in% 3:4) |>
   tidyr::pivot_longer(
     cols = tidyselect::matches("c_fit"),
     names_to = "variable",

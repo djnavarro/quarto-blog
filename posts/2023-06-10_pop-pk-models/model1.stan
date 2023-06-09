@@ -67,7 +67,7 @@ transformed parameters {
     // pharmacokinetic parameters
     KA[i] = theta_KA * exp(eta_KA[i]);
     CL[i] = theta_CL * exp(eta_CL[i]);
-    V[i] = theta_CL * exp(eta_V[i]);
+    V[i] = theta_V * exp(eta_V[i]);
 
     // predicted drug amounts
     amount[start[i]:stop[i]] = ode_bdf(
@@ -89,6 +89,7 @@ transformed parameters {
 
 model {
   // foolish priors over population parameters
+  // (parameter bounds ensure these are actually half-normals)
   theta_KA ~ normal(0, 10);
   theta_CL ~ normal(0, 10);
   theta_V ~ normal(0, 10);

@@ -50,7 +50,7 @@ time_start <- Sys.time()
 out <- mod$sample(
   data = dat,
   chains = 4,
-  refresh = 1,
+  refresh = 10,
   iter_warmup = 1000,
   iter_sampling = 1000
 )
@@ -59,7 +59,8 @@ time_stop <- Sys.time()
 # save results ------------------------------------------------------------
 
 out_summary <- out$summary()
-out_draws <- out$draws(format = "draws_df")
+out_draws <- out$draws(format = "draws_df") |>
+  tibble::as_tibble()
 
 readr::write_csv(out_summary, fs::path(dir, "model1_summary.csv"))
 readr::write_csv(out_draws, fs::path(dir, "model1_draws.csv"))
