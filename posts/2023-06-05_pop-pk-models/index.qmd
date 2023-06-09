@@ -109,12 +109,12 @@ warfpk |>
     !is.na(dv) # ignore missing dv cases
   ) |>
   ggplot(aes(x = time, y = dv, group = id)) + 
-    geom_line(color = "grey50") +
-    geom_point() +
-    labs(
-      x = "Time since dose (hours)", 
-      y = "Plasma concentration (mg/L)"
-    )
+  geom_line(color = "grey50") +
+  geom_point() +
+  labs(
+    x = "Time since dose (hours)", 
+    y = "Plasma concentration (mg/L)"
+  )
 ```
 
 ## Deciphering NONMEM specifications
@@ -128,7 +128,7 @@ The original workshop is designed to be conducted using [NONMEM](https://www.ico
 - Boldfaced upper case Greek symbols denote parameter matrices: $\boldsymbol\Theta$, $\boldsymbol\Omega$, $\boldsymbol\Sigma$, etc
 
 There is also a convention assigning meaning to the different Greek letters:
- 
+
 - Population mean parameters are denoted $\theta$
 - Population variance parameters are denoted $\omega$
 - Individual departures from population mean and for $i$-th individual, $\eta_i$
@@ -189,22 +189,22 @@ The file continues, specifying the pharmacokinetic model (PK) and the error mode
 ``` fortran
 $PK
 
-   ; COVARIATE MODEL
-   TVCL=THETA(1)
-   TVV=THETA(2)
-   TVKA=THETA(3)
+  ; COVARIATE MODEL
+  TVCL=THETA(1)
+  TVV=THETA(2)
+  TVKA=THETA(3)
 
-   ; MODEL FOR RANDOM BETWEEN SUBJECT VARIABILITY
-   CL=TVCL*EXP(ETA(1))
-   V=TVV*EXP(ETA(2))
-   KA=TVKA*EXP(ETA(3))
+  ; MODEL FOR RANDOM BETWEEN SUBJECT VARIABILITY
+  CL=TVCL*EXP(ETA(1))
+  V=TVV*EXP(ETA(2))
+  KA=TVKA*EXP(ETA(3))
 
-   ; SCALE CONCENTRATIONS
-   S2=V
+  ; SCALE CONCENTRATIONS
+  S2=V
 
 $ERROR
-   Y=F+EPS(1)
-   IPRED=F
+  Y=F+EPS(1)
+  IPRED=F
 ```
 
 My goal is to re-write this model in Stan, but to do that I need to first express that as a statistical model rather as NONMEM syntax. So let's start at the population level. We have three parameters here:
@@ -242,8 +242,8 @@ $$
 So far, so good. This makes sense of most of the model specification, but there are a still some confusing parts that require a bit more digging around to decipher. First off, this strange invocation:
 
 ``` fortran
-   ; SCALE CONCENTRATIONS
-   S2=V
+  ; SCALE CONCENTRATIONS
+  S2=V
 ```
 
 This doesn't make sense unless you know something about the way that NONMEM has implemented the underlying model. In the 1-compartment IV bolus model that I used as my motivating example (previous section), the pharmacokinetic function $f()$ has a closed form expression for the drug *concentration* in the central (only) compartment. However, when you implement a pharmacokinetic model using a system of ordinary differential equations (like I did in an earlier post), the values produced by solving the ODE typically refer to the *amount* of drug in the relevant compartment. To convert these amounts to concentrations you need to scale them, generally by dividing by the volume of said compartment. And thus we have our explanation of the mysterious `S2=V` instruction. The `S2` parameter is the NONMEM scaling parameter for the central compartment. We set this equal to `V`, i.e., the estimated volume parameter for each subject.^[Honestly, I wasn't 100% certain that my interpretation was correct, but eventually I managed to find copies of the NONMEM user manuals online and they explain it there.] 
@@ -252,8 +252,8 @@ At last we come to the error model:
 
 ``` fortran
 $ERROR
-   Y=F+EPS(1)
-   IPRED=F
+  Y=F+EPS(1)
+  IPRED=F
 ```
 
 The relevant part here is the line specifying the relationship between the pharmacokinetic function `F`, the error terms `EPS`, and the observed data `Y`. In this case it's additive, exactly in keeping with what I assumed in my toy example:
@@ -282,14 +282,14 @@ When we implement the full model in Stan what we actually want to model is the d
 
 ``` stan
 vector amount_change(real time,
-                     vector state,
-                     real KA,
-                     real CL,
-                     real V) {
-  vector[2] dadt;
-  dadt[1] = - (KA * state[1]);
-  dadt[2] = (KA * state[1]) - (CL / V) * state[2];
-  return dadt;
+vector state,
+real KA,
+real CL,
+real V) {
+vector[2] dadt;
+dadt[1] = - (KA * state[1]);
+dadt[2] = (KA * state[1]) - (CL / V) * state[2];
+return dadt;
 }
 ```
 
@@ -373,6 +373,8 @@ out_summary |>
   )
 ```
 
+Yikes. Those R-hat values are a bit of a worry.
+
 Point estimates of population-level parameters in the NONMEM output (specifically the `.smr` file):
 
 ```
@@ -395,7 +397,90 @@ EPSSD:se% = 12.8
 
 The discrepancies, such as they are, reflect the fact that the Stan model and the NONMEM model both acknowledge considerable uncertainty about the population level parameters. 
 
+```{r}
+#| label: posterior-densities
+draws <- readr::read_csv("model1_draws.csv", show_col_types = FALSE) |>
+  dplyr::select(tidyselect::matches("(theta|sigma|omega|lp)")) |> 
+  dplyr::mutate(
+    id = dplyr::row_number(),
+    chain = ceiling(id/1000)
+  )
+draws
+```
+
+```{r}
+#| column: page
+#| fig-width: 16
+#| fig-height: 8
+#| label: posterior-density-plots
+draws_long <- draws |> 
+  tidyr::pivot_longer(
+    cols = !tidyselect::matches("(id|chain)"),
+    names_to = "parameter",
+    values_to = "value"
+  ) 
+
+draws_long |> 
+  dplyr::filter(chain %in% 1:2) |>
+  ggplot(aes(value)) +
+  geom_density(trim = TRUE, fill = "black") + 
+  facet_grid(chain ~ parameter, scales = "free")
+
+draws_long |> 
+  dplyr::filter(chain %in% 3:4) |>
+  ggplot(aes(value)) +
+  geom_density(trim = TRUE, fill = "black") + 
+  facet_grid(chain ~ parameter, scales = "free")
+```
+
+```{r}
+#| label: posterior-lp-plots
+ggplot(draws, aes(factor(chain), lp__)) + geom_violin() 
+```
+
+
 ### Model fits
+
+Under normal circumstances I could simply use the `$summary()` method to do all the work for me in extracting parameter estimates. However, because in this case I've decided that I only trust chains 3 and 4, I'm going to do it manually from the raw samples:
+
+```{r}
+#| label: manual-summary
+#| cache: true
+fit <- "model1_draws.csv" |> 
+  readr::read_csv(show_col_types = FALSE) |>
+  dplyr::select(tidyselect::matches("c_pred")) |>
+  dplyr::mutate(
+    sample = dplyr::row_number(),
+    chain = ceiling(sample/1000)
+  ) |> 
+  dplyr::filter(chain %in% 3:4) |>
+  tidyr::pivot_longer(
+    cols = tidyselect::matches("c_pred"),
+    names_to = "variable",
+    values_to = "y_hat"
+  ) |> 
+  dplyr::mutate(
+    obs_num = variable |> 
+      stringr::str_remove_all(".*\\[") |>
+      stringr::str_remove_all("\\]") |> 
+      as.numeric()
+  ) |>
+  dplyr::group_by(obs_num) |>
+  dplyr::summarise(
+    yh = mean(y_hat),
+    q5 = quantile(y_hat, .05),
+    q95 = quantile(y_hat, .95)
+  )  |>
+  dplyr::arrange(obs_num) |>
+  dplyr::mutate(
+    y = dat$c_obs,
+    time = warfpk_obs$time,
+    id = warfpk_obs$id
+  )
+
+fit
+```
+
 
 ```{r}
 #| column: page
@@ -403,17 +488,49 @@ The discrepancies, such as they are, reflect the fact that the Stan model and th
 #| fig-height: 8
 #| label: simple-plot
 library(ggplot2)
-res <- tibble::tibble(
-  y = dat$c_obs,
-  y_hat = out_summary$mean[grepl("c_pred", out_summary$variable)],
-  time = warfpk_obs$time,
-  id = warfpk_obs$id
-)
 
-ggplot(res, aes(y_hat, y, colour = factor(id))) +
+ggplot(fit, aes(yh, y, colour = factor(id))) +
   geom_abline(intercept = 0, slope = 1, colour = "grey50") +
   geom_point(size = 4, show.legend = FALSE) +
   facet_wrap(~ factor(id), nrow = 4)
+```
+
+```{r}
+#| label: pk-predictions
+#| cache: true
+prd <- "model1_draws.csv" |> 
+  readr::read_csv(show_col_types = FALSE) |>
+  dplyr::select(tidyselect::matches("c_fit")) |>
+  dplyr::mutate(
+    sample = dplyr::row_number(),
+    chain = ceiling(sample/1000)
+  ) |> 
+  dplyr::filter(chain %in% 3:4) |>
+  tidyr::pivot_longer(
+    cols = tidyselect::matches("c_fit"),
+    names_to = "variable",
+    values_to = "y_hat"
+  ) |> 
+  dplyr::group_by(variable) |>
+  dplyr::summarise(
+    yh = mean(y_hat),
+    q5 = quantile(y_hat, .05),
+    q95 = quantile(y_hat, .95)
+  ) |> 
+  dplyr::mutate(
+    obs_id = variable |> 
+      stringr::str_remove_all(".*\\[") |>
+      stringr::str_remove_all("\\]") 
+  ) |>
+  tidyr::separate(obs_id, into = c("id", "obs_num"), sep = ",") |>
+  dplyr::mutate(
+    obs_num = as.numeric(obs_num),
+    id = warfpk_amt$id[as.numeric(id)]
+  ) |>
+  dplyr::arrange(id, obs_num) |>
+  dplyr::mutate(time = rep(dat$t_fit, dat$n_ids))
+
+prd
 ```
 
 ```{r}
@@ -421,24 +538,19 @@ ggplot(res, aes(y_hat, y, colour = factor(id))) +
 #| fig-width: 16
 #| fig-height: 8
 #| label: pk-profiles
-prd <- tibble::tibble(
-  y = out_summary$mean[grepl("c_fit", out_summary$variable)],
-  q5 = out_summary$q5[grepl("c_fit", out_summary$variable)],
-  q95 = out_summary$q95[grepl("c_fit", out_summary$variable)],
-  id = as.vector((replicate(dat$n_fit, warfpk_amt$id))),
-  time = as.vector(t(replicate(dat$n_ids, dat$t_fit)))
-)
-
-ggplot(mapping = aes(time, y)) +
+ggplot() +
   geom_ribbon(
     data = prd, 
-    mapping = aes(ymin = q5, ymax = q95),
+    mapping = aes(time, yh, ymin = q5, ymax = q95),
     fill = "grey80"
   ) +
-  geom_line(data = prd) + 
+  geom_line(
+    data = prd,
+    mapping = aes(time, yh)
+  ) + 
   geom_point(
-    mapping = aes(colour = factor(id)), 
-    data = res, 
+    data = fit, 
+    mapping = aes(time, y, colour = factor(id)), 
     size = 4, 
     show.legend = FALSE
   ) +
@@ -448,7 +560,7 @@ ggplot(mapping = aes(time, y)) +
       y = 17, 
       id = warfpk_amt$id
     ),
-    aes(label = id)
+    mapping = aes(time, y, label = id)
   )+ 
   facet_wrap(~ factor(id), nrow = 4) + 
   theme_bw() + 

@@ -1,7 +1,7 @@
 
 # preliminaries -----------------------------------------------------------
 
-dir <- here::here("posts", "2023-06-05_pop-pk-models")
+dir <- here::here("posts", "2023-06-10_pop-pk-models")
 csv_path <- fs::path(dir, "warfpk.csv")
 mod_path <- fs::path(dir, "model1.stan")
 
