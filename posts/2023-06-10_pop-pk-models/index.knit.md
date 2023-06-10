@@ -7,15 +7,12 @@ image: "raimond-klavins-n-7HTOiJPso-unsplash.jpg"
 image-alt: "A photo of numerous pills and capsules in many different colours"
 ---
 
+
 <!--------------- my typical setup ----------------->
 
-```{r setup, include=FALSE}
-wide <- 136
-narrow <- 76
-options(width = narrow)
-cache_images <- TRUE
-set.seed(1)
-```
+
+
+
 
 <!--------------- post begins here ----------------->
 
@@ -62,31 +59,102 @@ The data set used in the tutorial is based on some old studies in the 1960s on t
 
 Reading the data into R using `readr::read_csv()` turns out to be mostly straightforward. Data are delimited with commas and there's very little weirdness to deal with. The only thing that is non-standard for an R user is that the data file uses `"."` to specify missing values (which I'm guessing is standard in pharmacometrics), so I'll need to state that explicitly when reading the data into R to ensure that numeric variables with missing values are correctly parsed as numeric:
 
-```{r}
-#| label: read-warfpk-data
+
+::: {.cell}
+
+```{.r .cell-code}
 warfpk <- readr::read_csv("warfpk.csv", na = ".", show_col_types = FALSE)
 warfpk
 ```
 
+::: {.cell-output .cell-output-stdout}
+```
+# A tibble: 289 × 10
+   `#ID`  time    wt   age   sex   amt  rate  dvid    dv   mdv
+   <chr> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl>
+ 1 0       0    66.7    50     1   100    -2     0  NA       1
+ 2 0       0.5  66.7    50     1    NA    NA     1   0       0
+ 3 0       1    66.7    50     1    NA    NA     1   1.9     0
+ 4 0       2    66.7    50     1    NA    NA     1   3.3     0
+ 5 0       3    66.7    50     1    NA    NA     1   6.6     0
+ 6 0       6    66.7    50     1    NA    NA     1   9.1     0
+ 7 0       9    66.7    50     1    NA    NA     1  10.8     0
+ 8 0      12    66.7    50     1    NA    NA     1   8.6     0
+ 9 0      24    66.7    50     1    NA    NA     1   5.6     0
+10 0      36    66.7    50     1    NA    NA     1   4       0
+# ℹ 279 more rows
+```
+:::
+:::
+
+
 These column names are pretty standard in the field, in part because standard software like NONMEM expects these names. They're perfectly fine for R too, with one minor exception: I'm going to rename the id variable using `dplyr::rename()`:
 
-```{r}
-#| label: clean-warfpk-names
+
+::: {.cell}
+
+```{.r .cell-code}
 warfpk <- warfpk |> dplyr::rename(id = `#ID`)
 warfpk
 ```
 
+::: {.cell-output .cell-output-stdout}
+```
+# A tibble: 289 × 10
+   id     time    wt   age   sex   amt  rate  dvid    dv   mdv
+   <chr> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl>
+ 1 0       0    66.7    50     1   100    -2     0  NA       1
+ 2 0       0.5  66.7    50     1    NA    NA     1   0       0
+ 3 0       1    66.7    50     1    NA    NA     1   1.9     0
+ 4 0       2    66.7    50     1    NA    NA     1   3.3     0
+ 5 0       3    66.7    50     1    NA    NA     1   6.6     0
+ 6 0       6    66.7    50     1    NA    NA     1   9.1     0
+ 7 0       9    66.7    50     1    NA    NA     1  10.8     0
+ 8 0      12    66.7    50     1    NA    NA     1   8.6     0
+ 9 0      24    66.7    50     1    NA    NA     1   5.6     0
+10 0      36    66.7    50     1    NA    NA     1   4       0
+# ℹ 279 more rows
+```
+:::
+:::
+
+
 Looking at this output more carefully, there's one slightly puzzling thing here: the `id` column looks like it's supposed to be a numeric id for the study participants, but R has parsed as a character vector. So there must be one non-numeric value in this column. I'd better find out what's going on there. A bit of digging reveals there's something peculiar going on with subject 12. Using `dplyr::filter()` to extract the data for that person we get this:
 
-```{r}
-#| label: detect-warfpk-typo
+
+::: {.cell}
+
+```{.r .cell-code}
 warfpk |> dplyr::filter(id |> stringr::str_detect("12"))
 ```
 
+::: {.cell-output .cell-output-stdout}
+```
+# A tibble: 11 × 10
+   id     time    wt   age   sex   amt  rate  dvid    dv   mdv
+   <chr> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl>
+ 1 12      0    75.3    32     1   113    -2     0  NA       1
+ 2 12      1.5  75.3    32     1    NA    NA     1   0.6     0
+ 3 #12     3    75.3    32     1    NA    NA     1   2.8     0
+ 4 12      6    75.3    32     1    NA    NA     1  13.8     0
+ 5 12      9    75.3    32     1    NA    NA     1  15       0
+ 6 12     24    75.3    32     1    NA    NA     1  10.5     0
+ 7 12     36    75.3    32     1    NA    NA     1   9.1     0
+ 8 12     48    75.3    32     1    NA    NA     1   6.6     0
+ 9 12     72    75.3    32     1    NA    NA     1   4.9     0
+10 12     96    75.3    32     1    NA    NA     1   2.4     0
+11 12    120    75.3    32     1    NA    NA     1   1.9     0
+```
+:::
+:::
+
+
 My first thought upon seeing this was that it must be a typo in the data file. No problem, it's easy enough to remove the `#` character and convert the id variable to numeric:
 
-```{r}
-#| label: clean-warfpk-id
+
+::: {.cell}
+
+```{.r .cell-code}
 warfpk <- warfpk |> 
   dplyr::mutate(
     id = id |> 
@@ -95,6 +163,27 @@ warfpk <- warfpk |>
   )
 warfpk
 ```
+
+::: {.cell-output .cell-output-stdout}
+```
+# A tibble: 289 × 10
+      id  time    wt   age   sex   amt  rate  dvid    dv   mdv
+   <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl>
+ 1     0   0    66.7    50     1   100    -2     0  NA       1
+ 2     0   0.5  66.7    50     1    NA    NA     1   0       0
+ 3     0   1    66.7    50     1    NA    NA     1   1.9     0
+ 4     0   2    66.7    50     1    NA    NA     1   3.3     0
+ 5     0   3    66.7    50     1    NA    NA     1   6.6     0
+ 6     0   6    66.7    50     1    NA    NA     1   9.1     0
+ 7     0   9    66.7    50     1    NA    NA     1  10.8     0
+ 8     0  12    66.7    50     1    NA    NA     1   8.6     0
+ 9     0  24    66.7    50     1    NA    NA     1   5.6     0
+10     0  36    66.7    50     1    NA    NA     1   4       0
+# ℹ 279 more rows
+```
+:::
+:::
+
 
 For the purposes of this post I am going to run with this version of the data, but later on it's going to turn out that the data from participant 12 is the least well-fit by the model, which is a hint that this might have been deliberate. In fact, as I started doing some more digging into NONMEM and learned how to decipher a NONMEM input file, I discovered that the `#` character appears to be serving a specific function when used as a prefix in this data file. Per this line of the input (see later), it's being used as an instruction to tell NONMEM to ignore the observation:
 
@@ -121,15 +210,40 @@ Now that I have the data, I need to make sense of it. The csv file itself doesn'
 
 One peculiarity of the data structure that appears to be quite standard in pharmacokinetics is that the data frame incorporates both **measurement events** where the drug concentration is measured, and **dosing events** where a dose of the drug is administered. It's a perfectly sensible way to organise the data, but later on it will be convenient to separate them in order to pass the data to Stan in a format that it expects. To get a sense of what the dosing events look like, we can extract the relevant subset of the data frame by filtering the data on `dvid`:
 
-```{r}
-#| label: "dosing"
+
+::: {.cell}
+
+```{.r .cell-code}
 warfpk |> dplyr::filter(dvid == 0)
 ```
 
+::: {.cell-output .cell-output-stdout}
+```
+# A tibble: 32 × 10
+      id  time    wt   age   sex   amt  rate  dvid    dv   mdv
+   <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl>
+ 1     0     0  66.7    50     1   100    -2     0    NA     1
+ 2     1     0  66.7    50     1   100    -2     0    NA     1
+ 3     2     0  66.7    31     1   100    -2     0    NA     1
+ 4     3     0  80      40     1   120    -2     0    NA     1
+ 5     4     0  40      46     0    60    -2     0    NA     1
+ 6     5     0  75.3    43     1   113    -2     0    NA     1
+ 7     6     0  60      36     0    90    -2     0    NA     1
+ 8     7     0  90      41     1   135    -2     0    NA     1
+ 9     8     0  50      27     0    75    -2     0    NA     1
+10     9     0  70      28     1   105    -2     0    NA     1
+# ℹ 22 more rows
+```
+:::
+:::
+
+
 Notably, not everyone is given the same dose, and in an utterly unsurprising turn of events it turns out that the dose is calculated based on weight (which is in turn, I'm told, a proxy for the volume of distribution in systemic circulation):^[Mentally I keep implicitly assuming that volume of distribution is basically the same thing as "the amount of blood plasma in the body", but that's not actually true. Certainly it makes sense as a crude first-approximation mental model, but bodies are complicated things so the reality is messier.]
 
-```{r}
-#| label: weight-dose
+
+::: {.cell}
+
+```{.r .cell-code}
 library(ggplot2)
 warfpk |> 
   dplyr::filter(dvid == 0) |>
@@ -139,21 +253,68 @@ warfpk |>
   labs(x = "Weight (kg)", y = "Dose (mg)")
 ```
 
+::: {.cell-output-display}
+![](index_files/figure-html/weight-dose-1.png){width=672}
+:::
+:::
+
+
 Okay, that all makes sense.
 
 Next, let's take a look at the data from a single subject. The observations in the `warfpk` data set appear to aggregate data from multiple studies, with the consequence that different subjects can have different measurement schedules. Here's participant 1, for instance:
 
-```{r}
-#| label: "one-person"
+
+::: {.cell}
+
+```{.r .cell-code}
 warfpk |> dplyr::filter(id == 1 & dvid == 1)
 ```
 
+::: {.cell-output .cell-output-stdout}
+```
+# A tibble: 6 × 10
+     id  time    wt   age   sex   amt  rate  dvid    dv   mdv
+  <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl>
+1     1    24  66.7    50     1    NA    NA     1   9.2     0
+2     1    36  66.7    50     1    NA    NA     1   8.5     0
+3     1    48  66.7    50     1    NA    NA     1   6.4     0
+4     1    72  66.7    50     1    NA    NA     1   4.8     0
+5     1    96  66.7    50     1    NA    NA     1   3.1     0
+6     1   120  66.7    50     1    NA    NA     1   2.5     0
+```
+:::
+:::
+
+
 A lot of the people in the data set have measurements taken on this schedule, but not everyone does. For comparison purposes, here's participant 2:
 
-```{r}
-#| label: "another-person"
+
+::: {.cell}
+
+```{.r .cell-code}
 warfpk |> dplyr::filter(id == 2 & dvid == 1)
 ```
+
+::: {.cell-output .cell-output-stdout}
+```
+# A tibble: 11 × 10
+      id  time    wt   age   sex   amt  rate  dvid    dv   mdv
+   <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl>
+ 1     2   0.5  66.7    31     1    NA    NA     1   0       0
+ 2     2   2    66.7    31     1    NA    NA     1   8.4     0
+ 3     2   3    66.7    31     1    NA    NA     1   9.7     0
+ 4     2   6    66.7    31     1    NA    NA     1   9.8     0
+ 5     2  12    66.7    31     1    NA    NA     1  11       0
+ 6     2  24    66.7    31     1    NA    NA     1   8.3     0
+ 7     2  36    66.7    31     1    NA    NA     1   7.7     0
+ 8     2  48    66.7    31     1    NA    NA     1   6.3     0
+ 9     2  72    66.7    31     1    NA    NA     1   4.1     0
+10     2  96    66.7    31     1    NA    NA     1   3       0
+11     2 120    66.7    31     1    NA    NA     1   1.4     0
+```
+:::
+:::
+
 
 This has implications for our model structure: we can't assume a single set of measurement times that will be identical for all subjects. From a Stan point of view, this means that if we try to pass the observed plasma concentrations as an array of vectors (one per person), it won't work. Since the vectors can have different lengths that data structure would be a ragged array, and Stan doesn't allow those. Instead, we're going to have to pass all the observations as one long vector and use indexing vectors to specify the "breakpoints" that indicate when the data from each person starts and stops. 
 
@@ -161,8 +322,10 @@ This has implications for our model structure: we can't assume a single set of m
 
 Now that we have a sense of the structure of the data, we can start drawing some plots designed to tell us what's going on. I'll start with a very naive kind of visualisation. Here's a scatterplot of time versus measured drug concentration that doesn't give you any indication about which observations belong to which person. 
 
-```{r}
-#| label: warfarin-data-raw
+
+::: {.cell}
+
+```{.r .cell-code}
 warfpk |> 
   dplyr::filter(
     dvid == 1, # only include measured times
@@ -177,10 +340,18 @@ warfpk |>
   )
 ```
 
+::: {.cell-output-display}
+![](index_files/figure-html/warfarin-data-raw-1.png){width=672}
+:::
+:::
+
+
 Looking at the data like this gives you the false impression that the data set is rather noisy.^[There's an irony here: if these were psychological data we'd be delighted to have data this clean. Psychological data are as noisy as a drunken fuck on a Friday (to use a technical term). Nevertheless, the reality of the warfarin data set is that the data are actually a lot cleaner than this plot makes it seem.] To see why this is misleading, let's add some lines that connect data from the same person:
 
-```{r}
-#| label: warfarin-data-connected
+
+::: {.cell}
+
+```{.r .cell-code}
 warfpk |> dplyr::filter(dvid == 1, !is.na(dv)) |>
   ggplot(aes(x = time, y = dv, group = factor(id))) + 
   geom_line(colour = "grey80") +
@@ -192,13 +363,18 @@ warfpk |> dplyr::filter(dvid == 1, !is.na(dv)) |>
   )
 ```
 
+::: {.cell-output-display}
+![](index_files/figure-html/warfarin-data-connected-1.png){width=672}
+:::
+:::
+
+
 The pattern of lines hints that a lot of this "noise" is not in fact noise, it's systematic variation across people. This becomes more obvious when we disaggregate the data further and plot the observations from each person in a separate panel:
 
-```{r}
-#| label: warfarin-data-disaggregated
-#| column: page
-#| fig-width: 16
-#| fig-height: 11
+
+::: {.cell .column-page}
+
+```{.r .cell-code}
 warfpk |> dplyr::filter(dvid == 1, !is.na(dv)) |>
   ggplot(aes(x = time, y = dv, colour = factor(id))) + 
   geom_line(show.legend = FALSE) +
@@ -210,6 +386,12 @@ warfpk |> dplyr::filter(dvid == 1, !is.na(dv)) |>
     y = "Warfarin plasma concentration (mg/L)"
   )
 ```
+
+::: {.cell-output-display}
+![](index_files/figure-html/warfarin-data-disaggregated-1.png){width=1536}
+:::
+:::
+
 
 When plotted this way, it's really clear that the data from each person is in fact quite precise. There's very little noise in any of these individual-subject plots. They're all very smooth looking curves: it just so happens that each person is unique and has their own curve. In other words, the vast majority of the variation is systematic difference across people: it's not measurement error. 
 
@@ -281,12 +463,10 @@ With that as preliminary notational exposition, I think I can now make sense of 
 
 One thing that I really appreciated when going through the tutorial materials is that they include actual NONMEM model specifications that workshop participants can play with. If you unfold the code below, you can see the complete NONMEM **control file** (which uses a .ctl file extension) for a NONMEM model of the warfarin data:
 
-```{fortran}
-#| eval: false
-#| code-fold: true
-#| code-summary: "The complete NONMEM control file"
-#| code-line-numbers: true
-#| label: NONMEM-control-file
+
+::: {.cell}
+
+```{.fortran .cell-code  code-fold="true" code-summary="The complete NONMEM control file" code-line-numbers="true"}
 ;O'REILLY RA, AGGELER PM. STUDIES ON COUMARIN ANTICOAGULANT DRUGS
 ;INITIATION OF WARFARIN THERAPY WITHOUT A LOADING DOSE.
 ;CIRCULATION 1968;38:169-177
@@ -343,6 +523,8 @@ ONEHEADER NOPRINT FILE=warf.fit
 $TABLE ID KA CL V WT SEX AGE
 ONEHEADER NOAPPEND NOPRINT FILE=warf.fit
 ```
+:::
+
 
 The control file requires a bit of effort for me -- as someone who doesn't use NONMEM -- to work out the structure of the underlying model, but after a little bit of work it wasn't too hard. Unlike Stan, which is a general-purpose probabilistic programming model for Bayesian analysis, NONMEM is a specific tool that hardcodes particular models of interest to pharmacometricians. The consequence of this is that the control file doesn't spell out all the details of each model: the user just refers to them by name. You can work out which model is used by looking at the line in the control file that specifies which subroutine is used:
 
@@ -452,8 +634,10 @@ When we implement the full model in Stan what we actually want to model is the d
 
 There's some nuances here in how we format the data for Stan. As mentioned earlier, Stan doesn't permit [ragged arrays](https://mc-stan.org/docs/stan-users-guide/ragged-data-structs.html), so we'll have to pass the observations as one long `c_obs` vector that aggregates across subjects. Within the model (see below), we'll use the `n_obs` vector that records the number of observations per subject to create break points that we can use to extract data from a single person. Here's the R code:
 
-```{r}
-#| label: stan-data-format
+
+::: {.cell}
+
+```{.r .cell-code}
 warfpk_obs <- warfpk[warfpk$mdv == 0, ]
 warfpk_amt <- warfpk[!is.na(warfpk$rate), ]
 
@@ -479,18 +663,152 @@ dat <- list(
   n_fit = length(t_fit)
 )
 ```
+:::
+
 
 Now let's have a look at the Stan code. At some point I'd like to start using [Torsten](https://metrumresearchgroup.github.io/Torsten/) for these things rather than reinventing the wheel and coding a standard compartmental model from scratch. However, I'm a bottom-up kind of person^[If you believe the testimony of my ex-boyfriends, that is.] and I find it useful to write lower-level model code myself a few times before I start relying on pre-built model code. Here's the complete Stan code for the model I implemented:
 
-```{stan}
-#| eval: false
-#| echo: true
-#| label: stan-model-1
-#| file: model1.stan
-#| filename: model1.stan
-#| output.var: mod
-#| code-line-numbers: true
+
+::: {.cell file='model1.stan' filename='model1.stan' output.var='mod'}
+
+```{.stan .cell-code  code-line-numbers="true"}
+functions {
+  vector amount_change(real time,
+                       vector state,
+                       real KA,
+                       real CL,
+                       real V) {
+    vector[2] dadt;
+    dadt[1] = - (KA * state[1]);
+    dadt[2] = (KA * state[1]) - (CL / V) * state[2];
+    return dadt;
+  }
+}
+
+data {
+  int<lower=1> n_ids;
+  int<lower=1> n_tot;
+  int<lower=1> n_fit;
+  array[n_ids] int n_obs;
+  vector[n_ids] dose;
+  array[n_tot] real t_obs;
+  vector[n_tot] c_obs;
+  array[n_fit] real t_fit;
+}
+
+transformed data {
+  array[n_ids] int start;
+  array[n_ids] int stop;
+  array[n_ids] vector[2] initial_amount;
+  real initial_time = 0;
+
+  // break points within the data vector
+  start[1] = 1;
+  stop[1] = n_obs[1];
+  for(i in 2:n_ids) {
+    start[i] = start[i - 1] + n_obs[i - 1];
+    stop[i] = stop[i - 1] + n_obs[i];
+  }
+
+  // initial states for each person
+  for(i in 1:n_ids) {
+    initial_amount[i][1] = dose[i];
+    initial_amount[i][2] = 0;
+  }
+}
+
+parameters {
+  real<lower=0> theta_KA;
+  real<lower=0> theta_CL;
+  real<lower=0> theta_V;
+  real<lower=.001> omega_KA;
+  real<lower=.001> omega_CL;
+  real<lower=.001> omega_V;
+  real<lower=.001> sigma;
+  vector[n_ids] eta_KA;
+  vector[n_ids] eta_CL;
+  vector[n_ids] eta_V;
+}
+
+transformed parameters {
+  vector<lower=0>[n_ids] KA;
+  vector<lower=0>[n_ids] CL;
+  vector<lower=0>[n_ids] V;
+  array[n_tot] vector[2] amount;
+  vector[n_tot] c_pred;
+
+  for(i in 1:n_ids) {
+    // pharmacokinetic parameters
+    KA[i] = theta_KA * exp(eta_KA[i]);
+    CL[i] = theta_CL * exp(eta_CL[i]);
+    V[i] = theta_V * exp(eta_V[i]);
+
+    // predicted drug amounts
+    amount[start[i]:stop[i]] = ode_bdf(
+      amount_change,            // ode function
+      initial_amount[i],        // initial state
+      initial_time,             // initial time
+      t_obs[start[i]:stop[i]],  // observation times
+      KA[i],                    // absorption rate
+      CL[i],                    // clearance
+      V[i]                      // volume
+    );
+
+    // convert to concentrations
+    for(j in 1:n_obs[i]) {
+      c_pred[start[i] + j - 1] = amount[start[i] + j - 1, 2] / V[i];
+    }
+  }
+}
+
+model {
+  // foolish priors over population parameters
+  // (parameter bounds ensure these are actually half-normals)
+  theta_KA ~ normal(0, 10);
+  theta_CL ~ normal(0, 10);
+  theta_V ~ normal(0, 10);
+  sigma ~ normal(0, 10);
+  omega_KA ~ normal(0, 10);
+  omega_CL ~ normal(0, 10);
+  omega_V ~ normal(0, 10);
+
+  // random effect terms
+  for(i in 1:n_ids) {
+    eta_KA[i] ~ normal(0, omega_KA);
+    eta_CL[i] ~ normal(0, omega_CL);
+    eta_V[i] ~ normal(0, omega_V);
+  }
+
+  // likelihood of observed concentrations
+  c_obs ~ normal(c_pred, sigma);
+}
+
+generated quantities {
+  array[n_ids, n_fit] vector[2] a_fit;
+  array[n_ids, n_fit] real c_fit;
+
+  for(i in 1:n_ids) {
+    // predicted drug amounts
+    a_fit[i] = ode_bdf(
+      amount_change,        // ode function
+      initial_amount[i],    // initial state
+      initial_time,         // initial time
+      t_fit,                // observation times
+      KA[i],                // absorption rate
+      CL[i],                // clearance
+      V[i]                  // volume
+    );
+
+    // convert to concentrations
+    for(j in 1:n_fit) {
+      c_fit[i, j] = a_fit[i, j][2] / V[i];
+    }
+  }
+}
+
 ```
+:::
+
 
 In the earlier post I wrote on [pharmacokinetic modelling in Stan](/stan-ode/) I already went through the low-level details of what each section in this code does, so I won't repeat myself here. However, there are a few comments I'll make about it:
 
@@ -499,9 +817,10 @@ In the earlier post I wrote on [pharmacokinetic modelling in Stan](/stan-ode/) I
 
 In any case, here's the R code to compile the model, run the sampler, and extract a summary representation:
 
-```{r}
-#| eval: false
-#| label: run-model
+
+::: {.cell}
+
+```{.r .cell-code}
 mod <- cmdstanr::cmdstan_model("model1.stan")
 out <- mod$sample(
   data = dat,
@@ -511,17 +830,22 @@ out <- mod$sample(
   iter_sampling = 1000
 )
 ```
+:::
+
 
 This code took a couple of hours to run and I have no desire to repeat the exercise more often than necessary, so I took the sensible step of saving relevant outputs to csv files:
 
-```{r}
-#| eval: false
-#| label: save-output
+
+::: {.cell}
+
+```{.r .cell-code}
 out_summary <- out$summary()
 out_draws <- out$draws(format = "draws_df") |> tibble::as_tibble()
 readr::write_csv(out_summary, fs::path(dir, "model1_summary.csv"))
 readr::write_csv(out_draws, fs::path(dir, "model1_draws.csv"))
 ```
+:::
+
 
 In what follows, I'll read data from these files when examining the behaviour of the model. However, there is a slight wrinkle here...
 
@@ -529,61 +853,116 @@ In what follows, I'll read data from these files when examining the behaviour of
 
 The awkward thing about storing *all* the output from the MCMC sampler is that the `model1_draws.csv` file is almost 300Mb in size. As such is slightly too large to store in the [github repository](https://github.com/djnavarro/quarto-blog) that contains this blog, and indeed if you look in the repo you won't find a copy of that file. That makes things tricky from a reproducibility point of view. I don't really imagine that anyone else actually needs a copy of this data (why would you????) but there *is* a chance that I might need to re-run the R code on this post without re-running the sampler. If that ever happens, I'll need a copy of this file stored somewhere. To that end, I finally got off my lazy arse, taught myself how to use the [pins](https://pins.rstudio.com/) package, created a publicly accessible pinboard on google cloud storage, and hosted a copy of the data file there:^[Not gonna lie, the only reason I finally forced myself to set this up is that, courtesy of an extremely unwise `git reset --hard` command while writing this post, I deleted the local copy of the `model1_draws.csv` file, and -- lacking any remote copy of the bloody thing -- had to rerun the entire sampler from the beginning to create a new one, wasting a lot of cpu cycles and exhausting most of my patience. Burned hands are the best teachers I guess...]
 
-```{r}
-#| label: show-pins
+
+::: {.cell}
+
+```{.r .cell-code}
 board <- pins::board_url("storage.googleapis.com/djnavarro-pins/_pins.yaml")
 board |> pins::pin_list()
 ```
+
+::: {.cell-output .cell-output-stdout}
+```
+[1] "diamonds"       "warfpk_data"    "warfpk_draws"   "warfpk_summary"
+```
+:::
+:::
+
 
 
 
 So if you're following along at home -- or, much more likely -- you are future me who has lost the local copy of the data, you can read the data as follows:
 
-```{r}
-#| label: read-pins
-#| eval: false
+
+::: {.cell}
+
+```{.r .cell-code}
 out_summary <- pins::pin_read(board, "warfpk_summary") |> tibble::as_tibble()
 out_draws <- pins::pin_read(board, "warfpk_draws") |> tibble::as_tibble()
 ```
+:::
+
 
 Anyway, the main thing is that one way or another we can assume that the `out_summary` and `out_draws` tibbles are both available, so let's get back to the main thread yes?
 
-```{r}
-#| label: read-stored-data
-#| echo: false
-out_summary <- readr::read_csv("model1_summary.csv", show_col_types = FALSE)
-out_draws <- readr::read_csv("model1_draws.csv", show_col_types = FALSE)
-```
+
+::: {.cell}
+
+:::
+
 
 ### Parameter estimates
 
 Let's start by taking a look at the summary. For the time being I'm only really interested in the population level parameters $\boldsymbol\theta$, $\boldsymbol\omega$, and $\sigma$, so I'll filter the results so that only those parameters (and the log-probability) are shown in the output:
 
 
-```{r}
-#| label: summary-model1
+
+::: {.cell}
+
+```{.r .cell-code}
 out_summary |> dplyr::filter(
   variable |> stringr::str_detect("(theta|omega|sigma|lp)")
 )
 ```
 
+::: {.cell-output .cell-output-stdout}
+```
+# A tibble: 8 × 10
+  variable     mean   median      sd     mad       q5     q95  rhat ess_bulk
+  <chr>       <dbl>    <dbl>   <dbl>   <dbl>    <dbl>   <dbl> <dbl>    <dbl>
+1 lp__     -104.    -103.    1.13e+1 1.12e+1 -124.    -87.2    1.01     431.
+2 theta_KA    0.755    0.667 3.71e-1 1.91e-1    0.445   1.33   1.01     448.
+3 theta_CL    0.135    0.135 8.11e-3 7.43e-3    0.123   0.149  1.00     841.
+4 theta_V     7.70     7.69  3.65e-1 3.59e-1    7.12    8.31   1.00     944.
+5 omega_KA    0.902    0.844 3.00e-1 2.48e-1    0.539   1.47   1.01     423.
+6 omega_CL    0.303    0.298 4.82e-2 4.62e-2    0.233   0.389  1.00    3060.
+7 omega_V     0.235    0.232 3.94e-2 3.70e-2    0.178   0.307  1.00    2693.
+8 sigma       1.08     1.08  5.77e-2 5.88e-2    0.993   1.18   1.00    2910.
+# ℹ 1 more variable: ess_tail <dbl>
+```
+:::
+:::
+
+
 The fact that all the R-hat values are very close to 1 suggests that my MCMC chains are behaving themselves nicely, and all four chains are giving the same answers. But just to check -- and because an earlier version of this model misbehaved quite badly and these plots turned out to be very helpful for diagnosing the problem -- I'll plot the marginal distributions over all the population level parameters (and the log-probability) separately for each chain. To do that, first I'll extract the relevant columns from the `model1_draws.csv` file that contains all the raw samples:
 
-```{r}
-#| label: posterior-densities
+
+::: {.cell}
+
+```{.r .cell-code}
 draws <- out_draws |>
   dplyr::select(tidyselect::matches("(theta|sigma|omega|lp|chain)")) 
 
 draws
 ```
 
+::: {.cell-output .cell-output-stdout}
+```
+# A tibble: 4,000 × 9
+    lp__ theta_KA theta_CL theta_V omega_KA omega_CL omega_V sigma .chain
+   <dbl>    <dbl>    <dbl>   <dbl>    <dbl>    <dbl>   <dbl> <dbl>  <dbl>
+ 1 -130.     1.15    0.135    8.56     1.81    0.317   0.235  1.15      1
+ 2 -143.     1.36    0.139    6.88     1.95    0.435   0.225  1.13      1
+ 3 -138.     1.86    0.134    7.18     1.90    0.312   0.204  1.06      1
+ 4 -137.     1.55    0.144    7.95     1.46    0.324   0.306  1.11      1
+ 5 -130.     1.60    0.138    8.08     1.84    0.290   0.240  1.08      1
+ 6 -132.     1.94    0.146    7.33     1.57    0.290   0.234  1.06      1
+ 7 -140.     1.45    0.143    7.71     1.99    0.260   0.165  1.20      1
+ 8 -132.     1.52    0.142    7.46     1.24    0.325   0.313  1.13      1
+ 9 -134.     1.57    0.144    7.57     1.82    0.261   0.174  1.09      1
+10 -133.     1.57    0.143    7.56     1.81    0.265   0.177  1.09      1
+# ℹ 3,990 more rows
+```
+:::
+:::
+
+
 After a little bit of data wrangling, I can create the appropriate plots:
 
-```{r}
-#| column: page
-#| fig-width: 16
-#| fig-height: 8
-#| label: posterior-density-plots
+
+::: {.cell .column-page}
+
+```{.r .cell-code}
 draws_long <- draws |> 
   tidyr::pivot_longer(
     cols = !tidyselect::matches("(id|chain)"),
@@ -602,28 +981,36 @@ draws_long |>
   )
 ```
 
+::: {.cell-output-display}
+![](index_files/figure-html/posterior-density-plots-1.png){width=1536}
+:::
+:::
+
+
 That looks nice, so it's time to move on.
 
 ### Comparison to NONMEM
 
 One of my fears when implementing this model in Stan was that I might have misunderstood what the NONMEM version of the model was doing, and as a consequence I'd end up estimating quite different things to what the conventional NONMEM model does. To help reassure myself that this isn't the case, it seems wise to compare the parameter estimates that both versions of the model produce. The files distributed with the workshop include these estimates for the NONMEM model, which are as follows:^[The NONMEM output expressed the standard error as a percentage of the point estimate, but for the purposes of comparison to the Stan model I've converted them back to raw values.]
 
-```{r}
-#| echo: false
-#| label: simplified-nonmem-params
-tibble::tribble(
-  ~parameter, ~estimate, ~pct_std_error,
-  "omega_CL", 0.285    , 14.2,
-  "omega_KA", 0.621    , 25.4,
-  "omega_V" , 0.222    , 14.4,
-  "sigma"   , 1.02     , 12.8,
-  "theta_CL", 0.134    , 5.4,
-  "theta_KA", 0.59     , 22.0,
-  "theta_V" , 7.72     , 4.5
-) |> 
-  dplyr::mutate(std_error = estimate * pct_std_error / 100) |>
-  dplyr::select(-pct_std_error)
+
+::: {.cell}
+::: {.cell-output .cell-output-stdout}
 ```
+# A tibble: 7 × 3
+  parameter estimate std_error
+  <chr>        <dbl>     <dbl>
+1 omega_CL     0.285   0.0405 
+2 omega_KA     0.621   0.158  
+3 omega_V      0.222   0.0320 
+4 sigma        1.02    0.131  
+5 theta_CL     0.134   0.00724
+6 theta_KA     0.59    0.130  
+7 theta_V      7.72    0.347  
+```
+:::
+:::
+
 
 <!-- 
 Note: I feel like there should be a .res file, but apparently there isn't one
@@ -650,17 +1037,24 @@ output, I'm pretty certain these are reported as percentages.
 
 To save you the effort of scrolling back and forth between this table and the Stan version above, here's a truncated version of the Stan table showing an apples-to-apples comparison:
 
-```{r}
-#| echo: false
-#| label: simplified-stan-params
-draws_long |> 
-  dplyr::group_by(parameter) |>
-  dplyr::filter(parameter != "lp__") |>
-  dplyr::summarise(
-    posterior_mean = mean(value),
-    posterior_sd = sd(value)
-  )
+
+::: {.cell}
+::: {.cell-output .cell-output-stdout}
 ```
+# A tibble: 7 × 3
+  parameter posterior_mean posterior_sd
+  <chr>              <dbl>        <dbl>
+1 omega_CL           0.303      0.0482 
+2 omega_KA           0.902      0.300  
+3 omega_V            0.235      0.0394 
+4 sigma              1.08       0.0577 
+5 theta_CL           0.135      0.00811
+6 theta_KA           0.755      0.371  
+7 theta_V            7.70       0.365  
+```
+:::
+:::
+
 
 As you can see, the two versions are in pretty close agreement. There are some modest differences in the estimates of the population mean and variability in the absorption rate KA, but I'm not too concerned about that.  
 
@@ -669,9 +1063,10 @@ As you can see, the two versions are in pretty close agreement. There are some m
 
 Now reassured that my model is doing the right thing, the time has come to do my favourite part of any modelling exercise: comparing the fitted values $\hat{y}$ produced by the model to the observed values $y$ in the data set. It's worth noting here that the summary representations produced by Stan are perfectly sufficient to draw these plots, because it includes summary statistics for the $\hat{y}$ values (the `c_pred` variables in the Stan model). However, the first version of the model I implemented had some weird bugs that required me to do a slightly deeper dive, and in order to work out where the bugs were I ended up writing code that extracts the relevant summaries from the raw MCMC samples. So, because I have that code at hand already, let's do it the long way. First up, let's plot the observed value $y$ against the fitted value $\hat{y}$ separately for each person. Here's the code used to extract the relevant data:
 
-```{r}
-#| label: manual-summary
-#| cache: true
+
+::: {.cell hash='index_cache/html/manual-summary_dd116b7ce0b39cc42f29440ebac8cffa'}
+
+```{.r .cell-code}
 fit <- out_draws |> 
   dplyr::select(tidyselect::matches("c_pred")) |>
   tidyr::pivot_longer(
@@ -701,13 +1096,33 @@ fit <- out_draws |>
 fit
 ```
 
+::: {.cell-output .cell-output-stdout}
+```
+# A tibble: 251 × 7
+   obs_num    yh    q5   q95     y  time    id
+     <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl>
+ 1       1  1.44  1.16  1.77   0     0.5     0
+ 2       2  2.68  2.19  3.24   1.9   1       0
+ 3       3  4.69  3.95  5.50   3.3   2       0
+ 4       4  6.19  5.33  7.07   6.6   3       0
+ 5       5  8.61  7.75  9.47   9.1   6       0
+ 6       6  9.28  8.41 10.2   10.8   9       0
+ 7       7  9.14  8.21 10.1    8.6  12       0
+ 8       8  6.67  5.80  7.58   5.6  24       0
+ 9       9  4.48  3.52  5.42   4    36       0
+10      10  2.99  2.01  3.99   2.7  48       0
+# ℹ 241 more rows
+```
+:::
+:::
+
+
 And here is the code used to draw the pretty picture:
 
-```{r}
-#| column: page
-#| fig-width: 16
-#| fig-height: 11
-#| label: simple-plot
+
+::: {.cell .column-page}
+
+```{.r .cell-code}
 ggplot(fit, aes(yh, y, colour = factor(id))) +
   geom_abline(intercept = 0, slope = 1, colour = "grey50") +
   geom_point(size = 4, show.legend = FALSE) +
@@ -720,13 +1135,20 @@ ggplot(fit, aes(yh, y, colour = factor(id))) +
   )
 ```
 
+::: {.cell-output-display}
+![](index_files/figure-html/simple-plot-1.png){width=1536}
+:::
+:::
+
+
 Well that's just delightful. In almost every case the observed and fitted values line up rather nicely. You just don't get that kind of prettiness in psychological data without doing some prior aggregation of raw data. 
 
 Let's take it a step further, and plot the observed data as a pharmacokinetic function (time vs drug concentration) and superimpose these over the model-estimated pharamacokinetic functions for each person. Again, this starts with a bit of data wrangling to extract what we need from the raw samples:
 
-```{r}
-#| label: pk-predictions
-#| cache: true
+
+::: {.cell hash='index_cache/html/pk-predictions_252fae3f8b1bc4e5f70b61b9518afad2'}
+
+```{.r .cell-code}
 prd <- out_draws |>
   dplyr::select(tidyselect::matches("c_fit")) |>
   tidyr::pivot_longer(
@@ -756,13 +1178,33 @@ prd <- out_draws |>
 prd
 ```
 
+::: {.cell-output .cell-output-stdout}
+```
+# A tibble: 2,496 × 7
+   variable       yh    q5   q95    id obs_num  time
+   <chr>       <dbl> <dbl> <dbl> <dbl>   <dbl> <dbl>
+ 1 c_fit[1,1]  0.303 0.241 0.378     0       1   0.1
+ 2 c_fit[1,2]  0.599 0.478 0.743     0       2   0.2
+ 3 c_fit[1,3]  0.885 0.709 1.10      0       3   0.3
+ 4 c_fit[1,4]  1.16  0.936 1.44      0       4   0.4
+ 5 c_fit[1,5]  1.44  1.16  1.77      0       5   0.5
+ 6 c_fit[1,6]  1.70  1.37  2.08      0       6   0.6
+ 7 c_fit[1,7]  1.96  1.59  2.39      0       7   0.7
+ 8 c_fit[1,8]  2.20  1.79  2.68      0       8   0.8
+ 9 c_fit[1,9]  2.45  2.00  2.96      0       9   0.9
+10 c_fit[1,10] 2.68  2.19  3.24      0      10   1  
+# ℹ 2,486 more rows
+```
+:::
+:::
+
+
 And again, we use a little bit of ggplot2 magic to make it pretty:
 
-```{r}
-#| column: page
-#| fig-width: 16
-#| fig-height: 8
-#| label: pk-profiles
+
+::: {.cell .column-page}
+
+```{.r .cell-code}
 ggplot() +
   geom_ribbon(
     data = prd, 
@@ -799,17 +1241,22 @@ ggplot() +
   )
 ```
 
+::: {.cell-output-display}
+![](index_files/figure-html/pk-profiles-1.png){width=1536}
+:::
+:::
+
+
 In each of these plots, the grey shaded region is a 90% confidence band^[More precisely, it's a Bayesian 90% equal-tail credible region. Whatevs.], the solid curve is the posterior predicted pharmacokinetic curve, and the dots are the raw data. As you'd hope and expect, the uncertainty bands are larger in those cases where the measurements were all taken after the drug concentration reaches its peak: if all you've observed is the tail^[Sometimes referred to as the elimination phase, but of course this is a dynamic system, so in reality absorbption and elimination are happening in parallel all the time. However, in practice you end up with a situation where early on the absorption process is the primary driver and later on the elimination process is the primary driver.] then you'll necessarily have some uncertainty about how high the peak was. Anyway, the main thing here is that the plots are very pretty, and you get a strong sense that the model does a good job of capturing the pattern of differences across people. 
 
 ### Individual parameters
 
 Moving along in our exploration of the model... here's the empirical distribution of estimated absorption rates (KA), clearance values (CL), and volume of distribution (V) parameters across people:
 
-```{r}
-#| label: individual-parameters
-#| column: page
-#| fig-width: 12
-#| fig-height: 6
+
+::: {.cell .column-page}
+
+```{.r .cell-code}
 pars <- out_draws |> 
   dplyr::select(tidyr::matches("^(KA|CL|V)")) |>
   tidyr::pivot_longer(
@@ -823,7 +1270,16 @@ pars <- out_draws |>
   ) |> 
   dplyr::group_by(parameter, ind) |> 
   dplyr::summarise(value = mean(value))
+```
 
+::: {.cell-output .cell-output-stderr}
+```
+`summarise()` has grouped output by 'parameter'. You can override using the
+`.groups` argument.
+```
+:::
+
+```{.r .cell-code}
 ggplot(pars, aes(value, fill = parameter)) + 
   geom_histogram(bins = 10, show.legend = FALSE) + 
   facet_wrap(~ parameter, scales = "free") +
@@ -831,17 +1287,22 @@ ggplot(pars, aes(value, fill = parameter)) +
   labs(x = "Parameter Value", y = "Count")
 ```
 
+::: {.cell-output-display}
+![](index_files/figure-html/individual-parameters-1.png){width=1152}
+:::
+:::
+
+
 Okay, seems good to me I guess?
 
 ### Residuals
 
 We're getting very close to the end. The last thing I want to do with this model is take a look at the residuals, since that's usually the best bet if you want to detect non-obvious model failures. In the plot below I've plotted the residual term $\hat{y} - y$ for every observation in the data set. As before, each panel corresponds to an individual subject, and the residuals are plotted as a function of the observed drug concentration $y$: 
 
-```{r}
-#| label: residuals 
-#| column: page
-#| fig-width: 16
-#| fig-height: 10
+
+::: {.cell .column-page}
+
+```{.r .cell-code}
 fit |> 
   dplyr::mutate(residual = y - yh) |>
   ggplot(aes(y, residual, colour = factor(id))) +
@@ -856,16 +1317,21 @@ fit |>
   )
 ```
 
+::: {.cell-output-display}
+![](index_files/figure-html/residuals-1.png){width=1536}
+:::
+:::
+
+
 For most people in the data set, there's nothing here to suggest systematic model misfit. The residuals are small, and show no systematic pattern. In a few cases, however, the model struggles slightly. As foreshadowed earlier in the post, participant 12 is the most obvious example: the estimated pharamacokinetic curve is a little too flat (the peak isn't high enough), leading to a systematic pattern where the model overestimates low concentrations and underestimates high concentrations. The effect is quite easy to spot in the residual plot, but virtually invisible in the individual-subject PK curves I showed in the last section. The model error isn't very large (even for the worst-fit person the posterior predictive PK curves are still awfully good), but it is there.
 
 The second version of a residual plot shows the unsigned residuals $|\hat{y} - y|$ as a function of $y$. Here, what I'm looking for is evidence that the *magnitude* of the residuals is systematically larger at higher concentrations, and would be a hint that the additive error assumption I've used in this model is inadequate for modelling the data:
 
 
-```{r}
-#| label: unsigned-residuals 
-#| column: page
-#| fig-width: 16
-#| fig-height: 10
+
+::: {.cell .column-page}
+
+```{.r .cell-code}
 fit |> 
   dplyr::mutate(residual = abs(y - yh)) |>
   ggplot(aes(y, residual, colour = factor(id))) +
@@ -878,6 +1344,12 @@ fit |>
     y = "Unsigned Residual"
   )
 ```
+
+::: {.cell-output-display}
+![](index_files/figure-html/unsigned-residuals-1.png){width=1536}
+:::
+:::
+
 
 On the whole I don't think there's much to worry about here. Of course that doesn't mean that additive errors are theoretically plausible or correct, it simply means that the statistical model appears to work just fine even without tinkering with this assumption. 
 
@@ -904,5 +1376,6 @@ I could get used to this.
 - O'Reilly, R. A., Aggeler, P. M., & Leong, L. S. (1963). Studies on the coumarin anticoagulant drugs: the pharmacodynamics of warfarin in man. *The Journal of Clinical Investigation, 42*(10), 1542-1551. [doi.org/10.1172%2FJCI104839](https://doi.org/10.1172%2FJCI104839)
 
 - Smith, P. L. (2000). Stochastic dynamic models of response time and accuracy: A foundational primer. *Journal of Mathematical Psychology, 44*(3), 408-463. [doi.org/10.1006/jmps.1999.1260](https://doi.org/10.1006/jmps.1999.1260)
+
 
 
