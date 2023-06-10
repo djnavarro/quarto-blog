@@ -1,0 +1,1523 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.3.340">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+<meta name="author" content="Danielle Navarro">
+<meta name="dcterms.date" content="2023-06-10">
+<meta name="description" content="In which the author works her way through the first part of an online tutorial, rewrites some NONMEM code in Stan, and takes notes">
+
+<title>Notes from a data witch - Building a population pharmacokinetic model with Stan</title>
+<style>
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+/* CSS for syntax highlighting */
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+</style>
+
+
+<script src="../../site_libs/quarto-nav/quarto-nav.js"></script>
+<script src="../../site_libs/quarto-nav/headroom.min.js"></script>
+<script src="../../site_libs/clipboard/clipboard.min.js"></script>
+<script src="../../site_libs/quarto-html/quarto.js"></script>
+<script src="../../site_libs/quarto-html/popper.min.js"></script>
+<script src="../../site_libs/quarto-html/tippy.umd.min.js"></script>
+<script src="../../site_libs/quarto-html/anchor.min.js"></script>
+<link href="../../site_libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="../../site_libs/quarto-html/quarto-syntax-highlighting.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="../../site_libs/bootstrap/bootstrap.min.js"></script>
+<link href="../../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="../../site_libs/bootstrap/bootstrap.min.css" rel="stylesheet" id="quarto-bootstrap" data-mode="light">
+<script id="quarto-search-options" type="application/json">{
+  "language": {
+    "search-no-results-text": "No results",
+    "search-matching-documents-text": "matching documents",
+    "search-copy-link-title": "Copy link to search",
+    "search-hide-matches-text": "Hide additional matches",
+    "search-more-match-text": "more match in this document",
+    "search-more-matches-text": "more matches in this document",
+    "search-clear-button-title": "Clear",
+    "search-detached-cancel-button-title": "Cancel",
+    "search-submit-button-title": "Submit"
+  }
+}</script>
+<style>
+
+      .quarto-title-block .quarto-title-banner {
+        background: #eeeeee;
+      }
+</style>
+
+  <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml-full.js" type="text/javascript"></script>
+
+<link rel="stylesheet" href="../../styles.css">
+<meta property="og:title" content="Notes from a data witch - Building a population pharmacokinetic model with Stan">
+<meta property="og:description" content="In which the author works her way through the first part of an online tutorial, rewrites some NONMEM code in Stan, and takes notes">
+<meta property="og:image" content="https://blog.djnavarro.net/posts/2023-06-10_pop-pk-models/raimond-klavins-n-7HTOiJPso-unsplash.jpg">
+<meta property="og:site-name" content="Notes from a data witch">
+<meta property="og:image:alt" content="A photo of numerous pills and capsules in many different colours">
+<meta name="twitter:title" content="Notes from a data witch - Building a population pharmacokinetic model with Stan">
+<meta name="twitter:description" content="In which the author works her way through the first part of an online tutorial, rewrites some NONMEM code in Stan, and takes notes">
+<meta name="twitter:image" content="https://blog.djnavarro.net/posts/2023-06-10_pop-pk-models/raimond-klavins-n-7HTOiJPso-unsplash.jpg">
+<meta name="twitter:creator" content="@djnavarro">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image:alt" content="A photo of numerous pills and capsules in many different colours">
+</head>
+
+<body class="floating nav-fixed">
+
+<div id="quarto-search-results"></div>
+  <header id="quarto-header" class="headroom fixed-top">
+    <nav class="navbar navbar-expand-lg navbar-dark ">
+      <div class="navbar-container container-fluid">
+          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarCollapse" aria-controls="navbarCollapse" aria-expanded="false" aria-label="Toggle navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
+  <span class="navbar-toggler-icon"></span>
+</button>
+          <div class="collapse navbar-collapse" id="navbarCollapse">
+            <ul class="navbar-nav navbar-nav-scroll me-auto">
+  <li class="nav-item">
+    <a class="nav-link" href="../../index.html" rel="" target="">
+ <span class="menu-text">Home</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../../index.xml" rel="" target="">
+ <span class="menu-text">RSS</span></a>
+  </li>  
+</ul>
+            <ul class="navbar-nav navbar-nav-scroll ms-auto">
+  <li class="nav-item dropdown ">
+    <a class="nav-link dropdown-toggle" href="#" id="nav-menu-sites" role="button" data-bs-toggle="dropdown" aria-expanded="false" rel="" target="">
+ <span class="menu-text">Sites</span>
+    </a>
+    <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="nav-menu-sites">    
+        <li>
+    <a class="dropdown-item" href="https://djnavarro.net" rel="" target="">
+ <span class="dropdown-text">Homepage</span></a>
+  </li>  
+        <li>
+    <a class="dropdown-item" href="https://blog.djnavarro.net" rel="" target="">
+ <span class="dropdown-text">Data science blog</span></a>
+  </li>  
+        <li>
+    <a class="dropdown-item" href="https://art.djnavarro.net" rel="" target="">
+ <span class="dropdown-text">Generative art</span></a>
+  </li>  
+        <li>
+    <a class="dropdown-item" href="https://papers.djnavarro.net" rel="" target="">
+ <span class="dropdown-text">Academic papers</span></a>
+  </li>  
+        <li>
+    <a class="dropdown-item" href="https://djnavarro.net/sites" rel="" target="">
+ <span class="dropdown-text">More…</span></a>
+  </li>  
+    </ul>
+  </li>
+</ul>
+            <div class="quarto-navbar-tools">
+</div>
+          </div> <!-- /navcollapse -->
+      </div> <!-- /container-fluid -->
+    </nav>
+</header>
+<!-- content -->
+<header id="title-block-header" class="quarto-title-block default toc-left page-columns page-full">
+  <div class="quarto-title-banner page-columns page-full">
+    <div class="quarto-title column-body">
+      <h1 class="title">Building a population pharmacokinetic model with Stan</h1>
+                  <div>
+        <div class="description">
+          In which the author works her way through the first part of an online tutorial, rewrites some NONMEM code in Stan, and takes notes
+        </div>
+      </div>
+                          <div class="quarto-categories">
+                <div class="quarto-category">Statistics</div>
+                <div class="quarto-category">Pharmacokinetics</div>
+                <div class="quarto-category">R</div>
+                <div class="quarto-category">Stan</div>
+                <div class="quarto-category">NONMEM</div>
+                <div class="quarto-category">Bayes</div>
+              </div>
+                  </div>
+  </div>
+    
+  
+  <div class="quarto-title-meta">
+
+      <div>
+      <div class="quarto-title-meta-heading">Author</div>
+      <div class="quarto-title-meta-contents">
+               <p><a href="https://djnavarro.net">Danielle Navarro</a> <a href="https://orcid.org/0000-0001-7648-6578" class="quarto-title-author-orcid"> <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAA2ZpVFh0WE1MOmNvbS5hZG9iZS54bXAAAAAAADw/eHBhY2tldCBiZWdpbj0i77u/IiBpZD0iVzVNME1wQ2VoaUh6cmVTek5UY3prYzlkIj8+IDx4OnhtcG1ldGEgeG1sbnM6eD0iYWRvYmU6bnM6bWV0YS8iIHg6eG1wdGs9IkFkb2JlIFhNUCBDb3JlIDUuMC1jMDYwIDYxLjEzNDc3NywgMjAxMC8wMi8xMi0xNzozMjowMCAgICAgICAgIj4gPHJkZjpSREYgeG1sbnM6cmRmPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5LzAyLzIyLXJkZi1zeW50YXgtbnMjIj4gPHJkZjpEZXNjcmlwdGlvbiByZGY6YWJvdXQ9IiIgeG1sbnM6eG1wTU09Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC9tbS8iIHhtbG5zOnN0UmVmPSJodHRwOi8vbnMuYWRvYmUuY29tL3hhcC8xLjAvc1R5cGUvUmVzb3VyY2VSZWYjIiB4bWxuczp4bXA9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC8iIHhtcE1NOk9yaWdpbmFsRG9jdW1lbnRJRD0ieG1wLmRpZDo1N0NEMjA4MDI1MjA2ODExOTk0QzkzNTEzRjZEQTg1NyIgeG1wTU06RG9jdW1lbnRJRD0ieG1wLmRpZDozM0NDOEJGNEZGNTcxMUUxODdBOEVCODg2RjdCQ0QwOSIgeG1wTU06SW5zdGFuY2VJRD0ieG1wLmlpZDozM0NDOEJGM0ZGNTcxMUUxODdBOEVCODg2RjdCQ0QwOSIgeG1wOkNyZWF0b3JUb29sPSJBZG9iZSBQaG90b3Nob3AgQ1M1IE1hY2ludG9zaCI+IDx4bXBNTTpEZXJpdmVkRnJvbSBzdFJlZjppbnN0YW5jZUlEPSJ4bXAuaWlkOkZDN0YxMTc0MDcyMDY4MTE5NUZFRDc5MUM2MUUwNEREIiBzdFJlZjpkb2N1bWVudElEPSJ4bXAuZGlkOjU3Q0QyMDgwMjUyMDY4MTE5OTRDOTM1MTNGNkRBODU3Ii8+IDwvcmRmOkRlc2NyaXB0aW9uPiA8L3JkZjpSREY+IDwveDp4bXBtZXRhPiA8P3hwYWNrZXQgZW5kPSJyIj8+84NovQAAAR1JREFUeNpiZEADy85ZJgCpeCB2QJM6AMQLo4yOL0AWZETSqACk1gOxAQN+cAGIA4EGPQBxmJA0nwdpjjQ8xqArmczw5tMHXAaALDgP1QMxAGqzAAPxQACqh4ER6uf5MBlkm0X4EGayMfMw/Pr7Bd2gRBZogMFBrv01hisv5jLsv9nLAPIOMnjy8RDDyYctyAbFM2EJbRQw+aAWw/LzVgx7b+cwCHKqMhjJFCBLOzAR6+lXX84xnHjYyqAo5IUizkRCwIENQQckGSDGY4TVgAPEaraQr2a4/24bSuoExcJCfAEJihXkWDj3ZAKy9EJGaEo8T0QSxkjSwORsCAuDQCD+QILmD1A9kECEZgxDaEZhICIzGcIyEyOl2RkgwAAhkmC+eAm0TAAAAABJRU5ErkJggg=="></a></p>
+            </div>
+    </div>
+      
+      <div>
+      <div class="quarto-title-meta-heading">Published</div>
+      <div class="quarto-title-meta-contents">
+        <p class="date">June 10, 2023</p>
+      </div>
+    </div>
+    
+      
+    </div>
+    
+  
+  </header><div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-article page-navbar">
+<!-- sidebar -->
+  <nav id="quarto-sidebar" class="sidebar collapse collapse-horizontal sidebar-navigation floating overflow-auto">
+    <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">Table of contents</h2>
+   
+  <ul>
+  <li><a href="#prologue" id="toc-prologue" class="nav-link active" data-scroll-target="#prologue">Prologue</a></li>
+  <li><a href="#some-resources" id="toc-some-resources" class="nav-link" data-scroll-target="#some-resources">Some resources</a></li>
+  <li><a href="#the-warfarin-data-set" id="toc-the-warfarin-data-set" class="nav-link" data-scroll-target="#the-warfarin-data-set">The warfarin data set</a>
+  <ul class="collapse">
+  <li><a href="#parsing-the-data" id="toc-parsing-the-data" class="nav-link" data-scroll-target="#parsing-the-data">Parsing the data</a></li>
+  <li><a href="#interpreting-the-data" id="toc-interpreting-the-data" class="nav-link" data-scroll-target="#interpreting-the-data">Interpreting the data</a></li>
+  </ul></li>
+  <li><a href="#why-we-need-population-models" id="toc-why-we-need-population-models" class="nav-link" data-scroll-target="#why-we-need-population-models">Why we need population models</a></li>
+  <li><a href="#deciphering-nonmem-specifications" id="toc-deciphering-nonmem-specifications" class="nav-link" data-scroll-target="#deciphering-nonmem-specifications">Deciphering NONMEM specifications</a>
+  <ul class="collapse">
+  <li><a href="#notation-from-nonmem" id="toc-notation-from-nonmem" class="nav-link" data-scroll-target="#notation-from-nonmem">Notation from NONMEM</a></li>
+  <li><a href="#reading-a-nonmem-control-file" id="toc-reading-a-nonmem-control-file" class="nav-link" data-scroll-target="#reading-a-nonmem-control-file">Reading a NONMEM control file</a></li>
+  </ul></li>
+  <li><a href="#implementation-in-stan" id="toc-implementation-in-stan" class="nav-link" data-scroll-target="#implementation-in-stan">Implementation in Stan</a>
+  <ul class="collapse">
+  <li><a href="#modelling-code" id="toc-modelling-code" class="nav-link" data-scroll-target="#modelling-code">Modelling code</a></li>
+  <li><a href="#parameter-estimates" id="toc-parameter-estimates" class="nav-link" data-scroll-target="#parameter-estimates">Parameter estimates</a></li>
+  <li><a href="#comparison-to-nonmem" id="toc-comparison-to-nonmem" class="nav-link" data-scroll-target="#comparison-to-nonmem">Comparison to NONMEM</a></li>
+  <li><a href="#model-fits" id="toc-model-fits" class="nav-link" data-scroll-target="#model-fits">Model fits</a></li>
+  <li><a href="#residuals" id="toc-residuals" class="nav-link" data-scroll-target="#residuals">Residuals</a></li>
+  </ul></li>
+  <li><a href="#epilogue" id="toc-epilogue" class="nav-link" data-scroll-target="#epilogue">Epilogue</a></li>
+  <li><a href="#references" id="toc-references" class="nav-link" data-scroll-target="#references">References</a></li>
+  </ul>
+</nav>
+</nav>
+<div id="quarto-sidebar-glass" data-bs-toggle="collapse" data-bs-target="#quarto-sidebar,#quarto-sidebar-glass"></div>
+<!-- margin-sidebar -->
+    <div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
+    </div>
+<!-- main -->
+<main class="content quarto-banner-title-block page-columns page-full" id="quarto-document-content">
+
+
+
+
+<!--------------- my typical setup ----------------->
+<!--------------- post begins here ----------------->
+<p><strong>Note</strong>: This is the third post in a series on pharmacometric modelling, and implicitly assumes some knowledge of the concepts outlined in the first two:</p>
+<ul>
+<li>The first post talked about <a href="../../non-compartmental-analysis/">non-compartmental analysis</a> and in the process introduced some basic terminology used in pharamacometrics</li>
+<li>The second post talked about building <a href="../../stan-ode/">compartmental models in Stan</a> and introduced a lot of the ideas I’ll build on here</li>
+</ul>
+<p>In the earlier posts I didn’t touch any real data sets, and only considered an idealised case where you have data from only a single person and therefore have no need for population models. I’ll address both of those shortcomings in this post.</p>
+<section id="prologue" class="level2">
+<h2 class="anchored" data-anchor-id="prologue">Prologue</h2>
+<p>All the way back in 2006 I published a paper in the <em>Journal of Mathematical Psychology</em> called “Modelling individual differences with Dirichlet processes” with a bunch of no-name coauthors.<a href="#fn1" class="footnote-ref" id="fnref1" role="doc-noteref"><sup>1</sup></a> In brutal honesty the paper should probably have been called “Everything Danielle knows about Dirichlet processes, with a fig leaf of pretense of applying it to data”, but it did allow me to use the following utterly unhinged quote from an anonymous reviewer on an earlier paper:</p>
+<blockquote class="blockquote">
+<p>I am surprised that the author has used this data set. In my lab, when we collect data with such large individual differences, we refer to the data as “junk”. We then re-design our stimuli and/or experimental procedures, and run a new experiment. The junk data never appear in publications</p>
+</blockquote>
+<p>This attitude, which I have encountered from time to time in research, utterly puzzles me. One of the most salient things about human thought and behaviour is that… well, people think and act differently to each other. If you want to understand the human mind, you kinda have to engage with that fact and develop experiments and modelling techniques that can accommodate this variation. I expressed the idea schematically in Figure 2 of the paper:</p>
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><img src="population-models.png" class="img-fluid figure-img"></p>
+</figure>
+</div>
+<p>I am still quite fond of this figure. It nicely captures the idea that when developing population models we are usually operating in three spaces at once:</p>
+<ul>
+<li>At the <strong>data level</strong> we have observable quantities that we can measure in our experiments. Each person in our study can have different data values, and people can differ from each other in all kinds of ways</li>
+<li>At the <strong>individual level</strong> we seek to infer the parameters of a model that can summarise the observations from a single person in a theoretically meaningful way, and account for how those observations might vary as a function of covariates.</li>
+<li>At the <strong>population level</strong> we seek to infer parameters that describe the typical parameter values associated with individuals, and how those parameter values typically vary across individuals.</li>
+</ul>
+<p>Shockingly, it turns out that this basic framework is not even slightly specific to psychology. It’s something that shows up in almost every scientific domain, and there are standard statistical tools that we use to capture this idea that are surprisingly similar to one another even when the domain of application differs.</p>
+<p>And so it transpires that, as I continue the process of teaching myself pharmacometrics, I discover that the modelling tools used in <strong>population pharmacokinetics</strong> (pop-PK) are shockingly familiar to me. So let’s dive in, shall we?</p>
+</section>
+<section id="some-resources" class="level2">
+<h2 class="anchored" data-anchor-id="some-resources">Some resources</h2>
+<p>To make the transition from modelling toy data sets to dealing with real ones, it helps a lot to have some real data to work with, and a worked example that shows how real data are analysed in practice. To that end, I’ve been relying on resources made publicly abailable by the <a href="https://www.paganz.org/">Population Approach Group of Australia and New Zealand</a>, who have a series of <a href="https://www.paganz.org/resources/">handy tutorials</a> for folks interested in pharmacometric modelling. The one I’m working through at the moment is a <a href="https://www.paganz.org/wp-content/uploads/2016/06/PAWs-Beginners-2019.zip">2019 workshop on pop-PK models</a> (link goes to a zip file), which provides a very nice tutorial on building such models.</p>
+<p>The only catch, from my perspective, is that the tutorial uses the <a href="https://www.iconplc.com/solutions/technologies/nonmem/">NONMEM</a> pharmacometrics software, and I don’t have access to NONMEM. So as a fun little exercise, I’m going to translate some of the code from the workshop from NONMEM to Stan (and R).</p>
+</section>
+<section id="the-warfarin-data-set" class="level2">
+<h2 class="anchored" data-anchor-id="the-warfarin-data-set">The warfarin data set</h2>
+<p>The data set used in the tutorial is based on some old studies in the 1960s on the pharmacokinetics of <a href="https://en.wikipedia.org/wiki/Warfarin">warfarin</a>, an anticoagulant medication that is probably well-known to most people (I mean, even I know what warfarin is). The data is provided as a csv file called “warfpk.csv”, so my first step will be to import the data into R so that I can work with it.</p>
+<section id="parsing-the-data" class="level3">
+<h3 class="anchored" data-anchor-id="parsing-the-data">Parsing the data</h3>
+<p>Reading the data into R using <code>readr::read_csv()</code> turns out to be mostly straightforward. Data are delimited with commas and there’s very little weirdness to deal with. The only thing that is non-standard for an R user is that the data file uses <code>"."</code> to specify missing values (which I’m guessing is standard in pharmacometrics), so I’ll need to state that explicitly when reading the data into R to ensure that numeric variables with missing values are correctly parsed as numeric:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb1"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a>warfpk <span class="ot">&lt;-</span> readr<span class="sc">::</span><span class="fu">read_csv</span>(<span class="st">"warfpk.csv"</span>, <span class="at">na =</span> <span class="st">"."</span>, <span class="at">show_col_types =</span> <span class="cn">FALSE</span>)</span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>warfpk</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 289 × 10
+   `#ID`  time    wt   age   sex   amt  rate  dvid    dv   mdv
+   &lt;chr&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;
+ 1 0       0    66.7    50     1   100    -2     0  NA       1
+ 2 0       0.5  66.7    50     1    NA    NA     1   0       0
+ 3 0       1    66.7    50     1    NA    NA     1   1.9     0
+ 4 0       2    66.7    50     1    NA    NA     1   3.3     0
+ 5 0       3    66.7    50     1    NA    NA     1   6.6     0
+ 6 0       6    66.7    50     1    NA    NA     1   9.1     0
+ 7 0       9    66.7    50     1    NA    NA     1  10.8     0
+ 8 0      12    66.7    50     1    NA    NA     1   8.6     0
+ 9 0      24    66.7    50     1    NA    NA     1   5.6     0
+10 0      36    66.7    50     1    NA    NA     1   4       0
+# ℹ 279 more rows</code></pre>
+</div>
+</div>
+<p>These column names are pretty standard in the field, in part because standard software like NONMEM expects these names. They’re perfectly fine for R too, with one minor exception: I’m going to rename the id variable using <code>dplyr::rename()</code>:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb3"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a>warfpk <span class="ot">&lt;-</span> warfpk <span class="sc">|&gt;</span> dplyr<span class="sc">::</span><span class="fu">rename</span>(<span class="at">id =</span> <span class="st">`</span><span class="at">#ID</span><span class="st">`</span>)</span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>warfpk</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 289 × 10
+   id     time    wt   age   sex   amt  rate  dvid    dv   mdv
+   &lt;chr&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;
+ 1 0       0    66.7    50     1   100    -2     0  NA       1
+ 2 0       0.5  66.7    50     1    NA    NA     1   0       0
+ 3 0       1    66.7    50     1    NA    NA     1   1.9     0
+ 4 0       2    66.7    50     1    NA    NA     1   3.3     0
+ 5 0       3    66.7    50     1    NA    NA     1   6.6     0
+ 6 0       6    66.7    50     1    NA    NA     1   9.1     0
+ 7 0       9    66.7    50     1    NA    NA     1  10.8     0
+ 8 0      12    66.7    50     1    NA    NA     1   8.6     0
+ 9 0      24    66.7    50     1    NA    NA     1   5.6     0
+10 0      36    66.7    50     1    NA    NA     1   4       0
+# ℹ 279 more rows</code></pre>
+</div>
+</div>
+<p>Looking at this output more carefully, there’s one slightly puzzling thing here: the <code>id</code> column looks like it’s supposed to be a numeric id for the study participants, but R has parsed as a character vector. So there must be one non-numeric value in this column. I’d better find out what’s going on there. A bit of digging reveals there’s something peculiar going on with subject 12. Using <code>dplyr::filter()</code> to extract the data for that person we get this:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb5"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a>warfpk <span class="sc">|&gt;</span> dplyr<span class="sc">::</span><span class="fu">filter</span>(id <span class="sc">|&gt;</span> stringr<span class="sc">::</span><span class="fu">str_detect</span>(<span class="st">"12"</span>))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 11 × 10
+   id     time    wt   age   sex   amt  rate  dvid    dv   mdv
+   &lt;chr&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;
+ 1 12      0    75.3    32     1   113    -2     0  NA       1
+ 2 12      1.5  75.3    32     1    NA    NA     1   0.6     0
+ 3 #12     3    75.3    32     1    NA    NA     1   2.8     0
+ 4 12      6    75.3    32     1    NA    NA     1  13.8     0
+ 5 12      9    75.3    32     1    NA    NA     1  15       0
+ 6 12     24    75.3    32     1    NA    NA     1  10.5     0
+ 7 12     36    75.3    32     1    NA    NA     1   9.1     0
+ 8 12     48    75.3    32     1    NA    NA     1   6.6     0
+ 9 12     72    75.3    32     1    NA    NA     1   4.9     0
+10 12     96    75.3    32     1    NA    NA     1   2.4     0
+11 12    120    75.3    32     1    NA    NA     1   1.9     0</code></pre>
+</div>
+</div>
+<p>My first thought upon seeing this was that it must be a typo in the data file. No problem, it’s easy enough to remove the <code>#</code> character and convert the id variable to numeric:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb7"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a>warfpk <span class="ot">&lt;-</span> warfpk <span class="sc">|&gt;</span> </span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">mutate</span>(</span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a>    <span class="at">id =</span> id <span class="sc">|&gt;</span> </span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>      stringr<span class="sc">::</span><span class="fu">str_remove_all</span>(<span class="st">"#"</span>) <span class="sc">|&gt;</span> </span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a>      <span class="fu">as.numeric</span>()</span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb7-7"><a href="#cb7-7" aria-hidden="true" tabindex="-1"></a>warfpk</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 289 × 10
+      id  time    wt   age   sex   amt  rate  dvid    dv   mdv
+   &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;
+ 1     0   0    66.7    50     1   100    -2     0  NA       1
+ 2     0   0.5  66.7    50     1    NA    NA     1   0       0
+ 3     0   1    66.7    50     1    NA    NA     1   1.9     0
+ 4     0   2    66.7    50     1    NA    NA     1   3.3     0
+ 5     0   3    66.7    50     1    NA    NA     1   6.6     0
+ 6     0   6    66.7    50     1    NA    NA     1   9.1     0
+ 7     0   9    66.7    50     1    NA    NA     1  10.8     0
+ 8     0  12    66.7    50     1    NA    NA     1   8.6     0
+ 9     0  24    66.7    50     1    NA    NA     1   5.6     0
+10     0  36    66.7    50     1    NA    NA     1   4       0
+# ℹ 279 more rows</code></pre>
+</div>
+</div>
+<p>For the purposes of this post I am going to run with this version of the data, but later on it’s going to turn out that the data from participant 12 is the least well-fit by the model, which is a hint that this might have been deliberate. In fact, as I started doing some more digging into NONMEM and learned how to decipher a NONMEM input file, I discovered that the <code>#</code> character appears to be serving a specific function when used as a prefix in this data file. Per this line of the input (see later), it’s being used as an instruction to tell NONMEM to ignore the observation:</p>
+<div class="sourceCode" id="cb9"><pre class="sourceCode fortran code-with-copy"><code class="sourceCode fortranfixed"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a>$DATA ..\warfpk.csv IGNORE<span class="kw">=</span>#</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>What I’m guessing here is that this observation was dropped from the data set in the tutorial for some reason. It’s not obvious to me what the specific reason was for omitting that observation, and it’s possible I should also be filtering out that case, but I’m not going to worry about that for the purposes of this blog post.</p>
+</section>
+<section id="interpreting-the-data" class="level3">
+<h3 class="anchored" data-anchor-id="interpreting-the-data">Interpreting the data</h3>
+<p>Now that I have the data, I need to make sense of it. The csv file itself doesn’t say give much information about the variables, but when digging into the NONMEM input files included with the workshop materials I found the citations to the original papers from whence the data came. The data originate in papers by O’Reilly and colleagues, published in 1963 and 1968. Both papers are available online in full text, and after reading through them, we can reverse engineer (most of!) a data dictionary:</p>
+<ul>
+<li><code>id</code>: Numeric value specifying the arbitrary identifier for each person</li>
+<li><code>time</code>: Time elapsed since dose was administered (in hours)</li>
+<li><code>wt</code>: Weight of each person (in kilograms)</li>
+<li><code>age</code>: Age of each person (in years)</li>
+<li><code>sex</code>: Biological sex of each person (0 = female, 1 = male)<a href="#fn2" class="footnote-ref" id="fnref2" role="doc-noteref"><sup>2</sup></a></li>
+<li><code>amt</code>: Dose administered to this person at this time point (in milligrams)</li>
+<li><code>rate</code>: Uncertain what this refers to, but it has value -2 when drug is administered and missing otherwise</li>
+<li><code>dvid</code>: Appears to be a dummy variable indicating whether the dependent variable was measured at this time point (0 = false, 1 = true)</li>
+<li><code>dv</code>: Measured value of the dependent variable (plasma warfarin concentration, in mg/L)</li>
+<li><code>mdv</code>: Appears to be a dummy variable that is the reverse of <code>dvid</code>, and is presumably an indicator variable whose meaning is “missing dependent variable” (0 = false, 1 = true)</li>
+</ul>
+<p>One peculiarity of the data structure that appears to be quite standard in pharmacokinetics is that the data frame incorporates both <strong>measurement events</strong> where the drug concentration is measure, and <strong>dosing events</strong> where a dose of the drug is provided. It’s a perfectly sensible way to organised the data, but later on it will be convenient to separate them in order to pass the data to Stan in a format that it expects. To get a sense of what the dosing events look like, we can extract the relevant subset of the data frame by filtering the data on <code>dvid</code>:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb10"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a>warfpk <span class="sc">|&gt;</span> dplyr<span class="sc">::</span><span class="fu">filter</span>(dvid <span class="sc">==</span> <span class="dv">0</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 32 × 10
+      id  time    wt   age   sex   amt  rate  dvid    dv   mdv
+   &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;
+ 1     0     0  66.7    50     1   100    -2     0    NA     1
+ 2     1     0  66.7    50     1   100    -2     0    NA     1
+ 3     2     0  66.7    31     1   100    -2     0    NA     1
+ 4     3     0  80      40     1   120    -2     0    NA     1
+ 5     4     0  40      46     0    60    -2     0    NA     1
+ 6     5     0  75.3    43     1   113    -2     0    NA     1
+ 7     6     0  60      36     0    90    -2     0    NA     1
+ 8     7     0  90      41     1   135    -2     0    NA     1
+ 9     8     0  50      27     0    75    -2     0    NA     1
+10     9     0  70      28     1   105    -2     0    NA     1
+# ℹ 22 more rows</code></pre>
+</div>
+</div>
+<p>Notably, not everyone is given the same dose, and in an utterly unsurprising turn of events it turns out that the dose is calculated based on weight (which is in turn, I’m told, a proxy for the volume of distribution in systemic circulation):<a href="#fn3" class="footnote-ref" id="fnref3" role="doc-noteref"><sup>3</sup></a></p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb12"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(ggplot2)</span>
+<span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a>warfpk <span class="sc">|&gt;</span> </span>
+<span id="cb12-3"><a href="#cb12-3" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">filter</span>(dvid <span class="sc">==</span> <span class="dv">0</span>) <span class="sc">|&gt;</span></span>
+<span id="cb12-4"><a href="#cb12-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>(<span class="fu">aes</span>(wt, amt, <span class="at">colour =</span> <span class="fu">factor</span>(sex))) <span class="sc">+</span> </span>
+<span id="cb12-5"><a href="#cb12-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="at">size =</span> <span class="dv">4</span>, <span class="at">show.legend =</span> <span class="cn">FALSE</span>) <span class="sc">+</span></span>
+<span id="cb12-6"><a href="#cb12-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_bw</span>() <span class="sc">+</span> </span>
+<span id="cb12-7"><a href="#cb12-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">x =</span> <span class="st">"Weight (kg)"</span>, <span class="at">y =</span> <span class="st">"Dose (mg)"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<p><img src="index_files/figure-html/weight-dose-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>Okay, that all makes sense.</p>
+<p>Next, let’s take a look at the data from a single subject. The observations in the <code>warfpk</code> data set appear to aggregate data from multiple studies, with the consequence that different subjects can have different measurement schedules. Here’s participant 1, for instance:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb13"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a>warfpk <span class="sc">|&gt;</span> dplyr<span class="sc">::</span><span class="fu">filter</span>(id <span class="sc">==</span> <span class="dv">1</span> <span class="sc">&amp;</span> dvid <span class="sc">==</span> <span class="dv">1</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 6 × 10
+     id  time    wt   age   sex   amt  rate  dvid    dv   mdv
+  &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;
+1     1    24  66.7    50     1    NA    NA     1   9.2     0
+2     1    36  66.7    50     1    NA    NA     1   8.5     0
+3     1    48  66.7    50     1    NA    NA     1   6.4     0
+4     1    72  66.7    50     1    NA    NA     1   4.8     0
+5     1    96  66.7    50     1    NA    NA     1   3.1     0
+6     1   120  66.7    50     1    NA    NA     1   2.5     0</code></pre>
+</div>
+</div>
+<p>A lot of the people in the data set have measurements taken on this schedule, but not everyone does. For comparison purposes, here’s participant 2:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb15"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a>warfpk <span class="sc">|&gt;</span> dplyr<span class="sc">::</span><span class="fu">filter</span>(id <span class="sc">==</span> <span class="dv">2</span> <span class="sc">&amp;</span> dvid <span class="sc">==</span> <span class="dv">1</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 11 × 10
+      id  time    wt   age   sex   amt  rate  dvid    dv   mdv
+   &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;
+ 1     2   0.5  66.7    31     1    NA    NA     1   0       0
+ 2     2   2    66.7    31     1    NA    NA     1   8.4     0
+ 3     2   3    66.7    31     1    NA    NA     1   9.7     0
+ 4     2   6    66.7    31     1    NA    NA     1   9.8     0
+ 5     2  12    66.7    31     1    NA    NA     1  11       0
+ 6     2  24    66.7    31     1    NA    NA     1   8.3     0
+ 7     2  36    66.7    31     1    NA    NA     1   7.7     0
+ 8     2  48    66.7    31     1    NA    NA     1   6.3     0
+ 9     2  72    66.7    31     1    NA    NA     1   4.1     0
+10     2  96    66.7    31     1    NA    NA     1   3       0
+11     2 120    66.7    31     1    NA    NA     1   1.4     0</code></pre>
+</div>
+</div>
+</section>
+</section>
+<section id="why-we-need-population-models" class="level2 page-columns page-full">
+<h2 class="anchored" data-anchor-id="why-we-need-population-models">Why we need population models</h2>
+<p>Now that we have a sense of the structure of the data, we can start drawing some plots designed to tell us what’s going on. I’ll start with a very naive kind of visualisation. Here’s a scatterplot of time versus measured drug concentration that doesn’t give you any indication about which observations belong to which person.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb17"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a>warfpk <span class="sc">|&gt;</span> </span>
+<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">filter</span>(</span>
+<span id="cb17-3"><a href="#cb17-3" aria-hidden="true" tabindex="-1"></a>    dvid <span class="sc">==</span> <span class="dv">1</span>, <span class="co"># only include measured times</span></span>
+<span id="cb17-4"><a href="#cb17-4" aria-hidden="true" tabindex="-1"></a>    <span class="sc">!</span><span class="fu">is.na</span>(dv) <span class="co"># ignore missing dv cases</span></span>
+<span id="cb17-5"><a href="#cb17-5" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">|&gt;</span></span>
+<span id="cb17-6"><a href="#cb17-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>(<span class="fu">aes</span>(<span class="at">x =</span> time, <span class="at">y =</span> dv, <span class="at">group =</span> <span class="fu">factor</span>(id))) <span class="sc">+</span> </span>
+<span id="cb17-7"><a href="#cb17-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>() <span class="sc">+</span></span>
+<span id="cb17-8"><a href="#cb17-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_bw</span>() <span class="sc">+</span> </span>
+<span id="cb17-9"><a href="#cb17-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(</span>
+<span id="cb17-10"><a href="#cb17-10" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> <span class="st">"Time since dose (hours)"</span>, </span>
+<span id="cb17-11"><a href="#cb17-11" aria-hidden="true" tabindex="-1"></a>    <span class="at">y =</span> <span class="st">"Warfarin plasma concentration (mg/L)"</span></span>
+<span id="cb17-12"><a href="#cb17-12" aria-hidden="true" tabindex="-1"></a>  )</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<p><img src="index_files/figure-html/warfarin-data-raw-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>Looking at the data like this gives you the false impression that the data set is rather noisy.<a href="#fn4" class="footnote-ref" id="fnref4" role="doc-noteref"><sup>4</sup></a> To see why this is misleading, let’s add some lines that connect data from the same person:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb18"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a>warfpk <span class="sc">|&gt;</span> dplyr<span class="sc">::</span><span class="fu">filter</span>(dvid <span class="sc">==</span> <span class="dv">1</span>, <span class="sc">!</span><span class="fu">is.na</span>(dv)) <span class="sc">|&gt;</span></span>
+<span id="cb18-2"><a href="#cb18-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>(<span class="fu">aes</span>(<span class="at">x =</span> time, <span class="at">y =</span> dv, <span class="at">group =</span> <span class="fu">factor</span>(id))) <span class="sc">+</span> </span>
+<span id="cb18-3"><a href="#cb18-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_line</span>(<span class="at">colour =</span> <span class="st">"grey80"</span>) <span class="sc">+</span></span>
+<span id="cb18-4"><a href="#cb18-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>() <span class="sc">+</span></span>
+<span id="cb18-5"><a href="#cb18-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_bw</span>() <span class="sc">+</span> </span>
+<span id="cb18-6"><a href="#cb18-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(</span>
+<span id="cb18-7"><a href="#cb18-7" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> <span class="st">"Time since dose (hours)"</span>, </span>
+<span id="cb18-8"><a href="#cb18-8" aria-hidden="true" tabindex="-1"></a>    <span class="at">y =</span> <span class="st">"Warfarin plasma concentration (mg/L)"</span></span>
+<span id="cb18-9"><a href="#cb18-9" aria-hidden="true" tabindex="-1"></a>  )</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display">
+<p><img src="index_files/figure-html/warfarin-data-connected-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>The pattern of lines hints that a lot of this “noise” is not in fact noise, it’s systematic variation across people. This becomes more obvious when we disaggregate the data further and plot the observations from each person in a separate panel:</p>
+<div class="cell page-columns page-full">
+<div class="sourceCode cell-code" id="cb19"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a>warfpk <span class="sc">|&gt;</span> dplyr<span class="sc">::</span><span class="fu">filter</span>(dvid <span class="sc">==</span> <span class="dv">1</span>, <span class="sc">!</span><span class="fu">is.na</span>(dv)) <span class="sc">|&gt;</span></span>
+<span id="cb19-2"><a href="#cb19-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>(<span class="fu">aes</span>(<span class="at">x =</span> time, <span class="at">y =</span> dv, <span class="at">colour =</span> <span class="fu">factor</span>(id))) <span class="sc">+</span> </span>
+<span id="cb19-3"><a href="#cb19-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_line</span>(<span class="at">show.legend =</span> <span class="cn">FALSE</span>) <span class="sc">+</span></span>
+<span id="cb19-4"><a href="#cb19-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="at">size =</span> <span class="dv">4</span>, <span class="at">show.legend =</span> <span class="cn">FALSE</span>) <span class="sc">+</span></span>
+<span id="cb19-5"><a href="#cb19-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">facet_wrap</span>(<span class="sc">~</span> <span class="fu">factor</span>(id), <span class="at">ncol =</span> <span class="dv">8</span>) <span class="sc">+</span></span>
+<span id="cb19-6"><a href="#cb19-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_bw</span>() <span class="sc">+</span> </span>
+<span id="cb19-7"><a href="#cb19-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(</span>
+<span id="cb19-8"><a href="#cb19-8" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> <span class="st">"Time since dose (hours)"</span>, </span>
+<span id="cb19-9"><a href="#cb19-9" aria-hidden="true" tabindex="-1"></a>    <span class="at">y =</span> <span class="st">"Warfarin plasma concentration (mg/L)"</span></span>
+<span id="cb19-10"><a href="#cb19-10" aria-hidden="true" tabindex="-1"></a>  )</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display column-page">
+<p><img src="index_files/figure-html/warfarin-data-disaggregated-1.png" class="img-fluid" width="1536"></p>
+</div>
+</div>
+<p>When plotted this way, it’s really clear that the data from each person is in fact quite precise. There’s very little noise in any of these individual-subject plots. They’re all very smooth looking curves: it just so happens that each person is unique and has their own curve. In other words, the vast majority of the variation is systematic difference across people: it’s not measurement error.</p>
+<p>When data have this structure, you really (really really really really) need to adopt a statistical approach that accommodates individual differences. You need a pop-PK model.</p>
+</section>
+<section id="deciphering-nonmem-specifications" class="level2">
+<h2 class="anchored" data-anchor-id="deciphering-nonmem-specifications">Deciphering NONMEM specifications</h2>
+<p>Okay. Time for a digression, sort of. My primary goal in this post is to implement a pop-PK model from scratch in Stan, using material from a workshop on NONMEM as my launching point. There’s a twin motivation here. On the one hand, I want to extend the Stan code from my last pharmacometrics post so that it can handle pop-PK models. But on the other hand, I also want to familiarise myself with the nomenclature used in the field, which derives heavily from notation used in NONMEM. To that end, I’m going to start trying to write my model using NONMEM-style variable names, and in the process familiarise myself with how NONMEM input files are structured.</p>
+<p>Reading NONMEM code takes a bit of effort if, like me, you’re not used to it. Decoding a NONMEM model specification requires you to understand the convention used to describe models, and to understand the syntax used in the input files. I’ll start with the notation.</p>
+<section id="notation-from-nonmem" class="level3">
+<h3 class="anchored" data-anchor-id="notation-from-nonmem">Notation from NONMEM</h3>
+<p>To make sense of the statistical notation used in NONMEM specifications, I relied quite heavily on the two NONMEM tutorial papers by Bauer (2019) were helpful for me, and an older paper by Bauer et al (2007) that is a little more explicit about the statistical formulation of the models. I’m not 100% certain I’ve done the decoding correctly, but as far as I can tell the following syntactic conventions are very often used:</p>
+<ul>
+<li>Italicised lower case Greek symbols refer to scalar parameters: <span class="math inline">\(\theta\)</span>, <span class="math inline">\(\omega\)</span>, <span class="math inline">\(\sigma\)</span>, etc</li>
+<li>Boldfaced upper case Greek symbols denote parameter vectors: <span class="math inline">\(\boldsymbol\theta\)</span>, <span class="math inline">\(\boldsymbol\omega\)</span>, <span class="math inline">\(\boldsymbol\sigma\)</span>, etc</li>
+<li>Boldfaced upper case Greek symbols denote parameter matrices: <span class="math inline">\(\boldsymbol\Theta\)</span>, <span class="math inline">\(\boldsymbol\Omega\)</span>, <span class="math inline">\(\boldsymbol\Sigma\)</span>, etc</li>
+</ul>
+<p>There is also a convention assigning meaning to the different Greek letters:</p>
+<ul>
+<li>Population mean parameters are denoted with thetas (<span class="math inline">\(\theta\)</span>, <span class="math inline">\(\boldsymbol\theta\)</span>, <span class="math inline">\(\boldsymbol\Theta\)</span>)</li>
+<li>Population variance parameters are denoted (<span class="math inline">\(\omega\)</span>, <span class="math inline">\(\boldsymbol\omega\)</span>, <span class="math inline">\(\boldsymbol\Omega\)</span>)</li>
+<li>Individual departures from population mean are denoted with etas (<span class="math inline">\(\eta\)</span>, <span class="math inline">\(\boldsymbol\eta\)</span>)</li>
+<li>Standard deviation of measurement error terms is denoted with sigmas (<span class="math inline">\(\sigma\)</span>, <span class="math inline">\(\boldsymbol\sigma\)</span>, <span class="math inline">\(\boldsymbol\Sigma\)</span>)</li>
+<li>Difference between individual subject expected values and observation are denoted with epsilons, <span class="math inline">\(\epsilon\)</span></li>
+</ul>
+<p>To help myself keep the notation straight, I’ll consider a simple one-compartment intravenous bolus model with first-order elimination, because unlike other models that one has a nice clean analytical closed form for the pharmacokinetic function. If we let <span class="math inline">\(f(t, k, V, D)\)</span> denote the pharmacokinetic function that describes how drug concentration changes as a function of time <span class="math inline">\(t\)</span>, dose <span class="math inline">\(D\)</span>, elimination rate <span class="math inline">\(k\)</span>, and volume of distribution <span class="math inline">\(V\)</span>, this model asserts that the blood plasma drug concentration decays exponentially with time:</p>
+<p><span class="math display">\[
+f(t, k, V, D) = \frac{D}{V} \exp(-kt)
+\]</span></p>
+<p>In this model, the measurement time <span class="math inline">\(t\)</span> and dose <span class="math inline">\(D\)</span> (assumed to be administered at time <span class="math inline">\(t = 0\)</span>) are both part of the study design. The other two quantities <span class="math inline">\(k\)</span> and <span class="math inline">\(V\)</span>, are model parameters that can be different for every person. Because we’re allowing for the possibility that the parameters can vary from person to person, we’ll need notation to describe this variation. At a population level, we have a parameter vector <span class="math inline">\(\boldsymbol{\theta} = (\theta_1, \theta_2)\)</span> where – somewhat arbitrarily – I’ll say that <span class="math inline">\(\theta_1\)</span> denotes the typical value for the elimination rate <span class="math inline">\(k\)</span>, and <span class="math inline">\(\theta_2\)</span> is the typical value for the volume of distribution <span class="math inline">\(V\)</span>. Since these quantities can vary from person to person, we would also – assuming for the sake of simplicity that there is no population correlation between them<a href="#fn5" class="footnote-ref" id="fnref5" role="doc-noteref"><sup>5</sup></a> – have a variance vector <span class="math inline">\(\boldsymbol{\omega} = (\omega_1, \omega_2)\)</span>.</p>
+<p>In this scenario, then, the parameters for the i-th participant would be some function of the typical values <span class="math inline">\(\boldsymbol\theta\)</span> and the random effects <span class="math inline">\(\boldsymbol\eta_i\)</span> associated with that person. I’m not certain if there’s a standard notation used to describe these transformation functions, so I’ll just use <span class="math inline">\(g_1()\)</span> and <span class="math inline">\(g_2()\)</span> to denote these:</p>
+<p><span class="math display">\[
+\begin{array}{rcl}
+k_i &amp;=&amp; g_1(\theta_1, \eta_{i1}) \\
+V_i &amp;=&amp; g_2(\theta_2, \eta_{i2})
+\end{array}
+\]</span></p>
+<p>When specifying the statistical model, it’s conventional to assume that the random effect terms <span class="math inline">\(\eta_{ik}\)</span> are normally distributed with mean zero:</p>
+<p><span class="math display">\[
+\eta_{ik} \sim \mbox{Normal}(0, \omega_k)
+\]</span></p>
+<p>Next, let’s consider the notation for the pharmacokinetic function <span class="math inline">\(f()\)</span> itself. Earlier I wrote out the specific form of this function for a particular model, but since the precise form is different from model to model, we could refer to it generically as <span class="math inline">\(f(t, \boldsymbol\eta_i, \boldsymbol\theta, D_i)\)</span>.</p>
+<p>If measurement errors are assumed to be additive – they don’t have to be, but I’m only considering additive error models in this post – the observed concentration <span class="math inline">\(y_{ij}\)</span> for the i-th person at the j-th time point can be expressed as follows:</p>
+<p><span class="math display">\[
+y_{ij} = f(t_j, \boldsymbol\eta_i, \boldsymbol\theta, D_i) + \epsilon_{ij}
+\]</span></p>
+<p>In this expression, <span class="math inline">\(\epsilon_{ij}\)</span> is the error associated with person i and time j, and we presume these errors are normally distributed with mean zero and standard deviation <span class="math inline">\(\sigma\)</span>:</p>
+<p><span class="math display">\[
+\epsilon_{ik} \sim \mbox{Normal}(0, \sigma)
+\]</span></p>
+<p>With that as preliminary notational exposition, I think I can now make sense of how the model specification in NONMEM is expressed. So let’s turn to that now…</p>
+</section>
+<section id="reading-a-nonmem-control-file" class="level3">
+<h3 class="anchored" data-anchor-id="reading-a-nonmem-control-file">Reading a NONMEM control file</h3>
+<p>One thing that I really appreciated when going through the tutorial materials is that they include actual NONMEM model specifications that workshop participants can play with. If you unfold the code below, you can see the complete NONMEM <strong>control file</strong> (which uses a .ctl file extension) for a NONMEM model of the warfarin data:</p>
+<div class="cell">
+<details>
+<summary>The complete NONMEM control file</summary>
+<div class="sourceCode cell-code" id="cb20"><pre class="sourceCode numberSource fortran number-lines code-with-copy"><code class="sourceCode fortranfixed"><span id="cb20-1"><a href="#cb20-1"></a>;O<span class="st">'</span>REILLY RA, AGGELER PM. STUDIES ON COUMARIN ANTICOAGULANT DRUGS</span>
+<span id="cb20-2"><a href="#cb20-2"></a>;INITIATION OF WARFARIN THERAPY WITHOUT A LOADING DOSE.</span>
+<span id="cb20-3"><a href="#cb20-3"></a>;CIRCULATION <span class="dv">1968</span>;<span class="dv">38</span>:<span class="dv">169</span><span class="kw">-</span><span class="dv">177</span></span>
+<span id="cb20-4"><a href="#cb20-4"></a>;</span>
+<span id="cb20-5"><a href="#cb20-5"></a>;O<span class="st">'</span>REILLY RA, AGGELER PM, LEONG LS. STUDIES OF THE COUMARIN ANTICOAGULANT</span>
+<span id="cb20-6"><a href="#cb20-6"></a>;DRUGS: THE PHARMACODYNAMICS OF WARFARIN IN MAN.</span>
+<span id="cb20-7"><a href="#cb20-7"></a>;JOURNAL OF CLINICAL INVESTIGATION <span class="dv">1963</span>;<span class="dv">42</span>(<span class="dv">10</span>):<span class="dv">1542</span><span class="kw">-</span><span class="dv">1551</span></span>
+<span id="cb20-8"><a href="#cb20-8"></a>;</span>
+<span id="cb20-9"><a href="#cb20-9"></a></span>
+<span id="cb20-10"><a href="#cb20-10"></a>$PROB WARFARIN PK</span>
+<span id="cb20-11"><a href="#cb20-11"></a>$INPUT ID TIME WT AGE SEX AMT RATX DVID DV MDV</span>
+<span id="cb20-12"><a href="#cb20-12"></a>$DATA ..\warfpk.csv IGNORE<span class="kw">=</span>#</span>
+<span id="cb20-13"><a href="#cb20-13"></a></span>
+<span id="cb20-14"><a href="#cb20-14"></a>$SUBR ADVAN2 TRANS2</span>
+<span id="cb20-15"><a href="#cb20-15"></a></span>
+<span id="cb20-16"><a href="#cb20-16"></a>$PK</span>
+<span id="cb20-17"><a href="#cb20-17"></a></span>
+<span id="cb20-18"><a href="#cb20-18"></a>   ; COVARIATE MODEL</span>
+<span id="cb20-19"><a href="#cb20-19"></a>   TVCL<span class="kw">=</span>THETA(<span class="dv">1</span>)</span>
+<span id="cb20-20"><a href="#cb20-20"></a>   TVV<span class="kw">=</span>THETA(<span class="dv">2</span>)</span>
+<span id="cb20-21"><a href="#cb20-21"></a>   TVKA<span class="kw">=</span>THETA(<span class="dv">3</span>)</span>
+<span id="cb20-22"><a href="#cb20-22"></a></span>
+<span id="cb20-23"><a href="#cb20-23"></a>   ; MODEL <span class="kw">FOR</span> RANDOM BETWEEN SUBJECT VARIABILITY</span>
+<span id="cb20-24"><a href="#cb20-24"></a>   CL<span class="kw">=</span>TVCL<span class="kw">*</span><span class="bu">EXP</span>(ETA(<span class="dv">1</span>))</span>
+<span id="cb20-25"><a href="#cb20-25"></a>   V<span class="kw">=</span>TVV<span class="kw">*</span><span class="bu">EXP</span>(ETA(<span class="dv">2</span>))</span>
+<span id="cb20-26"><a href="#cb20-26"></a>   KA<span class="kw">=</span>TVKA<span class="kw">*</span><span class="bu">EXP</span>(ETA(<span class="dv">3</span>))</span>
+<span id="cb20-27"><a href="#cb20-27"></a></span>
+<span id="cb20-28"><a href="#cb20-28"></a>   ; <span class="bu">SCALE</span> CONCENTRATIONS</span>
+<span id="cb20-29"><a href="#cb20-29"></a>   S2<span class="kw">=</span>V</span>
+<span id="cb20-30"><a href="#cb20-30"></a></span>
+<span id="cb20-31"><a href="#cb20-31"></a>$ERROR</span>
+<span id="cb20-32"><a href="#cb20-32"></a>   Y<span class="kw">=</span>F<span class="kw">+</span>EPS(<span class="dv">1</span>)</span>
+<span id="cb20-33"><a href="#cb20-33"></a>   IPRED<span class="kw">=</span>F</span>
+<span id="cb20-34"><a href="#cb20-34"></a></span>
+<span id="cb20-35"><a href="#cb20-35"></a>$THETA</span>
+<span id="cb20-36"><a href="#cb20-36"></a>   (<span class="fl">0.01</span>,<span class="fl">0.1</span>)   ; POP_CL</span>
+<span id="cb20-37"><a href="#cb20-37"></a>   (<span class="fl">0.01</span>,<span class="dv">8</span>)     ; POP_V</span>
+<span id="cb20-38"><a href="#cb20-38"></a>   (<span class="fl">0.01</span>,<span class="fl">0.362</span>) ; POP_KA</span>
+<span id="cb20-39"><a href="#cb20-39"></a></span>
+<span id="cb20-40"><a href="#cb20-40"></a>$OMEGA</span>
+<span id="cb20-41"><a href="#cb20-41"></a>   <span class="fl">0.1</span> ; PPV_CL</span>
+<span id="cb20-42"><a href="#cb20-42"></a>   <span class="fl">0.1</span> ; PPV_V</span>
+<span id="cb20-43"><a href="#cb20-43"></a>   <span class="fl">0.1</span> ; PPV_KA</span>
+<span id="cb20-44"><a href="#cb20-44"></a></span>
+<span id="cb20-45"><a href="#cb20-45"></a>$SIGMA </span>
+<span id="cb20-46"><a href="#cb20-46"></a>   <span class="fl">0.1</span> ; RUV_ADD</span>
+<span id="cb20-47"><a href="#cb20-47"></a></span>
+<span id="cb20-48"><a href="#cb20-48"></a>$EST <span class="bu">MAX</span><span class="kw">=</span><span class="dv">9990</span> SIG<span class="kw">=</span><span class="dv">3</span> <span class="fu">PRINT</span><span class="kw">=</span><span class="dv">1</span> METHOD<span class="kw">=</span>COND INTER</span>
+<span id="cb20-49"><a href="#cb20-49"></a>$COV</span>
+<span id="cb20-50"><a href="#cb20-50"></a></span>
+<span id="cb20-51"><a href="#cb20-51"></a>$TABLE ID TIME DVID Y </span>
+<span id="cb20-52"><a href="#cb20-52"></a>ONEHEADER NOPRINT FILE<span class="kw">=</span>warf.fit</span>
+<span id="cb20-53"><a href="#cb20-53"></a></span>
+<span id="cb20-54"><a href="#cb20-54"></a>$TABLE ID KA CL V WT SEX AGE</span>
+<span id="cb20-55"><a href="#cb20-55"></a>ONEHEADER NOAPPEND NOPRINT FILE<span class="kw">=</span>warf.fit</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</details>
+</div>
+<p>The control file requires a bit of effort for me – as someone who doesn’t use NONMEM – to work out what structure of the underlying model is, but after a little bit of work it wasn’t too hard. Unlike Stan, which is a general-purpose probabilistic programming model for Bayesian analysis, NONMEM is a specific tool that hardcodes particular models of interest to pharmacometricians. You can work out which model is used by looking at the line in the control file that specifies which subroutine is used:</p>
+<div class="sourceCode" id="cb21"><pre class="sourceCode fortran code-with-copy"><code class="sourceCode fortranfixed"><span id="cb21-1"><a href="#cb21-1" aria-hidden="true" tabindex="-1"></a>$SUBR ADVAN2 TRANS2</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>On my own I would have no way to make sense of this without doing a deep dive into the NONMEM user manuals, but happily the workshop notes helpfully explain this. In NONMEM land, this line is refering to two different modules: ADVAN provides a library of pharmacokinetic models that are bundled with the software, and TRANS specifies parameter transformations. Of particular importance is the fact that ADVAN2 refers specifically to a one-compartment model with first-order absorption and first-order elimination. That’s super handy for me because it’s not too different from models I’ve implemented from scratch in Stan previously.</p>
+<p>The file continues, specifying the pharmacokinetic model (PK) and the error model (ERROR) using the standard notation where “theta” denotes a population level parameter, “eta” denotes a random effect that varies from person to person, and “epsilon” denotes residuals:</p>
+<div class="sourceCode" id="cb22"><pre class="sourceCode fortran code-with-copy"><code class="sourceCode fortranfixed"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a>$PK</span>
+<span id="cb22-2"><a href="#cb22-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb22-3"><a href="#cb22-3" aria-hidden="true" tabindex="-1"></a>  ; COVARIATE MODEL</span>
+<span id="cb22-4"><a href="#cb22-4" aria-hidden="true" tabindex="-1"></a>  TVCL<span class="kw">=</span>THETA(<span class="dv">1</span>)</span>
+<span id="cb22-5"><a href="#cb22-5" aria-hidden="true" tabindex="-1"></a>  TVV<span class="kw">=</span>THETA(<span class="dv">2</span>)</span>
+<span id="cb22-6"><a href="#cb22-6" aria-hidden="true" tabindex="-1"></a>  TVKA<span class="kw">=</span>THETA(<span class="dv">3</span>)</span>
+<span id="cb22-7"><a href="#cb22-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb22-8"><a href="#cb22-8" aria-hidden="true" tabindex="-1"></a>  ; MODEL <span class="kw">FOR</span> RANDOM BETWEEN SUBJECT VARIABILITY</span>
+<span id="cb22-9"><a href="#cb22-9" aria-hidden="true" tabindex="-1"></a>  CL<span class="kw">=</span>TVCL<span class="kw">*</span><span class="bu">EXP</span>(ETA(<span class="dv">1</span>))</span>
+<span id="cb22-10"><a href="#cb22-10" aria-hidden="true" tabindex="-1"></a>  V<span class="kw">=</span>TVV<span class="kw">*</span><span class="bu">EXP</span>(ETA(<span class="dv">2</span>))</span>
+<span id="cb22-11"><a href="#cb22-11" aria-hidden="true" tabindex="-1"></a>  KA<span class="kw">=</span>TVKA<span class="kw">*</span><span class="bu">EXP</span>(ETA(<span class="dv">3</span>))</span>
+<span id="cb22-12"><a href="#cb22-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb22-13"><a href="#cb22-13" aria-hidden="true" tabindex="-1"></a>  ; <span class="bu">SCALE</span> CONCENTRATIONS</span>
+<span id="cb22-14"><a href="#cb22-14" aria-hidden="true" tabindex="-1"></a>  S2<span class="kw">=</span>V</span>
+<span id="cb22-15"><a href="#cb22-15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb22-16"><a href="#cb22-16" aria-hidden="true" tabindex="-1"></a>$ERROR</span>
+<span id="cb22-17"><a href="#cb22-17" aria-hidden="true" tabindex="-1"></a>  Y<span class="kw">=</span>F<span class="kw">+</span>EPS(<span class="dv">1</span>)</span>
+<span id="cb22-18"><a href="#cb22-18" aria-hidden="true" tabindex="-1"></a>  IPRED<span class="kw">=</span>F</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>My goal is to re-write this model in Stan, but to do that I need to first express that as a statistical model rather as NONMEM syntax. So let’s start at the population level. We have three parameters here:</p>
+<ul>
+<li>A population typical value for the clearance rate CL, denoted TVCL</li>
+<li>A population typical value for the distribution volume V, denoted TVV</li>
+<li>A population typical value for the absorption rate KA, denoted TVKA</li>
+</ul>
+<p>The mapping here is straightfoward:</p>
+<p><span class="math display">\[
+\begin{array}{rcl}
+\mbox{TVCL} &amp;=&amp; \theta_1 \\
+\mbox{TVV} &amp;=&amp; \theta_2 \\
+\mbox{TVKA} &amp;=&amp; \theta_3
+\end{array}
+\]</span></p>
+<p>Now we consider the individual-subject level. At this level we have three parameters per person. For the i-th person, these parameters are:</p>
+<ul>
+<li>The clearance rate CL<span class="math inline">\(_i\)</span></li>
+<li>The distribution volume V<span class="math inline">\(_i\)</span></li>
+<li>The absorption rate KA<span class="math inline">\(_i\)</span></li>
+</ul>
+<p>As usual, the random effect terms <span class="math inline">\(\eta\)</span> are normally distributed with mean zero and variance <span class="math inline">\(\omega\)</span>, and the <span class="math inline">\(\theta\)</span> values are considered fixed effects. However, the population level and subject level parameters do not combine additively, they combine multiplicatively. Specifically, the <span class="math inline">\(g(\theta, \eta)\)</span> functions for this model are as follows:</p>
+<p><span class="math display">\[
+\begin{array}{rcl}
+\mbox{CL}_i &amp;=&amp; \theta_1 \exp(\eta_{1i}) \\
+\mbox{V}_i &amp;=&amp; \theta_2 \exp(\eta_{2i}) \\
+\mbox{KA}_i &amp;=&amp; \theta_3 \exp(\eta_{3i})
+\end{array}
+\]</span></p>
+<p>So far, so good. This makes sense of most of the model specification, but there are a still some confusing parts that require a bit more digging around to decipher. First off, this strange invocation:</p>
+<div class="sourceCode" id="cb23"><pre class="sourceCode fortran code-with-copy"><code class="sourceCode fortranfixed"><span id="cb23-1"><a href="#cb23-1" aria-hidden="true" tabindex="-1"></a>  ; <span class="bu">SCALE</span> CONCENTRATIONS</span>
+<span id="cb23-2"><a href="#cb23-2" aria-hidden="true" tabindex="-1"></a>  S2<span class="kw">=</span>V</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>This doesn’t make sense unless you know something about the way that NONMEM has implemented the underlying model. In the 1-compartment IV bolus model that I used as my motivating example (previous section), the pharmacokinetic function <span class="math inline">\(f()\)</span> has a closed form expression for the drug <em>concentration</em> in the central (only) compartment. However, when you implement a pharmacokinetic model using a system of ordinary differential equations (like I did in an earlier post), the values produced by solving the ODE typically refer to the <em>amount</em> of drug in the relevant compartment. To convert these amounts to concentrations you need to scale them, generally by dividing by the volume of said compartment. And thus we have our explanation of the mysterious <code>S2=V</code> instruction. The <code>S2</code> parameter is the NONMEM scaling parameter for the central compartment. We set this equal to <code>V</code>, i.e., the estimated volume parameter for each subject.<a href="#fn6" class="footnote-ref" id="fnref6" role="doc-noteref"><sup>6</sup></a></p>
+<p>At last we come to the error model:</p>
+<div class="sourceCode" id="cb24"><pre class="sourceCode fortran code-with-copy"><code class="sourceCode fortranfixed"><span id="cb24-1"><a href="#cb24-1" aria-hidden="true" tabindex="-1"></a>$ERROR</span>
+<span id="cb24-2"><a href="#cb24-2" aria-hidden="true" tabindex="-1"></a>  Y<span class="kw">=</span>F<span class="kw">+</span>EPS(<span class="dv">1</span>)</span>
+<span id="cb24-3"><a href="#cb24-3" aria-hidden="true" tabindex="-1"></a>  IPRED<span class="kw">=</span>F</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>The relevant part here is the line specifying the relationship between the pharmacokinetic function <code>F</code>, the error terms <code>EPS</code>, and the observed data <code>Y</code>. In this case it’s additive, exactly in keeping with what I assumed in my toy example:</p>
+<p><span class="math display">\[
+y_{ij} = f(t_j, \boldsymbol\eta_i, \boldsymbol\theta, D_i) + \epsilon_{ij}
+\]</span></p>
+<p>It doesn’t have to be. In fact, the hands-on exercise in Lecture 2 of the tutorial I’m working through prepares three versions of this model, one with additive error, one with multiplicative error, and one with a hybrid error model that incorporates additive and multiplicative components. I’ll get to that later, though probably in a future post.</p>
+<p>Yay! At long last I think I know the model I need to implement.</p>
+</section>
+</section>
+<section id="implementation-in-stan" class="level2 page-columns page-full">
+<h2 class="anchored" data-anchor-id="implementation-in-stan">Implementation in Stan</h2>
+<p>Last time around I wrote my ODEs using notation that made sense to me. This time around I’ll try to bring my notation a little closer to the terminology used in the NONMEM control file I was working from. There are two drug amounts that we need to keep track of, the amount <span class="math inline">\(\mbox{A}_g\)</span> in the gut that has not yet been absorbed into systemic circulation, and the amount <span class="math inline">\(\mbox{A}_c\)</span> currently in circulation (in the central/only compartment). The derivatives of these two quantities with respect to time form a system of differential quations:</p>
+<p><span class="math display">\[
+\begin{array}{rcl}
+\displaystyle \frac{d\mbox{A}_g}{dt} &amp;=&amp; -\mbox{KA} \times \mbox{A}_{g} \\ \\
+\displaystyle \frac{d\mbox{A}_c}{dt} &amp;=&amp; \displaystyle \mbox{KA} \times \mbox{A}_{g} - \frac{\mbox{CL}}{\mbox{V}} \ \mbox{A}_{c}
+\end{array}
+\]</span></p>
+<p>When we implement the full model in Stan what we actually want to model is the drug <em>concentration</em> in the central compartment as a function of time, and for that we’ll need to solve for <span class="math inline">\(\mbox{A}_c\)</span>.</p>
+<section id="modelling-code" class="level3">
+<h3 class="anchored" data-anchor-id="modelling-code">Modelling code</h3>
+<p>There’s some nuances here in how we format the data for Stan. Stan doesn’t permit <a href="https://mc-stan.org/docs/stan-users-guide/ragged-data-structs.html">ragged arrays</a>, so we’ll have to pass the observations as one long <code>c_obs</code> vector that aggregates across subjects. Within the model (see below), we’ll use the <code>n_obs</code> vector that records the number of observations per subject to create break points that we can use to extract data from a single person. Here’s the R code:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb25"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb25-1"><a href="#cb25-1" aria-hidden="true" tabindex="-1"></a>warfpk_obs <span class="ot">&lt;-</span> warfpk[warfpk<span class="sc">$</span>mdv <span class="sc">==</span> <span class="dv">0</span>, ]</span>
+<span id="cb25-2"><a href="#cb25-2" aria-hidden="true" tabindex="-1"></a>warfpk_amt <span class="ot">&lt;-</span> warfpk[<span class="sc">!</span><span class="fu">is.na</span>(warfpk<span class="sc">$</span>rate), ]</span>
+<span id="cb25-3"><a href="#cb25-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb25-4"><a href="#cb25-4" aria-hidden="true" tabindex="-1"></a>t_fit <span class="ot">&lt;-</span> <span class="fu">c</span>(</span>
+<span id="cb25-5"><a href="#cb25-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">seq</span>(.<span class="dv">1</span>, .<span class="dv">9</span>, .<span class="dv">1</span>),</span>
+<span id="cb25-6"><a href="#cb25-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">seq</span>(<span class="dv">1</span>, <span class="fl">2.75</span>, .<span class="dv">25</span>),</span>
+<span id="cb25-7"><a href="#cb25-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">seq</span>(<span class="dv">3</span>, <span class="fl">9.5</span>, .<span class="dv">5</span>),</span>
+<span id="cb25-8"><a href="#cb25-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">seq</span>(<span class="dv">10</span>, <span class="dv">23</span>, <span class="dv">1</span>),</span>
+<span id="cb25-9"><a href="#cb25-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">seq</span>(<span class="dv">24</span>, <span class="dv">120</span>, <span class="dv">3</span>)</span>
+<span id="cb25-10"><a href="#cb25-10" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb25-11"><a href="#cb25-11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb25-12"><a href="#cb25-12" aria-hidden="true" tabindex="-1"></a>dat <span class="ot">&lt;-</span> <span class="fu">list</span>(</span>
+<span id="cb25-13"><a href="#cb25-13" aria-hidden="true" tabindex="-1"></a>  <span class="at">n_ids =</span> <span class="fu">nrow</span>(warfpk_amt),</span>
+<span id="cb25-14"><a href="#cb25-14" aria-hidden="true" tabindex="-1"></a>  <span class="at">n_tot =</span> <span class="fu">nrow</span>(warfpk_obs),</span>
+<span id="cb25-15"><a href="#cb25-15" aria-hidden="true" tabindex="-1"></a>  <span class="at">n_obs =</span> purrr<span class="sc">::</span><span class="fu">map_int</span>(</span>
+<span id="cb25-16"><a href="#cb25-16" aria-hidden="true" tabindex="-1"></a>    warfpk_amt<span class="sc">$</span>id,</span>
+<span id="cb25-17"><a href="#cb25-17" aria-hidden="true" tabindex="-1"></a>    <span class="sc">~</span> <span class="fu">nrow</span>(warfpk_obs[warfpk_obs<span class="sc">$</span>id <span class="sc">==</span> .x, ])</span>
+<span id="cb25-18"><a href="#cb25-18" aria-hidden="true" tabindex="-1"></a>  ),</span>
+<span id="cb25-19"><a href="#cb25-19" aria-hidden="true" tabindex="-1"></a>  <span class="at">t_obs =</span> warfpk_obs<span class="sc">$</span>time,</span>
+<span id="cb25-20"><a href="#cb25-20" aria-hidden="true" tabindex="-1"></a>  <span class="at">c_obs =</span> warfpk_obs<span class="sc">$</span>dv,</span>
+<span id="cb25-21"><a href="#cb25-21" aria-hidden="true" tabindex="-1"></a>  <span class="at">dose =</span> warfpk_amt<span class="sc">$</span>amt,</span>
+<span id="cb25-22"><a href="#cb25-22" aria-hidden="true" tabindex="-1"></a>  <span class="at">t_fit =</span> t_fit,</span>
+<span id="cb25-23"><a href="#cb25-23" aria-hidden="true" tabindex="-1"></a>  <span class="at">n_fit =</span> <span class="fu">length</span>(t_fit)</span>
+<span id="cb25-24"><a href="#cb25-24" aria-hidden="true" tabindex="-1"></a>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>Now let’s have a look at the Stan code. At some point I’d like to start using <a href="https://metrumresearchgroup.github.io/Torsten/">Torsten</a> for these things rather than reinventing the wheel and coding a standard compartmental model from scratch. However, I’m a bottom-up kind of person<a href="#fn7" class="footnote-ref" id="fnref7" role="doc-noteref"><sup>7</sup></a> and I find it useful to write lower-level model code myself a few times before I start relying on pre-built model code. Here’s the complete Stan code for the model I implemented:</p>
+<div class="cell" data-file="model1.stan" data-output.var="mod">
+<div class="code-with-filename">
+<div class="code-with-filename-file">
+<pre><strong>model1.stan</strong></pre>
+</div>
+<div class="sourceCode cell-code" id="cb26"><pre class="sourceCode numberSource stan number-lines code-with-copy"><code class="sourceCode stan"><span id="cb26-1"><a href="#cb26-1"></a><span class="kw">functions</span> {</span>
+<span id="cb26-2"><a href="#cb26-2"></a>  <span class="dt">vector</span> amount_change(<span class="dt">real</span> time,</span>
+<span id="cb26-3"><a href="#cb26-3"></a>                       <span class="dt">vector</span> state,</span>
+<span id="cb26-4"><a href="#cb26-4"></a>                       <span class="dt">real</span> KA,</span>
+<span id="cb26-5"><a href="#cb26-5"></a>                       <span class="dt">real</span> CL,</span>
+<span id="cb26-6"><a href="#cb26-6"></a>                       <span class="dt">real</span> V) {</span>
+<span id="cb26-7"><a href="#cb26-7"></a>    <span class="dt">vector</span>[<span class="dv">2</span>] dadt;</span>
+<span id="cb26-8"><a href="#cb26-8"></a>    dadt[<span class="dv">1</span>] = - (KA * state[<span class="dv">1</span>]);</span>
+<span id="cb26-9"><a href="#cb26-9"></a>    dadt[<span class="dv">2</span>] = (KA * state[<span class="dv">1</span>]) - (CL / V) * state[<span class="dv">2</span>];</span>
+<span id="cb26-10"><a href="#cb26-10"></a>    <span class="cf">return</span> dadt;</span>
+<span id="cb26-11"><a href="#cb26-11"></a>  }</span>
+<span id="cb26-12"><a href="#cb26-12"></a>}</span>
+<span id="cb26-13"><a href="#cb26-13"></a></span>
+<span id="cb26-14"><a href="#cb26-14"></a><span class="kw">data</span> {</span>
+<span id="cb26-15"><a href="#cb26-15"></a>  <span class="dt">int</span>&lt;<span class="kw">lower</span>=<span class="dv">1</span>&gt; n_ids;</span>
+<span id="cb26-16"><a href="#cb26-16"></a>  <span class="dt">int</span>&lt;<span class="kw">lower</span>=<span class="dv">1</span>&gt; n_tot;</span>
+<span id="cb26-17"><a href="#cb26-17"></a>  <span class="dt">int</span>&lt;<span class="kw">lower</span>=<span class="dv">1</span>&gt; n_fit;</span>
+<span id="cb26-18"><a href="#cb26-18"></a>  <span class="dt">array</span>[n_ids] <span class="dt">int</span> n_obs;</span>
+<span id="cb26-19"><a href="#cb26-19"></a>  <span class="dt">vector</span>[n_ids] dose;</span>
+<span id="cb26-20"><a href="#cb26-20"></a>  <span class="dt">array</span>[n_tot] <span class="dt">real</span> t_obs;</span>
+<span id="cb26-21"><a href="#cb26-21"></a>  <span class="dt">vector</span>[n_tot] c_obs;</span>
+<span id="cb26-22"><a href="#cb26-22"></a>  <span class="dt">array</span>[n_fit] <span class="dt">real</span> t_fit;</span>
+<span id="cb26-23"><a href="#cb26-23"></a>}</span>
+<span id="cb26-24"><a href="#cb26-24"></a></span>
+<span id="cb26-25"><a href="#cb26-25"></a><span class="kw">transformed data</span> {</span>
+<span id="cb26-26"><a href="#cb26-26"></a>  <span class="dt">array</span>[n_ids] <span class="dt">int</span> start;</span>
+<span id="cb26-27"><a href="#cb26-27"></a>  <span class="dt">array</span>[n_ids] <span class="dt">int</span> stop;</span>
+<span id="cb26-28"><a href="#cb26-28"></a>  <span class="dt">array</span>[n_ids] <span class="dt">vector</span>[<span class="dv">2</span>] initial_amount;</span>
+<span id="cb26-29"><a href="#cb26-29"></a>  <span class="dt">real</span> initial_time = <span class="dv">0</span>;</span>
+<span id="cb26-30"><a href="#cb26-30"></a></span>
+<span id="cb26-31"><a href="#cb26-31"></a>  <span class="co">// break points within the data vector</span></span>
+<span id="cb26-32"><a href="#cb26-32"></a>  start[<span class="dv">1</span>] = <span class="dv">1</span>;</span>
+<span id="cb26-33"><a href="#cb26-33"></a>  stop[<span class="dv">1</span>] = n_obs[<span class="dv">1</span>];</span>
+<span id="cb26-34"><a href="#cb26-34"></a>  <span class="cf">for</span>(i <span class="cf">in</span> <span class="dv">2</span>:n_ids) {</span>
+<span id="cb26-35"><a href="#cb26-35"></a>    start[i] = start[i - <span class="dv">1</span>] + n_obs[i - <span class="dv">1</span>];</span>
+<span id="cb26-36"><a href="#cb26-36"></a>    stop[i] = stop[i - <span class="dv">1</span>] + n_obs[i];</span>
+<span id="cb26-37"><a href="#cb26-37"></a>  }</span>
+<span id="cb26-38"><a href="#cb26-38"></a></span>
+<span id="cb26-39"><a href="#cb26-39"></a>  <span class="co">// initial states for each person</span></span>
+<span id="cb26-40"><a href="#cb26-40"></a>  <span class="cf">for</span>(i <span class="cf">in</span> <span class="dv">1</span>:n_ids) {</span>
+<span id="cb26-41"><a href="#cb26-41"></a>    initial_amount[i][<span class="dv">1</span>] = dose[i];</span>
+<span id="cb26-42"><a href="#cb26-42"></a>    initial_amount[i][<span class="dv">2</span>] = <span class="dv">0</span>;</span>
+<span id="cb26-43"><a href="#cb26-43"></a>  }</span>
+<span id="cb26-44"><a href="#cb26-44"></a>}</span>
+<span id="cb26-45"><a href="#cb26-45"></a></span>
+<span id="cb26-46"><a href="#cb26-46"></a><span class="kw">parameters</span> {</span>
+<span id="cb26-47"><a href="#cb26-47"></a>  <span class="dt">real</span>&lt;<span class="kw">lower</span>=<span class="dv">0</span>&gt; theta_KA;</span>
+<span id="cb26-48"><a href="#cb26-48"></a>  <span class="dt">real</span>&lt;<span class="kw">lower</span>=<span class="dv">0</span>&gt; theta_CL;</span>
+<span id="cb26-49"><a href="#cb26-49"></a>  <span class="dt">real</span>&lt;<span class="kw">lower</span>=<span class="dv">0</span>&gt; theta_V;</span>
+<span id="cb26-50"><a href="#cb26-50"></a>  <span class="dt">real</span>&lt;<span class="kw">lower</span>=.<span class="dv">001</span>&gt; omega_KA;</span>
+<span id="cb26-51"><a href="#cb26-51"></a>  <span class="dt">real</span>&lt;<span class="kw">lower</span>=.<span class="dv">001</span>&gt; omega_CL;</span>
+<span id="cb26-52"><a href="#cb26-52"></a>  <span class="dt">real</span>&lt;<span class="kw">lower</span>=.<span class="dv">001</span>&gt; omega_V;</span>
+<span id="cb26-53"><a href="#cb26-53"></a>  <span class="dt">real</span>&lt;<span class="kw">lower</span>=.<span class="dv">001</span>&gt; sigma;</span>
+<span id="cb26-54"><a href="#cb26-54"></a>  <span class="dt">vector</span>[n_ids] eta_KA;</span>
+<span id="cb26-55"><a href="#cb26-55"></a>  <span class="dt">vector</span>[n_ids] eta_CL;</span>
+<span id="cb26-56"><a href="#cb26-56"></a>  <span class="dt">vector</span>[n_ids] eta_V;</span>
+<span id="cb26-57"><a href="#cb26-57"></a>}</span>
+<span id="cb26-58"><a href="#cb26-58"></a></span>
+<span id="cb26-59"><a href="#cb26-59"></a><span class="kw">transformed parameters</span> {</span>
+<span id="cb26-60"><a href="#cb26-60"></a>  <span class="dt">vector</span>&lt;<span class="kw">lower</span>=<span class="dv">0</span>&gt;[n_ids] KA;</span>
+<span id="cb26-61"><a href="#cb26-61"></a>  <span class="dt">vector</span>&lt;<span class="kw">lower</span>=<span class="dv">0</span>&gt;[n_ids] CL;</span>
+<span id="cb26-62"><a href="#cb26-62"></a>  <span class="dt">vector</span>&lt;<span class="kw">lower</span>=<span class="dv">0</span>&gt;[n_ids] V;</span>
+<span id="cb26-63"><a href="#cb26-63"></a>  <span class="dt">array</span>[n_tot] <span class="dt">vector</span>[<span class="dv">2</span>] amount;</span>
+<span id="cb26-64"><a href="#cb26-64"></a>  <span class="dt">vector</span>[n_tot] c_pred;</span>
+<span id="cb26-65"><a href="#cb26-65"></a></span>
+<span id="cb26-66"><a href="#cb26-66"></a>  <span class="cf">for</span>(i <span class="cf">in</span> <span class="dv">1</span>:n_ids) {</span>
+<span id="cb26-67"><a href="#cb26-67"></a>    <span class="co">// pharmacokinetic parameters</span></span>
+<span id="cb26-68"><a href="#cb26-68"></a>    KA[i] = theta_KA * exp(eta_KA[i]);</span>
+<span id="cb26-69"><a href="#cb26-69"></a>    CL[i] = theta_CL * exp(eta_CL[i]);</span>
+<span id="cb26-70"><a href="#cb26-70"></a>    V[i] = theta_V * exp(eta_V[i]);</span>
+<span id="cb26-71"><a href="#cb26-71"></a></span>
+<span id="cb26-72"><a href="#cb26-72"></a>    <span class="co">// predicted drug amounts</span></span>
+<span id="cb26-73"><a href="#cb26-73"></a>    amount[start[i]:stop[i]] = ode_bdf(</span>
+<span id="cb26-74"><a href="#cb26-74"></a>      amount_change,            <span class="co">// ode function</span></span>
+<span id="cb26-75"><a href="#cb26-75"></a>      initial_amount[i],        <span class="co">// initial state</span></span>
+<span id="cb26-76"><a href="#cb26-76"></a>      initial_time,             <span class="co">// initial time</span></span>
+<span id="cb26-77"><a href="#cb26-77"></a>      t_obs[start[i]:stop[i]],  <span class="co">// observation times</span></span>
+<span id="cb26-78"><a href="#cb26-78"></a>      KA[i],                    <span class="co">// absorption rate</span></span>
+<span id="cb26-79"><a href="#cb26-79"></a>      CL[i],                    <span class="co">// clearance</span></span>
+<span id="cb26-80"><a href="#cb26-80"></a>      V[i]                      <span class="co">// volume</span></span>
+<span id="cb26-81"><a href="#cb26-81"></a>    );</span>
+<span id="cb26-82"><a href="#cb26-82"></a></span>
+<span id="cb26-83"><a href="#cb26-83"></a>    <span class="co">// convert to concentrations</span></span>
+<span id="cb26-84"><a href="#cb26-84"></a>    <span class="cf">for</span>(j <span class="cf">in</span> <span class="dv">1</span>:n_obs[i]) {</span>
+<span id="cb26-85"><a href="#cb26-85"></a>      c_pred[start[i] + j - <span class="dv">1</span>] = amount[start[i] + j - <span class="dv">1</span>, <span class="dv">2</span>] / V[i];</span>
+<span id="cb26-86"><a href="#cb26-86"></a>    }</span>
+<span id="cb26-87"><a href="#cb26-87"></a>  }</span>
+<span id="cb26-88"><a href="#cb26-88"></a>}</span>
+<span id="cb26-89"><a href="#cb26-89"></a></span>
+<span id="cb26-90"><a href="#cb26-90"></a><span class="kw">model</span> {</span>
+<span id="cb26-91"><a href="#cb26-91"></a>  <span class="co">// foolish priors over population parameters</span></span>
+<span id="cb26-92"><a href="#cb26-92"></a>  <span class="co">// (parameter bounds ensure these are actually half-normals)</span></span>
+<span id="cb26-93"><a href="#cb26-93"></a>  theta_KA ~ normal(<span class="dv">0</span>, <span class="dv">10</span>);</span>
+<span id="cb26-94"><a href="#cb26-94"></a>  theta_CL ~ normal(<span class="dv">0</span>, <span class="dv">10</span>);</span>
+<span id="cb26-95"><a href="#cb26-95"></a>  theta_V ~ normal(<span class="dv">0</span>, <span class="dv">10</span>);</span>
+<span id="cb26-96"><a href="#cb26-96"></a>  sigma ~ normal(<span class="dv">0</span>, <span class="dv">10</span>);</span>
+<span id="cb26-97"><a href="#cb26-97"></a>  omega_KA ~ normal(<span class="dv">0</span>, <span class="dv">10</span>);</span>
+<span id="cb26-98"><a href="#cb26-98"></a>  omega_CL ~ normal(<span class="dv">0</span>, <span class="dv">10</span>);</span>
+<span id="cb26-99"><a href="#cb26-99"></a>  omega_V ~ normal(<span class="dv">0</span>, <span class="dv">10</span>);</span>
+<span id="cb26-100"><a href="#cb26-100"></a></span>
+<span id="cb26-101"><a href="#cb26-101"></a>  <span class="co">// random effect terms</span></span>
+<span id="cb26-102"><a href="#cb26-102"></a>  <span class="cf">for</span>(i <span class="cf">in</span> <span class="dv">1</span>:n_ids) {</span>
+<span id="cb26-103"><a href="#cb26-103"></a>    eta_KA[i] ~ normal(<span class="dv">0</span>, omega_KA);</span>
+<span id="cb26-104"><a href="#cb26-104"></a>    eta_CL[i] ~ normal(<span class="dv">0</span>, omega_CL);</span>
+<span id="cb26-105"><a href="#cb26-105"></a>    eta_V[i] ~ normal(<span class="dv">0</span>, omega_V);</span>
+<span id="cb26-106"><a href="#cb26-106"></a>  }</span>
+<span id="cb26-107"><a href="#cb26-107"></a></span>
+<span id="cb26-108"><a href="#cb26-108"></a>  <span class="co">// likelihood of observed concentrations</span></span>
+<span id="cb26-109"><a href="#cb26-109"></a>  c_obs ~ normal(c_pred, sigma);</span>
+<span id="cb26-110"><a href="#cb26-110"></a>}</span>
+<span id="cb26-111"><a href="#cb26-111"></a></span>
+<span id="cb26-112"><a href="#cb26-112"></a><span class="kw">generated quantities</span> {</span>
+<span id="cb26-113"><a href="#cb26-113"></a>  <span class="dt">array</span>[n_ids, n_fit] <span class="dt">vector</span>[<span class="dv">2</span>] a_fit;</span>
+<span id="cb26-114"><a href="#cb26-114"></a>  <span class="dt">array</span>[n_ids, n_fit] <span class="dt">real</span> c_fit;</span>
+<span id="cb26-115"><a href="#cb26-115"></a></span>
+<span id="cb26-116"><a href="#cb26-116"></a>  <span class="cf">for</span>(i <span class="cf">in</span> <span class="dv">1</span>:n_ids) {</span>
+<span id="cb26-117"><a href="#cb26-117"></a>    <span class="co">// predicted drug amounts</span></span>
+<span id="cb26-118"><a href="#cb26-118"></a>    a_fit[i] = ode_bdf(</span>
+<span id="cb26-119"><a href="#cb26-119"></a>      amount_change,        <span class="co">// ode function</span></span>
+<span id="cb26-120"><a href="#cb26-120"></a>      initial_amount[i],    <span class="co">// initial state</span></span>
+<span id="cb26-121"><a href="#cb26-121"></a>      initial_time,         <span class="co">// initial time</span></span>
+<span id="cb26-122"><a href="#cb26-122"></a>      t_fit,                <span class="co">// observation times</span></span>
+<span id="cb26-123"><a href="#cb26-123"></a>      KA[i],                <span class="co">// absorption rate</span></span>
+<span id="cb26-124"><a href="#cb26-124"></a>      CL[i],                <span class="co">// clearance</span></span>
+<span id="cb26-125"><a href="#cb26-125"></a>      V[i]                  <span class="co">// volume</span></span>
+<span id="cb26-126"><a href="#cb26-126"></a>    );</span>
+<span id="cb26-127"><a href="#cb26-127"></a></span>
+<span id="cb26-128"><a href="#cb26-128"></a>    <span class="co">// convert to concentrations</span></span>
+<span id="cb26-129"><a href="#cb26-129"></a>    <span class="cf">for</span>(j <span class="cf">in</span> <span class="dv">1</span>:n_fit) {</span>
+<span id="cb26-130"><a href="#cb26-130"></a>      c_fit[i, j] = a_fit[i, j][<span class="dv">2</span>] / V[i];</span>
+<span id="cb26-131"><a href="#cb26-131"></a>    }</span>
+<span id="cb26-132"><a href="#cb26-132"></a>  }</span>
+<span id="cb26-133"><a href="#cb26-133"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+<p>In the earlier post I wrote on <a href="../../stan-ode/">pharmacokinetic modelling in Stan</a> I already went through the low-level details of what each section in this code does, so I won’t repeat myself here. However, there are a few comments I’ll make about it:</p>
+<ul>
+<li>In all honesty I don’t think the ODE code is even needed here. With first-order absorption dynamics and first-order elimination dynamics, you can analytically calculate the pharmacokinetic curve using a <a href="https://en.wikipedia.org/wiki/Bateman_equation">Bateman curve</a>, which I talked about in a <a href="../../non-compartmental-analysis/">another post</a>. However, one of my goals here was to use the Stan ODE solvers in a population model, so for the purposes of this post I’ve chosen to do it the hard way.</li>
+<li>Speaking of doing things the hard way, note that I’ve called <code>ode_bdf()</code> here rather than <code>ode_rk45()</code>. This is to avoid any issues of <a href="https://en.wikipedia.org/wiki/Stiff_equation">ODE stiffness</a>. While there is always the possibility that ODE can remain stiff in the posterior,<a href="#fn8" class="footnote-ref" id="fnref8" role="doc-noteref"><sup>8</sup></a> I suspect the real issue here is that (a) I’ve chosen some absurdly diffuse priors, which means that the ODE can be quite poorly behaved during the warmup period for the sampler, and (b) earlier versions of the model had bugs that made the model do weird things. I strongly suspect that with those issues out of the way I could call <code>ode_rk45()</code> and get a considerable speedup. However, for the purposes of this post I’ll leave it as is.</li>
+</ul>
+<p>In any case, here’s the R code to compile the model, run the sampler, and extract a summary representation:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb27"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb27-1"><a href="#cb27-1" aria-hidden="true" tabindex="-1"></a>mod <span class="ot">&lt;-</span> cmdstanr<span class="sc">::</span><span class="fu">cmdstan_model</span>(<span class="st">"model1.stan"</span>)</span>
+<span id="cb27-2"><a href="#cb27-2" aria-hidden="true" tabindex="-1"></a>out <span class="ot">&lt;-</span> mod<span class="sc">$</span><span class="fu">sample</span>(</span>
+<span id="cb27-3"><a href="#cb27-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> dat,</span>
+<span id="cb27-4"><a href="#cb27-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">chains =</span> <span class="dv">4</span>,</span>
+<span id="cb27-5"><a href="#cb27-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">refresh =</span> <span class="dv">1</span>,</span>
+<span id="cb27-6"><a href="#cb27-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">iter_warmup =</span> <span class="dv">1000</span>,</span>
+<span id="cb27-7"><a href="#cb27-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">iter_sampling =</span> <span class="dv">1000</span></span>
+<span id="cb27-8"><a href="#cb27-8" aria-hidden="true" tabindex="-1"></a>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>This code took a couple of hours to run and I have no desire to repeat the exercise more often than necessary, so I took the sensible step of saving relevant outputs to csv files:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb28"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb28-1"><a href="#cb28-1" aria-hidden="true" tabindex="-1"></a>out_summary <span class="ot">&lt;-</span> out<span class="sc">$</span><span class="fu">summary</span>()</span>
+<span id="cb28-2"><a href="#cb28-2" aria-hidden="true" tabindex="-1"></a>out_draws <span class="ot">&lt;-</span> out<span class="sc">$</span><span class="fu">draws</span>(<span class="at">format =</span> <span class="st">"draws_df"</span>) <span class="sc">|&gt;</span> tibble<span class="sc">::</span><span class="fu">as_tibble</span>()</span>
+<span id="cb28-3"><a href="#cb28-3" aria-hidden="true" tabindex="-1"></a>readr<span class="sc">::</span><span class="fu">write_csv</span>(out_summary, fs<span class="sc">::</span><span class="fu">path</span>(dir, <span class="st">"model1_summary.csv"</span>))</span>
+<span id="cb28-4"><a href="#cb28-4" aria-hidden="true" tabindex="-1"></a>readr<span class="sc">::</span><span class="fu">write_csv</span>(out_draws, fs<span class="sc">::</span><span class="fu">path</span>(dir, <span class="st">"model1_draws.csv"</span>))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>In what follows, I’ll read data from these files when examining the behaviour of the model.</p>
+</section>
+<section id="parameter-estimates" class="level3 page-columns page-full">
+<h3 class="anchored" data-anchor-id="parameter-estimates">Parameter estimates</h3>
+<p>Let’s start by taking a look at the summary. For the time being I’m only really interested in the population level parameters <span class="math inline">\(\boldsymbol\theta\)</span>, <span class="math inline">\(\boldsymbol\omega\)</span>, and <span class="math inline">\(\sigma\)</span>, so I’ll filter the results so that only those parameters (and the log-probability) are shown in the output:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb29"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb29-1"><a href="#cb29-1" aria-hidden="true" tabindex="-1"></a>out_summary <span class="ot">&lt;-</span> readr<span class="sc">::</span><span class="fu">read_csv</span>(<span class="st">"model1_summary.csv"</span>, <span class="at">show_col_types =</span> <span class="cn">FALSE</span>)</span>
+<span id="cb29-2"><a href="#cb29-2" aria-hidden="true" tabindex="-1"></a>out_summary <span class="sc">|&gt;</span> dplyr<span class="sc">::</span><span class="fu">filter</span>(</span>
+<span id="cb29-3"><a href="#cb29-3" aria-hidden="true" tabindex="-1"></a>  variable <span class="sc">|&gt;</span> stringr<span class="sc">::</span><span class="fu">str_detect</span>(<span class="st">"(theta|omega|sigma|lp)"</span>)</span>
+<span id="cb29-4"><a href="#cb29-4" aria-hidden="true" tabindex="-1"></a>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 8 × 10
+  variable     mean   median      sd     mad       q5     q95  rhat ess_bulk
+  &lt;chr&gt;       &lt;dbl&gt;    &lt;dbl&gt;   &lt;dbl&gt;   &lt;dbl&gt;    &lt;dbl&gt;   &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt;
+1 lp__     -104.    -103.    1.15e+1 1.12e+1 -124.    -86.2    1.00     407.
+2 theta_KA    0.789    0.669 4.99e-1 1.91e-1    0.449   1.47   1.01     301.
+3 theta_CL    0.135    0.134 7.71e-3 7.49e-3    0.123   0.148  1.00     869.
+4 theta_V     7.70     7.70  3.66e-1 3.52e-1    7.10    8.30   1.01     820.
+5 omega_KA    0.904    0.826 3.39e-1 2.46e-1    0.526   1.57   1.00     307.
+6 omega_CL    0.303    0.298 4.71e-2 4.56e-2    0.234   0.384  1.00    3257.
+7 omega_V     0.235    0.231 3.86e-2 3.68e-2    0.180   0.303  1.00    2551.
+8 sigma       1.08     1.08  5.71e-2 5.54e-2    0.994   1.18   1.00    3373.
+# ℹ 1 more variable: ess_tail &lt;dbl&gt;</code></pre>
+</div>
+</div>
+<p>The fact that all the R-hat values are very close to 1 suggests that my MCMC chains are behaving themselves nicely, and all four chains are giving the same answers. But just to check – and because an earlier version of this model misbehaved quite badly and these plots turned out to be very helpful for diagnosing the problem – I’ll plot the marginal distributions over all the population level parameters (and the log-probability) separately for each chain. To do that, first I’ll extract the relevant columns from the <code>model1_draws.csv</code> file that contains all the raw samples:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb31"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb31-1"><a href="#cb31-1" aria-hidden="true" tabindex="-1"></a>draws <span class="ot">&lt;-</span> readr<span class="sc">::</span><span class="fu">read_csv</span>(<span class="st">"model1_draws.csv"</span>, <span class="at">show_col_types =</span> <span class="cn">FALSE</span>) <span class="sc">|&gt;</span></span>
+<span id="cb31-2"><a href="#cb31-2" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">select</span>(tidyselect<span class="sc">::</span><span class="fu">matches</span>(<span class="st">"(theta|sigma|omega|lp|chain)"</span>)) </span>
+<span id="cb31-3"><a href="#cb31-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb31-4"><a href="#cb31-4" aria-hidden="true" tabindex="-1"></a>draws</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 4,000 × 9
+     lp__ theta_KA theta_CL theta_V omega_KA omega_CL omega_V sigma .chain
+    &lt;dbl&gt;    &lt;dbl&gt;    &lt;dbl&gt;   &lt;dbl&gt;    &lt;dbl&gt;    &lt;dbl&gt;   &lt;dbl&gt; &lt;dbl&gt;  &lt;dbl&gt;
+ 1  -98.2    0.660    0.124    8.03    0.836    0.301   0.221 1.08       1
+ 2  -98.2    0.442    0.132    7.89    1.16     0.249   0.225 1.00       1
+ 3 -105.     0.376    0.142    7.94    1.17     0.366   0.230 1.07       1
+ 4 -113.     0.620    0.150    7.57    1.11     0.342   0.243 1.12       1
+ 5 -111.     0.700    0.150    7.47    1.22     0.316   0.209 0.993      1
+ 6 -107.     0.831    0.152    7.62    1.21     0.345   0.251 1.02       1
+ 7 -130.     0.741    0.152    7.69    1.38     0.312   0.288 0.988      1
+ 8 -127.     0.750    0.157    7.36    1.24     0.272   0.280 1.21       1
+ 9 -128.     0.733    0.151    7.36    1.26     0.239   0.267 1.20       1
+10 -104.     0.522    0.136    7.75    0.691    0.335   0.263 1.03       1
+# ℹ 3,990 more rows</code></pre>
+</div>
+</div>
+<p>After a little bit of data wrangling, I can create the appropriate plots:</p>
+<div class="cell page-columns page-full">
+<div class="sourceCode cell-code" id="cb33"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb33-1"><a href="#cb33-1" aria-hidden="true" tabindex="-1"></a>draws_long <span class="ot">&lt;-</span> draws <span class="sc">|&gt;</span> </span>
+<span id="cb33-2"><a href="#cb33-2" aria-hidden="true" tabindex="-1"></a>  tidyr<span class="sc">::</span><span class="fu">pivot_longer</span>(</span>
+<span id="cb33-3"><a href="#cb33-3" aria-hidden="true" tabindex="-1"></a>    <span class="at">cols =</span> <span class="sc">!</span>tidyselect<span class="sc">::</span><span class="fu">matches</span>(<span class="st">"(id|chain)"</span>),</span>
+<span id="cb33-4"><a href="#cb33-4" aria-hidden="true" tabindex="-1"></a>    <span class="at">names_to =</span> <span class="st">"parameter"</span>,</span>
+<span id="cb33-5"><a href="#cb33-5" aria-hidden="true" tabindex="-1"></a>    <span class="at">values_to =</span> <span class="st">"value"</span></span>
+<span id="cb33-6"><a href="#cb33-6" aria-hidden="true" tabindex="-1"></a>  ) </span>
+<span id="cb33-7"><a href="#cb33-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb33-8"><a href="#cb33-8" aria-hidden="true" tabindex="-1"></a>draws_long <span class="sc">|&gt;</span> </span>
+<span id="cb33-9"><a href="#cb33-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>(<span class="fu">aes</span>(<span class="at">x =</span> <span class="fu">factor</span>(.chain), value, <span class="at">fill =</span> parameter)) <span class="sc">+</span></span>
+<span id="cb33-10"><a href="#cb33-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_violin</span>(<span class="at">draw_quantiles =</span> <span class="fu">c</span>(.<span class="dv">25</span>, .<span class="dv">5</span>, .<span class="dv">75</span>), <span class="at">show.legend =</span> <span class="cn">FALSE</span>) <span class="sc">+</span> </span>
+<span id="cb33-11"><a href="#cb33-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">facet_wrap</span>(<span class="sc">~</span> parameter, <span class="at">scales =</span> <span class="st">"free"</span>, <span class="at">ncol =</span> <span class="dv">4</span>) <span class="sc">+</span></span>
+<span id="cb33-12"><a href="#cb33-12" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_bw</span>() <span class="sc">+</span> </span>
+<span id="cb33-13"><a href="#cb33-13" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(</span>
+<span id="cb33-14"><a href="#cb33-14" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> <span class="st">"MCMC chain"</span>,</span>
+<span id="cb33-15"><a href="#cb33-15" aria-hidden="true" tabindex="-1"></a>    <span class="at">y =</span> <span class="st">"Sampled parameter value"</span></span>
+<span id="cb33-16"><a href="#cb33-16" aria-hidden="true" tabindex="-1"></a>  )</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display column-page">
+<p><img src="index_files/figure-html/posterior-density-plots-1.png" class="img-fluid" width="1536"></p>
+</div>
+</div>
+<p>That looks nice, so it’s time to move on.</p>
+</section>
+<section id="comparison-to-nonmem" class="level3">
+<h3 class="anchored" data-anchor-id="comparison-to-nonmem">Comparison to NONMEM</h3>
+<p>One of my fears when implementing this model in Stan was that I might have misunderstood what the NONMEM version of the model was doing, and as a consequence I’d end up estimating quite different things to what the conventional NONMEM model does. To help reassure myself that this isn’t the case, it seems wise to compare the parameter estimates that both versions of the model produce. The files distributed with the workshop include these estimates for the NONMEM model, which are as follows:<a href="#fn9" class="footnote-ref" id="fnref9" role="doc-noteref"><sup>9</sup></a></p>
+<div class="cell">
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 7 × 3
+  parameter estimate std_error
+  &lt;chr&gt;        &lt;dbl&gt;     &lt;dbl&gt;
+1 omega_CL     0.285   0.0405 
+2 omega_KA     0.621   0.158  
+3 omega_V      0.222   0.0320 
+4 sigma        1.02    0.131  
+5 theta_CL     0.134   0.00724
+6 theta_KA     0.59    0.130  
+7 theta_V      7.72    0.347  </code></pre>
+</div>
+</div>
+<!-- 
+Note: I feel like there should be a .res file, but apparently there isn't one
+bundled with the tutorial. Fortunately, it looks like everything that matters 
+is also in the .smr file. Here's the cut-and-paste for the relevant bits:
+
+THETA:      POP_CL      POP_V       POP_KA      
+THETA     = 0.134       7.72        0.59
+
+ETA:        PPV_CL      PPV_V       PPV_KA      
+ETASD     = 0.285       0.222       0.621
+
+EPSSD     = 1.020
+
+THETA:se% = 5.4         4.5         22.0
+ETASD:se% = 14.2        14.4        25.4
+EPSSD:se% = 12.8
+
+Judging from the "se%" part, the fact that these numbers are completely
+unhinged if treated as literal standard errors, and the fact that rescaling
+places most of the standard error estimates in alignment with the Bayesian
+output, I'm pretty certain these are reported as percentages.
+-->
+<p>To save you the effort of scrolling back and forth between this table and the Stan version above, here’s a truncated version of the Stan table showing an apples-to-apples comparison:</p>
+<div class="cell">
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 7 × 3
+  parameter posterior_mean posterior_sd
+  &lt;chr&gt;              &lt;dbl&gt;        &lt;dbl&gt;
+1 omega_CL           0.303      0.0471 
+2 omega_KA           0.904      0.339  
+3 omega_V            0.235      0.0386 
+4 sigma              1.08       0.0571 
+5 theta_CL           0.135      0.00771
+6 theta_KA           0.789      0.499  
+7 theta_V            7.70       0.366  </code></pre>
+</div>
+</div>
+<p>As you can see, the two versions are in pretty close agreement. There are some modest differences in the estimates of the population mean and variability in the absorption rate KA, but I’m not too concerned about that.</p>
+</section>
+<section id="model-fits" class="level3 page-columns page-full">
+<h3 class="anchored" data-anchor-id="model-fits">Model fits</h3>
+<p>Under normal circumstances I could simply use the <code>$summary()</code> method to do all the work for me in extracting parameter estimates. However, because I’m having fun playing with the raw samples data, I’m going to do it the long way…</p>
+<div class="cell" data-hash="index_cache/html/manual-summary_863c9471862e64e72dc76eb704513be3">
+<div class="sourceCode cell-code" id="cb36"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb36-1"><a href="#cb36-1" aria-hidden="true" tabindex="-1"></a>fit <span class="ot">&lt;-</span> <span class="st">"model1_draws.csv"</span> <span class="sc">|&gt;</span> </span>
+<span id="cb36-2"><a href="#cb36-2" aria-hidden="true" tabindex="-1"></a>  readr<span class="sc">::</span><span class="fu">read_csv</span>(<span class="at">show_col_types =</span> <span class="cn">FALSE</span>) <span class="sc">|&gt;</span></span>
+<span id="cb36-3"><a href="#cb36-3" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">select</span>(tidyselect<span class="sc">::</span><span class="fu">matches</span>(<span class="st">"c_pred"</span>)) <span class="sc">|&gt;</span></span>
+<span id="cb36-4"><a href="#cb36-4" aria-hidden="true" tabindex="-1"></a>  tidyr<span class="sc">::</span><span class="fu">pivot_longer</span>(</span>
+<span id="cb36-5"><a href="#cb36-5" aria-hidden="true" tabindex="-1"></a>    <span class="at">cols =</span> tidyselect<span class="sc">::</span><span class="fu">matches</span>(<span class="st">"c_pred"</span>),</span>
+<span id="cb36-6"><a href="#cb36-6" aria-hidden="true" tabindex="-1"></a>    <span class="at">names_to =</span> <span class="st">"variable"</span>,</span>
+<span id="cb36-7"><a href="#cb36-7" aria-hidden="true" tabindex="-1"></a>    <span class="at">values_to =</span> <span class="st">"y_hat"</span></span>
+<span id="cb36-8"><a href="#cb36-8" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">|&gt;</span> </span>
+<span id="cb36-9"><a href="#cb36-9" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">mutate</span>(</span>
+<span id="cb36-10"><a href="#cb36-10" aria-hidden="true" tabindex="-1"></a>    <span class="at">obs_num =</span> variable <span class="sc">|&gt;</span> </span>
+<span id="cb36-11"><a href="#cb36-11" aria-hidden="true" tabindex="-1"></a>      stringr<span class="sc">::</span><span class="fu">str_remove_all</span>(<span class="st">".*</span><span class="sc">\\</span><span class="st">["</span>) <span class="sc">|&gt;</span></span>
+<span id="cb36-12"><a href="#cb36-12" aria-hidden="true" tabindex="-1"></a>      stringr<span class="sc">::</span><span class="fu">str_remove_all</span>(<span class="st">"</span><span class="sc">\\</span><span class="st">]"</span>) <span class="sc">|&gt;</span> </span>
+<span id="cb36-13"><a href="#cb36-13" aria-hidden="true" tabindex="-1"></a>      <span class="fu">as.numeric</span>()</span>
+<span id="cb36-14"><a href="#cb36-14" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">|&gt;</span></span>
+<span id="cb36-15"><a href="#cb36-15" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">group_by</span>(obs_num) <span class="sc">|&gt;</span></span>
+<span id="cb36-16"><a href="#cb36-16" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">summarise</span>(</span>
+<span id="cb36-17"><a href="#cb36-17" aria-hidden="true" tabindex="-1"></a>    <span class="at">yh =</span> <span class="fu">mean</span>(y_hat),</span>
+<span id="cb36-18"><a href="#cb36-18" aria-hidden="true" tabindex="-1"></a>    <span class="at">q5 =</span> <span class="fu">quantile</span>(y_hat, .<span class="dv">05</span>),</span>
+<span id="cb36-19"><a href="#cb36-19" aria-hidden="true" tabindex="-1"></a>    <span class="at">q95 =</span> <span class="fu">quantile</span>(y_hat, .<span class="dv">95</span>)</span>
+<span id="cb36-20"><a href="#cb36-20" aria-hidden="true" tabindex="-1"></a>  )  <span class="sc">|&gt;</span></span>
+<span id="cb36-21"><a href="#cb36-21" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">arrange</span>(obs_num) <span class="sc">|&gt;</span></span>
+<span id="cb36-22"><a href="#cb36-22" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">mutate</span>(</span>
+<span id="cb36-23"><a href="#cb36-23" aria-hidden="true" tabindex="-1"></a>    <span class="at">y =</span> dat<span class="sc">$</span>c_obs,</span>
+<span id="cb36-24"><a href="#cb36-24" aria-hidden="true" tabindex="-1"></a>    <span class="at">time =</span> warfpk_obs<span class="sc">$</span>time,</span>
+<span id="cb36-25"><a href="#cb36-25" aria-hidden="true" tabindex="-1"></a>    <span class="at">id =</span> warfpk_obs<span class="sc">$</span>id</span>
+<span id="cb36-26"><a href="#cb36-26" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb36-27"><a href="#cb36-27" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb36-28"><a href="#cb36-28" aria-hidden="true" tabindex="-1"></a>fit</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 251 × 7
+   obs_num    yh    q5   q95     y  time    id
+     &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;
+ 1       1  1.44  1.15  1.75   0     0.5     0
+ 2       2  2.69  2.18  3.23   1.9   1       0
+ 3       3  4.70  3.93  5.52   3.3   2       0
+ 4       4  6.20  5.30  7.11   6.6   3       0
+ 5       5  8.62  7.73  9.50   9.1   6       0
+ 6       6  9.28  8.36 10.2   10.8   9       0
+ 7       7  9.14  8.16 10.1    8.6  12       0
+ 8       8  6.67  5.79  7.58   5.6  24       0
+ 9       9  4.49  3.53  5.43   4    36       0
+10      10  3.01  2.04  4.00   2.7  48       0
+# ℹ 241 more rows</code></pre>
+</div>
+</div>
+<div class="cell page-columns page-full">
+<div class="sourceCode cell-code" id="cb38"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb38-1"><a href="#cb38-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(fit, <span class="fu">aes</span>(yh, y, <span class="at">colour =</span> <span class="fu">factor</span>(id))) <span class="sc">+</span></span>
+<span id="cb38-2"><a href="#cb38-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_abline</span>(<span class="at">intercept =</span> <span class="dv">0</span>, <span class="at">slope =</span> <span class="dv">1</span>, <span class="at">colour =</span> <span class="st">"grey50"</span>) <span class="sc">+</span></span>
+<span id="cb38-3"><a href="#cb38-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="at">size =</span> <span class="dv">4</span>, <span class="at">show.legend =</span> <span class="cn">FALSE</span>) <span class="sc">+</span></span>
+<span id="cb38-4"><a href="#cb38-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">coord_equal</span>() <span class="sc">+</span> </span>
+<span id="cb38-5"><a href="#cb38-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">facet_wrap</span>(<span class="sc">~</span> <span class="fu">factor</span>(id), <span class="at">nrow =</span> <span class="dv">4</span>) <span class="sc">+</span> </span>
+<span id="cb38-6"><a href="#cb38-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_bw</span>() <span class="sc">+</span> </span>
+<span id="cb38-7"><a href="#cb38-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(</span>
+<span id="cb38-8"><a href="#cb38-8" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> <span class="st">"Fitted value for drug concentration, y_hat"</span>,</span>
+<span id="cb38-9"><a href="#cb38-9" aria-hidden="true" tabindex="-1"></a>    <span class="at">y =</span> <span class="st">"Observed value for drug concentration, y"</span></span>
+<span id="cb38-10"><a href="#cb38-10" aria-hidden="true" tabindex="-1"></a>  )</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display column-page">
+<p><img src="index_files/figure-html/simple-plot-1.png" class="img-fluid" width="1536"></p>
+</div>
+</div>
+<div class="cell" data-hash="index_cache/html/pk-predictions_296e0b65c2a1e440a0dd1956834d70ec">
+<div class="sourceCode cell-code" id="cb39"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb39-1"><a href="#cb39-1" aria-hidden="true" tabindex="-1"></a>prd <span class="ot">&lt;-</span> <span class="st">"model1_draws.csv"</span> <span class="sc">|&gt;</span> </span>
+<span id="cb39-2"><a href="#cb39-2" aria-hidden="true" tabindex="-1"></a>  readr<span class="sc">::</span><span class="fu">read_csv</span>(<span class="at">show_col_types =</span> <span class="cn">FALSE</span>) <span class="sc">|&gt;</span></span>
+<span id="cb39-3"><a href="#cb39-3" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">select</span>(tidyselect<span class="sc">::</span><span class="fu">matches</span>(<span class="st">"c_fit"</span>)) <span class="sc">|&gt;</span></span>
+<span id="cb39-4"><a href="#cb39-4" aria-hidden="true" tabindex="-1"></a>  tidyr<span class="sc">::</span><span class="fu">pivot_longer</span>(</span>
+<span id="cb39-5"><a href="#cb39-5" aria-hidden="true" tabindex="-1"></a>    <span class="at">cols =</span> tidyselect<span class="sc">::</span><span class="fu">matches</span>(<span class="st">"c_fit"</span>),</span>
+<span id="cb39-6"><a href="#cb39-6" aria-hidden="true" tabindex="-1"></a>    <span class="at">names_to =</span> <span class="st">"variable"</span>,</span>
+<span id="cb39-7"><a href="#cb39-7" aria-hidden="true" tabindex="-1"></a>    <span class="at">values_to =</span> <span class="st">"y_hat"</span></span>
+<span id="cb39-8"><a href="#cb39-8" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">|&gt;</span> </span>
+<span id="cb39-9"><a href="#cb39-9" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">group_by</span>(variable) <span class="sc">|&gt;</span></span>
+<span id="cb39-10"><a href="#cb39-10" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">summarise</span>(</span>
+<span id="cb39-11"><a href="#cb39-11" aria-hidden="true" tabindex="-1"></a>    <span class="at">yh =</span> <span class="fu">mean</span>(y_hat),</span>
+<span id="cb39-12"><a href="#cb39-12" aria-hidden="true" tabindex="-1"></a>    <span class="at">q5 =</span> <span class="fu">quantile</span>(y_hat, .<span class="dv">05</span>),</span>
+<span id="cb39-13"><a href="#cb39-13" aria-hidden="true" tabindex="-1"></a>    <span class="at">q95 =</span> <span class="fu">quantile</span>(y_hat, .<span class="dv">95</span>)</span>
+<span id="cb39-14"><a href="#cb39-14" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">|&gt;</span> </span>
+<span id="cb39-15"><a href="#cb39-15" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">mutate</span>(</span>
+<span id="cb39-16"><a href="#cb39-16" aria-hidden="true" tabindex="-1"></a>    <span class="at">obs_id =</span> variable <span class="sc">|&gt;</span> </span>
+<span id="cb39-17"><a href="#cb39-17" aria-hidden="true" tabindex="-1"></a>      stringr<span class="sc">::</span><span class="fu">str_remove_all</span>(<span class="st">".*</span><span class="sc">\\</span><span class="st">["</span>) <span class="sc">|&gt;</span></span>
+<span id="cb39-18"><a href="#cb39-18" aria-hidden="true" tabindex="-1"></a>      stringr<span class="sc">::</span><span class="fu">str_remove_all</span>(<span class="st">"</span><span class="sc">\\</span><span class="st">]"</span>) </span>
+<span id="cb39-19"><a href="#cb39-19" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">|&gt;</span></span>
+<span id="cb39-20"><a href="#cb39-20" aria-hidden="true" tabindex="-1"></a>  tidyr<span class="sc">::</span><span class="fu">separate</span>(obs_id, <span class="at">into =</span> <span class="fu">c</span>(<span class="st">"id"</span>, <span class="st">"obs_num"</span>), <span class="at">sep =</span> <span class="st">","</span>) <span class="sc">|&gt;</span></span>
+<span id="cb39-21"><a href="#cb39-21" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">mutate</span>(</span>
+<span id="cb39-22"><a href="#cb39-22" aria-hidden="true" tabindex="-1"></a>    <span class="at">obs_num =</span> <span class="fu">as.numeric</span>(obs_num),</span>
+<span id="cb39-23"><a href="#cb39-23" aria-hidden="true" tabindex="-1"></a>    <span class="at">id =</span> warfpk_amt<span class="sc">$</span>id[<span class="fu">as.numeric</span>(id)]</span>
+<span id="cb39-24"><a href="#cb39-24" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">|&gt;</span></span>
+<span id="cb39-25"><a href="#cb39-25" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">arrange</span>(id, obs_num) <span class="sc">|&gt;</span></span>
+<span id="cb39-26"><a href="#cb39-26" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">mutate</span>(<span class="at">time =</span> <span class="fu">rep</span>(dat<span class="sc">$</span>t_fit, dat<span class="sc">$</span>n_ids))</span>
+<span id="cb39-27"><a href="#cb39-27" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb39-28"><a href="#cb39-28" aria-hidden="true" tabindex="-1"></a>prd</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 2,496 × 7
+   variable       yh    q5   q95    id obs_num  time
+   &lt;chr&gt;       &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;   &lt;dbl&gt; &lt;dbl&gt;
+ 1 c_fit[1,1]  0.304 0.240 0.376     0       1   0.1
+ 2 c_fit[1,2]  0.600 0.476 0.738     0       2   0.2
+ 3 c_fit[1,3]  0.887 0.706 1.09      0       3   0.3
+ 4 c_fit[1,4]  1.17  0.932 1.43      0       4   0.4
+ 5 c_fit[1,5]  1.44  1.15  1.75      0       5   0.5
+ 6 c_fit[1,6]  1.70  1.37  2.07      0       6   0.6
+ 7 c_fit[1,7]  1.96  1.58  2.37      0       7   0.7
+ 8 c_fit[1,8]  2.21  1.78  2.67      0       8   0.8
+ 9 c_fit[1,9]  2.45  1.99  2.95      0       9   0.9
+10 c_fit[1,10] 2.69  2.18  3.23      0      10   1  
+# ℹ 2,486 more rows</code></pre>
+</div>
+</div>
+<div class="cell page-columns page-full">
+<div class="sourceCode cell-code" id="cb41"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb41-1"><a href="#cb41-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>() <span class="sc">+</span></span>
+<span id="cb41-2"><a href="#cb41-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_ribbon</span>(</span>
+<span id="cb41-3"><a href="#cb41-3" aria-hidden="true" tabindex="-1"></a>    <span class="at">data =</span> prd, </span>
+<span id="cb41-4"><a href="#cb41-4" aria-hidden="true" tabindex="-1"></a>    <span class="at">mapping =</span> <span class="fu">aes</span>(time, yh, <span class="at">ymin =</span> q5, <span class="at">ymax =</span> q95),</span>
+<span id="cb41-5"><a href="#cb41-5" aria-hidden="true" tabindex="-1"></a>    <span class="at">fill =</span> <span class="st">"grey80"</span></span>
+<span id="cb41-6"><a href="#cb41-6" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">+</span></span>
+<span id="cb41-7"><a href="#cb41-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_line</span>(</span>
+<span id="cb41-8"><a href="#cb41-8" aria-hidden="true" tabindex="-1"></a>    <span class="at">data =</span> prd,</span>
+<span id="cb41-9"><a href="#cb41-9" aria-hidden="true" tabindex="-1"></a>    <span class="at">mapping =</span> <span class="fu">aes</span>(time, yh)</span>
+<span id="cb41-10"><a href="#cb41-10" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">+</span> </span>
+<span id="cb41-11"><a href="#cb41-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(</span>
+<span id="cb41-12"><a href="#cb41-12" aria-hidden="true" tabindex="-1"></a>    <span class="at">data =</span> fit, </span>
+<span id="cb41-13"><a href="#cb41-13" aria-hidden="true" tabindex="-1"></a>    <span class="at">mapping =</span> <span class="fu">aes</span>(time, y, <span class="at">colour =</span> <span class="fu">factor</span>(id)), </span>
+<span id="cb41-14"><a href="#cb41-14" aria-hidden="true" tabindex="-1"></a>    <span class="at">size =</span> <span class="dv">4</span>, </span>
+<span id="cb41-15"><a href="#cb41-15" aria-hidden="true" tabindex="-1"></a>    <span class="at">show.legend =</span> <span class="cn">FALSE</span></span>
+<span id="cb41-16"><a href="#cb41-16" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">+</span></span>
+<span id="cb41-17"><a href="#cb41-17" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_label</span>(</span>
+<span id="cb41-18"><a href="#cb41-18" aria-hidden="true" tabindex="-1"></a>    <span class="at">data =</span> tibble<span class="sc">::</span><span class="fu">tibble</span>(</span>
+<span id="cb41-19"><a href="#cb41-19" aria-hidden="true" tabindex="-1"></a>      <span class="at">time =</span> <span class="dv">110</span>, </span>
+<span id="cb41-20"><a href="#cb41-20" aria-hidden="true" tabindex="-1"></a>      <span class="at">y =</span> <span class="dv">17</span>, </span>
+<span id="cb41-21"><a href="#cb41-21" aria-hidden="true" tabindex="-1"></a>      <span class="at">id =</span> warfpk_amt<span class="sc">$</span>id</span>
+<span id="cb41-22"><a href="#cb41-22" aria-hidden="true" tabindex="-1"></a>    ),</span>
+<span id="cb41-23"><a href="#cb41-23" aria-hidden="true" tabindex="-1"></a>    <span class="at">mapping =</span> <span class="fu">aes</span>(time, y, <span class="at">label =</span> id)</span>
+<span id="cb41-24"><a href="#cb41-24" aria-hidden="true" tabindex="-1"></a>  )<span class="sc">+</span> </span>
+<span id="cb41-25"><a href="#cb41-25" aria-hidden="true" tabindex="-1"></a>  <span class="fu">facet_wrap</span>(<span class="sc">~</span> <span class="fu">factor</span>(id), <span class="at">nrow =</span> <span class="dv">4</span>) <span class="sc">+</span> </span>
+<span id="cb41-26"><a href="#cb41-26" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_bw</span>() <span class="sc">+</span> </span>
+<span id="cb41-27"><a href="#cb41-27" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme</span>(</span>
+<span id="cb41-28"><a href="#cb41-28" aria-hidden="true" tabindex="-1"></a>    <span class="at">strip.text =</span> <span class="fu">element_blank</span>(), </span>
+<span id="cb41-29"><a href="#cb41-29" aria-hidden="true" tabindex="-1"></a>    <span class="at">strip.background =</span> <span class="fu">element_blank</span>()</span>
+<span id="cb41-30"><a href="#cb41-30" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">+</span></span>
+<span id="cb41-31"><a href="#cb41-31" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(</span>
+<span id="cb41-32"><a href="#cb41-32" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> <span class="st">"Time (hours)"</span>,</span>
+<span id="cb41-33"><a href="#cb41-33" aria-hidden="true" tabindex="-1"></a>    <span class="at">y =</span> <span class="st">"Warfarin plasma concentration (mg/L)"</span></span>
+<span id="cb41-34"><a href="#cb41-34" aria-hidden="true" tabindex="-1"></a>  )</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display column-page">
+<p><img src="index_files/figure-html/pk-profiles-1.png" class="img-fluid" width="1536"></p>
+</div>
+</div>
+</section>
+<section id="residuals" class="level3 page-columns page-full">
+<h3 class="anchored" data-anchor-id="residuals">Residuals</h3>
+<p>The last thing I want to do with this model is take a look at the residuals, since that’s usually the best bet if you want to detect non-obvious model failures. In the plot below I’ve plotted the residual term <span class="math inline">\(\hat{y} - y\)</span> for every observation in the data set. As before, each panel corresponds to an individual subject, and the residuals are plotted as a function of the observed drug concentration <span class="math inline">\(y\)</span>:</p>
+<div class="cell page-columns page-full">
+<div class="sourceCode cell-code" id="cb42"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb42-1"><a href="#cb42-1" aria-hidden="true" tabindex="-1"></a>fit <span class="sc">|&gt;</span> </span>
+<span id="cb42-2"><a href="#cb42-2" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">mutate</span>(<span class="at">residual =</span> y <span class="sc">-</span> yh) <span class="sc">|&gt;</span></span>
+<span id="cb42-3"><a href="#cb42-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>(<span class="fu">aes</span>(y, residual, <span class="at">colour =</span> <span class="fu">factor</span>(id))) <span class="sc">+</span></span>
+<span id="cb42-4"><a href="#cb42-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_abline</span>(<span class="at">slope =</span> <span class="dv">0</span>, <span class="at">intercept =</span> <span class="dv">0</span>, <span class="at">colour =</span> <span class="st">"grey80"</span>, <span class="at">linewidth =</span> <span class="dv">2</span>) <span class="sc">+</span></span>
+<span id="cb42-5"><a href="#cb42-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="at">show.legend =</span> <span class="cn">FALSE</span>, <span class="at">size =</span> <span class="dv">4</span>) <span class="sc">+</span> </span>
+<span id="cb42-6"><a href="#cb42-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_smooth</span>(<span class="at">formula =</span> y <span class="sc">~</span> x, <span class="at">method =</span> lm, <span class="at">colour =</span> <span class="st">"black"</span>, <span class="at">se =</span> <span class="cn">FALSE</span>) <span class="sc">+</span> </span>
+<span id="cb42-7"><a href="#cb42-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_bw</span>() <span class="sc">+</span> </span>
+<span id="cb42-8"><a href="#cb42-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">facet_wrap</span>(<span class="sc">~</span> <span class="fu">factor</span>(id), <span class="at">ncol =</span> <span class="dv">8</span>, <span class="at">scales =</span> <span class="st">"free_x"</span>) <span class="sc">+</span> </span>
+<span id="cb42-9"><a href="#cb42-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(</span>
+<span id="cb42-10"><a href="#cb42-10" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> <span class="st">"Observed concentration"</span>,</span>
+<span id="cb42-11"><a href="#cb42-11" aria-hidden="true" tabindex="-1"></a>    <span class="at">y =</span> <span class="st">"Residual"</span></span>
+<span id="cb42-12"><a href="#cb42-12" aria-hidden="true" tabindex="-1"></a>  )</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display column-page">
+<p><img src="index_files/figure-html/residuals-1.png" class="img-fluid" width="1536"></p>
+</div>
+</div>
+<p>For most people in the data set, there’s nothing here to suggest systematic model misfit. The residuals are small, and show no systematic pattern. In a few cases, however, the model struggles slightly. Participant 12 is the most obvious example: the estimated pharamacokinetic curve is a little too flat (the peak isn’t high enough), leading to a systematic pattern where the model overestimates low concentrations and underestimates high concentrations. The effect is quite easy to spot in the residual plot, but virtually invisible in the individual-subject PK curves I showed in the last section. The model error isn’t very large (even for the worst-fit person the posterior predictive PK curves are still awfully good), but it is there.</p>
+<p>The second version of a residual plot shows the unsigned residuals <span class="math inline">\(|\hat{y} - y|\)</span> as a function of <span class="math inline">\(y\)</span>. Here, what I’m looking for is evidence that the <em>magnitude</em> of the residuals is systematically larger at higher concentrations, and would be a hint that the additive error assumption I’ve used in this model is inadequate for modelling the data:</p>
+<div class="cell page-columns page-full">
+<div class="sourceCode cell-code" id="cb43"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb43-1"><a href="#cb43-1" aria-hidden="true" tabindex="-1"></a>fit <span class="sc">|&gt;</span> </span>
+<span id="cb43-2"><a href="#cb43-2" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">mutate</span>(<span class="at">residual =</span> <span class="fu">abs</span>(y <span class="sc">-</span> yh)) <span class="sc">|&gt;</span></span>
+<span id="cb43-3"><a href="#cb43-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>(<span class="fu">aes</span>(y, residual, <span class="at">colour =</span> <span class="fu">factor</span>(id))) <span class="sc">+</span></span>
+<span id="cb43-4"><a href="#cb43-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="at">show.legend =</span> <span class="cn">FALSE</span>, <span class="at">size =</span> <span class="dv">4</span>) <span class="sc">+</span> </span>
+<span id="cb43-5"><a href="#cb43-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_smooth</span>(<span class="at">formula =</span> y <span class="sc">~</span> x, <span class="at">method =</span> lm, <span class="at">colour =</span> <span class="st">"black"</span>, <span class="at">se =</span> <span class="cn">FALSE</span>) <span class="sc">+</span> </span>
+<span id="cb43-6"><a href="#cb43-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_bw</span>() <span class="sc">+</span> </span>
+<span id="cb43-7"><a href="#cb43-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">facet_wrap</span>(<span class="sc">~</span> <span class="fu">factor</span>(id), <span class="at">ncol =</span> <span class="dv">8</span>, <span class="at">scales =</span> <span class="st">"free_x"</span>) <span class="sc">+</span> </span>
+<span id="cb43-8"><a href="#cb43-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(</span>
+<span id="cb43-9"><a href="#cb43-9" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> <span class="st">"Observed concentration"</span>,</span>
+<span id="cb43-10"><a href="#cb43-10" aria-hidden="true" tabindex="-1"></a>    <span class="at">y =</span> <span class="st">"Unsigned Residual"</span></span>
+<span id="cb43-11"><a href="#cb43-11" aria-hidden="true" tabindex="-1"></a>  )</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output-display column-page">
+<p><img src="index_files/figure-html/unsigned-residuals-1.png" class="img-fluid" width="1536"></p>
+</div>
+</div>
+<p>On the whole I don’t think there’s much to worry about here. Of course that doesn’t mean that additive errors are theoretically plausible or correct, it simply means that the statistical model appears to work just fine even without tinkering with this assumption.</p>
+</section>
+</section>
+<section id="epilogue" class="level2">
+<h2 class="anchored" data-anchor-id="epilogue">Epilogue</h2>
+<p>As someone learning pharmacometrics coming from a rather different technical discipline (mathematical psychology), the thing I find truly surprising in this is how clean the data set is, despite containing relatively few data points. Folks outside of mathematical psychology might find it surprising to learn that there are some extremely effective formal models in psychology, some of which are horrifyingly technical (reading the infamous 2000 paper by Philip Smith in the <em>Journal of Mathematical Psychology</em> nearly broke me as a graduate student), but it’s usually the case for those models that you’re working with extremely noisy or impoverished data, so you need quite a lot of data to work with them safely. Yet here, we have a data set with a mere 32 people and only a handful of observations per person, and it’s entirely possible to fit a stochastic dynamic hierarchical Bayesian model that produces person-specific pharmacokinetic curves that closely match the observed data, only occasionally show hints of systematic misfit, and allow estimation of population level parameters with only modest uncertainty. Granted, from an empirical perspective it’s far more costly to take a measurement, and – quite rightly – there are stricter regulatory and ethical constraints that go into conducting a study like this than there would be for a typical psychological study, but even so, it still comes as a shock to me that it “just works”.</p>
+<p>I could get used to this.</p>
+</section>
+<section id="references" class="level2">
+<h2 class="anchored" data-anchor-id="references">References</h2>
+<ul>
+<li><p>Bauer, R. J., Guzy, S., &amp; Ng, C. (2007). A survey of population analysis methods and software for complex pharmacokinetic and pharmacodynamic models with examples. <em>The AAPS Journal, 9</em>, E60-E83. <a href="https://doi.org/10.1208/aapsj0901007">doi.org/10.1208/aapsj0901007</a></p></li>
+<li><p>Bauer, R. J. (2019). NONMEM tutorial part I: Description of commands and options, with simple examples of population analysis. <em>CPT: Pharmacometrics &amp; Systems Pharmacology, 8</em>(8), 525-537. <a href="https://doi.org/10.1002/psp4.12404">doi.org/10.1002/psp4.12404</a></p></li>
+<li><p>Bauer, R. J. (2019). NONMEM tutorial part II: Estimation methods and advanced examples. <em>CPT: Pharmacometrics &amp; Systems Pharmacology, 8</em>(8), 538-556. <a href="https://doi.org/10.1002/psp4.12422">doi.org/10.1002/psp4.12422</a></p></li>
+<li><p>Foster, D., Abuhelwa, A. &amp; Hughes, J. (2019). <em>Population Analysis Using NONMEM Beginners Workshop</em>. Retrieved from: <a href="https://www.paganz.org/resources/">www.paganz.org/resources/</a></p></li>
+<li><p>Navarro, D. J., Griffiths, T. L., Steyvers, M. and Lee, M. D. (2006). Modeling individual differences using Dirichlet processes. <em>Journal of Mathematical Psychology, 50</em>, 101-122. <a href="https://dx.doi.org/10.1016/j.jmp.2005.11.006">dx.doi.org/10.1016/j.jmp.2005.11.006</a></p></li>
+<li><p>O’Reilly, R. A., &amp; Aggeler, P. M. (1968). Studies on coumarin anticoagulant drugs: initiation of warfarin therapy without a loading dose. <em>Circulation, 38</em>(1), 169-177. <a href="https://doi.org/10.1161/01.CIR.38.1.169">doi.org/10.1161/01.CIR.38.1.169</a></p></li>
+<li><p>O’Reilly, R. A., Aggeler, P. M., &amp; Leong, L. S. (1963). Studies on the coumarin anticoagulant drugs: the pharmacodynamics of warfarin in man. <em>The Journal of Clinical Investigation, 42</em>(10), 1542-1551. <a href="https://doi.org/10.1172%2FJCI104839">doi.org/10.1172%2FJCI104839</a></p></li>
+<li><p>Smith, P. L. (2000). Stochastic dynamic models of response time and accuracy: A foundational primer. <em>Journal of Mathematical Psychology, 44</em>(3), 408-463. <a href="https://doi.org/10.1006/jmps.1999.1260">doi.org/10.1006/jmps.1999.1260</a></p></li>
+</ul>
+
+
+</section>
+
+
+<div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document" role="doc-endnotes"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
+
+<ol>
+<li id="fn1"><p>Yes this is indeed a joke. Tom Griffiths, Mark Steyvers, and Michael Lee are all considerably more successful as academics than I ever was, so much so that when Mark fed the text of the paper – which is about 99% my writing – into an author-topic model that allows specific passages to be attributed to specific authors, it did not attribute a single word of the text to me. Oh well.<a href="#fnref1" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn2"><p>Technically I’m guessing the code here, but there’s a lot more 1s in the data than 0s, and a lot more of male subjects reported by O’Reilly &amp; Aggeler, so it seems a safe bet!<a href="#fnref2" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn3"><p>Mentally I keep implicitly assuming that volume of distribution is basically the same thing as “the amount of blood plasma in the body”, but that’s not actually true. Certainly it makes sense as a crude first-approximation mental model, but bodies are complicated things so the reality is messier.<a href="#fnref3" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn4"><p>There’s an irony here: if these were psychological data we’d be delighted to have data this clean. Psychological data are <em>noisy as a drunk fuck</em>, to use a technical term. Nevertheless, the reality of the warfarin data set is that the data are actually a lot cleaner than this plot makes it seem.<a href="#fnref4" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn5"><p>If we wanted to consider this correlation then we’d have a full variance-covariance matrix denoted <span class="math inline">\(\boldsymbol\Omega\)</span>, but I’m not going to go there in this post<a href="#fnref5" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn6"><p>Honestly, I wasn’t 100% certain that my interpretation was correct, but eventually I managed to find copies of the NONMEM user manuals online and they explain it there.<a href="#fnref6" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn7"><p>If you believe the testimony of my ex-boyfriends, that is.<a href="#fnref7" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn8"><p>…or so I’m told. Honestly, the last time I had to work so hard to keep a straight face in front of a statistical audience was writing academic papers that required me to talk about posterior Weiner processes.<a href="#fnref8" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn9"><p>The NONMEM output expressed the standard error as a percentage of the point estimate, but for the purposes of comparison to the Stan model I’ve converted them back to raw values.<a href="#fnref9" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+</ol>
+</section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div id="quarto-reuse" class="quarto-appendix-contents"><div><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2023,
+  author = {Navarro, Danielle},
+  title = {Building a Population Pharmacokinetic Model with {Stan}},
+  date = {2023-06-10},
+  url = {https://blog.djnavarro.net/posts/2023-06-10_pop-pk-models},
+  langid = {en}
+}
+</code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2023" class="csl-entry quarto-appendix-citeas" role="listitem">
+Navarro, Danielle. 2023. <span>“Building a Population Pharmacokinetic
+Model with Stan.”</span> June 10, 2023. <a href="https://blog.djnavarro.net/posts/2023-06-10_pop-pk-models">https://blog.djnavarro.net/posts/2023-06-10_pop-pk-models</a>.
+</div></div></section></div></main> <!-- /main -->
+<!-- plausible -->
+<script async="" defer="" data-domain="blog.djnavarro.net" src="https://plausible.io/js/plausible.js"></script>
+<script id="quarto-html-after-body" type="application/javascript">
+window.document.addEventListener("DOMContentLoaded", function (event) {
+  const toggleBodyColorMode = (bsSheetEl) => {
+    const mode = bsSheetEl.getAttribute("data-mode");
+    const bodyEl = window.document.querySelector("body");
+    if (mode === "dark") {
+      bodyEl.classList.add("quarto-dark");
+      bodyEl.classList.remove("quarto-light");
+    } else {
+      bodyEl.classList.add("quarto-light");
+      bodyEl.classList.remove("quarto-dark");
+    }
+  }
+  const toggleBodyColorPrimary = () => {
+    const bsSheetEl = window.document.querySelector("link#quarto-bootstrap");
+    if (bsSheetEl) {
+      toggleBodyColorMode(bsSheetEl);
+    }
+  }
+  toggleBodyColorPrimary();  
+  const icon = "";
+  const anchorJS = new window.AnchorJS();
+  anchorJS.options = {
+    placement: 'right',
+    icon: icon
+  };
+  anchorJS.add('.anchored');
+  const isCodeAnnotation = (el) => {
+    for (const clz of el.classList) {
+      if (clz.startsWith('code-annotation-')) {                     
+        return true;
+      }
+    }
+    return false;
+  }
+  const clipboard = new window.ClipboardJS('.code-copy-button', {
+    text: function(trigger) {
+      const codeEl = trigger.previousElementSibling.cloneNode(true);
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+    }
+  });
+  clipboard.on('success', function(e) {
+    // button target
+    const button = e.trigger;
+    // don't keep focus
+    button.blur();
+    // flash "checked"
+    button.classList.add('code-copy-button-checked');
+    var currentTitle = button.getAttribute("title");
+    button.setAttribute("title", "Copied!");
+    let tooltip;
+    if (window.bootstrap) {
+      button.setAttribute("data-bs-toggle", "tooltip");
+      button.setAttribute("data-bs-placement", "left");
+      button.setAttribute("data-bs-title", "Copied!");
+      tooltip = new bootstrap.Tooltip(button, 
+        { trigger: "manual", 
+          customClass: "code-copy-button-tooltip",
+          offset: [0, -8]});
+      tooltip.show();    
+    }
+    setTimeout(function() {
+      if (tooltip) {
+        tooltip.hide();
+        button.removeAttribute("data-bs-title");
+        button.removeAttribute("data-bs-toggle");
+        button.removeAttribute("data-bs-placement");
+      }
+      button.setAttribute("title", currentTitle);
+      button.classList.remove('code-copy-button-checked');
+    }, 1000);
+    // clear code selection
+    e.clearSelection();
+  });
+  function tippyHover(el, contentFn) {
+    const config = {
+      allowHTML: true,
+      content: contentFn,
+      maxWidth: 500,
+      delay: 100,
+      arrow: false,
+      appendTo: function(el) {
+          return el.parentElement;
+      },
+      interactive: true,
+      interactiveBorder: 10,
+      theme: 'quarto',
+      placement: 'bottom-start'
+    };
+    window.tippy(el, config); 
+  }
+  const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+  for (var i=0; i<noterefs.length; i++) {
+    const ref = noterefs[i];
+    tippyHover(ref, function() {
+      // use id or data attribute instead here
+      let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+      try { href = new URL(href).hash; } catch {}
+      const id = href.replace(/^#\/?/, "");
+      const note = window.document.getElementById(id);
+      return note.innerHTML;
+    });
+  }
+      let selectedAnnoteEl;
+      const selectorForAnnotation = ( cell, annotation) => {
+        let cellAttr = 'data-code-cell="' + cell + '"';
+        let lineAttr = 'data-code-annotation="' +  annotation + '"';
+        const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+        return selector;
+      }
+      const selectCodeLines = (annoteEl) => {
+        const doc = window.document;
+        const targetCell = annoteEl.getAttribute("data-target-cell");
+        const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+        const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+        const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+        const lineIds = lines.map((line) => {
+          return targetCell + "-" + line;
+        })
+        let top = null;
+        let height = null;
+        let parent = null;
+        if (lineIds.length > 0) {
+            //compute the position of the single el (top and bottom and make a div)
+            const el = window.document.getElementById(lineIds[0]);
+            top = el.offsetTop;
+            height = el.offsetHeight;
+            parent = el.parentElement.parentElement;
+          if (lineIds.length > 1) {
+            const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+            const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+            height = bottom - top;
+          }
+          if (top !== null && height !== null && parent !== null) {
+            // cook up a div (if necessary) and position it 
+            let div = window.document.getElementById("code-annotation-line-highlight");
+            if (div === null) {
+              div = window.document.createElement("div");
+              div.setAttribute("id", "code-annotation-line-highlight");
+              div.style.position = 'absolute';
+              parent.appendChild(div);
+            }
+            div.style.top = top - 2 + "px";
+            div.style.height = height + 4 + "px";
+            let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+            if (gutterDiv === null) {
+              gutterDiv = window.document.createElement("div");
+              gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+              gutterDiv.style.position = 'absolute';
+              const codeCell = window.document.getElementById(targetCell);
+              const gutter = codeCell.querySelector('.code-annotation-gutter');
+              gutter.appendChild(gutterDiv);
+            }
+            gutterDiv.style.top = top - 2 + "px";
+            gutterDiv.style.height = height + 4 + "px";
+          }
+          selectedAnnoteEl = annoteEl;
+        }
+      };
+      const unselectCodeLines = () => {
+        const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+        elementsIds.forEach((elId) => {
+          const div = window.document.getElementById(elId);
+          if (div) {
+            div.remove();
+          }
+        });
+        selectedAnnoteEl = undefined;
+      };
+      // Attach click handler to the DT
+      const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+      for (const annoteDlNode of annoteDls) {
+        annoteDlNode.addEventListener('click', (event) => {
+          const clickedEl = event.target;
+          if (clickedEl !== selectedAnnoteEl) {
+            unselectCodeLines();
+            const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+            if (activeEl) {
+              activeEl.classList.remove('code-annotation-active');
+            }
+            selectCodeLines(clickedEl);
+            clickedEl.classList.add('code-annotation-active');
+          } else {
+            // Unselect the line
+            unselectCodeLines();
+            clickedEl.classList.remove('code-annotation-active');
+          }
+        });
+      }
+  const findCites = (el) => {
+    const parentEl = el.parentElement;
+    if (parentEl) {
+      const cites = parentEl.dataset.cites;
+      if (cites) {
+        return {
+          el,
+          cites: cites.split(' ')
+        };
+      } else {
+        return findCites(el.parentElement)
+      }
+    } else {
+      return undefined;
+    }
+  };
+  var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+  for (var i=0; i<bibliorefs.length; i++) {
+    const ref = bibliorefs[i];
+    const citeInfo = findCites(ref);
+    if (citeInfo) {
+      tippyHover(citeInfo.el, function() {
+        var popup = window.document.createElement('div');
+        citeInfo.cites.forEach(function(cite) {
+          var citeDiv = window.document.createElement('div');
+          citeDiv.classList.add('hanging-indent');
+          citeDiv.classList.add('csl-entry');
+          var biblioDiv = window.document.getElementById('ref-' + cite);
+          if (biblioDiv) {
+            citeDiv.innerHTML = biblioDiv.innerHTML;
+          }
+          popup.appendChild(citeDiv);
+        });
+        return popup.innerHTML;
+      });
+    }
+  }
+});
+</script>
+</div> <!-- /content -->
+<footer class="footer">
+  <div class="nav-footer">
+    <div class="nav-footer-left">
+      &nbsp;
+    </div>   
+    <div class="nav-footer-center">
+      <ul class="footer-items list-unstyled">
+    <li class="nav-item">
+    <a class="nav-link" href="https://blog.djnavarro.net">blog.djnavarro.net</a>
+  </li>  
+</ul>
+    </div>
+    <div class="nav-footer-right">
+      &nbsp;
+    </div>
+  </div>
+</footer>
+
+
+
+</body></html>
