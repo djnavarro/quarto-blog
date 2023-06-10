@@ -50,7 +50,7 @@ And so it transpires that, as I continue the process of teaching myself pharmaco
 
 ## Some resources
 
-To make the transition from modelling toy data sets to dealing with real ones, it helps a lot to have some real data to work with, and a worked example that shows how real data are analysed in practice. To that end, I've been relying on resources made publicly abailable by the [Population Approach Group of Australia and New Zealand](https://www.paganz.org/), who have a series of [handy tutorials](https://www.paganz.org/resources/) for folks interested in pharmacometric modelling. The one I'm working through at the moment is a [2019 workshop on pop-PK models](https://www.paganz.org/wp-content/uploads/2016/06/PAWs-Beginners-2019.zip) (link goes to a zip file), which provides a very nice tutorial on building such models.
+To make the transition from modelling toy data sets to dealing with real ones, it helps a lot to have some real data to work with, and a worked example that shows how real data are analysed in practice. To that end, I've been relying on resources made publicly available by the [Population Approach Group of Australia and New Zealand](https://www.paganz.org/), who have a series of [handy tutorials](https://www.paganz.org/resources/) for folks interested in pharmacometric modelling. The one I'm working through at the moment is a [2019 workshop on pop-PK models](https://www.paganz.org/wp-content/uploads/2016/06/PAWs-Beginners-2019.zip) (link goes to a zip file), which provides a very nice tutorial on building such models.
 
 The only catch, from my perspective, is that the tutorial uses the  [NONMEM](https://www.iconplc.com/solutions/technologies/nonmem/) pharmacometrics software, and I don't have access to NONMEM. So as a fun little exercise, I'm going to translate some of the code from the workshop from NONMEM to Stan (and R).
 
@@ -106,7 +106,7 @@ What I'm guessing here is that this observation was dropped from the data set in
 
 ### Interpreting the data
 
-Now that I have the data, I need to make sense of it. The csv file itself doesn't say give much information about the variables, but when digging into the NONMEM input files included with the workshop materials I found the citations to the original papers from whence the data came. The data originate in papers by O'Reilly and colleagues, published in 1963 and 1968. Both papers are available online in full text, and after reading through them, we can reverse engineer (most of!) a data dictionary:
+Now that I have the data, I need to make sense of it. The csv file itself doesn't give much information about the variables, but when digging into the NONMEM input files included with the workshop materials I found the citations to the original papers from whence the data came. The data originate in papers by O'Reilly and colleagues, published in 1963 and 1968. Both papers are available online in full text, and after reading through them, we can reverse engineer (most of!) a data dictionary:
 
 - `id`: Numeric value specifying the arbitrary identifier for each person
 - `time`: Time elapsed since dose was administered (in hours)
@@ -119,7 +119,7 @@ Now that I have the data, I need to make sense of it. The csv file itself doesn'
 - `dv`: Measured value of the dependent variable (plasma warfarin concentration, in mg/L)
 - `mdv`: Appears to be a dummy variable that is the reverse of `dvid`, and is presumably an indicator variable whose meaning is "missing dependent variable" (0 = false, 1 = true)
 
-One peculiarity of the data structure that appears to be quite standard in pharmacokinetics is that the data frame incorporates both **measurement events** where the drug concentration is measure, and **dosing events** where a dose of the drug is provided. It's a perfectly sensible way to organised the data, but later on it will be convenient to separate them in order to pass the data to Stan in a format that it expects. To get a sense of what the dosing events look like, we can extract the relevant subset of the data frame by filtering the data on `dvid`:
+One peculiarity of the data structure that appears to be quite standard in pharmacokinetics is that the data frame incorporates both **measurement events** where the drug concentration is measured, and **dosing events** where a dose of the drug is administered. It's a perfectly sensible way to organise the data, but later on it will be convenient to separate them in order to pass the data to Stan in a format that it expects. To get a sense of what the dosing events look like, we can extract the relevant subset of the data frame by filtering the data on `dvid`:
 
 ```{r}
 #| label: "dosing"
@@ -154,6 +154,8 @@ A lot of the people in the data set have measurements taken on this schedule, bu
 #| label: "another-person"
 warfpk |> dplyr::filter(id == 2 & dvid == 1)
 ```
+
+This has implications for our model structure: we can't assume a single set of measurement times that will be identical for all subjects. From a Stan point of view, this means that if we try to pass the observed plasma concentrations as an array of vectors (one per person), it won't work. Since the vectors can have different lengths that data structure would be a ragged array, and Stan doesn't allow those. Instead, we're going to have to pass all the observations as one long vector and use indexing vectors to specify the "breakpoints" that indicate when the data from each person starts and stops. 
 
 ## Why we need population models
 
@@ -211,7 +213,7 @@ warfpk |> dplyr::filter(dvid == 1, !is.na(dv)) |>
 
 When plotted this way, it's really clear that the data from each person is in fact quite precise. There's very little noise in any of these individual-subject plots. They're all very smooth looking curves: it just so happens that each person is unique and has their own curve. In other words, the vast majority of the variation is systematic difference across people: it's not measurement error. 
 
-When data have this structure, you really (really really really really) need to adopt a statistical approach that accommodates individual differences. You need a pop-PK model. 
+When data have this structure, you really (really really really really) need to adopt a statistical approach that accommodates individual differences. You need a pop-PK model.^[I mean, from a statistical perspective what we're saying is that we need a hierarchical model, and those are essentially the same thing regardless of the domain of application, but whatever.]
 
 ## Deciphering NONMEM specifications
 
@@ -230,8 +232,8 @@ To make sense of the statistical notation used in NONMEM specifications, I relie
 
 There is also a convention assigning meaning to the different Greek letters:
 
-- Population mean parameters are denoted with thetas ($\theta$, $\boldsymbol\theta$, $\boldsymbol\Theta$)
-- Population variance parameters are denoted ($\omega$, $\boldsymbol\omega$, $\boldsymbol\Omega$)
+- Population mean^[Okay, technically these don't have to be means: really what we're talking about are location parameters. Again, whatevs.] parameters are denoted with thetas ($\theta$, $\boldsymbol\theta$, $\boldsymbol\Theta$)
+- Population standard deviation^[Same as above: technically, we're talking about scale parameters.] parameters are denoted ($\omega$, $\boldsymbol\omega$, $\boldsymbol\Omega$)
 - Individual departures from population mean are denoted with etas ($\eta$, $\boldsymbol\eta$)
 - Standard deviation of measurement error terms is denoted with sigmas ($\sigma$, $\boldsymbol\sigma$, $\boldsymbol\Sigma$)
 - Difference between individual subject expected values and observation are denoted with epsilons, $\epsilon$
@@ -242,7 +244,7 @@ $$
 f(t, k, V, D) = \frac{D}{V} \exp(-kt)
 $$
 
-In this model, the measurement time $t$ and dose $D$ (assumed to be administered at time $t = 0$) are both part of the study design. The other two quantities $k$ and $V$, are model parameters that can be different for every person. Because we're allowing for the possibility that the parameters can vary from person to person, we'll need notation to describe this variation. At a population level, we have a parameter vector $\boldsymbol{\theta} = (\theta_1, \theta_2)$ where -- somewhat arbitrarily -- I'll say that $\theta_1$ denotes the typical value for the elimination rate $k$, and $\theta_2$ is the typical value for the volume of distribution $V$. Since these quantities can vary from person to person, we would also -- assuming for the sake of simplicity that there is no population correlation between them^[If we wanted to consider this correlation then we'd have a full variance-covariance matrix denoted $\boldsymbol\Omega$, but I'm not going to go there in this post] -- have a variance vector $\boldsymbol{\omega} = (\omega_1, \omega_2)$. 
+In this model, the measurement time $t$ and dose $D$ (assumed to be administered at time $t = 0$) are both part of the study design. The other two quantities, $k$ and $V$, are model parameters that can be different for every person. Because we're allowing for the possibility that the parameters can vary from person to person, we'll need notation to describe this variation. At a population level, we have a parameter vector $\boldsymbol{\theta} = (\theta_1, \theta_2)$ where -- somewhat arbitrarily -- I'll say that $\theta_1$ denotes the typical value for the elimination rate $k$, and $\theta_2$ is the typical value for the volume of distribution $V$. Since these quantities can vary from person to person, we would also -- assuming for the sake of simplicity that there is no population correlation between them^[If we wanted to consider this correlation then we'd have a full variance-covariance matrix denoted $\boldsymbol\Omega$, but I'm not going to go there in this post] -- have a variance vector $\boldsymbol{\omega} = (\omega_1, \omega_2)$. 
 
 In this scenario, then, the parameters for the i-th participant would be some function of the typical values $\boldsymbol\theta$ and the random effects $\boldsymbol\eta_i$ associated with that person. I'm not certain if there's a standard notation used to describe these transformation functions, so I'll just use $g_1()$ and $g_2()$ to denote these:
 
@@ -253,7 +255,7 @@ V_i &=& g_2(\theta_2, \eta_{i2})
 \end{array}
 $$
 
-When specifying the statistical model, it's conventional to assume that the random effect terms $\eta_{ik}$ are normally distributed with mean zero:
+When specifying the statistical model, it's conventional to assume that the random effect terms $\eta_{ik}$ are normally distributed with mean zero and standard deviation $\omega_k$:
 
 $$
 \eta_{ik} \sim \mbox{Normal}(0, \omega_k) 
@@ -261,10 +263,10 @@ $$
 
 Next, let's consider the notation for the pharmacokinetic function $f()$ itself. Earlier I wrote out the specific form of this function for a particular model, but since the precise form is different from model to model, we could refer to it generically as $f(t, \boldsymbol\eta_i, \boldsymbol\theta, D_i)$.
 
-If measurement errors are assumed to be additive -- they don't have to be, but I'm only considering additive error models in this post -- the observed concentration $y_{ij}$ for the i-th person at the j-th time point can be expressed as follows:
+If measurement errors are assumed to be additive -- they don't have to be, but I'm only considering additive error models in this post -- the observed concentration $y_{ij}$ for the i-th person at the j-th time point $t_{ij}$ can be expressed as follows:
 
 $$
-y_{ij} = f(t_j, \boldsymbol\eta_i, \boldsymbol\theta, D_i) + \epsilon_{ij}
+y_{ij} = f(t_{ij}, \boldsymbol\eta_i, \boldsymbol\theta, D_i) + \epsilon_{ij}
 $$
 
 In this expression, $\epsilon_{ij}$ is the error associated with person i and time j, and we presume these errors are normally distributed with mean zero and standard deviation $\sigma$:
@@ -342,7 +344,7 @@ $TABLE ID KA CL V WT SEX AGE
 ONEHEADER NOAPPEND NOPRINT FILE=warf.fit
 ```
 
-The control file requires a bit of effort for me -- as someone who doesn't use NONMEM -- to work out what structure of the underlying model is, but after a little bit of work it wasn't too hard. Unlike Stan, which is a general-purpose probabilistic programming model for Bayesian analysis, NONMEM is a specific tool that hardcodes particular models of interest to pharmacometricians. You can work out which model is used by looking at the line in the control file that specifies which subroutine is used:
+The control file requires a bit of effort for me -- as someone who doesn't use NONMEM -- to work out the structure of the underlying model, but after a little bit of work it wasn't too hard. Unlike Stan, which is a general-purpose probabilistic programming model for Bayesian analysis, NONMEM is a specific tool that hardcodes particular models of interest to pharmacometricians. The consequence of this is that the control file doesn't spell out all the details of each model: the user just refers to them by name. You can work out which model is used by looking at the line in the control file that specifies which subroutine is used:
 
 ``` fortran
 $SUBR ADVAN2 TRANS2
@@ -395,7 +397,7 @@ Now we consider the individual-subject level. At this level we have three parame
 - The distribution volume V$_i$
 - The absorption rate KA$_i$
 
-As usual, the random effect terms $\eta$ are normally distributed with mean zero and variance $\omega$, and the $\theta$ values are considered fixed effects. However, the population level and subject level parameters do not combine additively, they combine multiplicatively. Specifically, the $g(\theta, \eta)$ functions for this model are as follows:
+As usual, the random effect terms $\eta$ are normally distributed with mean zero and standard deviation $\omega$, and the $\theta$ values are considered fixed effects. However, the population level and subject level parameters do not combine additively, they combine multiplicatively. Specifically, the $g(\theta, \eta)$ functions for this model are as follows:
 
 $$
 \begin{array}{rcl}
@@ -425,7 +427,7 @@ $ERROR
 The relevant part here is the line specifying the relationship between the pharmacokinetic function `F`, the error terms `EPS`, and the observed data `Y`. In this case it's additive, exactly in keeping with what I assumed in my toy example:
 
 $$
-y_{ij} = f(t_j, \boldsymbol\eta_i, \boldsymbol\theta, D_i) + \epsilon_{ij}
+y_{ij} = f(t_{ij}, \boldsymbol\eta_i, \boldsymbol\theta, D_i) + \epsilon_{ij}
 $$
 
 It doesn't have to be. In fact, the hands-on exercise in Lecture 2 of the tutorial I'm working through prepares three versions of this model, one with additive error, one with multiplicative error, and one with a hybrid error model that incorporates additive and multiplicative components. I'll get to that later, though probably in a future post.
@@ -448,7 +450,7 @@ When we implement the full model in Stan what we actually want to model is the d
 
 ### Modelling code
 
-There's some nuances here in how we format the data for Stan. Stan doesn't permit [ragged arrays](https://mc-stan.org/docs/stan-users-guide/ragged-data-structs.html), so we'll have to pass the observations as one long `c_obs` vector that aggregates across subjects. Within the model (see below), we'll use the `n_obs` vector that records the number of observations per subject to create break points that we can use to extract data from a single person. Here's the R code:
+There's some nuances here in how we format the data for Stan. As mentioned earlier, Stan doesn't permit [ragged arrays](https://mc-stan.org/docs/stan-users-guide/ragged-data-structs.html), so we'll have to pass the observations as one long `c_obs` vector that aggregates across subjects. Within the model (see below), we'll use the `n_obs` vector that records the number of observations per subject to create break points that we can use to extract data from a single person. Here's the R code:
 
 ```{r}
 #| label: stan-data-format
@@ -521,7 +523,34 @@ readr::write_csv(out_summary, fs::path(dir, "model1_summary.csv"))
 readr::write_csv(out_draws, fs::path(dir, "model1_draws.csv"))
 ```
 
-In what follows, I'll read data from these files when examining the behaviour of the model.
+In what follows, I'll read data from these files when examining the behaviour of the model. However, there is a slight wrinkle here...
+
+### Pinned copies of the output files
+
+The awkward thing about storing *all* the output from the MCMC sampler is that the `model1_draws.csv` file is about 200Mb in size. As such is slightly too large to store in the [github repository](https://github.com/djnavarro/quarto-blog) that contains this blog, and indeed if you look in the repo you won't find a copy of that file. That makes things tricky from a reproducibility point of view. I don't really imagine that anyone else actually needs a copy of this data (why would you????) but there *is* a chance that I might need to re-run the R code on this post without re-running the sampler. If that ever happens, I'll need a copy of this file stored somewhere. To that end, I finally got off my lazy arse, taught myself how to use the [pins](https://pins.rstudio.com/) package, created a publicly accessible pinboard on google cloud storage, and hosted a copy of the data file there:^[Not gonna lie, the only reason I finally forced myself to set this up is that, courtesy of an extremely unwise `git reset --hard` command while writing this post, I deleted the local copy of the `model1_draws.csv` file, and -- lacking any remote copy of the bloody thing -- had to rerun the entire sampler from the beginning to create a new one, wasting a lot of cpu cycles and exhausting most of my patience. Burned hands are the best teachers I guess...]
+
+```{r}
+#| label: show-pins
+board <- pins::board_url("storage.googleapis.com/djnavarro-pins/_pins.yaml")
+```
+
+So if you're following along at home -- or, much more likely -- you are future me who has lost the local copy of the data, you can read the data as follows:
+
+```{r}
+#| label: read-pins
+#| eval: false
+out_summary <- pins::pin_read(board, "warfpk_summary") |> tibble::as_tibble()
+out_draws <- pins::pin_read(board, "warfpk_draws") |> tibble::as_tibble()
+```
+
+Anyway, the main thing is that one way or another we can assume that the `out_summary` and `out_draws` tibbles are both available, so let's get back to the main thread yes?
+
+```{r}
+#| label: read-stored-data
+#| echo: false
+out_summary <- readr::read_csv("model1_summary.csv", show_col_types = FALSE)
+out_draws <- readr::read_csv("model1_draws.csv", show_col_types = FALSE)
+```
 
 ### Parameter estimates
 
@@ -530,7 +559,6 @@ Let's start by taking a look at the summary. For the time being I'm only really 
 
 ```{r}
 #| label: summary-model1
-out_summary <- readr::read_csv("model1_summary.csv", show_col_types = FALSE)
 out_summary |> dplyr::filter(
   variable |> stringr::str_detect("(theta|omega|sigma|lp)")
 )
@@ -540,7 +568,7 @@ The fact that all the R-hat values are very close to 1 suggests that my MCMC cha
 
 ```{r}
 #| label: posterior-densities
-draws <- readr::read_csv("model1_draws.csv", show_col_types = FALSE) |>
+draws <- out_draws |>
   dplyr::select(tidyselect::matches("(theta|sigma|omega|lp|chain)")) 
 
 draws
@@ -641,8 +669,7 @@ Now reassured that my model is doing the right thing, the time has come to do my
 ```{r}
 #| label: manual-summary
 #| cache: true
-fit <- "model1_draws.csv" |> 
-  readr::read_csv(show_col_types = FALSE) |>
+fit <- out_draws |> 
   dplyr::select(tidyselect::matches("c_pred")) |>
   tidyr::pivot_longer(
     cols = tidyselect::matches("c_pred"),
@@ -697,8 +724,7 @@ Let's take it a step further, and plot the observed data as a pharmacokinetic fu
 ```{r}
 #| label: pk-predictions
 #| cache: true
-prd <- "model1_draws.csv" |> 
-  readr::read_csv(show_col_types = FALSE) |>
+prd <- out_draws |>
   dplyr::select(tidyselect::matches("c_fit")) |>
   tidyr::pivot_longer(
     cols = tidyselect::matches("c_fit"),
