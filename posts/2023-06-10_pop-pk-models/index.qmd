@@ -126,7 +126,7 @@ One peculiarity of the data structure that appears to be quite standard in pharm
 warfpk |> dplyr::filter(dvid == 0)
 ```
 
-Notably, not everyone is given the same dose, and in an utterly unsurprising turn of events it turns out that the dose is calculated based on weight (which is in turn, I'm told, a proxy for the volume of distribution in systemic circulation):^[Mentally I keep implicitly assuming that volume of distribution is basically the same thing as "the amount of blood plasma in the body", but that's not actually true. Certainly it makes sense as a crude first-approximation mental model, but bodies are complicated things so the reality is messier.]
+Notably, not everyone is given the same dose, and in an utterly unsurprising turn of events it turns out that the dose is calculated based on weight (which is in turn, I'm told, a proxy for the volume of distribution in systemic circulation):
 
 ```{r}
 #| label: weight-dose
@@ -244,7 +244,7 @@ $$
 f(t, k, V, D) = \frac{D}{V} \exp(-kt)
 $$
 
-In this model, the measurement time $t$ and dose $D$ (assumed to be administered at time $t = 0$) are both part of the study design. The other two quantities, $k$ and $V$, are model parameters that can be different for every person. Because we're allowing for the possibility that the parameters can vary from person to person, we'll need notation to describe this variation. At a population level, we have a parameter vector $\boldsymbol{\theta} = (\theta_1, \theta_2)$ where -- somewhat arbitrarily -- I'll say that $\theta_1$ denotes the typical value for the elimination rate $k$, and $\theta_2$ is the typical value for the volume of distribution $V$. Since these quantities can vary from person to person, we would also -- assuming for the sake of simplicity that there is no population correlation between them^[If we wanted to consider this correlation then we'd have a full variance-covariance matrix denoted $\boldsymbol\Omega$, but I'm not going to go there in this post] -- have a variance vector $\boldsymbol{\omega} = (\omega_1, \omega_2)$. 
+In this model, the measurement time $t$ and dose $D$ (assumed to be administered at time $t = 0$) are both part of the study design. The other two quantities, $k$ and $V$, are model parameters that can be different for every person. Because we're allowing for the possibility that the parameters can vary from person to person, we'll need notation to describe this variation. At a population level, we have a parameter vector $\boldsymbol{\theta} = (\theta_1, \theta_2)$ where -- somewhat arbitrarily -- I'll say that $\theta_1$ denotes the typical value for the elimination rate $k$, and $\theta_2$ is the typical value for the volume of distribution $V$. Since these quantities can vary from person to person, we would also -- assuming for the sake of simplicity that there is no population correlation between them^[If we wanted to consider this correlation then we'd have a full variance-covariance matrix denoted $\boldsymbol\Omega$, but I'm not going to go there in this post] -- have a scale vector $\boldsymbol{\omega} = (\omega_1, \omega_2)$. 
 
 In this scenario, then, the parameters for the i-th participant would be some function of the typical values $\boldsymbol\theta$ and the random effects $\boldsymbol\eta_i$ associated with that person. I'm not certain if there's a standard notation used to describe these transformation functions, so I'll just use $g_1()$ and $g_2()$ to denote these:
 
@@ -436,24 +436,12 @@ Yay! At long last I think I know the model I need to implement.
 
 ## Implementation in Stan
 
-Last time around I wrote my ODEs using notation that made sense to me. This time around I'll try to bring my notation a little closer to the terminology used in the NONMEM control file I was working from. There are two drug amounts that we need to keep track of, the amount $\mbox{A}_g$ in the gut that has not yet been absorbed into systemic circulation, and the amount $\mbox{A}_c$ currently in circulation (in the central/only compartment). The derivatives of these two quantities with respect to time form a system of differential quations:
+### Passing the data to Stan
 
-
-$$
-\begin{array}{rcl}
-\displaystyle \frac{d\mbox{A}_g}{dt} &=& -\mbox{KA} \times \mbox{A}_{g} \\ \\
-\displaystyle \frac{d\mbox{A}_c}{dt} &=& \displaystyle \mbox{KA} \times \mbox{A}_{g} - \frac{\mbox{CL}}{\mbox{V}} \ \mbox{A}_{c}
-\end{array}
-$$
-
-When we implement the full model in Stan what we actually want to model is the drug *concentration* in the central compartment as a function of time, and for that we'll need to solve for $\mbox{A}_c$. 
-
-### Modelling code
-
-There's some nuances here in how we format the data for Stan. As mentioned earlier, Stan doesn't permit [ragged arrays](https://mc-stan.org/docs/stan-users-guide/ragged-data-structs.html), so we'll have to pass the observations as one long `c_obs` vector that aggregates across subjects. Within the model (see below), we'll use the `n_obs` vector that records the number of observations per subject to create break points that we can use to extract data from a single person. Here's the R code:
+The first issue we'll need to consider is how data should be passed from R to Stan. There's some nuances here in how we format the data for Stan. As mentioned earlier, Stan doesn't permit [ragged arrays](https://mc-stan.org/docs/stan-users-guide/ragged-data-structs.html), so we'll have to pass the observations as one long `c_obs` vector that aggregates across subjects. Within the model (see below), we'll use the `n_obs` vector that records the number of observations per subject to create break points that we can use to extract data from a single person. Here's the R code I used:
 
 ```{r}
-#| label: stan-data-format
+#| label: make-stan-data
 warfpk_obs <- warfpk[warfpk$mdv == 0, ]
 warfpk_amt <- warfpk[!is.na(warfpk$rate), ]
 
@@ -479,6 +467,50 @@ dat <- list(
   n_fit = length(t_fit)
 )
 ```
+
+The interpretation of this input is as follows:
+
+- `n_ids` is an integer indicating the number of subjects
+- `n_tot` is an integer indicating the total number of measurements (aggregating across subjects)
+- `n_obs` is an integer vector of length `n_ids` indicating the number of measurements for each person
+- `t_obs` is a numeric vector of length `n_tot` specifying the time at which a measurement was taken
+- `c_obs` is a numeric vector of length `n_tot` containing all the measurements. The data from all subjects are concatenated into this vector
+- `dose` is a numeric vector of length `n_ids` specifying the dose administered to each person
+- `t_fit` is a vector of time points for which we would like to estimate the pharamacokinetic function for each person
+- `n_fit` is an integer specfiying the length of `t_fit`
+
+Here's what the input data looks like when formatted for my Stan model:
+
+```{r}
+#| label: stan-data-format
+dat
+```
+
+### Computing the pharmacokinetic function
+
+Next, we need to think a little about the pharmacokinetics involved. The model I want to implement is a one-compartment model with first-order absorption and first-order elimination. To understand what that means, it helps to recognise that at any given point in time there are *two* drug amounts that the model needs to track: the amount of drug $\mbox{A}_g$ in the gut that has not yet been absorbed into systemic circulation, and the amount $\mbox{A}_c$ currently in circulation. 
+
+First order absorption with absorption rate KA^[My notation is a little different to what I used in the previous post. That's deliberate: last time around I wrote my model code and expressed the differential equations using notation that made sense to me. This time around I'm trying to bring my notation a little closer to the terminology used in the NONMEM control file I'm working from, in order to more closely match typical practice in the field.] means that at each moment in time some proportion KA of the drug amount in the gut $A_g$ is absorbed. Formally, this gives us the following differential equation for gut amounts:
+
+$$
+\frac{d\mbox{A}_g}{dt} = -\mbox{KA} \times \mbox{A}_{g} 
+$$
+
+The same logic applies to the drug quantity in circulation $A_c$. At each point in time it increases by whatever drug amount arrives from the gut, but it also decreases by whatever amount is eliminated. Formally we could express this in terms of an elimination rate parameter (which would be denoted KE), which would give us the following:
+
+$$
+\frac{d\mbox{A}_c}{dt} = (\mbox{KA} \times \mbox{A}_{g}) - (\mbox{KE} \times \mbox{A}_{c})
+$$
+
+However, when it comes to elimination it is more conventional to express the elimination rate as the ratio between the *clearance* (CL: volume of blood that can be completely cleared of drug per unit time), and the *volume of distibution* (V) through which the drug circulates.^[Whenever I am being lazy I have the bad habit of assuming that the volume of distribution is basically the same thing as "the amount of blood plasma in the body", but that's not actually true. Certainly it makes sense as a crude first-approximation mental model, but bodies are complicated things so the reality is messier, and the apparent volume of distribution can be large than the amount of blood in the body.] That gives is the following: 
+
+$$
+\frac{d\mbox{A}_c}{dt} = (\mbox{KA} \times \mbox{A}_{g}) - \left(\frac{\mbox{CL}}{\mbox{V}} \times \mbox{A}_{c}\right)
+$$
+Taken together, these two expressions form a system of ordinary differential equations(ODEs) that I'll have Stan solve numerically. This will give us a numerical estimate of the pharmacokinetic function $f(t_{ij}, \boldsymbol\eta_i, \boldsymbol\theta, D_i)$. Well sort of. The function $f()$ describes drug *concentrations*, but the output of the ODE solver will give us a measure of drug *amount*. So, in order to compute the pharamacokinetic function, the output of the ODE solver will need to be divided by the estimate of the volume if distribution V for each person. 
+
+
+### Modelling code
 
 Now let's have a look at the Stan code. At some point I'd like to start using [Torsten](https://metrumresearchgroup.github.io/Torsten/) for these things rather than reinventing the wheel and coding a standard compartmental model from scratch. However, I'm a bottom-up kind of person^[If you believe the testimony of my ex-boyfriends, that is.] and I find it useful to write lower-level model code myself a few times before I start relying on pre-built model code. Here's the complete Stan code for the model I implemented:
 
@@ -535,8 +567,6 @@ board <- pins::board_url("storage.googleapis.com/djnavarro-pins/_pins.yaml")
 board |> pins::pin_list()
 ```
 
-
-
 So if you're following along at home -- or, much more likely -- you are future me who has lost the local copy of the data, you can read the data as follows:
 
 ```{r}
@@ -555,9 +585,13 @@ out_summary <- readr::read_csv("model1_summary.csv", show_col_types = FALSE)
 out_draws <- readr::read_csv("model1_draws.csv", show_col_types = FALSE)
 ```
 
-### Parameter estimates
+## Model behaviour
 
-Let's start by taking a look at the summary. For the time being I'm only really interested in the population level parameters $\boldsymbol\theta$, $\boldsymbol\omega$, and $\sigma$, so I'll filter the results so that only those parameters (and the log-probability) are shown in the output:
+Now that I've fit my Stan model, it's time to take a look at what it does.
+
+### Population parameters
+
+Let's start by taking a look at a high level summary by extracting some relevant information from `out_summary`. For the time being I'm only really interested in the population level parameters $\boldsymbol\theta$, $\boldsymbol\omega$, and $\sigma$, so I'll filter the results so that only those parameters (and the log-probability) are shown in the output:
 
 
 ```{r}
@@ -662,7 +696,7 @@ draws_long |>
   )
 ```
 
-As you can see, the two versions are in pretty close agreement. There are some modest differences in the estimates of the population mean and variability in the absorption rate KA, but I'm not too concerned about that.  
+As you can see, the two versions are in pretty close agreement. There are some modest differences in the estimates of the population mean and variability in the absorption rate KA -- compared to NONMEM, the Stan version suggests the absorption rate is slightly higher on average, but also more variable across people -- but on the whole that seems like a minor discrepancy, and I'm not too concerned about it.  
 
 
 ### Model fits
@@ -810,6 +844,7 @@ Moving along in our exploration of the model... here's the empirical distributio
 #| column: page
 #| fig-width: 12
 #| fig-height: 6
+#| message: false
 pars <- out_draws |> 
   dplyr::select(tidyr::matches("^(KA|CL|V)")) |>
   tidyr::pivot_longer(
