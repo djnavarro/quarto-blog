@@ -2,7 +2,9 @@
 title: "Pins and needles"
 description: "Learning my lessons the hard way"
 date: "2023-06-12"
-categories: ["R"]
+categories: ["R", "Reproducibility"]
+image: immo-wegmann-zqO87IQK6c0-unsplash.jpg
+image-alt: An image showing two pieces of paper pinned to a board
 ---
 
 <!--------------- my typical setup ----------------->
@@ -23,15 +25,23 @@ Fuuuuuuuuuuck. I'm an idiot.
 
 Okay, that's not true. I'm not an idiot. But I what I am (or was), is a person who doesn't have a workflow in place to manage data files that don't really belong in a git repository, and I paid the price for that huge tiny mistake. Lesson learned.
 
+This is the story of [how I learned how to stop worrying and love pins](https://en.wikipedia.org/wiki/Dr._Strangelove). It's not a very thorough or detailed post. I'm trying to follow [Julia Evans' advice on blogging](https://jvns.ca/blog/2023/06/05/some-blogging-myths/) and allow myself to tell personal stories, even if those stories are incomplete or imperfect. Not every post needs to be a goddamn monograph. 
+
 ## Storing data with pins
 
-As with everything in data science, this is a problem that can be solved in many different ways. In this instance I'm working within R, which influences how I think about this. Even within R there are multiple solutions, but I'm lazy and chose to use the [pins](https://pins.rstudio.com/) package for this because I know the developers and it was the first option that came to mind. I don't really want to write a full tutorial on the pins package because I'm fairly new to it myself, but in case you don't already know pins, here's a very quick summary:
+As with everything in data science, mine is a problem that can be solved in many different ways. In this instance I'm working within R, which influences how I think about this. Even within R there are multiple solutions, but I'm lazy and chose to use the [pins](https://pins.rstudio.com/) package for this because I know the developers and it was the first option that came to mind. I don't really want to write a full tutorial on the pins package because I'm fairly new to it myself, but in case you don't already know pins, here's a very quick summary:
 
 - A **pin** is a serialised copy of an R object saved to disk along with accompanying metadata. The most obvious kind of object to store in this way is a data frame, but the general approach is broader. You can choose what format the object is stored in. For general R objects you can write to the native [rds](https://rdrr.io/r/base/readRDS.html) format or the [qs](https://github.com/traversc/qs) format. Lists can be saved as json. For rectangular objects like data frames you also have the options of writing to a csv file, [parquet](https://parquet.apache.org/), or the [arrow IPC file](https://arrow.apache.org/docs/format/Columnar.html#ipc-file-format).
 
 - Pins live within a **board**, which refers to the file storage location. This can be a folder on your local machine, or a bucket on a cloud storage provider (AWS, Azure, GCS, etc). When reading or writing a pin, you read or write to the board. Each board is associated with a manifest, a yaml file called `_pins.yaml` that lives in the root directory of the board and lists all the pins stored in the board. 
 
-There's more nuance to pins than this: pins can be versioned and given tags, for instance. But I'm not going to bother with all that here. 
+There's more nuance to pins than this: pins can be versioned and given tags, for instance. But I'm not going to bother with all that here. Instead, I'll dive straight in and illustrate a very simple workflow using pins that solves about 90% of my problems with almost no effort...
+
+<br>
+
+:::{.column-page}
+![](immo-wegmann-zqO87IQK6c0-unsplash.jpg)
+:::
 
 ## Using pins with Dropbox personal storage
 
@@ -88,14 +98,16 @@ pin_read(board_dropbox, "mpg") |> tibble::as_tibble()
 
 Yay!
 
-My job is not quite finished though. What I haven't done yet is create a manifest file for the board. Fortunately that's also easy to do:
+There's quite a bit going on under the hood, and I'm glossing over all sorts of details related to metadata, versioning and so on. There's a reason why pins doesn't simply dump the csv file into the root folder and call it a day. The extra stuff serves a purpose. But let's not worry about that for now. What matters is that it works.  
+
+Unfortunately, my job is not quite finished. What I haven't done yet is create a manifest file that summarises the content of the board. Fortunately that's also easy to do:
 
 ```{r}
 #| cache: true
 write_board_manifest(board_dropbox)
 ```
 
-This creates a `_pins.yaml` file that provides an overview of the contents of the board. The pins package doesn't automate this part of the process, so you need to call `write_board_manifest()` every time you modify the pins stored in the board. 
+This creates a `_pins.yaml` file that contains the relevant summary. The pins package doesn't automate this part of the process, so you need to call `write_board_manifest()` every time you modify the pins stored in the board. But that's pretty easy to do. 
 
 All in all, quite painless, and the really nice thing about it is that this dead-simple workflow is perfectly sufficient for my immediate needs. I can now use my `~/Dropbox/Pins` folder as the place to keep my big data files without messing up my git workflow at all. The pins package provides a suite of tools that allow me to manipulate pins, but this isn't the post for that. All I care about right now is convincing myself that yes, this actually will address my immediate concern.
 
@@ -109,7 +121,13 @@ The shortcoming of this approach is that it only works for me. Although my `~/Dr
 
 Unfortunately, it's at this point I made a tiiiiiny mistake. I decided to use Google Cloud Storage to host my buckets because that's the cloud provider I'm most familiar with... but unbeknownst to me at the time it turns out that support for GCS buckets in the pins package is a work in progress. It mostly works but there's a few features still missing, and I had to resort to a truly awful hack in order to get what I wanted. 
 
-But I'm getting ahead of myself.
+But I'm getting ahead of myself. Let's start out by creating the buckets and see what happens...
+
+<br>
+
+:::{.column-page}
+![](nicolas-brulois-EA4MvInOSy0-unsplash.jpg)
+:::
 
 
 ## Creating and configuring the storage buckets
@@ -131,7 +149,7 @@ gcloud storage buckets add-iam-policy-binding gs://djnavarro-pins/ \
   --role=roles/storage.objectViewer
 ```
 
-Cool. [Now I have a machine gun](https://youtu.be/DlQoXP2XH68)... um, sorry, a public GCS bucket. Let's use that to store my pins.
+Cool. [Now I have a machine gun](https://youtu.be/DlQoXP2XH68). Um, sorry. Now I have a public GCS bucket. Yes. That's what I meant. Let's use it to store my pins.
 
 ## Writing pins to a board on Google Cloud Storage
 
@@ -243,11 +261,22 @@ gcs_get_object("gs://djnavarro-pins/_pins.yaml") |>
   - warfpk_summary/20230610T083635Z-340c1/
 ```
 
-Okay, fair enough. That's not at all surprising, because I haven't called `write_board_manifest()` to update the manifest file yet. Unfortunately, this is the moment at which I had to resort to a terrible horrible no good very bad hack.^[Some hacks are like that. Even in Australia.]
+Okay, fair enough. That's not at all surprising, because I haven't called `write_board_manifest()` to update the manifest file yet. Unfortunately, this is the moment at which I had to resort to a [terrible horrible no good very bad hack](https://en.wikipedia.org/wiki/Alexander_and_the_Terrible,_Horrible,_No_Good,_Very_Bad_Day).^[Some hacks are like that. Even in Australia.]
+
+This is the "needles" part of my "pins and needles" story.
+
+
+<br>
+
+:::{.column-page}
+![](lisa-woakes-5FTXPrP2k3c-unsplash.jpg)
+:::
+
+
 
 ## The terrible horrible no good very bad hack
 
-There's a bit of a painful thing that follows because pins doesn't currently have working `pin_list()` method for google cloud storage. This in turn means that I can't currently use `write_board_manifest()` to write a manifest file for my board. That's a huge pain. A little browsing on github issues reassures that the devs are well aware of the problem, and addressing this is indeed on the to-do list. Unfortunately that doesn't solve my problem in the here-and-now, so while I'm waiting I decided to put together some helper functions that will be good enough for my purposes:
+There's a bit of a painful thing that follows because pins doesn't currently have working `pin_list()` method for google cloud storage. This in turn means that I can't currently use `write_board_manifest()` to write a manifest file for my board, because it relies on the `pin_list()` function to do part of the work. That's a huge pain. A little browsing on github reassures me that the [developers are well aware of the problem](https://github.com/rstudio/pins-r/pull/695), and addressing this is indeed on the to-do list. Awesome. I'm a patient person, and happy to wait for it to be addressed. Unfortunately patience doesn't solve my problem in the here-and-now, so while I'm waiting I decided to put together some helper functions that are good enough for my immediate needs. This `pin_list_gcs()` function returns a character vector with the names of my stored pins:
 
 ```{r}
 #| eval: false
@@ -259,7 +288,7 @@ pin_list_gcs <- function(board, ...) {
 }
 ```
 
-Now a little bit of evil, in which I do the thing you should never ever do:
+Now a little bit of evil, in which I do the thing you should never ever do. I'm going to mess with the internals of the pins package and overwrite its internal `pins_list.pins_board_gcs()` function. 
 
 ```{r}
 #| eval: false
@@ -267,7 +296,11 @@ unlockBinding(as.symbol("pin_list.pins_board_gcs"), getNamespace("pins"))
 assignInNamespace("pin_list.pins_board_gcs", pin_list_gcs, "pins")
 ```
 
-Next write an S3 method that allows me to write the manifest file:
+I am a terrible person. 
+
+But you knew that already, so let's move on. 
+
+My next step is to write an S3 method that allows me to write a manifest file for my :
 
 ```{r}
 #| eval: false
@@ -290,7 +323,7 @@ Now this works:
 write_board_manifest_yaml(board, manifest = pins:::make_manifest(board))
 ```
 
-We can verify that we've written the updated file. For reasons that escape me, this won't work unless you start a new session (and reauthenticate in the process), or specify the `generation` argument to `gcs_get_object()`. Otherwise you just get the old version of the manifest file. Anyway here's the result:
+We can verify that we've written the updated file. For reasons that escape me, this won't work unless you start a new session and reauthenticate in the process^[Actually, it does still work even without reauthentication if you explicitly specify the `generation` argument to `gcs_get_object()` but whatever.]. If you don't do that you'll just get the old version of the manifest file. I have no idea why. Anyway here's the result:
 
 ```{r}
 #| eval: false
@@ -338,19 +371,33 @@ gcs_list_objects(bucket = "gs://djnavarro-pins")
 
 Yup, it works. But I'm under no illusions. This is not a good workflow. Messing around with the internals of someone else's package is... bad. Very bad. I do not recommend anyone do this. This is purely a temporary fix I'm adopting for the time being while GCS support in pins is incomplete. 
 
+Okay, whatever. Let's move on, shall we? Ugly hack notwithstanding, I now have a workflow that allows me to use a public GCS bucket to store my pins. It's good enough for now, so I'll now take a look at how *other* people can read pins from this bucket.
+
 ## The read-only workflow
+
+The nice thing about cloud storage services like AWS S3 and GCS is that they provide public, human readable URLs for shared files. My `djnavarro-pins` bucket, for instance, is publicly available at `https://storage.googleapis.com/djnavarro-pins/`. Any R users who wants to use one of my pins can do so using the `pins::board_url()` function. We can create a read-only board by passing it the path to the manifest file, like this:
 
 ```{r}
 read_only_board <- board_url(
   "https://storage.googleapis.com/djnavarro-pins/_pins.yaml"
 )
+```
+
+Since this other person isn't me and doesn't know what pins are stored here, they might want to use the `pin_search()` function to get a listing of all the pins, like this:
+
+```{r}
 pin_search(read_only_board)
 ```
+
+Cool. Now that we know what pins are available, we can read the data stored in the "diamonds" pin directly into R by calling `pin_read()`:
+
 
 ```{r}
 pin_read(read_only_board, "diamonds") |>
   tibble::as_tibble()
 ```
+
+A nice thing about using `pin_read()` rather than downloading the file directly is that the pins package automatically creates a local cache of previously-downloaded pins. You don't have to download the same file over and over when re-running your code. I'm not going to go into those details here, but I will mention that it also provides functions that let you manage this cache without much difficulty. From this perspective, everything "just works". It's really quite nice. 
 
 ## Epilogue
 
