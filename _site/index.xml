@@ -27,59 +27,205 @@
 
 <!--------------- my typical setup ----------------->
 <!--------------- post begins here ----------------->
+<p>A few days ago <a href="https://youtu.be/GwQW3KW3DCc">I made a huge mistake</a>. I was working on a project that, quite rightly, I’d placed under version control. It lived within a git repository, and that git repository was hosted remotely on GitHub. That’s not the mistake: version control is a good thing. The mistake arrived when the project generated a large output files (about 300Mb in size), and because it’s not a good idea to have large files under version control<sup>1</sup> I added that file to <code>.gitignore</code>. Again, not a mistake per se, but you can see the shape of the mistake already: the large file doesn’t exist anywhere except as an untracked file in my local git repo. Bad things can happen in this situation, and lo and behold a few hours later when I messed up something else and unthinkingly called <code>git reset --hard</code> to revert to an earlier state, the file – which took about two hours to generate in the first place – vanished.</p>
+<p>Fuuuuuuuuuuck. I’m an idiot.</p>
+<p>Okay, that’s not true. I’m not an idiot. But I what I am (or was), is a person who doesn’t have a workflow in place to manage data files that don’t really belong in a git repository, and I paid the price for that huge tiny mistake. Lesson learned.</p>
+<section id="storing-data-with-pins" class="level2">
+<h2 class="anchored" data-anchor-id="storing-data-with-pins">Storing data with pins</h2>
+<p>As with everything in data science, this is a problem that can be solved in many different ways. In this instance I’m working within R, which influences how I think about this. Even within R there are multiple solutions, but I’m lazy and chose to use the <a href="https://pins.rstudio.com/">pins</a> package for this because I know the developers and it was the first option that came to mind. I don’t really want to write a full tutorial on the pins package because I’m fairly new to it myself, but in case you don’t already know pins, here’s a very quick summary:</p>
+<ul>
+<li><p>A <strong>pin</strong> is a serialised copy of an R object saved to disk along with accompanying metadata. The most obvious kind of object to store in this way is a data frame, but the general approach is broader. You can choose what format the object is stored in. For general R objects you can write to the native <a href="https://rdrr.io/r/base/readRDS.html">rds</a> format or the <a href="https://github.com/traversc/qs">qs</a> format. Lists can be saved as json. For rectangular objects like data frames you also have the options of writing to a csv file, <a href="https://parquet.apache.org/">parquet</a>, or the <a href="https://arrow.apache.org/docs/format/Columnar.html#ipc-file-format">arrow IPC file</a>.</p></li>
+<li><p>Pins live within a <strong>board</strong>, which refers to the file storage location. This can be a folder on your local machine, or a bucket on a cloud storage provider (AWS, Azure, GCS, etc). When reading or writing a pin, you read or write to the board. Each board is associated with a manifest, a yaml file called <code>_pins.yaml</code> that lives in the root directory of the board and lists all the pins stored in the board.</p></li>
+</ul>
+<p>There’s more nuance to pins than this: pins can be versioned and given tags, for instance. But I’m not going to bother with all that here.</p>
+</section>
+<section id="using-pins-with-dropbox-personal-storage" class="level2">
+<h2 class="anchored" data-anchor-id="using-pins-with-dropbox-personal-storage">Using pins with Dropbox personal storage</h2>
+<p>Okay, let’s have a look at ways to solve my problem using pins. I am by nature a lazy person who looks for the easiest solutions to my problems. In particular, I habitually look for solutions that align nicely with my existing setup. In this case, my first thought was to use Dropbox. For many years now I have organised my “personal” files<sup>2</sup> on my local machine by keeping my git repos in <code>~/GitHub</code> and keeping my files that aren’t under version control (but should still be backed up) in <code>~/Dropbox</code>. Viewed from that perspective, the solution I’m looking for is something where I can keep my git repos in <code>~/GitHub</code>, but have the large data files stored in <code>~/Dropbox</code>.</p>
+<p>This workflow is very easy to set up with pins. It’s not what I do now (more on that momentarily) but it was the first thing I tried and it works beautifully for personal use. All I have to do is create a Dropbox folder that I’ll use to store my pins (say, <code>~/Dropbox/Pins</code>), and then create a board in that folder. First, let’s make sure I have the folder:</p>
+<div class="cell" data-hash="index_cache/html/unnamed-chunk-2_7212a78f918f330c65e28bea70103cc1">
+<div class="sourceCode cell-code" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1">fs<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">dir_create</span>(<span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"~/Dropbox/Pins"</span>)</span></code></pre></div>
+</div>
+<p>Now I’ll load the pins package and create a board in that folder.</p>
+<div class="cell" data-hash="index_cache/html/unnamed-chunk-3_d11ca5376e296d9e616663ad3d885347">
+<div class="sourceCode cell-code" id="cb2" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">library</span>(pins)</span>
+<span id="cb2-2">board_dropbox <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">board_folder</span>(<span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"~/Dropbox/Pins"</span>)</span>
+<span id="cb2-3">board_dropbox</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Pin board &lt;pins_board_folder&gt;
+Path: '~/Dropbox/Pins'
+Cache size: 0</code></pre>
+</div>
+</div>
+<p>Let’s suppose I want to pin a copy of the <code>mpg</code> data from the ggplot2 package as a csv file. I’d do that by calling <code>pin_write()</code>:</p>
+<div class="cell" data-hash="index_cache/html/unnamed-chunk-4_b5e66aa3a9dce8588733a4455802cbf2">
+<div class="sourceCode cell-code" id="cb4" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">pin_write</span>(</span>
+<span id="cb4-2">  <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">board =</span> board_dropbox,</span>
+<span id="cb4-3">  <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">x =</span> ggplot2<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span>mpg,</span>
+<span id="cb4-4">  <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">name =</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"mpg"</span>,</span>
+<span id="cb4-5">  <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">type =</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"csv"</span></span>
+<span id="cb4-6">)</span></code></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Creating new version '20230613T004154Z-26aa0'
+Writing to pin 'mpg'</code></pre>
+</div>
+</div>
+<p>The <code>pin_write()</code> function allows you to supply more information and metadata than this, but – again – I’m not going to bother with all that here. The main thing for my purposes is that <code>pin_write()</code> has indeed written some files to disk:</p>
+<div class="cell" data-hash="index_cache/html/unnamed-chunk-5_b5005892aac663e22f76f64bcfb84b27">
+<div class="sourceCode cell-code" id="cb6" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1">fs<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">dir_ls</span>(<span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"~/Dropbox/Pins"</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">recurse =</span> <span class="cn" style="color: #8f5902;
+background-color: null;
+font-style: inherit;">TRUE</span>)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>/home/danielle/Dropbox/Pins/mpg
+/home/danielle/Dropbox/Pins/mpg/20230613T004154Z-26aa0
+/home/danielle/Dropbox/Pins/mpg/20230613T004154Z-26aa0/data.txt
+/home/danielle/Dropbox/Pins/mpg/20230613T004154Z-26aa0/mpg.csv</code></pre>
+</div>
+</div>
+<p>Okay that’s easy enough. The next step is to check if I can read the data back to R. That’s very easy to do with <code>pin_read()</code>. When I pass the board (<code>board_dropbox</code>) and the name of the pin (<code>"mpg"</code>) to this function, it returns the data:</p>
+<div class="cell" data-hash="index_cache/html/unnamed-chunk-6_0426e2247b6e420b3778526804575775">
+<div class="sourceCode cell-code" id="cb8" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">pin_read</span>(board_dropbox, <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"mpg"</span>) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span> tibble<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">as_tibble</span>()</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 234 × 11
+   manufacturer model  displ  year   cyl trans drv     cty   hwy fl    class
+   &lt;chr&gt;        &lt;chr&gt;  &lt;dbl&gt; &lt;int&gt; &lt;int&gt; &lt;chr&gt; &lt;chr&gt; &lt;int&gt; &lt;int&gt; &lt;chr&gt; &lt;chr&gt;
+ 1 audi         a4       1.8  1999     4 auto… f        18    29 p     comp…
+ 2 audi         a4       1.8  1999     4 manu… f        21    29 p     comp…
+ 3 audi         a4       2    2008     4 manu… f        20    31 p     comp…
+ 4 audi         a4       2    2008     4 auto… f        21    30 p     comp…
+ 5 audi         a4       2.8  1999     6 auto… f        16    26 p     comp…
+ 6 audi         a4       2.8  1999     6 manu… f        18    26 p     comp…
+ 7 audi         a4       3.1  2008     6 auto… f        18    27 p     comp…
+ 8 audi         a4 qu…   1.8  1999     4 manu… 4        18    26 p     comp…
+ 9 audi         a4 qu…   1.8  1999     4 auto… 4        16    25 p     comp…
+10 audi         a4 qu…   2    2008     4 manu… 4        20    28 p     comp…
+# ℹ 224 more rows</code></pre>
+</div>
+</div>
+<p>Yay!</p>
+<p>My job is not quite finished though. What I haven’t done yet is create a manifest file for the board. Fortunately that’s also easy to do:</p>
+<div class="cell" data-hash="index_cache/html/unnamed-chunk-7_c13794266f79fd00bbb10429918b4a5b">
+<div class="sourceCode cell-code" id="cb10" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">write_board_manifest</span>(board_dropbox)</span></code></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Manifest file written to root folder of board, as `_pins.yaml`</code></pre>
+</div>
+</div>
+<p>This creates a <code>_pins.yaml</code> file that provides an overview of the contents of the board. The pins package doesn’t automate this part of the process, so you need to call <code>write_board_manifest()</code> every time you modify the pins stored in the board.</p>
+<p>All in all, quite painless, and the really nice thing about it is that this dead-simple workflow is perfectly sufficient for my immediate needs. I can now use my <code>~/Dropbox/Pins</code> folder as the place to keep my big data files without messing up my git workflow at all. The pins package provides a suite of tools that allow me to manipulate pins, but this isn’t the post for that. All I care about right now is convincing myself that yes, this actually will address my immediate concern.</p>
+<p>Yay again! Problem solved.</p>
+<p>Well, sort of.</p>
+</section>
+<section id="making-a-huge-tiny-mistake" class="level2">
+<h2 class="anchored" data-anchor-id="making-a-huge-tiny-mistake">Making a huge tiny mistake…</h2>
+<p>The shortcoming of this approach is that it only works for me. Although my <code>~/Dropbox/Pins</code> folder is backed up, thereby ensuring I don’t lose my data files, it’s not shared with anyone else. One solution to this would of course be to share the folder. Dropbox supports that, and this would work perfectly well for small-group collaboration. If I’m working with a bunch of people on a project and we need shared copies of a data file, I could share the folder with them and everything would work for them too. But it’s not a <em>great</em> solution to the problem, and it’s not ideal if I want to create a public repository of data files that anyone can access. Yes, you <em>can</em> do that with Dropbox, but it’s not really what the service is supposed to be used for. To my mind, a better approach in that situation is to create a file storage bucket with Amazon AWS S3, or Google Cloud Storage, or whatever. If I then make that bucket publicly readable, anyone can access my pins. That seems like a much better plan to me.</p>
+<p>Unfortunately, it’s at this point I made a tiiiiiny mistake. I decided to use Google Cloud Storage to host my buckets because that’s the cloud provider I’m most familiar with… but unbeknownst to me at the time it turns out that support for GCS buckets in the pins package is a work in progress. It mostly works but there’s a few features still missing, and I had to resort to a truly awful hack in order to get what I wanted.</p>
+<p>But I’m getting ahead of myself.</p>
+</section>
 <section id="creating-and-configuring-the-storage-buckets" class="level2">
 <h2 class="anchored" data-anchor-id="creating-and-configuring-the-storage-buckets">Creating and configuring the storage buckets</h2>
-<p>I’m familiar enough with the gcloud command line that I feel comfortable creating the bucket there. There’s some <a href="https://cloud.google.com/storage/docs/creating-buckets#storage-create-bucket-cli">relevant documentation</a> to help out too, which is nice. Everything in google cloud takes place within a project, specified by project ID (in this case <code>pins-389407</code>). For my own purposes I have two buckets in my pins project: <code>djnavarro-pins</code> is where I store publicly accessible data, and <code>djnavarro-private-pins</code> is where I keep private pins. Rather than set defaults, I have a tendency to do everything explicitly, so the <code>--project</code> flag is set in each command, as is the <code>--location</code> flag used to specify that I want my data to be stored in Sydney (also known as <code>australia-southeast1</code>). Anyway:</p>
-<div class="sourceCode" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb1-1"><span class="ex" style="color: null;
+<p>Over the years I’ve done quite a bit of work using Google Cloud Platform. Small scale stuff, generally, but nevertheless I’ve had enough experience with it that I’m fairly comfortable with the <a href="https://cloud.google.com/sdk/gcloud/">gcloud</a> command line tool. So naturally, the first thing I did was create my buckets from the terminal.<sup>3</sup> This isn’t supposed to be a gcloud tutorial, but in case you’re interested there’s some <a href="https://cloud.google.com/storage/docs/creating-buckets#storage-create-bucket-cli">relevant documentation</a> that explains what I did. Everything in google cloud takes place within a project, specified by project ID (in this case <code>pins-389407</code>). For my own purposes I have two buckets in my pins project: <code>djnavarro-pins</code> is where I store publicly accessible data, and <code>djnavarro-private-pins</code> is where I keep private pins. Rather than set defaults, I have a tendency to do everything explicitly, so the <code>--project</code> flag is set in each command, as is the <code>--location</code> flag used to specify that I want my data to be stored in Sydney (also known as <code>australia-southeast1</code>). Anyway, here’s the command to create the bucket:</p>
+<div class="sourceCode" id="cb12" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb12-1"><span class="ex" style="color: null;
 background-color: null;
 font-style: inherit;">gcloud</span> storage buckets create gs://djnavarro-pins/ <span class="dt" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">\</span></span>
-<span id="cb1-2">  <span class="at" style="color: #657422;
+<span id="cb12-2">  <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">--project</span> pins-389407 <span class="dt" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">\</span></span>
-<span id="cb1-3">  <span class="at" style="color: #657422;
+<span id="cb12-3">  <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">--location</span> australia-southeast1 <span class="dt" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">\</span></span>
-<span id="cb1-4">  <span class="at" style="color: #657422;
+<span id="cb12-4">  <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">--uniform-bucket-level-access</span></span></code></pre></div>
-<p>The <code>--uniform-bucket-level-access</code> flag is used to indicate that I’m not doing fancy file-specific access control. I’m too lazy or simple-minded for that: I want one bucket to be public, and another bucket to be private. To make all files in the bucket publicly readable (<a href="https://cloud.google.com/storage/docs/access-control/making-data-public#command-line_1">relevant documentation</a>) the command I want is this:</p>
-<div class="sourceCode" id="cb2" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb2-1"><span class="ex" style="color: null;
+<p>The <code>--uniform-bucket-level-access</code> flag is used to indicate that I’m not doing fancy file-specific access control. I’m too lazy or simple-minded for that: I want one bucket to be public, and another bucket to be private. By default the buckets are private, and to make all files in the bucket publicly readable (<a href="https://cloud.google.com/storage/docs/access-control/making-data-public#command-line_1">relevant documentation</a>) the command I want is this:</p>
+<div class="sourceCode" id="cb13" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb13-1"><span class="ex" style="color: null;
 background-color: null;
 font-style: inherit;">gcloud</span> storage buckets add-iam-policy-binding gs://djnavarro-pins/ <span class="dt" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">\</span></span>
-<span id="cb2-2">  <span class="at" style="color: #657422;
+<span id="cb13-2">  <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">--member</span><span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">=</span>allUsers <span class="dt" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">\</span></span>
-<span id="cb2-3">  <span class="at" style="color: #657422;
+<span id="cb13-3">  <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">--role</span><span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">=</span>roles/storage.objectViewer</span></code></pre></div>
+<p>Cool. <a href="https://youtu.be/DlQoXP2XH68">Now I have a machine gun</a>… um, sorry, a public GCS bucket. Let’s use that to store my pins.</p>
 </section>
-<section id="a-terrible-horrible-no-good-very-bad-hack" class="level2 page-columns page-full">
-<h2 class="anchored" data-anchor-id="a-terrible-horrible-no-good-very-bad-hack">A terrible horrible no good very bad hack</h2>
-<p>Let’s say I want to pin the <code>diamonds</code> data from the ggplot2 package as a csv file. The first thing I need is an authentication token, which I can obtain with the help of the gargle package:</p>
+<section id="writing-pins-to-a-board-on-google-cloud-storage" class="level2 page-columns page-full">
+<h2 class="anchored" data-anchor-id="writing-pins-to-a-board-on-google-cloud-storage">Writing pins to a board on Google Cloud Storage</h2>
+<p>For the moment I’m going to look at this solely from my perspective: as the owner of this public bucket, how can I use it to store pins? I’m not going to concern myself with how other people can access it right now. I’ll get to that at the end of the post.</p>
+<p>Let’s say I want to pin the <code>diamonds</code> data from the ggplot2 package as a csv file. In order to write anything to my bucket, I need to autheticate with google. I find this step clunky but doable. The first thing I need to do is obtain an authentication token, which I can obtain with the help of the <a href="https://gargle.r-lib.org/">gargle</a> package:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb3" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1"><span class="fu" style="color: #4758AB;
+<div class="sourceCode cell-code" id="cb14" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb14-1"><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">library</span>(gargle)</span>
-<span id="cb3-2">scope <span class="ot" style="color: #003B4F;
+<span id="cb14-2">scope <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"https://www.googleapis.com/auth/cloud-platform"</span></span>
-<span id="cb3-3">token <span class="ot" style="color: #003B4F;
+<span id="cb14-3">token <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
 background-color: null;
@@ -87,17 +233,17 @@ font-style: inherit;">token_fetch</span>(<span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">scopes =</span> scope)</span></code></pre></div>
 </div>
-<p>This workflow is designed for interactive use so there’s a confirmation process to follow. Once that’s done I can authenticate with the googleCloudStorageR package, and I can confirm it’s working by listing the contents of the bucket:</p>
+<p>This workflow is designed for interactive use so there’s a confirmation process to follow. Once that’s done I can authenticate with the <a href="https://code.markedmondson.me/googleCloudStorageR/">googleCloudStorageR</a> package by passing the token to the <code>gcs_auth()</code> function. Once that’s done I can list the contents of my bucket with <code>gcs_list_objects()</code>:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb4" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><span class="fu" style="color: #4758AB;
+<div class="sourceCode cell-code" id="cb15" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb15-1"><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">library</span>(googleCloudStorageR)</span>
-<span id="cb4-2"><span class="fu" style="color: #4758AB;
+<span id="cb15-2"><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">gcs_auth</span>(<span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">token =</span> token)</span>
-<span id="cb4-3"><span class="fu" style="color: #4758AB;
+<span id="cb15-3"><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">gcs_list_objects</span>(<span class="at" style="color: #657422;
 background-color: null;
@@ -115,12 +261,13 @@ font-style: inherit;">"gs://djnavarro-pins"</span>)</span></code></pre></div>
 6           warfpk_summary/20230610T083635Z-340c1/data.txt 200 bytes 2023-06-10 08:38:44
 7 warfpk_summary/20230610T083635Z-340c1/warfpk_summary.csv    1.2 Mb 2023-06-10 08:38:44</code></pre>
 </div>
-<p>Now we can use the pins package as a more convenient interface:</p>
+<p>As you can see from this file listing, there are already a few pins stored in this bucket. That’s because I’d been using it in <a href="../../pop-pk-models/">my previous post</a>, which was indeed the project in which I’d made my huge mistake.</p>
+<p>The googleCloudStorageR package has quite a bit of functionality built into it, and I can read and write whatever I want to the bucket using this interface. However, what I really want to do is abstract over the low level processes using the pins package. So, very similar to what I did with my local dropbox folder, I’ll use the <code>board_gcs()</code> function to treat the <code>gs://djnavarro-pins</code> bucket as a board:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb6" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1"><span class="fu" style="color: #4758AB;
+<div class="sourceCode cell-code" id="cb17" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb17-1"><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">library</span>(pins)</span>
-<span id="cb6-2">board <span class="ot" style="color: #003B4F;
+<span id="cb17-2">board <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
 background-color: null;
@@ -128,30 +275,31 @@ font-style: inherit;">board_gcs</span>(<span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"gs://djnavarro-pins"</span>)</span></code></pre></div>
 </div>
-<p>I can write pins directly to the board like so:</p>
+<p>Because I’ve authenticated and because I have write access to the bucket, I can write my pins directly to the board using <code>pin_write()</code>. The command for a board stored as a GCS bucket is essentially identical to the command I used with my local folder earlier:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb7" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1"><span class="fu" style="color: #4758AB;
+<div class="sourceCode cell-code" id="cb18" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1"><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">pin_write</span>(</span>
-<span id="cb7-2">  board, </span>
-<span id="cb7-3">  ggplot2<span class="sc" style="color: #5E5E5E;
+<span id="cb18-2">  board, </span>
+<span id="cb18-3">  ggplot2<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">::</span>diamonds, </span>
-<span id="cb7-4">  <span class="at" style="color: #657422;
+<span id="cb18-4">  <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">name =</span> <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"diamonds"</span>, </span>
-<span id="cb7-5">  <span class="at" style="color: #657422;
+<span id="cb18-5">  <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">type =</span> <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"csv"</span></span>
-<span id="cb7-6">)</span></code></pre></div>
+<span id="cb18-6">)</span></code></pre></div>
 </div>
-<p>Under the hood the work is done by googleCloudStorageR, which whines a little about needing <code>predefinedAcl = "bucketLevel"</code>, but does get the job done. In principle I could pass this argument to <code>pin_write()</code> via the dots, but unfortunately <code>pin_write()</code> is a bit trigger happy and throws an error if I do, incorrectly guessing that the argument is misspelled. We can verify that the files have been written as follows:</p>
+<p>Under the hood the work is done by googleCloudStorageR, and when I run this commmand it whines a little about needing <code>predefinedAcl = "bucketLevel"</code>, but it’s smart enough to get the job done anyway. In principle what I should be doing to prevent the warning messages is pass this argument to <code>pin_write()</code> via the dots, but unfortunately <code>pin_write()</code> appears to be a bit trigger happy and it throws an error if I do that. As far as I can tell what’s happening is that pins is incorrectly guessing that the argument is misspelled, so for the time being I’ll just have to live with googleCloudStorageR grumbling at me.</p>
+<p>What really matters here is that it works. We can verify that the files have been written as follows:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb8" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1"><span class="fu" style="color: #4758AB;
+<div class="sourceCode cell-code" id="cb19" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb19-1"><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">gcs_list_objects</span>(<span class="at" style="color: #657422;
 background-color: null;
@@ -171,23 +319,23 @@ font-style: inherit;">"gs://djnavarro-pins"</span>)</span></code></pre></div>
 8           warfpk_summary/20230610T083635Z-340c1/data.txt 200 bytes 2023-06-10 08:38:44
 9 warfpk_summary/20230610T083635Z-340c1/warfpk_summary.csv    1.2 Mb 2023-06-10 08:38:44</code></pre>
 </div>
-<p>That works: the files for the diamonds pin have been written, but notice that the <code>_pins.yaml</code> manifest file is still 161 bytes in size. It hasn’t been update to add an entry for the diamonds data:</p>
+<p>Brilliant! It does works! The files for the diamonds pin have been written. <a href="https://youtu.be/QcCHLfVdhXg">Everything is fine</a>. Except… it isn’t. Notice that the <code>_pins.yaml</code> manifest file is still 161 bytes in size. It hasn’t been update to add an entry for the diamonds data, which we can confirm by downloading the file directly using <code>googleCloudStorageR::gcs_get_object()</code>:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb10" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1"><span class="fu" style="color: #4758AB;
+<div class="sourceCode cell-code" id="cb21" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb21-1"><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">gcs_get_object</span>(<span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"gs://djnavarro-pins/_pins.yaml"</span>) <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">|&gt;</span> </span>
-<span id="cb10-2">  yaml<span class="sc" style="color: #5E5E5E;
+<span id="cb21-2">  yaml<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">as.yaml</span>() <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">|&gt;</span></span>
-<span id="cb10-3">  <span class="fu" style="color: #4758AB;
+<span id="cb21-3">  <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">cat</span>()</span></code></pre></div>
 </div>
@@ -199,14 +347,18 @@ font-style: inherit;">cat</span>()</span></code></pre></div>
   - warfpk_draws/20230610T142202Z-5bd80/
   warfpk_summary:
   - warfpk_summary/20230610T083635Z-340c1/</code></pre>
+<p>Okay, fair enough. That’s not at all surprising, because I haven’t called <code>write_board_manifest()</code> to update the manifest file yet. Unfortunately, this is the moment at which I had to resort to a terrible horrible no good very bad hack.<sup>4</sup></p>
+</section>
+<section id="the-terrible-horrible-no-good-very-bad-hack" class="level2 page-columns page-full">
+<h2 class="anchored" data-anchor-id="the-terrible-horrible-no-good-very-bad-hack">The terrible horrible no good very bad hack</h2>
 <p>There’s a bit of a painful thing that follows because pins doesn’t currently have working <code>pin_list()</code> method for google cloud storage. This in turn means that I can’t currently use <code>write_board_manifest()</code> to write a manifest file for my board. That’s a huge pain. A little browsing on github issues reassures that the devs are well aware of the problem, and addressing this is indeed on the to-do list. Unfortunately that doesn’t solve my problem in the here-and-now, so while I’m waiting I decided to put together some helper functions that will be good enough for my purposes:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb12" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb12-1">pin_list_gcs <span class="ot" style="color: #003B4F;
+<div class="sourceCode cell-code" id="cb23" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb23-1">pin_list_gcs <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> <span class="cf" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">function</span>(board, ...) {</span>
-<span id="cb12-2">  googleCloudStorageR<span class="sc" style="color: #5E5E5E;
+<span id="cb23-2">  googleCloudStorageR<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
 background-color: null;
@@ -219,7 +371,7 @@ background-color: null;
 font-style: inherit;">$</span>name <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">|&gt;</span> </span>
-<span id="cb12-3">    <span class="fu" style="color: #4758AB;
+<span id="cb23-3">    <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">grep</span>(<span class="at" style="color: #657422;
 background-color: null;
@@ -234,7 +386,7 @@ background-color: null;
 font-style: inherit;">TRUE</span>) <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">|&gt;</span> </span>
-<span id="cb12-4">    <span class="fu" style="color: #4758AB;
+<span id="cb23-4">    <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">gsub</span>(<span class="at" style="color: #657422;
 background-color: null;
@@ -249,14 +401,14 @@ background-color: null;
 font-style: inherit;">x =</span> _) <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">|&gt;</span></span>
-<span id="cb12-5">    <span class="fu" style="color: #4758AB;
+<span id="cb23-5">    <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">unique</span>()</span>
-<span id="cb12-6">}</span></code></pre></div>
+<span id="cb23-6">}</span></code></pre></div>
 </div>
 <p>Now a little bit of evil, in which I do the thing you should never ever do:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb13" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1"><span class="fu" style="color: #4758AB;
+<div class="sourceCode cell-code" id="cb24" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb24-1"><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">unlockBinding</span>(<span class="fu" style="color: #4758AB;
 background-color: null;
@@ -267,7 +419,7 @@ background-color: null;
 font-style: inherit;">getNamespace</span>(<span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"pins"</span>))</span>
-<span id="cb13-2"><span class="fu" style="color: #4758AB;
+<span id="cb24-2"><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">assignInNamespace</span>(<span class="st" style="color: #20794D;
 background-color: null;
@@ -277,54 +429,54 @@ font-style: inherit;">"pins"</span>)</span></code></pre></div>
 </div>
 <p>Next write an S3 method that allows me to write the manifest file:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb14" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb14-1">write_board_manifest_yaml.pins_board_gcs <span class="ot" style="color: #003B4F;
+<div class="sourceCode cell-code" id="cb25" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb25-1">write_board_manifest_yaml.pins_board_gcs <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> <span class="cf" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">function</span>(board, manifest, ...) {</span>
-<span id="cb14-2">  temp_file <span class="ot" style="color: #003B4F;
+<span id="cb25-2">  temp_file <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> withr<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">local_tempfile</span>()</span>
-<span id="cb14-3">  yaml<span class="sc" style="color: #5E5E5E;
+<span id="cb25-3">  yaml<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">write_yaml</span>(manifest, <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">file =</span> temp_file)</span>
-<span id="cb14-4">  googleCloudStorageR<span class="sc" style="color: #5E5E5E;
+<span id="cb25-4">  googleCloudStorageR<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">gcs_upload</span>(</span>
-<span id="cb14-5">    <span class="at" style="color: #657422;
+<span id="cb25-5">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">file =</span> temp_file, </span>
-<span id="cb14-6">    <span class="at" style="color: #657422;
+<span id="cb25-6">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">bucket =</span> board<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">$</span>bucket, </span>
-<span id="cb14-7">    <span class="at" style="color: #657422;
+<span id="cb25-7">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">type =</span> <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"text/yaml"</span>,</span>
-<span id="cb14-8">    <span class="at" style="color: #657422;
+<span id="cb25-8">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">name =</span> <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"_pins.yaml"</span></span>
-<span id="cb14-9">  )</span>
-<span id="cb14-10">}</span></code></pre></div>
+<span id="cb25-9">  )</span>
+<span id="cb25-10">}</span></code></pre></div>
 </div>
 <p>Now this works:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb15" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb15-1"><span class="fu" style="color: #4758AB;
+<div class="sourceCode cell-code" id="cb26" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb26-1"><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">write_board_manifest_yaml</span>(board, <span class="at" style="color: #657422;
 background-color: null;
@@ -336,21 +488,21 @@ font-style: inherit;">make_manifest</span>(board))</span></code></pre></div>
 </div>
 <p>We can verify that we’ve written the updated file. For reasons that escape me, this won’t work unless you start a new session (and reauthenticate in the process), or specify the <code>generation</code> argument to <code>gcs_get_object()</code>. Otherwise you just get the old version of the manifest file. Anyway here’s the result:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb16" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb16-1"><span class="fu" style="color: #4758AB;
+<div class="sourceCode cell-code" id="cb27" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb27-1"><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">gcs_get_object</span>(<span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"gs://djnavarro-pins/_pins.yaml"</span>) <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">|&gt;</span> </span>
-<span id="cb16-2">  yaml<span class="sc" style="color: #5E5E5E;
+<span id="cb27-2">  yaml<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">as.yaml</span>() <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">|&gt;</span></span>
-<span id="cb16-3">  <span class="fu" style="color: #4758AB;
+<span id="cb27-3">  <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">cat</span>()</span></code></pre></div>
 </div>
@@ -366,7 +518,7 @@ font-style: inherit;">cat</span>()</span></code></pre></div>
   - warfpk_summary/20230610T083635Z-340c1/</code></pre>
 <p>Similarly, if we now list the contents of the bucket we can see that it’s all been updated:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb18" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1"><span class="fu" style="color: #4758AB;
+<div class="sourceCode cell-code" id="cb29" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb29-1"><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">gcs_list_objects</span>(<span class="at" style="color: #657422;
 background-color: null;
@@ -386,20 +538,21 @@ font-style: inherit;">"gs://djnavarro-pins"</span>)</span></code></pre></div>
 8           warfpk_summary/20230610T083635Z-340c1/data.txt 200 bytes 2023-06-10 08:38:44
 9 warfpk_summary/20230610T083635Z-340c1/warfpk_summary.csv    1.2 Mb 2023-06-10 08:38:44</code></pre>
 </div>
+<p>Yup, it works. But I’m under no illusions. This is not a good workflow. Messing around with the internals of someone else’s package is… bad. Very bad. I do not recommend anyone do this. This is purely a temporary fix I’m adopting for the time being while GCS support in pins is incomplete.</p>
 </section>
 <section id="the-read-only-workflow" class="level2">
 <h2 class="anchored" data-anchor-id="the-read-only-workflow">The read-only workflow</h2>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb20" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb20-1">read_only_board <span class="ot" style="color: #003B4F;
+<div class="sourceCode cell-code" id="cb31" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb31-1">read_only_board <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">board_url</span>(</span>
-<span id="cb20-2">  <span class="st" style="color: #20794D;
+<span id="cb31-2">  <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"https://storage.googleapis.com/djnavarro-pins/_pins.yaml"</span></span>
-<span id="cb20-3">)</span>
-<span id="cb20-4"><span class="fu" style="color: #4758AB;
+<span id="cb31-3">)</span>
+<span id="cb31-4"><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">pin_search</span>(read_only_board)</span></code></pre></div>
 <div class="cell-output cell-output-stdout">
@@ -413,14 +566,14 @@ font-style: inherit;">pin_search</span>(read_only_board)</span></code></pre></di
 </div>
 </div>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb22" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb22-1"><span class="fu" style="color: #4758AB;
+<div class="sourceCode cell-code" id="cb33" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb33-1"><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">pin_read</span>(read_only_board, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"diamonds"</span>) <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">|&gt;</span></span>
-<span id="cb22-2">  tibble<span class="sc" style="color: #5E5E5E;
+<span id="cb33-2">  tibble<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
 background-color: null;
@@ -445,12 +598,23 @@ font-style: inherit;">as_tibble</span>()</span></code></pre></div>
 </section>
 <section id="epilogue" class="level2">
 <h2 class="anchored" data-anchor-id="epilogue">Epilogue</h2>
-<p>As a general long-term strategy, this workflow is <em>terrible</em> and I have no intention whatsoever of relying on it. Under no circumstances is it a good idea to rely on a method that fucks around with the internals of a package. This is only a temporary hack I’m relying on while waiting for the pins package to support google cloud buckets more completely.</p>
+<p>On the whole I’m very happy with pins. It solves a real problem I have, and the interface is nice. I’ll probably use it for other things in the future. The specific issue I ran into with GCS boards is an annoyance, but one that I’m pretty certain will vanish as GCS support in pins matures. No big deal.</p>
+<p>That being said, because I am very uncomfortable with the fact that I’ve published my terrible horrible no good very bad hack to the internet, I will say it agains… as a general long-term strategy, my workflow is <em>terrible</em> and I have no intention whatsoever of relying on it. Nobody else should rely on my terrible horrible no good very bad hack. I implemented it as a hotfix, nothing else. Under no circumstances is it wise to rely on a method that fucks around with the internals of a package.</p>
+<p>Anyways… that’s about all I had to say really.</p>
 
 
 </section>
 
-<div id="quarto-appendix" class="default"><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div id="quarto-reuse" class="quarto-appendix-contents"><div><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2023,
+
+<div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
+
+<ol>
+<li id="fn1"><p>Indeed, GitHub won’t let you push a file that large to the remote repository unless you use large file storage, which is not a thing I want to do.↩︎</p></li>
+<li id="fn2"><p>In this case what I really mean by “personal” isn’t that the files are sensitive in any way, just that I’m not trying to share them with anyone else. My workflow is designed to allow <em>me</em> to reproduce anything I’ve done in the past if my laptop mysteriously catches fire. At this point I’m not at all concerned about whether anyone else can reproduce it.↩︎</p></li>
+<li id="fn3"><p>As a disclaimer: I am <em>not</em> a fan of so-called “command line bullshittery”. There’s nothing special about working from the command line, and I feel obliged to point out that you don’t actually need to use the gcloud CLI to do any of this. The google cloud console lets you do the exact same thing with a GUI. No big deal. If that approach feels easier to you, go for it!↩︎</p></li>
+<li id="fn4"><p>Some hacks are like that. Even in Australia.↩︎</p></li>
+</ol>
+</section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div id="quarto-reuse" class="quarto-appendix-contents"><div><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2023,
   author = {Navarro, Danielle},
   title = {Pins and Needles},
   date = {2023-06-12},
