@@ -1,0 +1,160 @@
+---
+title: "A little ANSI trickery"
+description: "Fun and games with asciicast and cli"
+date: "2023-06-14"
+categories: ["R"]
+---
+
+<!--------------- my typical setup ----------------->
+
+```{r}
+#| label: setup
+#| include: false
+wide <- 136
+narrow <- 76
+options(width = narrow)
+cache_images <- TRUE
+set.seed(1)
+```
+
+<!--------------- post begins here ----------------->
+
+
+```{r}
+#| label: asciicast-setup
+#| include: false
+#| cache: false
+knitr::opts_chunk$set(
+  collapse = FALSE,
+  comment = "",
+  out.width = "100%",
+  cache = TRUE,
+  asciicast_knitr_output = "html"
+)
+
+asciicast::init_knitr_engine(
+  echo = TRUE,
+  echo_input = FALSE,
+  same_process = TRUE,
+  startup = quote({
+    library(cli)
+    options(
+      cli.num_colors = cli::truecolor,
+      asciicast_theme = list(background = c(255, 255, 255))
+    )
+    set.seed(1)
+  })
+)
+```
+
+On mastodon today I wrote cute little [post](https://fosstodon.org/@djnavarro/110540314955265024) showing what my R startup message currently looks like:
+
+<p align="center" style="padding: 10px;">
+<iframe src="https://fosstodon.org/@djnavarro/110540314955265024/embed" class="mastodon-embed" style="max-width: 100%; border: 0" width="400" allowfullscreen="allowfullscreen"></iframe><script src="https://fosstodon.org/embed.js" async="async"></script>
+</p>
+
+In the replies, I included the code showing how to generate the rainbow strip that appears at the bottom of the startup message. Calling this `rainbow_strip()` function from the R console will give you the result you're looking for:
+
+```{r}
+rainbow_strip <- function() {
+  c("#e50000", "#ff8d00", "#ffee00", "#028121", "#004cff", "#770088") |>
+    purrr::map(cli::make_ansi_style) |>
+    purrr::walk(~ cat(.x(paste0(rep("\u2583", 6), collapse = ""))))
+}
+```
+
+```{asciicast}
+#| include: false
+rainbow_strip <- function() {
+  c("#e50000", "#ff8d00", "#ffee00", "#028121", "#004cff", "#770088") |>
+    purrr::map(cli::make_ansi_style) |>
+    purrr::walk(~ cat(.x(paste0(rep("\u2583", 6), collapse = ""))))
+}
+```
+
+The code isn't very complicated, but it does rely on a few tricks. The most important trick is the one that occurs on the second line, in which I use the [cli](about:blank) package to define a set of six styles, each of which colours the text in one of the colours from the LGBTIQ+ pride flag.^[In the post on Mastodon I used `crayon::make_style
+()` rather than `cli::make_ansi_style()`, but they do the same thing. After I wrote the post I remembered that the crayon package has been superseded by cli, so it's generally better to use the cli version instead.] Each of these six styles is then applied to the UTF-8 character^[In the source code I use `"\u2583"` to produce the UTF-8 character `"▃"`.] string `"▃▃▃▃▃▃"`  and the results are concatenated in the output. It's very pretty. But suppose I wanted to reproduce the style out output within a quarto document like this one. Alas, it does not work:
+
+```{r}
+rainbow_strip()
+```
+
+Hm. Well that's annoying. But just to be sure, let's try it again.
+
+```{asciicast}
+rainbow_strip()
+```
+
+Say what? It works the second time, but not the first? Peculiar. Someone -- possibly me?^[Definitely me.] -- must be engaged in some trickery that isn't obvious from first inspection. 
+
+## The trickery revealed
+
+If you were to take a look at the source code for this quarto document, the thing you'd immediately notice is that while both of these two code chunks contain R code, one of them is explicitly an R chunk and the other is... not. Here's the first one again, with the quarto code chunk shown:
+
+```{r}
+#| echo: fenced
+rainbow_strip()
+```
+
+The second one, however, is tagged as an "asciicast" code chunk. It still executes the R code, but something extra is going on when the code runs, because now it works...
+
+```{asciicast}
+#| include: false
+# I have no idea why I have to do this again... the same_process argument
+# ought to mean I don't have to. Siiiiiiiigh.
+rainbow_strip <- function() {
+  c("#e50000", "#ff8d00", "#ffee00", "#028121", "#004cff", "#770088") |>
+    purrr::map(cli::make_ansi_style) |>
+    purrr::walk(~ cat(.x(paste0(rep("\u2583", 6), collapse = ""))))
+}
+```
+
+```{asciicast}
+#| echo: fenced
+rainbow_strip()
+```
+
+The thing that makes this all work is the [asciicast](https://r-lib.github.io/asciicast/) package. Typically, the asciicast package is used to create screencast from R code. I've used it before on this blog, actually. When I wrote the ["pretty little CLIs"](/pretty-little-clis/) post about the cli package, I used asciicast to create all the animations that appear in the post. However, you can also use asciicast in conjunction with the [knitr](https://yihui.org/knitr/) engine that powers the code execution in quarto.^[I mean, that's assuming you're using knitr as the engine, which I am in this post. There's nothing stopping you from using jupyter as the execution engine, which I've done in the past for python-focused posts.]
+
+Here's the code chunk I used to set this up:
+
+```{r}
+#| echo: fenced
+knitr::opts_chunk$set(
+  collapse = FALSE,
+  comment = "",
+  out.width = "100%",
+  cache = TRUE,
+  asciicast_knitr_output = "html"
+)
+
+asciicast::init_knitr_engine(
+  echo = TRUE,
+  echo_input = FALSE,
+  same_process = TRUE,
+  startup = quote({
+    library(cli)
+    options(
+      cli.num_colors = cli::truecolor,
+      asciicast_theme = list(background = c(255, 255, 255))
+    )
+    set.seed(1)
+  })
+)
+```
+
+The first command sets the knitr options for R code chunks. The important line here is the one that sets `asciicast_knitr_output = "html"`, which ensures that asciicast produces HTML output. If you don't set this, the output from asciicast chunks will be rendered as images rather than HTML. The second line does what you might expect: calling `asciicast::init_knitr_engine()` initialises the asciicast knitr engine.
+
+Here's a simple tibble rendered in the usual way:
+
+```{r}
+tibble::tibble(x = 1:3, y = letters[1:3])
+```
+
+Here's the same tibble rendered with the asciicast knitr engine:
+
+```{asciicast}
+tibble::tibble(x = 1:3, y = letters[1:3])
+```
+
+
