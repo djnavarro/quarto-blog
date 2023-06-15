@@ -1,0 +1,233 @@
+---
+title: "On tabulizer and living in dark times"
+description: "It was the best of times, it was the worst of times. It was the age of lovely ropensci tools, it was the age of internally displaced transgender people in the United States. It was indeed the season of light and the season of darkness"
+date: "2023-06-15"
+categories: ["R", "Data Wrangling"]
+---
+
+<!--------------- my typical setup ----------------->
+
+```{r}
+#| label: setup
+#| include: false
+very_wide <- 500
+wide <- 136
+narrow <- 76
+options(width = narrow)
+cache_images <- TRUE
+set.seed(1)
+```
+
+<!--------------- post begins here ----------------->
+
+
+## To make cheese, we must first create the universe
+
+Andrew Collier has us covered:
+
+https://datawookie.dev/blog/2018/02/installing-rjava-on-ubuntu/
+
+Install the java runtime environment and the java development kit.
+
+``` bash
+sudo apt-get install -y default-jre default-jdk
+```
+
+Next we have to make sure R knows where to find Java:
+
+``` bash
+sudo R CMD javareconf
+```
+
+Only now may we install the package:
+
+``` r
+install.packages("rJava")
+```
+
+You will need to restart RStudio after doing this, apparently.
+
+## Let there be tabulizer
+
+https://docs.ropensci.org/tabulizer/
+
+``` r
+remotes::install_github(c("ropensci/tabulizerjars", "ropensci/tabulizer"))
+```
+
+Let's see if it's working
+
+```{r}
+library(tabulizer)
+pdf_file <- system.file("examples", "data.pdf", package = "tabulizer")
+pdf_tabs <- extract_tables(pdf_file)
+str(pdf_tabs)
+```
+
+We have a list of tables:
+
+```{r}
+mat <- pdf_tabs[[1]]
+mat[1:10, ]
+```
+
+Use the first row to set the column names:
+
+```{r}
+colnames(mat) <- mat[1, ]
+mat <- mat[-1, ]
+mat[1:10, ]
+```
+
+Load some data-wrangling packages:
+
+```{r}
+#| message: false
+library(dplyr)
+library(tidyr)
+library(tibble)
+```
+
+```{r}
+mat |> 
+  as_tibble() |>
+  mutate(across(everything(), as.numeric))
+```
+
+## Real life examples never work right the first time
+
+https://www.erininthemorning.com/p/us-internal-refugee-crisis-130-260k
+
+The data source is this article:
+
+https://www.dataforprogress.org/blog/2023/6/8/lgbtq-adults-do-not-feel-safe-and-do-not-think-the-democratic-party-is-doing-enough-to-protect-their-rights
+
+The summary tables from the survey are in a linked pdf file, saved locally as `dfp_lgbtq_survey.pdf`. Try to automatically extract tables from page 2: 
+
+```{r}
+#| label: extract-table-bad
+dfp_pdf <- "dfp_lgbtq_survey.pdf"
+dfp_tabs <- extract_tables(dfp_pdf, pages = 2)
+dfp_tabs
+```
+
+Okay, no good. Let's do it manually.
+
+## It's a whole journey sometimes
+
+```{r}
+get_page_dims(dfp_pdf)
+```
+
+Little bit of tinkering and guessing, but once you get the coordinates about right, it parses the table reasonably well. Not perfect, but we can work with this!
+
+```{r}
+#| echo: false
+options(width = very_wide)
+```
+
+```{r}
+#| label: extract-table-good
+#| eval: false
+mat <- extract_tables(
+  file = dfp_pdf, 
+  pages = 2, 
+  guess = FALSE,
+  area = list(c(250, 0, 450, 595))
+)[[1]]
+
+mat
+```
+
+```{r}
+#| echo: false
+#| column: page
+#| label: extract-table-good
+```
+
+
+Split-apply-combine. First the split:
+
+```{r}
+#| label: split-apply-combine
+#| eval: false
+# split into a list of matrices, each corresponding to a row 
+# in the final table
+mat <- lapply(
+  list(1:5, 6:8, 9:11, 12:14, 15, 16), 
+  \(rows) {
+    if(length(rows) == 1) return(matrix(mat[rows,], nrow = 1))
+    mat[rows,]
+  }
+)
+
+# convert each matrix into a character vector for the row
+mat <- lapply(
+  mat, 
+  \(x) {
+    apply(x, 2, \(y) {as.vector(paste(y, collapse = " "))})
+  }
+)
+
+# combine back into a character matrix
+mat <- matrix(unlist(mat), nrow = length(mat), byrow = TRUE) 
+mat
+```
+
+```{r}
+#| echo: false
+#| column: page
+#| label: split-apply-combine
+```
+
+
+Convert first row to column names:
+
+```{r}
+colnames(mat) <- mat[1, ]
+mat <- mat[-1, ]
+```
+'
+Now load handy packages:
+
+```{r}
+#| message: false
+library(dplyr)
+library(tidyr)
+library(tibble)
+library(janitor)
+```
+
+Convert to tibble with clean names:
+
+
+```{r}
+#| echo: false
+options(width = wide)
+```
+
+```{r}
+#| label: make-data-frame
+#| eval: false
+dat <- mat |> 
+  as_tibble() |>
+  clean_names() |>
+  rename(
+    "black" = "black_or_african_american",
+    "hispanic" = "hispanic_or_latino_a", 
+    "trans" = "identifies_as_transgender",
+    "not_trans" = "does_not_identify_as_transgender"
+  ) |>
+  mutate(across(!response, \(x) {as.numeric(gsub(",", "", x))}))
+
+dat
+```
+
+```{r}
+#| echo: false
+#| column: page
+#| label: make-data-frame
+```
+
+
+
