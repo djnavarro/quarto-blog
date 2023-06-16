@@ -1,0 +1,259 @@
+---
+title: "Extracting tables from pdf files with tabulizer"
+description: "Something nicer than the last post"
+date: "2023-06-16"
+categories: ["R", "Data Wrangling"] 
+image: dimitra-peppa--abBaVOMsBk-unsplash.jpg
+image-alt: Photo of many small white tables in an outdoor courtyard
+--- 
+
+<!--------------- my typical setup ----------------->
+
+```{r}
+#| label: setup
+#| include: false
+very_wide <- 500
+wide <- 136
+narrow <- 76
+options(width = narrow)
+cache_images <- TRUE
+set.seed(1)
+```
+
+<!--------------- post begins here ----------------->
+
+In the last post I talked about [something very grim](/dark-times/), and to be honest it's not at all what wanted to be writing about yesterday. My intention when I woke up yesterday was to write about [tabulizer](https://docs.ropensci.org/tabulizer/), an R package you can use to extract tables from a pdf document. This isn't my favourite of data wrangling tasks: pdf is not a very good format in which to store data, but it's awfully common to find yourself in a situation where the data you want to work with exists only as a table in a pdf document. Because this is a thing that happens, it's nice to have tools that make it a little easier. 
+
+## To extract a table, we must first create the universe
+
+The tabulizer package works by supplying bindings to [tabula-java](https://github.com/tabulapdf/tabula-java/), a java library for extracting tables from pdfs. So if you want tabulizer to work in R you need a working installation of Java, and you need to have the [rJava](https://github.com/s-u/rJava) package to provide the R-to-Java bindings. 
+
+My experience in the past has been that getting all this setup can be a bit finicky. Happily for me, I'm on Ubuntu and [Andrew Collier has a blog post](https://datawookie.dev/blog/2018/02/installing-rjava-on-ubuntu/) that walks you through the process step by step. Following his guide, my first step was to install the Java runtime environment and the Java development kit:
+
+``` bash
+sudo apt-get install -y default-jre default-jdk
+```
+
+This worked smoothly, so I moved onto the next step and ensured that R knows where to find Java:
+
+``` bash
+sudo R CMD javareconf
+```
+
+Only now is it possible to install the rJava package:
+
+``` r
+install.packages("rJava")
+```
+
+Andrew's post suggests that you need to restart RStudio after doing this, so I did that too. Having done so, I could finally install the tabulizer package itself:
+
+``` r
+remotes::install_github(c("ropensci/tabulizerjars", "ropensci/tabulizer"))
+```
+
+## Let there be tables
+
+Now that I have the tabulizer package installed, I'll load it along with the other packages I'll be using in this post:
+
+```{r}
+#| message: false
+library(tabulizer)
+library(dplyr)
+library(tidyr)
+library(tibble)
+library(purrr)
+library(janitor)
+```
+
+To check that it works, I'll need a pdf file to work with. As a convenience, the tabulizer package comes with a bundled "data.pdf" file that we can use for this purpose:
+
+```{r}
+pdf_data <- system.file("examples", "data.pdf", package = "tabulizer")
+```
+
+I've embedded a copy of the "data.pdf" file in this post, and as you can see it's very simple test case (by design). The file contains four tables, and only those four tables:
+
+<br>
+<object data="data.pdf" type="application/pdf" width="100%" height="500px" style="padding:10px">
+  <p>Unable to display PDF file. <a href="data.pdf">Download</a> instead.</p>
+</object>
+<br>
+    
+We can use this data file as a way to check that the package works and does what we expect. The workhorse function in the package is `extract_tables()`. We pass it the path to the pdf file as the first argument, and use the various other arguments to provide details about how the file should be processed. In this case, the only other argument I'll specify is `output = "data.frame"`, which tells the `extract_tables()` function to return a list of data frames rather than a list of matrices (the default behaviour). Let's see if it's working:
+
+```{r}
+pdf_tables <- pdf_data |> 
+  extract_tables(output = "data.frame") |>
+  map(as_tibble)
+
+pdf_tables
+```
+
+That looks nice. With very little effort we've extracted all four tables from the pdf file, and returned a list of tibbles containing the data. Yay! 🎉
+
+## Wild caught pdf files are trickier to work with
+
+Okay, let's try a harder example. One of the two reports I referred to in yesterdays blog post is a survey of LGBTQ people conducted by [Data For Progress](https://www.dataforprogress.org/). Unlike the test file, it contains additional text that is not part of any table, and the tables within the report have a lot of fancier formatting that isn't present in the test file. I've cached a local copy of the pdf file as "dfp_lgbtq_survey.pdf", and you can take a look yourself to see what we're working with this time:
+
+<br>
+<object data="dfp_lgbtq_survey.pdf" type="application/pdf" width="100%" height="500px" style="padding:10px">
+  <p>Unable to display PDF file. <a href="dfp_lgbtq_survey.pdf">Download</a> instead.</p>
+</object>
+<br>
+
+The data I used in that post comes from question 4, so I'll try to extract the data for that table from the pdf file. This turns out to be a little harder to do. My first attempt tried to automatically pull all the tables from the second page by setting `pages = 2`, and this is what happened: 
+
+```{r}
+#| label: extract-table-bad
+pdf_file <- "dfp_lgbtq_survey.pdf"
+extract_tables(pdf_file, pages = 2)
+```
+
+Okay, that's definitely not the data we want. To make this work we're going to have to give `extract_tables()` a little more information. One way to do this is to explicitly specify the `area` of the pdf file that contains the table to be extracted. To that end, it's helpful to first call the `get_page_dims()` function, which gives us the dimensions of each page in the pdf document:
+
+```{r}
+get_page_dims(pdf_file)
+```
+
+Now that we have the dimensions for each page we can specify a rectangular region as a vector containing the top, left, bottom and right coordinates of the rectangle:
+
+```{r}
+region <- c(250, 0, 450, 595)
+```
+
+The command we want looks like this:
+
+```{r}
+#| echo: false
+options(width = very_wide)
+```
+
+```{r}
+#| label: extract-table-good
+mat <- extract_tables(
+  file = pdf_file, 
+  pages = 2, 
+  guess = FALSE,
+  area = list(region)
+)[[1]]
+```
+
+This time around, in addition to setting `pages = 2`, we've set `guess = FALSE` in order to stop `extract_tables()` from trying to automatically detect regions containing tabular data, and also passed a list of regions (in this case just the one region) as the `area` argument, thereby telling `extract_tables()` to look in that specific part of the document. 
+
+Let's take a look at the result:
+
+```{r}
+#| eval: false
+#| label: show-mat
+mat
+```
+
+```{r}
+#| echo: false
+#| column: page
+#| label: show-mat
+```
+
+
+It's not quite organised the way we want, but it's definitely the right data.
+
+Even better, you don't actually have to do all this messing about trying to figure out the precise region containing the table. If you have the [Shiny](https://shiny.posit.co/) and [miniUI](https://github.com/rstudio/miniUI) packages installed, you can work interactively using a command like this:
+
+```{r}
+#| eval: false
+extract_areas("dfp_lgbtq_survey.pdf", pages = 2)
+```
+
+After using click and drag to select the region of the page containing the table, R returns the same data contained in the `mat` matrix shown earlier. 
+
+
+## Cleaning the table
+
+Once we have the data in this matrix form, it's slightly tedious to wrangle it into the format we want, but it's not conceptually difficult once we have a few helper functions to make our lives easier. The first step is to split the matrix into a list of matrices, each of which contains the data that should belong in a single row of the final data set. The `row_split()` function below takes a matrix as input, and splits it up into a list of matrices specified by the list argument `rows`, where each element of `rows` is a vector containing the indices of the rows that should be included in the relevant element of the output: 
+
+```{r}
+#| eval: false
+#| label: row-split
+row_split <- function(x, rows) {
+  lapply(rows, \(r) {
+    if(length(r) == 1) return(matrix(x[r, ], nrow = 1))
+    x[r, ]
+  })
+}
+groups <- list(1:5, 6:8, 9:11, 12:14, 15, 16)
+
+mat_split <- row_split(mat, rows = groups)
+mat_split
+```
+
+```{r}
+#| column: page
+#| label: row-split
+#| echo: false
+```
+
+The second helper function is `col_paste()` which takes a matrix with one or more rows as input and collapses it to a vector by pasting the contents of all cells in the same column together:
+
+```{r}
+#| echo: false
+options(width = narrow)
+```
+
+```{r}
+#| label: row-paste
+col_paste <- function(x, ...) {
+  apply(x, 2, \(y) {as.vector(paste(y, ...))})
+}
+```
+
+To illustrate the idea, let's take `mat_split[[1]]`, a five-row matrix that contains the data that should eventually become our column names, and convert it to a character vector using `col_paste()`
+
+```{r}
+col_paste(mat_split[[1]], collapse = " ")
+```
+
+Finally, we can use the `row_combine()` function below that takes a list of vectors and combines them into a matrix.
+
+```{r}
+row_combine <- function(x, ...) {
+  matrix(unlist(x), nrow = length(x), byrow = TRUE)
+}
+```
+
+Equipped with these helpers, the following pipeline takes the raw output `mat` and converts it into a tibble `dat` containing the data in the format we want it to be:
+
+```{r}
+#| echo: false
+options(width = wide)
+```
+
+```{r}
+#| label: make-data-frame
+#| eval: false
+dat <- mat |> 
+  row_split(groups) |>                         # split into list of matrices
+  map(\(x) {col_paste(x, collapse = " ")}) |>  # paste into character vector
+  row_combine() |>                             # combine vectors into one matrix
+  as_tibble(.name_repair = "minimal") |>       # convert to tibble
+  row_to_names(row_number = 1) |>              # use first row as names
+  clean_names() |>                             # clean the names
+  rename(                                      # shorten some names
+    "black" = "black_or_african_american",
+    "hispanic" = "hispanic_or_latino_a", 
+    "trans" = "identifies_as_transgender",
+    "not_trans" = "does_not_identify_as_transgender"
+  ) |>
+  mutate(across(!response, \(x) {as.numeric(gsub(",", "", x))})) # numeric data
+
+dat
+```
+
+```{r}
+#| echo: false
+#| column: page
+#| label: make-data-frame
+```
+
+Et voilà!
+

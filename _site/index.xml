@@ -15,7 +15,655 @@
 <link>https://blog.djnavarro.net/index.html</link>
 </image>
 <generator>quarto-1.3.340</generator>
-<lastBuildDate>Wed, 14 Jun 2023 14:00:00 GMT</lastBuildDate>
+<lastBuildDate>Thu, 15 Jun 2023 14:00:00 GMT</lastBuildDate>
+<item>
+  <title>Extracting tables from pdf files with tabulizer</title>
+  <dc:creator>Danielle Navarro</dc:creator>
+  <link>https://blog.djnavarro.net/posts/2023-06-16_tabulizer/index.html</link>
+  <description><![CDATA[ 
+
+
+
+
+<!--------------- my typical setup ----------------->
+<!--------------- post begins here ----------------->
+<p>In the last post I talked about <a href="../../dark-times/">something very grim</a>, and to be honest it’s not at all what wanted to be writing about yesterday. My intention when I woke up yesterday was to write about <a href="https://docs.ropensci.org/tabulizer/">tabulizer</a>, an R package you can use to extract tables from a pdf document. This isn’t my favourite of data wrangling tasks: pdf is not a very good format in which to store data, but it’s awfully common to find yourself in a situation where the data you want to work with exists only as a table in a pdf document. Because this is a thing that happens, it’s nice to have tools that make it a little easier.</p>
+<section id="to-extract-a-table-we-must-first-create-the-universe" class="level2">
+<h2 class="anchored" data-anchor-id="to-extract-a-table-we-must-first-create-the-universe">To extract a table, we must first create the universe</h2>
+<p>The tabulizer package works by supplying bindings to <a href="https://github.com/tabulapdf/tabula-java/">tabula-java</a>, a java library for extracting tables from pdfs. So if you want tabulizer to work in R you need a working installation of Java, and you need to have the <a href="https://github.com/s-u/rJava">rJava</a> package to provide the R-to-Java bindings.</p>
+<p>My experience in the past has been that getting all this setup can be a bit finicky. Happily for me, I’m on Ubuntu and <a href="https://datawookie.dev/blog/2018/02/installing-rjava-on-ubuntu/">Andrew Collier has a blog post</a> that walks you through the process step by step. Following his guide, my first step was to install the Java runtime environment and the Java development kit:</p>
+<div class="sourceCode" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb1-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">sudo</span> apt-get install <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">-y</span> default-jre default-jdk</span></code></pre></div>
+<p>This worked smoothly, so I moved onto the next step and ensured that R knows where to find Java:</p>
+<div class="sourceCode" id="cb2" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb2-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">sudo</span> R CMD javareconf</span></code></pre></div>
+<p>Only now is it possible to install the rJava package:</p>
+<div class="sourceCode" id="cb3" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">install.packages</span>(<span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"rJava"</span>)</span></code></pre></div>
+<p>Andrew’s post suggests that you need to restart RStudio after doing this, so I did that too. Having done so, I could finally install the tabulizer package itself:</p>
+<div class="sourceCode" id="cb4" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1">remotes<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">install_github</span>(<span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">c</span>(<span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"ropensci/tabulizerjars"</span>, <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"ropensci/tabulizer"</span>))</span></code></pre></div>
+</section>
+<section id="let-there-be-tables" class="level2">
+<h2 class="anchored" data-anchor-id="let-there-be-tables">Let there be tables</h2>
+<p>Now that I have the tabulizer package installed, I’ll load it along with the other packages I’ll be using in this post:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb5" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">library</span>(tabulizer)</span>
+<span id="cb5-2"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">library</span>(dplyr)</span>
+<span id="cb5-3"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">library</span>(tidyr)</span>
+<span id="cb5-4"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">library</span>(tibble)</span>
+<span id="cb5-5"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">library</span>(purrr)</span>
+<span id="cb5-6"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">library</span>(janitor)</span></code></pre></div>
+</div>
+<p>To check that it works, I’ll need a pdf file to work with. As a convenience, the tabulizer package comes with a bundled “data.pdf” file that we can use for this purpose:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb6" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1">pdf_data <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">system.file</span>(<span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"examples"</span>, <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"data.pdf"</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">package =</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"tabulizer"</span>)</span></code></pre></div>
+</div>
+<p>I’ve embedded a copy of the “data.pdf” file in this post, and as you can see it’s very simple test case (by design). The file contains four tables, and only those four tables:</p>
+<br> <object data="data.pdf" type="application/pdf" width="100%" height="500px" style="padding:10px">
+<p>
+Unable to display PDF file. <a href="data.pdf">Download</a> instead.
+</p>
+</object>
+<p><br></p>
+<p>We can use this data file as a way to check that the package works and does what we expect. The workhorse function in the package is <code>extract_tables()</code>. We pass it the path to the pdf file as the first argument, and use the various other arguments to provide details about how the file should be processed. In this case, the only other argument I’ll specify is <code>output = "data.frame"</code>, which tells the <code>extract_tables()</code> function to return a list of data frames rather than a list of matrices (the default behaviour). Let’s see if it’s working:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb7" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1">pdf_tables <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> pdf_data <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span> </span>
+<span id="cb7-2">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">extract_tables</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">output =</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"data.frame"</span>) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span></span>
+<span id="cb7-3">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">map</span>(as_tibble)</span>
+<span id="cb7-4"></span>
+<span id="cb7-5">pdf_tables</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[[1]]
+# A tibble: 31 × 10
+     mpg   cyl  disp    hp  drat    wt  qsec    vs    am  gear
+   &lt;dbl&gt; &lt;int&gt; &lt;dbl&gt; &lt;int&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;int&gt; &lt;int&gt; &lt;int&gt;
+ 1  21       6  160    110  3.9   2.62  16.5     0     1     4
+ 2  21       6  160    110  3.9   2.88  17.0     0     1     4
+ 3  22.8     4  108     93  3.85  2.32  18.6     1     1     4
+ 4  21.4     6  258    110  3.08  3.22  19.4     1     0     3
+ 5  18.7     8  360    175  3.15  3.44  17.0     0     0     3
+ 6  18.1     6  225    105  2.76  3.46  20.2     1     0     3
+ 7  14.3     8  360    245  3.21  3.57  15.8     0     0     3
+ 8  24.4     4  147.    62  3.69  3.19  20       1     0     4
+ 9  22.8     4  141.    95  3.92  3.15  22.9     1     0     4
+10  19.2     6  168.   123  3.92  3.44  18.3     1     0     4
+# ℹ 21 more rows
+
+[[2]]
+# A tibble: 6 × 5
+  Sepal.Length Sepal.Width Petal.Length Petal.Width Species
+         &lt;dbl&gt;       &lt;dbl&gt;        &lt;dbl&gt;       &lt;dbl&gt; &lt;chr&gt;  
+1          5.1         3.5          1.4         0.2 setosa 
+2          4.9         3            1.4         0.2 setosa 
+3          4.7         3.2          1.3         0.2 setosa 
+4          4.6         3.1          1.5         0.2 setosa 
+5          5           3.6          1.4         0.2 setosa 
+6          5.4         3.9          1.7         0.4 setosa 
+
+[[3]]
+# A tibble: 6 × 6
+      X Sepal.Length Sepal.Width Petal.Length Petal.Width Species  
+  &lt;int&gt;        &lt;dbl&gt;       &lt;dbl&gt;        &lt;dbl&gt;       &lt;dbl&gt; &lt;chr&gt;    
+1   145          6.7         3.3          5.7         2.5 virginica
+2   146          6.7         3            5.2         2.3 virginica
+3   147          6.3         2.5          5           1.9 virginica
+4   148          6.5         3            5.2         2   virginica
+5   149          6.2         3.4          5.4         2.3 virginica
+6   150          5.9         3            5.1         1.8 virginica
+
+[[4]]
+# A tibble: 14 × 1
+   supp 
+   &lt;chr&gt;
+ 1 VC   
+ 2 VC   
+ 3 VC   
+ 4 VC   
+ 5 VC   
+ 6 VC   
+ 7 VC   
+ 8 VC   
+ 9 VC   
+10 VC   
+11 VC   
+12 VC   
+13 VC   
+14 VC   </code></pre>
+</div>
+</div>
+<p>That looks nice. With very little effort we’ve extracted all four tables from the pdf file, and returned a list of tibbles containing the data. Yay! 🎉</p>
+</section>
+<section id="wild-caught-pdf-files-are-trickier-to-work-with" class="level2 page-columns page-full">
+<h2 class="anchored" data-anchor-id="wild-caught-pdf-files-are-trickier-to-work-with">Wild caught pdf files are trickier to work with</h2>
+<p>Okay, let’s try a harder example. One of the two reports I referred to in yesterdays blog post is a survey of LGBTQ people conducted by <a href="https://www.dataforprogress.org/">Data For Progress</a>. Unlike the test file, it contains additional text that is not part of any table, and the tables within the report have a lot of fancier formatting that isn’t present in the test file. I’ve cached a local copy of the pdf file as “dfp_lgbtq_survey.pdf”, and you can take a look yourself to see what we’re working with this time:</p>
+<br> <object data="dfp_lgbtq_survey.pdf" type="application/pdf" width="100%" height="500px" style="padding:10px">
+<p>
+Unable to display PDF file. <a href="dfp_lgbtq_survey.pdf">Download</a> instead.
+</p>
+</object>
+<p><br></p>
+<p>The data I used in that post comes from question 4, so I’ll try to extract the data for that table from the pdf file. This turns out to be a little harder to do. My first attempt tried to automatically pull all the tables from the second page by setting <code>pages = 2</code>, and this is what happened:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb9" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1">pdf_file <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"dfp_lgbtq_survey.pdf"</span></span>
+<span id="cb9-2"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">extract_tables</span>(pdf_file, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">pages =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">2</span>)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[[1]]
+     [,1] [,2] [,3] [,4] [,5] [,6] [,7] [,8] [,9] [,10] [,11]
+[1,] "79" "85" "82" "70" "87" "89" "77" "79" "83" "69"  "80" 
+[2,] "17" "12" "13" "29" "7"  "6"  "19" "14" "15" "27"  "17" 
+
+[[2]]
+     [,1]       [,2]      [,3]       [,4]       [,5]    [,6]     [,7]  
+[1,] "Response" "Topline" "African"  "or"       "White" "Female" "Male"
+[2,] ""         ""        ""         ""         ""      ""       ""    
+[3,] ""         ""        "American" "Latino/a​" ""      ""       ""    
+     [,8]     [,9]          [,10]         [,11] [,12] [,13] [,14] [,15]
+[1,] ""       ""            "identify as" ""    ""    ""    ""    "65+"
+[2,] "binary" "transgender" ""            "24"  "39"  "54"  "64"  ""   
+[3,] ""       ""            "transgender" ""    ""    ""    ""    ""   </code></pre>
+</div>
+</div>
+<p>Okay, that’s definitely not the data we want. To make this work we’re going to have to give <code>extract_tables()</code> a little more information. One way to do this is to explicitly specify the <code>area</code> of the pdf file that contains the table to be extracted. To that end, it’s helpful to first call the <code>get_page_dims()</code> function, which gives us the dimensions of each page in the pdf document:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb11" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb11-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">get_page_dims</span>(pdf_file)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[[1]]
+[1] 595 842
+
+[[2]]
+[1] 595 842
+
+[[3]]
+[1] 595 842</code></pre>
+</div>
+</div>
+<p>Now that we have the dimensions for each page we can specify a rectangular region as a vector containing the top, left, bottom and right coordinates of the rectangle:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb13" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1">region <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">c</span>(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">250</span>, <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">0</span>, <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">450</span>, <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">595</span>)</span></code></pre></div>
+</div>
+<p>The command we want looks like this:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb14" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb14-1">mat <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">extract_tables</span>(</span>
+<span id="cb14-2">  <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">file =</span> pdf_file, </span>
+<span id="cb14-3">  <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">pages =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">2</span>, </span>
+<span id="cb14-4">  <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">guess =</span> <span class="cn" style="color: #8f5902;
+background-color: null;
+font-style: inherit;">FALSE</span>,</span>
+<span id="cb14-5">  <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">area =</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">list</span>(region)</span>
+<span id="cb14-6">)[[<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">1</span>]]</span></code></pre></div>
+</div>
+<p>This time around, in addition to setting <code>pages = 2</code>, we’ve set <code>guess = FALSE</code> in order to stop <code>extract_tables()</code> from trying to automatically detect regions containing tabular data, and also passed a list of regions (in this case just the one region) as the <code>area</code> argument, thereby telling <code>extract_tables()</code> to look in that specific part of the document.</p>
+<p>Let’s take a look at the result:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb15" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb15-1">mat</span></code></pre></div>
+</div>
+<div class="cell column-page">
+<div class="cell-output cell-output-stdout">
+<pre><code>      [,1]                                [,2]      [,3]       [,4]       [,5]    [,6]     [,7]   [,8]     [,9]            [,10]         [,11] [,12] [,13] [,14] [,15]
+ [1,] ""                                  ""        "Black or" "Hispanic" ""      ""       ""     ""       ""              "Does not"    ""    ""    ""    ""    ""   
+ [2,] ""                                  ""        ""         ""         ""      ""       ""     "Non-"   "Identifies as" ""            "18-" "25-" "40-" "55-" ""   
+ [3,] "Response"                          "Topline" "African"  "or"       "White" "Female" "Male" ""       ""              "identify as" ""    ""    ""    ""    "65+"
+ [4,] ""                                  ""        ""         ""         ""      ""       ""     "binary" "transgender"   ""            "24"  "39"  "54"  "64"  ""   
+ [5,] ""                                  ""        "American" "Latino/​a" ""      ""       ""     ""       ""              "transgender" ""    ""    ""    ""    ""   
+ [6,] "Yes, I have considered moving"     ""        ""         ""         ""      ""       ""     ""       ""              ""            ""    ""    ""    ""    ""   
+ [7,] ""                                  "27"      "24"       "28"       "27"    "26"     "20"   "44"     "43"            "24"          "41"  "28"  "18"  "17"  "17" 
+ [8,] "out of my community or state"      ""        ""         ""         ""      ""       ""     ""       ""              ""            ""    ""    ""    ""    ""   
+ [9,] "No, I have not considered"         ""        ""         ""         ""      ""       ""     ""       ""              ""            ""    ""    ""    ""    ""   
+[10,] "moving out of my community or"     "61"      "57"       "59"       "64"    "60"     "75"   "37"     "40"            "65"          "43"  "60"  "74"  "80"  "70" 
+[11,] "state"                             ""        ""         ""         ""      ""       ""     ""       ""              ""            ""    ""    ""    ""    ""   
+[12,] "I have already moved out of my"    ""        ""         ""         ""      ""       ""     ""       ""              ""            ""    ""    ""    ""    ""   
+[13,] "community or state as a result of" "5"       "6"        "4"        "3"     "3"      "3"    "13"     "8"             "4"           "8"   "4"   "2"   "1"   "9"  
+[14,] "anti-LGBTQ+ legislation"           ""        ""         ""         ""      ""       ""     ""       ""              ""            ""    ""    ""    ""    ""   
+[15,] "Not sure"                          "7"       "14"       "8"        "6"     "11"     "3"    "6"      "8"             "7"           "9"   "8"   "7"   "2"   "4"  
+[16,] "Weighted N"                        "1,036"   "93"       "217"      "632"   "426"    "368"  "135"    "166"           "870"         "249" "425" "186" "93"  "83" </code></pre>
+</div>
+</div>
+<p>It’s not quite organised the way we want, but it’s definitely the right data.</p>
+<p>Even better, you don’t actually have to do all this messing about trying to figure out the precise region containing the table. If you have the <a href="https://shiny.posit.co/">Shiny</a> and <a href="https://github.com/rstudio/miniUI">miniUI</a> packages installed, you can work interactively using a command like this:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb17" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb17-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">extract_areas</span>(<span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"dfp_lgbtq_survey.pdf"</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">pages =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">2</span>)</span></code></pre></div>
+</div>
+<p>After using click and drag to select the region of the page containing the table, R returns the same data contained in the <code>mat</code> matrix shown earlier.</p>
+</section>
+<section id="cleaning-the-table" class="level2 page-columns page-full">
+<h2 class="anchored" data-anchor-id="cleaning-the-table">Cleaning the table</h2>
+<p>Once we have the data in this matrix form, it’s slightly tedious to wrangle it into the format we want, but it’s not conceptually difficult once we have a few helper functions to make our lives easier. The first step is to split the matrix into a list of matrices, each of which contains the data that should belong in a single row of the final data set. The <code>row_split()</code> function below takes a matrix as input, and splits it up into a list of matrices specified by the list argument <code>rows</code>, where each element of <code>rows</code> is a vector containing the indices of the rows that should be included in the relevant element of the output:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb18" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1">row_split <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="cf" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">function</span>(x, rows) {</span>
+<span id="cb18-2">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">lapply</span>(rows, \(r) {</span>
+<span id="cb18-3">    <span class="cf" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">if</span>(<span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">length</span>(r) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">==</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">1</span>) <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">return</span>(<span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">matrix</span>(x[r, ], <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">nrow =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">1</span>))</span>
+<span id="cb18-4">    x[r, ]</span>
+<span id="cb18-5">  })</span>
+<span id="cb18-6">}</span>
+<span id="cb18-7">groups <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">list</span>(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">1</span><span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">:</span><span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">5</span>, <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">6</span><span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">:</span><span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">8</span>, <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">9</span><span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">:</span><span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">11</span>, <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">12</span><span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">:</span><span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">14</span>, <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">15</span>, <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">16</span>)</span>
+<span id="cb18-8"></span>
+<span id="cb18-9">mat_split <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">row_split</span>(mat, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">rows =</span> groups)</span>
+<span id="cb18-10">mat_split</span></code></pre></div>
+</div>
+<div class="cell column-page">
+<div class="cell-output cell-output-stdout">
+<pre><code>[[1]]
+     [,1]       [,2]      [,3]       [,4]       [,5]    [,6]     [,7]   [,8]     [,9]            [,10]         [,11] [,12] [,13] [,14] [,15]
+[1,] ""         ""        "Black or" "Hispanic" ""      ""       ""     ""       ""              "Does not"    ""    ""    ""    ""    ""   
+[2,] ""         ""        ""         ""         ""      ""       ""     "Non-"   "Identifies as" ""            "18-" "25-" "40-" "55-" ""   
+[3,] "Response" "Topline" "African"  "or"       "White" "Female" "Male" ""       ""              "identify as" ""    ""    ""    ""    "65+"
+[4,] ""         ""        ""         ""         ""      ""       ""     "binary" "transgender"   ""            "24"  "39"  "54"  "64"  ""   
+[5,] ""         ""        "American" "Latino/​a" ""      ""       ""     ""       ""              "transgender" ""    ""    ""    ""    ""   
+
+[[2]]
+     [,1]                            [,2] [,3] [,4] [,5] [,6] [,7] [,8] [,9] [,10] [,11] [,12] [,13] [,14] [,15]
+[1,] "Yes, I have considered moving" ""   ""   ""   ""   ""   ""   ""   ""   ""    ""    ""    ""    ""    ""   
+[2,] ""                              "27" "24" "28" "27" "26" "20" "44" "43" "24"  "41"  "28"  "18"  "17"  "17" 
+[3,] "out of my community or state"  ""   ""   ""   ""   ""   ""   ""   ""   ""    ""    ""    ""    ""    ""   
+
+[[3]]
+     [,1]                            [,2] [,3] [,4] [,5] [,6] [,7] [,8] [,9] [,10] [,11] [,12] [,13] [,14] [,15]
+[1,] "No, I have not considered"     ""   ""   ""   ""   ""   ""   ""   ""   ""    ""    ""    ""    ""    ""   
+[2,] "moving out of my community or" "61" "57" "59" "64" "60" "75" "37" "40" "65"  "43"  "60"  "74"  "80"  "70" 
+[3,] "state"                         ""   ""   ""   ""   ""   ""   ""   ""   ""    ""    ""    ""    ""    ""   
+
+[[4]]
+     [,1]                                [,2] [,3] [,4] [,5] [,6] [,7] [,8] [,9] [,10] [,11] [,12] [,13] [,14] [,15]
+[1,] "I have already moved out of my"    ""   ""   ""   ""   ""   ""   ""   ""   ""    ""    ""    ""    ""    ""   
+[2,] "community or state as a result of" "5"  "6"  "4"  "3"  "3"  "3"  "13" "8"  "4"   "8"   "4"   "2"   "1"   "9"  
+[3,] "anti-LGBTQ+ legislation"           ""   ""   ""   ""   ""   ""   ""   ""   ""    ""    ""    ""    ""    ""   
+
+[[5]]
+     [,1]       [,2] [,3] [,4] [,5] [,6] [,7] [,8] [,9] [,10] [,11] [,12] [,13] [,14] [,15]
+[1,] "Not sure" "7"  "14" "8"  "6"  "11" "3"  "6"  "8"  "7"   "9"   "8"   "7"   "2"   "4"  
+
+[[6]]
+     [,1]         [,2]    [,3] [,4]  [,5]  [,6]  [,7]  [,8]  [,9]  [,10] [,11] [,12] [,13] [,14] [,15]
+[1,] "Weighted N" "1,036" "93" "217" "632" "426" "368" "135" "166" "870" "249" "425" "186" "93"  "83" </code></pre>
+</div>
+</div>
+<p>The second helper function is <code>col_paste()</code> which takes a matrix with one or more rows as input and collapses it to a vector by pasting the contents of all cells in the same column together:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb20" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb20-1">col_paste <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="cf" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">function</span>(x, ...) {</span>
+<span id="cb20-2">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">apply</span>(x, <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">2</span>, \(y) {<span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">as.vector</span>(<span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">paste</span>(y, ...))})</span>
+<span id="cb20-3">}</span></code></pre></div>
+</div>
+<p>To illustrate the idea, let’s take <code>mat_split[[1]]</code>, a five-row matrix that contains the data that should eventually become our column names, and convert it to a character vector using <code>col_paste()</code></p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb21" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb21-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">col_paste</span>(mat_split[[<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">1</span>]], <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">collapse =</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">" "</span>)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code> [1] "  Response  "                      
+ [2] "  Topline  "                       
+ [3] "Black or  African  American"       
+ [4] "Hispanic  or  Latino/​a"            
+ [5] "  White  "                         
+ [6] "  Female  "                        
+ [7] "  Male  "                          
+ [8] " Non-  binary "                    
+ [9] " Identifies as  transgender "      
+[10] "Does not  identify as  transgender"
+[11] " 18-  24 "                         
+[12] " 25-  39 "                         
+[13] " 40-  54 "                         
+[14] " 55-  64 "                         
+[15] "  65+  "                           </code></pre>
+</div>
+</div>
+<p>Finally, we can use the <code>row_combine()</code> function below that takes a list of vectors and combines them into a matrix.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb23" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb23-1">row_combine <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="cf" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">function</span>(x, ...) {</span>
+<span id="cb23-2">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">matrix</span>(<span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">unlist</span>(x), <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">nrow =</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">length</span>(x), <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">byrow =</span> <span class="cn" style="color: #8f5902;
+background-color: null;
+font-style: inherit;">TRUE</span>)</span>
+<span id="cb23-3">}</span></code></pre></div>
+</div>
+<p>Equipped with these helpers, the following pipeline takes the raw output <code>mat</code> and converts it into a tibble <code>dat</code> containing the data in the format we want it to be:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb24" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb24-1">dat <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> mat <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span> </span>
+<span id="cb24-2">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">row_split</span>(groups) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span>                         <span class="co" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;"># split into list of matrices</span></span>
+<span id="cb24-3">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">map</span>(\(x) {<span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">col_paste</span>(x, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">collapse =</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">" "</span>)}) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span>  <span class="co" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;"># paste into character vector</span></span>
+<span id="cb24-4">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">row_combine</span>() <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span>                             <span class="co" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;"># combine vectors into one matrix</span></span>
+<span id="cb24-5">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">as_tibble</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">.name_repair =</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"minimal"</span>) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span>       <span class="co" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;"># convert to tibble</span></span>
+<span id="cb24-6">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">row_to_names</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">row_number =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">1</span>) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span>              <span class="co" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;"># use first row as names</span></span>
+<span id="cb24-7">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">clean_names</span>() <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span>                             <span class="co" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;"># clean the names</span></span>
+<span id="cb24-8">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">rename</span>(                                      <span class="co" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;"># shorten some names</span></span>
+<span id="cb24-9">    <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"black"</span> <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">=</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"black_or_african_american"</span>,</span>
+<span id="cb24-10">    <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"hispanic"</span> <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">=</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"hispanic_or_latino_a"</span>, </span>
+<span id="cb24-11">    <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"trans"</span> <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">=</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"identifies_as_transgender"</span>,</span>
+<span id="cb24-12">    <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"not_trans"</span> <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">=</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"does_not_identify_as_transgender"</span></span>
+<span id="cb24-13">  ) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span></span>
+<span id="cb24-14">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">mutate</span>(<span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">across</span>(<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">!</span>response, \(x) {<span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">as.numeric</span>(<span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">gsub</span>(<span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">","</span>, <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">""</span>, x))})) <span class="co" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;"># numeric data</span></span>
+<span id="cb24-15"></span>
+<span id="cb24-16">dat</span></code></pre></div>
+</div>
+<div class="cell column-page">
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 5 × 15
+  response                        topline black hispanic white female  male non_binary trans not_trans x18_24 x25_39 x40_54 x55_64   x65
+  &lt;chr&gt;                             &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt; &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt;      &lt;dbl&gt; &lt;dbl&gt;     &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt;
+1 Yes, I have considered moving …      27    24       28    27     26    20         44    43        24     41     28     18     17    17
+2 No, I have not considered movi…      61    57       59    64     60    75         37    40        65     43     60     74     80    70
+3 I have already moved out of my…       5     6        4     3      3     3         13     8         4      8      4      2      1     9
+4 Not sure                              7    14        8     6     11     3          6     8         7      9      8      7      2     4
+5 Weighted N                         1036    93      217   632    426   368        135   166       870    249    425    186     93    83</code></pre>
+</div>
+</div>
+<p>Et voilà!</p>
+
+
+</section>
+
+<div id="quarto-appendix" class="default"><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div id="quarto-reuse" class="quarto-appendix-contents"><div><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2023,
+  author = {Navarro, Danielle},
+  title = {Extracting Tables from Pdf Files with Tabulizer},
+  date = {2023-06-16},
+  url = {https://blog.djnavarro.net/posts/2023-06-16_tabulizer},
+  langid = {en}
+}
+</code></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2023" class="csl-entry quarto-appendix-citeas">
+Navarro, Danielle. 2023. <span>“Extracting Tables from Pdf Files with
+Tabulizer.”</span> June 16, 2023. <a href="https://blog.djnavarro.net/posts/2023-06-16_tabulizer">https://blog.djnavarro.net/posts/2023-06-16_tabulizer</a>.
+</div></div></section></div> ]]></description>
+  <category>R</category>
+  <category>Data Wrangling</category>
+  <guid>https://blog.djnavarro.net/posts/2023-06-16_tabulizer/index.html</guid>
+  <pubDate>Thu, 15 Jun 2023 14:00:00 GMT</pubDate>
+  <media:content url="https://blog.djnavarro.net/posts/2023-06-16_tabulizer/dimitra-peppa--abBaVOMsBk-unsplash.jpg" medium="image" type="image/jpeg"/>
+</item>
 <item>
   <title>On living in dark times</title>
   <dc:creator>Danielle Navarro</dc:creator>
@@ -23740,1351 +24388,6 @@ Navarro, Danielle. 2022. <span>“Queue.”</span> December 22, 2022. <a href="h
   <guid>https://blog.djnavarro.net/posts/2022-12-22_queue/index.html</guid>
   <pubDate>Wed, 21 Dec 2022 13:00:00 GMT</pubDate>
   <media:content url="https://blog.djnavarro.net/posts/2022-12-22_queue/donut_100.png" medium="image" type="image/png" height="144" width="144"/>
-</item>
-<item>
-  <title>Crayola crayon colours</title>
-  <dc:creator>Danielle Navarro</dc:creator>
-  <link>https://blog.djnavarro.net/posts/2022-12-18_crayola-crayon-colours/index.html</link>
-  <description><![CDATA[ 
-
-
-
-
-<!--------------- my typical setup ----------------->
-<!--------------- post begins here ----------------->
-<p>What am I doing? Why am I here? Oh that’s right. So I was having coffee this morning reading the nerd news on mastodon as a girl likes to do and this <a href="https://mas.to/@kims/109525496705672156">this very cool post about crayon colours</a> by Kim Scheinberg caught my attention.</p>
-<div class="quarto-figure quarto-figure-center">
-<figure class="figure">
-<p><img src="https://blog.djnavarro.net/posts/2022-12-18_crayola-crayon-colours/crayola_toot.jpg" class="img-fluid figure-img" style="width:75.0%"></p>
-</figure>
-</div>
-<p>The image comes from <a href="http://www.datapointed.net/2010/01/crayola-crayon-color-chart/">this blog post</a> by Stephen Von Worley – he has a <a href="http://www.datapointed.net/2010/10/crayola-color-chart-rainbow-style/">follow up</a> too. Interesting. I realise I am of course about to waste half a day on this…</p>
-<section id="its-the-prologue-baby" class="level2 page-columns page-full">
-<h2 class="anchored" data-anchor-id="its-the-prologue-baby">It’s the prologue, baby</h2>
-<p>Having read the blog posts by Von Worley I worked out that the source of the data is the Wikipedia <a href="https://en.wikipedia.org/wiki/List_of_Crayola_crayon_colors">list of Crayola crayon colours</a>, and as it happens I know how to pull data from Wikipedia tables into R. Thanks to <a href="https://ivelasq.rbind.io/blog/politely-scraping/">this amazing post</a> by Isabella Velásquez, I’d learned all about using the <a href="https://dmi3kno.github.io/polite/">polite</a> package to make sure that my webscraping is appropriate and respectful, and using the <a href="https://rvest.tidyverse.org/">rvest</a> package to do the actual scraping. What I had assumed, is that reading the table into R was going to be a simple matter of writing some code like this…</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1">url <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"https://en.wikipedia.org/wiki/List_of_Crayola_crayon_colors"</span></span>
-<span id="cb1-2">raw <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> url <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span></span>
-<span id="cb1-3">  polite<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">bow</span>() <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span></span>
-<span id="cb1-4">  polite<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">scrape</span>() <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span></span>
-<span id="cb1-5">  rvest<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">html_nodes</span>(<span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"table.wikitable"</span>)</span></code></pre></div>
-</div>
-<p>This scrapes all the tables from the page, but I only want the first one. That’s the big table with the listing of Crayolas standard colours. The table itself looks a little like this:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb2" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1">raw[[<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span>]]</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>{html_node}
-&lt;table class="wikitable sortable"&gt;
-[1] &lt;caption&gt;\n&lt;/caption&gt;
-[2] &lt;tbody&gt;\n&lt;tr&gt;\n&lt;th width="10%" class="sortable"&gt;Color\n&lt;/th&gt;\n&lt;th wid ...</code></pre>
-</div>
-</div>
-<p>I don’t want to parse the html myself, but the hope is that I can use something like the <code>html_table()</code> function to extract the table and return a data frame. Okay, let’s give it a go…</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb4" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1">crayola <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> raw[[<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span>]] <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span> rvest<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">html_table</span>()</span></code></pre></div>
-</div>
-<p>Well it hasn’t thrown an error, but when I look at the <code>crayola</code> data frame…</p>
-<div class="cell column-page">
-<div class="sourceCode cell-code" id="cb5" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1">crayola</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code># A tibble: 168 × 9
-   Color Name                    Hexadecimal in their website depicti…¹ Years in production[…² Notes `16-Box` `24-Box` `32-Box` `64-Box`
-   &lt;lgl&gt; &lt;chr&gt;                   &lt;chr&gt;                                  &lt;chr&gt;                  &lt;chr&gt; &lt;chr&gt;    &lt;chr&gt;    &lt;chr&gt;    &lt;chr&gt;   
- 1 NA    Red                     "#ED0A3F"                              1903–present           ""    "Yes"    "Yes"    "Yes"    "Yes"   
- 2 NA    Maroon                  "#C32148"                              1949–present           "Kno… "No"     "No"     "No"     "No"    
- 3 NA    Scarlet                 "#FD0E35"                              1998–present           "Kno… "No"     "Yes"    "Yes"    "Yes"   
- 4 NA    Brick Red               "#C62D42"                              1958–present           ""    "No"     "No"     "No"     "Yes"   
- 5 NA    English Vermilion       ""                                     1903–1935              "Als… ""       ""       ""       ""      
- 6 NA    Madder Lake             ""                                     1903–1935              ""    ""       ""       ""       ""      
- 7 NA    Permanent Geranium Lake ""                                     1903–circa 1910        ""    ""       ""       ""       ""      
- 8 NA    Maximum Red             ""                                     1926–1944              "Par… ""       ""       ""       ""      
- 9 NA    Chestnut                "#B94E48"                              1903–present           "Kno… "No"     "No"     "Yes"    "Yes"   
-10 NA    Orange-Red              "#FF5349"                              1958–1990              ""    ""       ""       ""       ""      
-# ℹ 158 more rows
-# ℹ abbreviated names: ¹​`Hexadecimal in their website depiction[b]`, ²​`Years in production[2]`</code></pre>
-</div>
-</div>
-<p>… I encounter a rather awkward problem. The <code>color</code> field, which renders on the Wikipedia page as a pretty block of colour showing what the crayon colour looks like, is empty. Sure, I do have text containing hex codes for some of the crayons, but the missing data isn’t missing at random. Old crayon colours are the ones systematically missing an official hex code. Okay, so I really would like to have some data in my <code>color</code> column.</p>
-</section>
-<section id="act-i-i-think-it-works-like-the-hanky-code" class="level2 page-columns page-full">
-<h2 class="anchored" data-anchor-id="act-i-i-think-it-works-like-the-hanky-code">Act I: I think it works like the hanky code</h2>
-<p>Look, that’s not a big deal right? Not having any colours for a post about colours? I guess the post will be short. Eh. Let’s set that aside and focus on the important things. Those column names need a little cleaning, so I’ll do the thing I always do and break out <a href="https://sfirke.github.io/janitor/">janitor</a> and <a href="https://dplyr.tidyverse.org/">dplyr</a>:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb7" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1">crayola <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> crayola <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span></span>
-<span id="cb7-2">  janitor<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">clean_names</span>() <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span></span>
-<span id="cb7-3">  dplyr<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">rename</span>(</span>
-<span id="cb7-4">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">listed =</span> hexadecimal_in_their_website_depiction_b,</span>
-<span id="cb7-5">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">years =</span> years_in_production_2</span>
-<span id="cb7-6">  )</span></code></pre></div>
-</div>
-<p>Much nicer:</p>
-<div class="cell column-page">
-<div class="sourceCode cell-code" id="cb8" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1">crayola</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code># A tibble: 168 × 9
-   color name                    listed    years           notes                                     x16_box x24_box x32_box x64_box
-   &lt;lgl&gt; &lt;chr&gt;                   &lt;chr&gt;     &lt;chr&gt;           &lt;chr&gt;                                     &lt;chr&gt;   &lt;chr&gt;   &lt;chr&gt;   &lt;chr&gt;  
- 1 NA    Red                     "#ED0A3F" 1903–present    ""                                        "Yes"   "Yes"   "Yes"   "Yes"  
- 2 NA    Maroon                  "#C32148" 1949–present    "Known as \"Dark Red\", 1949–1958.[2]"    "No"    "No"    "No"    "No"   
- 3 NA    Scarlet                 "#FD0E35" 1998–present    "Known as \"Torch Red\", 1998.[2]"        "No"    "Yes"   "Yes"   "Yes"  
- 4 NA    Brick Red               "#C62D42" 1958–present    ""                                        "No"    "No"    "No"    "Yes"  
- 5 NA    English Vermilion       ""        1903–1935       "Also spelled \"Vermillion\".[2]"         ""      ""      ""      ""     
- 6 NA    Madder Lake             ""        1903–1935       ""                                        ""      ""      ""      ""     
- 7 NA    Permanent Geranium Lake ""        1903–circa 1910 ""                                        ""      ""      ""      ""     
- 8 NA    Maximum Red             ""        1926–1944       "Part of the Munsell line.[2]"            ""      ""      ""      ""     
- 9 NA    Chestnut                "#B94E48" 1903–present    "Known as \"Indian Red\" before 1999.[2]" "No"    "No"    "Yes"   "Yes"  
-10 NA    Orange-Red              "#FF5349" 1958–1990       ""                                        ""      ""      ""      ""     
-# ℹ 158 more rows</code></pre>
-</div>
-</div>
-<p>Now where was I? What’s that maxim about never using background colour to encode substantive data in a table? I seem to have run afoul of that. Let’s take a look at the elements of the html table and see if I can work out where things went wrong…</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb10" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1">cells <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> raw[[<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span>]] <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span> rvest<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">html_elements</span>(<span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"td"</span>)</span>
-<span id="cb10-2">cells</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>{xml_nodeset (1512)}
- [1] &lt;td style="background: #ED0A3F; color: white"&gt;&nbsp;\n&lt;/td&gt;
- [2] &lt;td&gt;Red\n&lt;/td&gt;
- [3] &lt;td align="center" style="background:#E9E9E9"&gt;#ED0A3F\n&lt;/td&gt;
- [4] &lt;td&gt;1903–present\n&lt;/td&gt;
- [5] &lt;td&gt;\n&lt;/td&gt;
- [6] &lt;td style="background:#9EFF9E;vertical-align:middle;text-align:cente ...
- [7] &lt;td style="background:#9EFF9E;vertical-align:middle;text-align:cente ...
- [8] &lt;td style="background:#9EFF9E;vertical-align:middle;text-align:cente ...
- [9] &lt;td style="background:#9EFF9E;vertical-align:middle;text-align:cente ...
-[10] &lt;td style="background: #C32148; color: white"&gt;&nbsp;\n&lt;/td&gt;
-[11] &lt;td&gt;Maroon\n&lt;/td&gt;
-[12] &lt;td align="center" style="background:#E9E9E9"&gt;#C32148\n&lt;/td&gt;
-[13] &lt;td&gt;1949–present\n&lt;/td&gt;
-[14] &lt;td&gt;Known as "Dark Red", 1949–1958.&lt;sup id="cite_ref-WelterColorName ...
-[15] &lt;td style="background:#FFC7C7;vertical-align:middle;text-align:cente ...
-[16] &lt;td style="background:#FFC7C7;vertical-align:middle;text-align:cente ...
-[17] &lt;td style="background:#FFC7C7;vertical-align:middle;text-align:cente ...
-[18] &lt;td style="background:#FFC7C7;vertical-align:middle;text-align:cente ...
-[19] &lt;td style="background: #FD0E35; color: white"&gt;&nbsp;\n&lt;/td&gt;
-[20] &lt;td&gt;Scarlet\n&lt;/td&gt;
-...</code></pre>
-</div>
-</div>
-<p>Okay yeah. You can see the problem looking at the 1st and 10th line of the output here. The piece of information we need is embedded in the css style attribute, and it’s <em>only</em> in the style metadata attribute. There’s no data in the actual “td” element for <code>html_table()</code> to capture. I’m going to have to fix that myself I guess. Sigh.</p>
-<p>The first part of my process was to find the relevant subset of cells. There’s probably a better way to do it, but my approach was based on noting that (a) it’s really easy to find the cells containing the colour names (“Red”, “Maroon”, etc), and (b) the cell to the left of it is always the one that has the background colour that I’m looking for. So, my first step was to manually pull out the text in each cell. That’s easy to do with rvest thanks to the <code>html_text()</code> function, and just to make my life a little easier I used <a href="https://stringr.tidyverse.org/">stringr</a> to remove all the <code>\n</code> characters at the end of each cell:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb12" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb12-1">cell_text <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> cells <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span></span>
-<span id="cb12-2">  rvest<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">html_text</span>() <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span></span>
-<span id="cb12-3">  stringr<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">str_remove_all</span>(<span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"</span><span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">\n</span><span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">$"</span>)</span></code></pre></div>
-</div>
-<p>And here’s the text in the first 20 cells:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb13" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1">cell_text[<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span><span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">:</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">20</span>]</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code> [1] "&nbsp;"                                   
- [2] "Red"                                 
- [3] "#ED0A3F"                             
- [4] "1903–present"                        
- [5] ""                                    
- [6] "Yes"                                 
- [7] "Yes"                                 
- [8] "Yes"                                 
- [9] "Yes"                                 
-[10] "&nbsp;"                                   
-[11] "Maroon"                              
-[12] "#C32148"                             
-[13] "1949–present"                        
-[14] "Known as \"Dark Red\", 1949–1958.[2]"
-[15] "No"                                  
-[16] "No"                                  
-[17] "No"                                  
-[18] "No"                                  
-[19] "&nbsp;"                                   
-[20] "Scarlet"                             </code></pre>
-</div>
-</div>
-<p>So when I now match this text against the colour names stored in <code>crayola$name</code>, I’ll detect “Red” in cell 2, “Maroon” in cell 11, and so on. If I subtract 1 from each of these values, I now have the indices of the table cells that contain the style information I need.</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb15" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb15-1">ind <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">which</span>(cell_text <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">%in%</span> crayola<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">$</span>name) <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span></span></code></pre></div>
-</div>
-<p>Here’s what those cells look like:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb16" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb16-1">cells[ind]</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>{xml_nodeset (168)}
- [1] &lt;td style="background: #ED0A3F; color: white"&gt;&nbsp;\n&lt;/td&gt;
- [2] &lt;td style="background: #C32148; color: white"&gt;&nbsp;\n&lt;/td&gt;
- [3] &lt;td style="background: #FD0E35; color: white"&gt;&nbsp;\n&lt;/td&gt;
- [4] &lt;td style="background: #C62D42; color: white"&gt;&nbsp;\n&lt;/td&gt;
- [5] &lt;td style="background: #CC474B; color: white"&gt;&nbsp;\n&lt;/td&gt;
- [6] &lt;td style="background: #CC3336; color: white"&gt;&nbsp;\n&lt;/td&gt;
- [7] &lt;td style="background: #E12C2C; color: white"&gt;&nbsp;\n&lt;/td&gt;
- [8] &lt;td style="background: #D92121; color: white"&gt;&nbsp;\n&lt;/td&gt;
- [9] &lt;td style="background: #B94E48; color: white"&gt;&nbsp;\n&lt;/td&gt;
-[10] &lt;td style="background: #FF5349; color: white"&gt;&nbsp;\n&lt;/td&gt;
-[11] &lt;td style="background: #FE4C40; color: white"&gt;&nbsp;\n&lt;/td&gt;
-[12] &lt;td style="background: #FE6F5E; color: white"&gt;&nbsp;\n&lt;/td&gt;
-[13] &lt;td style="background: #B33B24; color: white"&gt;&nbsp;\n&lt;/td&gt;
-[14] &lt;td style="background: #CC553D; color: white"&gt;&nbsp;\n&lt;/td&gt;
-[15] &lt;td style="background: #E6735C; color: white"&gt;&nbsp;\n&lt;/td&gt;
-[16] &lt;td style="background: #FF9980; color: white"&gt;&nbsp;\n&lt;/td&gt;
-[17] &lt;td style="background: #E58E73; color: white"&gt;&nbsp;\n&lt;/td&gt;
-[18] &lt;td style="background: #FF7034; color: white"&gt;&nbsp;\n&lt;/td&gt;
-[19] &lt;td style="background: #FF681F; color: white"&gt;&nbsp;\n&lt;/td&gt;
-[20] &lt;td style="background: #FF8833; color: white"&gt;&nbsp;\n&lt;/td&gt;
-...</code></pre>
-</div>
-</div>
-<p>That’s much nicer. Now I have something with a consistent format that I can process without too much pain. The rvest package has a <code>html_attr()</code> function which I can use to pull out the contents of the style attribute as a string. So, after spending a few minutes trying to remember how regular expressions work, I used <code>str_extract()</code> to pull out the hexadecimal codes like this:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb18" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1">background <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> cells[ind] <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span></span>
-<span id="cb18-2">  rvest<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">html_attr</span>(<span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"style"</span>) <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span></span>
-<span id="cb18-3">  stringr<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">str_extract</span>(<span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"#[0-9ABCDEF]{6}"</span>)</span></code></pre></div>
-</div>
-<p>Let’s take a look:</p>
-<div class="cell column-page">
-<div class="sourceCode cell-code" id="cb19" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb19-1">background</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>  [1] "#ED0A3F" "#C32148" "#FD0E35" "#C62D42" "#CC474B" "#CC3336" "#E12C2C" "#D92121" "#B94E48" "#FF5349" "#FE4C40" "#FE6F5E" "#B33B24"
- [14] "#CC553D" "#E6735C" "#FF9980" "#E58E73" "#FF7034" "#FF681F" "#FF8833" "#FFB97B" "#ECAC76" "#E77200" "#FFAE42" "#F2BA49" "#FBE7B2"
- [27] "#F2C649" "#F8D568" "#FCD667" "#FED85D" "#FBE870" "#F1E788" "#FFEB00" "#B5B35C" "#ECEBBD" "#FAFA37" "#FFFF99" "#FFFF9F" "#D9E650"
- [40] "#ACBF60" "#AFE313" "#BEE64B" "#C5E17A" "#5E8C31" "#7BA05B" "#9DE093" "#63B76C" "#4D8C57" "#01A638" "#6CA67C" "#5FA777" "#93DFB8"
- [53] "#33CC99" "#1AB385" "#29AB87" "#00CC99" "#00755E" "#8DD9CC" "#01796F" "#30BFBF" "#00CCCC" "#008080" "#8FD8D8" "#95E0E8" "#6CDAE7"
- [66] "#2D383A" "#76D7EA" "#7ED4E6" "#0095B7" "#009DC4" "#02A4D3" "#47ABCC" "#2EB4E6" "#339ACC" "#93CCEA" "#2887C8" "#003366" "#0066CC"
- [79] "#1560BD" "#0066FF" "#A9B2C3" "#C3CDE6" "#4570E6" "#3C69E7" "#7A89B8" "#4F69C6" "#8D90A1" "#8C90C8" "#7070CC" "#9999CC" "#ACACE6"
- [92] "#766EC8" "#6456B7" "#3F26BF" "#8B72BE" "#652DC1" "#6B3FA0" "#8359A3" "#8F47B3" "#C9A0DC" "#BF8FCC" "#803790" "#733380" "#D6AEDD"
-[105] "#C154C1" "#FC74FD" "#732E6C" "#E667CE" "#E29CD2" "#8E3179" "#D96CBE" "#D8BFD8" "#C8509B" "#BB3385" "#D982B5" "#A63A79" "#A50B5E"
-[118] "#614051" "#F653A6" "#DA3287" "#FF3399" "#FBAED2" "#FFB7D5" "#FFA6C9" "#F7468A" "#E30B5C" "#FDD7E4" "#E62E6B" "#DB5079" "#FC80A5"
-[131] "#F091A9" "#FF91A4" "#A55353" "#CA3435" "#FEBAAD" "#F7A38E" "#E97451" "#AF593E" "#9E5B40" "#87421F" "#926F5B" "#DEA681" "#D27D46"
-[144] "#664228" "#FA9D5A" "#EDC9AF" "#FFCBA4" "#805533" "#FDD5B1" "#EED9C4" "#665233" "#837050" "#E6BC5C" "#92926E" "#E6BE8A" "#C9C0BB"
-[157] "#DA8A67" "#C88A65" "#000000" "#736A62" "#8B8680" "#C8C8CD" "#D9D6CF" "#FFFFFF" "#F1D651" "#DDEBEC" "#D9DAD2" "#C0D5F0"</code></pre>
-</div>
-</div>
-<p>Yay, those look like hex colours. Better yet, because I’ve been careful to ensure that I’ve matched everything to the correct colours and in the correct order, I can insert them into the <code>crayola</code> tibble where they should have been in the first place:</p>
-<div class="cell column-page">
-<div class="sourceCode cell-code" id="cb21" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb21-1">crayola<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">$</span>color <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> background</span>
-<span id="cb21-2">crayola</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code># A tibble: 168 × 9
-   color   name                    listed    years           notes                                     x16_box x24_box x32_box x64_box
-   &lt;chr&gt;   &lt;chr&gt;                   &lt;chr&gt;     &lt;chr&gt;           &lt;chr&gt;                                     &lt;chr&gt;   &lt;chr&gt;   &lt;chr&gt;   &lt;chr&gt;  
- 1 #ED0A3F Red                     "#ED0A3F" 1903–present    ""                                        "Yes"   "Yes"   "Yes"   "Yes"  
- 2 #C32148 Maroon                  "#C32148" 1949–present    "Known as \"Dark Red\", 1949–1958.[2]"    "No"    "No"    "No"    "No"   
- 3 #FD0E35 Scarlet                 "#FD0E35" 1998–present    "Known as \"Torch Red\", 1998.[2]"        "No"    "Yes"   "Yes"   "Yes"  
- 4 #C62D42 Brick Red               "#C62D42" 1958–present    ""                                        "No"    "No"    "No"    "Yes"  
- 5 #CC474B English Vermilion       ""        1903–1935       "Also spelled \"Vermillion\".[2]"         ""      ""      ""      ""     
- 6 #CC3336 Madder Lake             ""        1903–1935       ""                                        ""      ""      ""      ""     
- 7 #E12C2C Permanent Geranium Lake ""        1903–circa 1910 ""                                        ""      ""      ""      ""     
- 8 #D92121 Maximum Red             ""        1926–1944       "Part of the Munsell line.[2]"            ""      ""      ""      ""     
- 9 #B94E48 Chestnut                "#B94E48" 1903–present    "Known as \"Indian Red\" before 1999.[2]" "No"    "No"    "Yes"   "Yes"  
-10 #FF5349 Orange-Red              "#FF5349" 1958–1990       ""                                        ""      ""      ""      ""     
-# ℹ 158 more rows</code></pre>
-</div>
-</div>
-<p>Finally!</p>
-</section>
-<section id="act-ii-one-hundred-years-of-tidyr" class="level2 page-columns page-full">
-<h2 class="anchored" data-anchor-id="act-ii-one-hundred-years-of-tidyr">Act II: One hundred years of tidyr</h2>
-<p>If life were at all fair my data wrangling woes would now be over, but of course they are not. If I’m going to analyse the Crayola data by year it will be useful to me if the <code>year</code> column has nicely formatted data, and of course it does not:</p>
-<div class="cell column-page">
-<div class="sourceCode cell-code" id="cb23" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb23-1">crayola<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">$</span>years</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>  [1] "1903–present"               "1949–present"               "1998–present"               "1958–present"              
-  [5] "1903–1935"                  "1903–1935"                  "1903–circa 1910"            "1926–1944"                 
-  [9] "1903–present"               "1958–1990"                  "1997–present"               "1958–present"              
- [13] "1903–circa 1910"            "1903–1944"                  "1903–circa 1910"            "1990–present"              
- [17] "1926–1944"                  "1958–present"               "1930–present"               "1903–present"              
- [21] "1993–present"               "1926–1944, 1949–1958"       "2003–present"               "1930–present"              
- [25] "1926–1944"                  "1998–present"               "1903–1990"                  "1958–1990"                 
- [29] "1903–present"               "1990–2017[2][3][4]"         "1903–present"               "1958–present"              
- [33] "1926–1944"                  "1903–present"               "1958–present"               "1926–1944"                 
- [37] "1998–present"               "1903–1990"                  "1926–1944"                  "1926–1944"                 
- [41] "2003–present"               "1903–1935"                  "1930–present"               "1926–1944"                 
- [45] "1993–present"               "1993–present"               "1998–present"               "1926–1944"                 
- [49] "1903–present"               "1903–1939"                  "1949–present"               "1949–present"              
- [53] "1993–present"               "1998–present"               "1990–present"               "1997–present"              
- [57] "1993–present"               "1926–1944"                  "1903–1949, 1958–present"    "1926–1944"                 
- [61] "1993–present"               "1990–2003"                  "1958"                       "1949–present"              
- [65] "1935–present"               "1998–present"               "1958–present"               "1926–1944"                 
- [69] "1949–present"               "1993–present"               "1990–present"               "1926–1958"                 
- [73] "1903–1958"                  "1949–1958"                  "1958–present"               "1958–1990"                 
- [77] "1903–present"               "1958–present"               "1993–present"               "1949–present"              
- [81] "1958–present"               "1958–present"               "1935–1958"                  "2017–present[5]"           
- [85] "2003–present"               "1999–present"               "1998–present"               "1903–1958"                 
- [89] "1903–circa 1910"            "1998–present"               "1926–1944"                  "1903–circa 1910, 1930–1990"
- [93] "1949–present"               "1903–1944"                  "1926–1944"                  "1998–present"              
- [97] "1990–present"               "1930–1949, 1958–present"    "1949–1958"                  "1993–present"              
-[101] "1949–1958"                  "1997–present"               "1926–1944"                  "1993–present"              
-[105] "1990–present"               "1997–present"               "1903–1930"                  "1949–1958"                 
-[109] "1949–present"               "1958–present"               "1949–1958"                  "1949–1999"                 
-[113] "1958–2003"                  "1930–present"               "1926–1944"                  "1926–1944"                 
-[117] "2003–present"               "1998–present"               "1903–present"               "1993–present"              
-[121] "1990–present"               "1958–present"               "1998–present"               "1903–present"              
-[125] "1958–present"               "1993–present"               "1998–present"               "1935–1958"                 
-[129] "1998–present"               "1993–present"               "1993–present"               "1949–present"              
-[133] "1926–1944"                  "1949–present"               "1958–present"               "1998–present"              
-[137] "1903–present"               "1903–present"               "1935–1944, 1958–present"    "1998–present"              
-[141] "1998–present"               "1993–present"               "1958–present"               "1903–1910"                 
-[145] "1958–present"               "1998–present"               "1903–present"               "1903–1944"                 
-[149] "1958–present"               "1998–present"               "1903–1990"                  "1998–present"              
-[153] "1903–circa 1910"            "1903–1944"                  "1953–present"               "1903–present"              
-[157] "1903–1915, 1958–present"    "1998–present"               "1903–present"               "1903–1910"                 
-[161] "1926–present"               "1958–1990"                  "1993–present"               "1903–present"              
-[165] "2021, 2022"                 "2021, 2022"                 "2021, 2022"                 "2021, 2022"                </code></pre>
-</div>
-</div>
-<p>There are several problems I’m going to need to solve to get this into a regular form:</p>
-<ul>
-<li>The “circa” text will have to be removed</li>
-<li>White spaces will need to be removed</li>
-<li>Footnote text will need to be removed</li>
-<li>The word “present” will have to be replaced by “2022”</li>
-<li>The single year “1958” will need to be replaced by an interval “1958-1958”</li>
-<li>The comma separated list “2021,2022” will need to be an interval “2021-2022”</li>
-</ul>
-<p>Here’s a little bit of stringr code that does that:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb25" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb25-1">crayola <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> crayola <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span></span>
-<span id="cb25-2">  dplyr<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">mutate</span>(</span>
-<span id="cb25-3">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">years =</span> years <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span></span>
-<span id="cb25-4">      stringr<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">str_remove_all</span>(<span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">" "</span>) <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span></span>
-<span id="cb25-5">      stringr<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">str_remove_all</span>(<span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"</span><span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">\\</span><span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">[.</span><span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">\\</span><span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">]"</span>) <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span></span>
-<span id="cb25-6">      stringr<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">str_remove_all</span>(<span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"circa"</span>) <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span></span>
-<span id="cb25-7">      stringr<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">str_replace_all</span>(<span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"present"</span>, <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"2022"</span>) <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span></span>
-<span id="cb25-8">      stringr<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">str_replace_all</span>(<span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"^1958$"</span>, <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"1958-1958"</span>) <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span></span>
-<span id="cb25-9">      stringr<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">str_replace_all</span>(<span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"2021,2022"</span>, <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"2021-2022"</span>),</span>
-<span id="cb25-10">  ) </span></code></pre></div>
-</div>
-<p>The <code>years</code> column now has a regular form. Each entry is either a contiguous interval like <code>"1903-2022"</code>, or a comma separated list of two such intervals like <code>"1903–1910,1930–1990"</code>:</p>
-<div class="cell column-page">
-<div class="sourceCode cell-code" id="cb26" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb26-1">crayola<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">$</span>years</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>  [1] "1903–2022"           "1949–2022"           "1998–2022"           "1958–2022"           "1903–1935"          
-  [6] "1903–1935"           "1903–1910"           "1926–1944"           "1903–2022"           "1958–1990"          
- [11] "1997–2022"           "1958–2022"           "1903–1910"           "1903–1944"           "1903–1910"          
- [16] "1990–2022"           "1926–1944"           "1958–2022"           "1930–2022"           "1903–2022"          
- [21] "1993–2022"           "1926–1944,1949–1958" "2003–2022"           "1930–2022"           "1926–1944"          
- [26] "1998–2022"           "1903–1990"           "1958–1990"           "1903–2022"           "1990–2017"          
- [31] "1903–2022"           "1958–2022"           "1926–1944"           "1903–2022"           "1958–2022"          
- [36] "1926–1944"           "1998–2022"           "1903–1990"           "1926–1944"           "1926–1944"          
- [41] "2003–2022"           "1903–1935"           "1930–2022"           "1926–1944"           "1993–2022"          
- [46] "1993–2022"           "1998–2022"           "1926–1944"           "1903–2022"           "1903–1939"          
- [51] "1949–2022"           "1949–2022"           "1993–2022"           "1998–2022"           "1990–2022"          
- [56] "1997–2022"           "1993–2022"           "1926–1944"           "1903–1949,1958–2022" "1926–1944"          
- [61] "1993–2022"           "1990–2003"           "1958-1958"           "1949–2022"           "1935–2022"          
- [66] "1998–2022"           "1958–2022"           "1926–1944"           "1949–2022"           "1993–2022"          
- [71] "1990–2022"           "1926–1958"           "1903–1958"           "1949–1958"           "1958–2022"          
- [76] "1958–1990"           "1903–2022"           "1958–2022"           "1993–2022"           "1949–2022"          
- [81] "1958–2022"           "1958–2022"           "1935–1958"           "2017–2022"           "2003–2022"          
- [86] "1999–2022"           "1998–2022"           "1903–1958"           "1903–1910"           "1998–2022"          
- [91] "1926–1944"           "1903–1910,1930–1990" "1949–2022"           "1903–1944"           "1926–1944"          
- [96] "1998–2022"           "1990–2022"           "1930–1949,1958–2022" "1949–1958"           "1993–2022"          
-[101] "1949–1958"           "1997–2022"           "1926–1944"           "1993–2022"           "1990–2022"          
-[106] "1997–2022"           "1903–1930"           "1949–1958"           "1949–2022"           "1958–2022"          
-[111] "1949–1958"           "1949–1999"           "1958–2003"           "1930–2022"           "1926–1944"          
-[116] "1926–1944"           "2003–2022"           "1998–2022"           "1903–2022"           "1993–2022"          
-[121] "1990–2022"           "1958–2022"           "1998–2022"           "1903–2022"           "1958–2022"          
-[126] "1993–2022"           "1998–2022"           "1935–1958"           "1998–2022"           "1993–2022"          
-[131] "1993–2022"           "1949–2022"           "1926–1944"           "1949–2022"           "1958–2022"          
-[136] "1998–2022"           "1903–2022"           "1903–2022"           "1935–1944,1958–2022" "1998–2022"          
-[141] "1998–2022"           "1993–2022"           "1958–2022"           "1903–1910"           "1958–2022"          
-[146] "1998–2022"           "1903–2022"           "1903–1944"           "1958–2022"           "1998–2022"          
-[151] "1903–1990"           "1998–2022"           "1903–1910"           "1903–1944"           "1953–2022"          
-[156] "1903–2022"           "1903–1915,1958–2022" "1998–2022"           "1903–2022"           "1903–1910"          
-[161] "1926–2022"           "1958–1990"           "1993–2022"           "1903–2022"           "2021-2022"          
-[166] "2021-2022"           "2021-2022"           "2021-2022"          </code></pre>
-</div>
-</div>
-<p>That’s better because the data format is now consistent, but it’s not tidy. In the long run, what I really want is a nice tidy tibble: each row should correspond to a single observation. If “Red” was a colour in 1935, then there should be a row in my table for which <code>name = "Red"</code> and <code>year = 1935</code>. That’s not quite what I have here, so I have more data wrangling to do and this time <a href="https://tidyr.tidyverse.org/">tidyr</a> will be my best friend.</p>
-<p>The first thing I’m going to do is use <code>tidyr::separate()</code> to split the <code>years</code> variable into two variables, <code>years_1</code> and <code>years_2</code>. The <code>years_1</code> variable will contain the first time interval for which a particular crayon colour was in production, and the <code>years_2</code> variable will contain the second interval in which it was in production. For almost all colours, <code>years_2</code> will be <code>NA</code>. It’s only those special cases like <code>"1903–1910,1930–1990"</code> that will have values in both.</p>
-<p>Then, because I don’t really see a need to have two variables that both represent a period of time, I’ll use <code>tidyr::pivot_longer()</code> to give myself a data set in which there is one row for every continuous time interval:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb28" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb28-1">crayola <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> crayola <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span></span>
-<span id="cb28-2">  tidyr<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">separate</span>(</span>
-<span id="cb28-3">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">col =</span> years,</span>
-<span id="cb28-4">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">into =</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">c</span>(<span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"years_1"</span>, <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"years_2"</span>),</span>
-<span id="cb28-5">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">sep =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">","</span>,</span>
-<span id="cb28-6">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">fill =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"right"</span></span>
-<span id="cb28-7">  ) <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span></span>
-<span id="cb28-8">  tidyr<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">pivot_longer</span>(</span>
-<span id="cb28-9">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">cols =</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">starts_with</span>(<span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"years_"</span>),</span>
-<span id="cb28-10">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">names_prefix =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"years_"</span>,</span>
-<span id="cb28-11">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">names_to =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"interval"</span>,</span>
-<span id="cb28-12">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">values_to =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"years"</span></span>
-<span id="cb28-13">  ) <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span></span>
-<span id="cb28-14">  dplyr<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">filter</span>(<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">!</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">is.na</span>(years))</span></code></pre></div>
-</div>
-<p>To give you a sense of what the data looks like in this form, I’ll pull out the rows corresponding to two different crayon colours, “Maroon” and “Violet-Blue”:</p>
-<div class="cell column-page">
-<div class="sourceCode cell-code" id="cb29" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb29-1">crayola <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span></span>
-<span id="cb29-2">  dplyr<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">filter</span>(name <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">==</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"Maroon"</span> <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|</span> name <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">==</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"Violet-Blue"</span>)</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code># A tibble: 3 × 10
-  color   name        listed  notes                                     x16_box x24_box x32_box x64_box interval years    
-  &lt;chr&gt;   &lt;chr&gt;       &lt;chr&gt;   &lt;chr&gt;                                     &lt;chr&gt;   &lt;chr&gt;   &lt;chr&gt;   &lt;chr&gt;   &lt;chr&gt;    &lt;chr&gt;    
-1 #C32148 Maroon      #C32148 "Known as \"Dark Red\", 1949–1958.[2]"    "No"    "No"    "No"    "No"    1        1949–2022
-2 #766EC8 Violet-Blue #766EC8 "Known as \"Blue-Violet\", 1930–1958.[2]" ""      ""      ""      ""      1        1903–1910
-3 #766EC8 Violet-Blue #766EC8 "Known as \"Blue-Violet\", 1930–1958.[2]" ""      ""      ""      ""      2        1930–1990</code></pre>
-</div>
-</div>
-<p>The “Maroon” crayon has been in production continuously since 1949, so there is only one row in the table for that one. The “Violet-Blue” crayon was in production from 1903 to 1910, and again from 1930 to 1990. These two production periods are each represented as a row.</p>
-<p>Excellent. Next, I’ll use <code>separate()</code> again to split the <code>years</code> interval into two columns, one for the <code>year_started</code> and another for the <code>year_ended</code>. Having done so, the year information is finally in a numeric format, so I can coerce it from character to integer:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb31" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb31-1">crayola <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> crayola <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span></span>
-<span id="cb31-2">  tidyr<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">separate</span>(</span>
-<span id="cb31-3">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">col =</span> years,</span>
-<span id="cb31-4">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">into =</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">c</span>(<span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"year_started"</span>, <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"year_ended"</span>)</span>
-<span id="cb31-5">  ) <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span></span>
-<span id="cb31-6">  dplyr<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">mutate</span>(</span>
-<span id="cb31-7">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">interval =</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">as.integer</span>(interval),</span>
-<span id="cb31-8">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">year_started =</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">as.integer</span>(year_started),</span>
-<span id="cb31-9">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">year_ended =</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">as.integer</span>(year_ended)</span>
-<span id="cb31-10">  )</span></code></pre></div>
-</div>
-<div class="cell column-page">
-<div class="sourceCode cell-code" id="cb32" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb32-1">crayola</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code># A tibble: 174 × 11
-   color   name                    listed    notes                      x16_box x24_box x32_box x64_box interval year_started year_ended
-   &lt;chr&gt;   &lt;chr&gt;                   &lt;chr&gt;     &lt;chr&gt;                      &lt;chr&gt;   &lt;chr&gt;   &lt;chr&gt;   &lt;chr&gt;      &lt;int&gt;        &lt;int&gt;      &lt;int&gt;
- 1 #ED0A3F Red                     "#ED0A3F" ""                         "Yes"   "Yes"   "Yes"   "Yes"          1         1903       2022
- 2 #C32148 Maroon                  "#C32148" "Known as \"Dark Red\", 1… "No"    "No"    "No"    "No"           1         1949       2022
- 3 #FD0E35 Scarlet                 "#FD0E35" "Known as \"Torch Red\", … "No"    "Yes"   "Yes"   "Yes"          1         1998       2022
- 4 #C62D42 Brick Red               "#C62D42" ""                         "No"    "No"    "No"    "Yes"          1         1958       2022
- 5 #CC474B English Vermilion       ""        "Also spelled \"Vermillio… ""      ""      ""      ""             1         1903       1935
- 6 #CC3336 Madder Lake             ""        ""                         ""      ""      ""      ""             1         1903       1935
- 7 #E12C2C Permanent Geranium Lake ""        ""                         ""      ""      ""      ""             1         1903       1910
- 8 #D92121 Maximum Red             ""        "Part of the Munsell line… ""      ""      ""      ""             1         1926       1944
- 9 #B94E48 Chestnut                "#B94E48" "Known as \"Indian Red\" … "No"    "No"    "Yes"   "Yes"          1         1903       2022
-10 #FF5349 Orange-Red              "#FF5349" ""                         ""      ""      ""      ""             1         1958       1990
-# ℹ 164 more rows</code></pre>
-</div>
-</div>
-<p>We’re getting close. At this point the last bit of work I have to do to fix the year data is unpack it. Instead of representing the data for Maroon crayons with one row with a <code>year_started</code> value of 1949 and <code>year_ended</code> value of 2022, I want to have a single column called <code>year</code>, and the data should contain one row for every year in which Maroon was in production. Somewhere in the back of my head there is the thought that there must be an easy way to do this with tidyr, but my ingenuity failed me this time and I fell back on my usual solution… <a href="https://purrr.tidyverse.org/">purrr</a>.</p>
-<p>It’s a two-step process. Step one: write a little function that expects to receive the values stored in one row of the existing data frame, and returns a new data frame in the format I want. In this case, I want a tibble that has one row for each <code>year</code> in range starting <code>year_started</code> and ending <code>year_ended</code>, but otherwise has the same structure as the existing data. The <code>unpack_row()</code> function below does that:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb34" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb34-1">unpack_row <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">function</span>(color, name, year_started, year_ended, ...) {</span>
-<span id="cb34-2">  tibble<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">tibble</span>(</span>
-<span id="cb34-3">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">name =</span> name,</span>
-<span id="cb34-4">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">color =</span> color,</span>
-<span id="cb34-5">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">year =</span> year_started<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">:</span>year_ended,</span>
-<span id="cb34-6">    ...</span>
-<span id="cb34-7">  )</span>
-<span id="cb34-8">}</span></code></pre></div>
-</div>
-<p>So now I’ll do the unpacking with <code>purrr::pmap_dfr()</code>, sort the rows into a nice order using <code>dplyr::arrange()</code>, and add an <code>id</code> column to ensure that every row in the table has a unique identifier:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb35" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb35-1">crayola <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> crayola <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span></span>
-<span id="cb35-2">  purrr<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">pmap_dfr</span>(unpack_row) <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span></span>
-<span id="cb35-3">  dplyr<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">arrange</span>(year, color) <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span></span>
-<span id="cb35-4">  dplyr<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">mutate</span>(<span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">id =</span> dplyr<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">row_number</span>())</span></code></pre></div>
-</div>
-<p>Voilà!</p>
-<div class="cell column-page">
-<div class="sourceCode cell-code" id="cb36" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb36-1">crayola</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code># A tibble: 7,749 × 11
-   name                color    year listed    notes                                      x16_box x24_box x32_box x64_box interval    id
-   &lt;chr&gt;               &lt;chr&gt;   &lt;int&gt; &lt;chr&gt;     &lt;chr&gt;                                      &lt;chr&gt;   &lt;chr&gt;   &lt;chr&gt;   &lt;chr&gt;      &lt;int&gt; &lt;int&gt;
- 1 Black               #000000  1903 "#000000" ""                                         "Yes"   "Yes"   "Yes"   "Yes"          1     1
- 2 Midnight Blue       #003366  1903 "#003366" "Known as \"Prussian Blue\", 1903–1958.[2… "No"    "No"    "No"    "No"           1     2
- 3 Pine Green          #01796F  1903 "#01796F" "Known as \"Dark Chrome Green\" (\"Chrome… "No"    "No"    "No"    "No"           1     3
- 4 Green               #01A638  1903 "#01A638" ""                                         "Yes"   "Yes"   "Yes"   "Yes"          1     4
- 5 Blue (I)            #2EB4E6  1903 ""        "Known as \"Celestial Blue\", 1935–1949, … ""      ""      ""      ""             1     5
- 6 Ultramarine Blue    #3F26BF  1903 ""        ""                                         ""      ""      ""      ""             1     6
- 7 Van Dyke Brown      #664228  1903 ""        "Same color as \"Brown\" (1903–1910).[2]"  ""      ""      ""      ""             1     7
- 8 Raw Umber           #665233  1903 "#665233" ""                                         ""      ""      ""      ""             1     8
- 9 Medium Chrome Green #6CA67C  1903 ""        "\"Chrome Green, Medium\" on labels. Prod… ""      ""      ""      ""             1     9
-10 Celestial Blue      #7070CC  1903 ""        ""                                         ""      ""      ""      ""             1    10
-# ℹ 7,739 more rows</code></pre>
-</div>
-</div>
-</section>
-<section id="act-iii-i-said-pet-i-said-luv-i-said-pet" class="level2 page-columns page-full">
-<h2 class="anchored" data-anchor-id="act-iii-i-said-pet-i-said-luv-i-said-pet">Act III: I said pet, I said LUV, I said pet…</h2>
-<p>Okay I have one last thing to do before I’m done with the data wrangling. Having hex strings associated with each crayon colour is nice and is exactly what I need for plotting, but you can’t construct a nice ordering of colours since colour space is three dimensional, more or less. I’m trying my very best to forget everything I ever learned about the psychophysics of human colour perception, but even so I’m not silly enough to try to work with raw RGB values. Instead I’ll use the <a href="http://colorspace.r-forge.r-project.org/">colorspace</a> package to convert extract hue/saturation/value coordinates, as well as my slightly-preferred method, <a href="https://en.wikipedia.org/wiki/CIELUV">CIELUV color coordinates</a>:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb38" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb38-1">HSV <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> colorspace<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">coords</span>(<span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">as</span>(colorspace<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">hex2RGB</span>(crayola<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">$</span>color), <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"HSV"</span>))</span>
-<span id="cb38-2">LUV <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> colorspace<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">coords</span>(<span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">as</span>(colorspace<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">hex2RGB</span>(crayola<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">$</span>color), <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"LUV"</span>))</span></code></pre></div>
-</div>
-<p>Each of these commands returns a matrix with three columns and the same number of rows as the <code>crayola</code> data frame. The first few rows of the <code>HSV</code> matrix look like this:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb39" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb39-1">HSV[<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span><span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">:</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">10</span>,]</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>              H         S         V
- [1,]   0.00000 0.0000000 0.0000000
- [2,] 210.00000 1.0000000 0.4000000
- [3,] 175.00000 0.9917355 0.4745098
- [4,] 140.00000 0.9939759 0.6509804
- [5,] 196.30435 0.8000000 0.9019608
- [6,] 249.80392 0.8010471 0.7490196
- [7,]  25.16129 0.6078431 0.4000000
- [8,]  36.47059 0.5000000 0.4000000
- [9,] 136.55172 0.3493976 0.6509804
-[10,] 240.00000 0.4509804 0.8000000</code></pre>
-</div>
-</div>
-<p>So now I can store all six coordinates in the <code>crayola</code> dataframe, along with the LUV-space version of “hue” which I compute in the last line here:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb41" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb41-1">crayola <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> crayola <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span></span>
-<span id="cb41-2">  dplyr<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">mutate</span>(</span>
-<span id="cb41-3">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">hue =</span> HSV[, <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"H"</span>],</span>
-<span id="cb41-4">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">sat =</span> HSV[, <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"S"</span>],</span>
-<span id="cb41-5">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">val =</span> HSV[, <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"V"</span>],</span>
-<span id="cb41-6">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">L =</span> LUV[, <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"L"</span>],</span>
-<span id="cb41-7">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">U =</span> LUV[, <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"U"</span>],</span>
-<span id="cb41-8">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">V =</span> LUV[, <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"V"</span>],</span>
-<span id="cb41-9">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">hue2 =</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">atan2</span>(V, U)</span>
-<span id="cb41-10">  )</span></code></pre></div>
-</div>
-<p>The Wikipedia page on CIELUV has a little more information on this, but really the thing that matters is that the <code>hue2</code> column is the variable I’m going to use to arrange the crayon colours when plotting them later. And so the moment arrives that, at long last, I have the data…</p>
-<div class="cell column-page">
-<div class="sourceCode cell-code" id="cb42" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb42-1">crayola</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code># A tibble: 7,749 × 18
-   name            color  year listed notes x16_box x24_box x32_box x64_box interval    id   hue   sat   val     L      U       V   hue2
-   &lt;chr&gt;           &lt;chr&gt; &lt;int&gt; &lt;chr&gt;  &lt;chr&gt; &lt;chr&gt;   &lt;chr&gt;   &lt;chr&gt;   &lt;chr&gt;      &lt;int&gt; &lt;int&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;  &lt;dbl&gt;   &lt;dbl&gt;  &lt;dbl&gt;
- 1 Black           #000…  1903 "#000… ""    "Yes"   "Yes"   "Yes"   "Yes"          1     1   0   0     0       0     0      0     -3.14 
- 2 Midnight Blue   #003…  1903 "#003… "Kno… "No"    "No"    "No"    "No"           1     2 210   1     0.4    21.3 -11.9  -40.1   -1.86 
- 3 Pine Green      #017…  1903 "#017… "Kno… "No"    "No"    "No"    "No"           1     3 175   0.992 0.475  45.4 -36.1    0.638  3.12 
- 4 Green           #01A…  1903 "#01A… ""    "Yes"   "Yes"   "Yes"   "Yes"          1     4 140   0.994 0.651  59.5 -54.9   61.6    2.30 
- 5 Blue (I)        #2EB…  1903 ""     "Kno… ""      ""      ""      ""             1     5 196.  0.8   0.902  68.7 -44.6  -53.4   -2.27 
- 6 Ultramarine Bl… #3F2…  1903 ""     ""    ""      ""      ""      ""             1     6 250.  0.801 0.749  29.9  -2.77 -96.9   -1.60 
- 7 Van Dyke Brown  #664…  1903 ""     "Sam… ""      ""      ""      ""             1     7  25.2 0.608 0.4    31.5  25.9   19.9    0.655
- 8 Raw Umber       #665…  1903 "#665… ""    ""      ""      ""      ""             1     8  36.5 0.5   0.4    36.2  14.7   22.3    0.987
- 9 Medium Chrome … #6CA…  1903 ""     "\"C… ""      ""      ""      ""             1     9 137.  0.349 0.651  63.3 -28.3   26.3    2.39 
-10 Celestial Blue  #707…  1903 ""     ""    ""      ""      ""      ""             1    10 240   0.451 0.8    51.1  -5.49 -76.1   -1.64 
-# ℹ 7,739 more rows</code></pre>
-</div>
-</div>
-</section>
-<section id="the-intermission-is-late-so-what" class="level2">
-<h2 class="anchored" data-anchor-id="the-intermission-is-late-so-what">The intermission is late, so what?</h2>
-<p>As a rule I make it a habit to assume that, while the internet never forgets anything at all in the general sense, it doesn’t remember anything <em>specific</em> for any interval longer than I’d trust a man not to have conveniently lost my phone number. Moreover, while I also make it a habit not to care greatly about the archival properties of What Went Down In The Stalls At The Duke On Friday, I’m slightly more invested in, um … crayons, I guess. Or data science practices in R. Whatever.</p>
-<p>My point here is that the table on wikipedia isn’t an archival source so there’s no guarantee that anything I’ve done up to this point is reproducible unless I do a bit of extra work myself and save a copy of the data…</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb44" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb44-1">folder <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> here<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">here</span>(<span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"posts"</span>, <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"2022-12-18_crayola-crayon-colours"</span>)</span>
-<span id="cb44-2">readr<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">write_csv</span>(crayola, fs<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">path</span>(folder, <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"crayola.csv"</span>))</span></code></pre></div>
-</div>
-<p>As a convenient side benefit, you can download a copy of <a href="https://github.com/djnavarro/quarto-blog/blob/main/posts/2022-12-18_crayola-crayon-colours/crayola.csv">the crayola colours</a> data as a csv file from github should you feel so inclined. There’s even a script containing most of the <a href="https://github.com/djnavarro/quarto-blog/blob/main/posts/2022-12-18_crayola-crayon-colours/crayola.R">code for this post</a> too :-)</p>
-</section>
-<section id="act-iv-not-even-chekhov-expects-it-to-go-off" class="level2 page-columns page-full">
-<h2 class="anchored" data-anchor-id="act-iv-not-even-chekhov-expects-it-to-go-off">Act IV: Not even Chekhov expects it to go off</h2>
-<p>In any case, the final act of our little drama has arrived at last. Time to make a plot. The drums roll and the audience holds their breath in antici–</p>
-<p>Oh let’s just get on with it and load <a href="https://ggplot2.tidyverse.org/">ggplot2</a> already. Here’s a stacked bar chart showing the number of distinct crayon colours in the Crayola standard set every year from 1903 to 2022. It has grown over time but the growth looks linear, not exponential:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb45" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb45-1"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">library</span>(ggplot2)</span>
-<span id="cb45-2">base <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> crayola <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span> </span>
-<span id="cb45-3">  dplyr<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">mutate</span>(</span>
-<span id="cb45-4">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">color =</span> forcats<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">fct_reorder</span>(color, hue2)</span>
-<span id="cb45-5">  ) <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span> </span>
-<span id="cb45-6">  <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">ggplot</span>(<span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">aes</span>(</span>
-<span id="cb45-7">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">x =</span> year,</span>
-<span id="cb45-8">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">group =</span> color,</span>
-<span id="cb45-9">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">fill =</span> color</span>
-<span id="cb45-10">  )) <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+</span></span>
-<span id="cb45-11">  <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">scale_fill_identity</span>() <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+</span></span>
-<span id="cb45-12">  <span class="cn" style="color: #8f5902;
-background-color: null;
-font-style: inherit;">NULL</span></span>
-<span id="cb45-13"></span>
-<span id="cb45-14">base <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">geom_bar</span>(<span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">show.legend =</span> <span class="cn" style="color: #8f5902;
-background-color: null;
-font-style: inherit;">FALSE</span>) </span></code></pre></div>
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2022-12-18_crayola-crayon-colours/index_files/figure-html/first-plot-1.png" class="img-fluid" width="672"></p>
-</div>
-</div>
-<p>But let’s be honest, shall we? No-one at all (least of all me) is interested in determining whether the rate of growth of Crayola crayon colours in the standard set is exponential or linear. It’s just fun. The real reason we all love the Crayola post was that the image was so terribly pretty, so let’s start making something pretty, yes?</p>
-<p>We can start getting something a little closer to the original if we set <code>position = "fill"</code>, and I’m going to use <code>theme_void()</code> because honestly it’s just prettier without the words and numbers getting in the way…</p>
-<div class="cell" data-layout-align="center">
-<div class="sourceCode cell-code" id="cb46" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb46-1">base <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+</span> </span>
-<span id="cb46-2">  <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">theme_void</span>() <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+</span></span>
-<span id="cb46-3">  <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">geom_bar</span>(</span>
-<span id="cb46-4">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">position =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"fill"</span>,</span>
-<span id="cb46-5">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">linetype =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"blank"</span>,</span>
-<span id="cb46-6">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">width =</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span>,</span>
-<span id="cb46-7">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">show.legend =</span> <span class="cn" style="color: #8f5902;
-background-color: null;
-font-style: inherit;">FALSE</span></span>
-<span id="cb46-8">  ) </span></code></pre></div>
-<div class="cell-output-display">
-<div class="quarto-figure quarto-figure-center">
-<figure class="figure">
-<p><img src="https://blog.djnavarro.net/posts/2022-12-18_crayola-crayon-colours/index_files/figure-html/unnamed-chunk-17-1.png" class="img-fluid figure-img" width="768"></p>
-</figure>
-</div>
-</div>
-</div>
-<p>It’s pretty, but it’s noticeably different from the original one. In my version, there are 39 separate colours depicted on the left hand side, whereas the version that was going around on mastodon (and appears in the original blog posts) has only 8. Out of paranoia, I decided to check the counts in my data…</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb47" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb47-1">crayola <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span> </span>
-<span id="cb47-2">  dplyr<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">count</span>(year) <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span></span>
-<span id="cb47-3">  dplyr<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">filter</span>(year <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">%in%</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">seq</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1903</span>, <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2003</span>, <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">by =</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">10</span>))</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code># A tibble: 11 × 2
-    year     n
-   &lt;int&gt; &lt;int&gt;
- 1  1903    40
- 2  1913    32
- 3  1923    31
- 4  1933    57
- 5  1943    57
- 6  1953    49
- 7  1963    64
- 8  1973    64
- 9  1983    64
-10  1993    80
-11  2003   108</code></pre>
-</div>
-</div>
-<p>…which does seem consistent with what the <a href="https://en.wikipedia.org/wiki/History_of_Crayola_crayons">history of Crayola crayons</a> wikipedia article has to say on the topic too:</p>
-<blockquote class="blockquote">
-<p>Early Crayola advertising mentions thirty different colors, although there is no official list; in fact thirty-eight different crayons are known from Crayola boxes of this period. The largest labeled assortment was box No.&nbsp;51, titled Crayola Young Artists’ Drawing Crayons, which included twenty-eight different crayons. Other colors were found in different boxes, including the “Rubens” No.&nbsp;500, a twenty-four crayon assortment.</p>
-</blockquote>
-<p>Okay, so if I haven’t made a mistake, what is going on? It turns out that although Steven Von Worley’s blog post still manages to point to the “same” Wikipedia page 12 years later, the contents of the page have changed considerably. The original post was published January 15th 2010. Conveniently the wayback machine has a <a href="http://web.archive.org/web/20100209002742/https://en.wikipedia.org/wiki/List_of_Crayola_crayon_colors">snapshot of that page</a> from only a few weeks later, on February 9th. I have a very different version of the Crayola colours data than Steven’s friend Velociraptor had.</p>
-<p>There are 133 colours listed in the 2010 version, and it’s missing all the colours that had gone out of production earlier than 1990. “English Vermillion”, for example, was in production from 1903 to 1935. It appears in the 2022 version of the Wikipedia data (and so it’s represented in my plots above), but it was omitted in the 2010 version of the Wikipedia data and so doesn’t appear in the version of the image that went around on Mastodon yesterday.</p>
-<p>Hm. So what happens to my data if I crudely simulate a censoring process a little bit like the one that applied to the 2010 version of the Wikipedia page? Let’s simply ignore all crayon colours that were out of production earlier than 1990, shall we?</p>
-<div class="cell" data-layout-align="center">
-<div class="sourceCode cell-code" id="cb49" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb49-1">base <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+</span> </span>
-<span id="cb49-2">  <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">theme_void</span>() <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+</span></span>
-<span id="cb49-3">  <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">geom_bar</span>(</span>
-<span id="cb49-4">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">data =</span>  crayola <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span> </span>
-<span id="cb49-5">      dplyr<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">group_by</span>(name) <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span></span>
-<span id="cb49-6">      dplyr<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">filter</span>(<span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">max</span>(year) <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">&gt;</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1990</span>) <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span></span>
-<span id="cb49-7">      dplyr<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">ungroup</span>() <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span></span>
-<span id="cb49-8">      dplyr<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">mutate</span>(<span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">color =</span> forcats<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">fct_reorder</span>(color, hue2)),</span>
-<span id="cb49-9">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">position =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"fill"</span>,</span>
-<span id="cb49-10">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">linetype =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"blank"</span>,</span>
-<span id="cb49-11">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">width =</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span>,</span>
-<span id="cb49-12">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">show.legend =</span> <span class="cn" style="color: #8f5902;
-background-color: null;
-font-style: inherit;">FALSE</span></span>
-<span id="cb49-13">  ) </span></code></pre></div>
-<div class="cell-output-display">
-<div class="quarto-figure quarto-figure-center">
-<figure class="figure">
-<p><img src="https://blog.djnavarro.net/posts/2022-12-18_crayola-crayon-colours/index_files/figure-html/second-plot-1.png" class="img-fluid figure-img" width="768"></p>
-</figure>
-</div>
-</div>
-</div>
-<p>Still not exactly equivalent, but it’s closer.</p>
-<p>More to the point however, I think we all have to admit that this is really the kind of data set that desperately needs to be plotted with the aid of <code>coord_polar()</code>, no?</p>
-<div class="cell page-columns page-full" data-layout-align="center">
-<div class="sourceCode cell-code" id="cb50" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb50-1">base <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+</span> </span>
-<span id="cb50-2">  <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">theme_void</span>() <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+</span></span>
-<span id="cb50-3">  <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">coord_polar</span>(<span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">theta =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"y"</span>) <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+</span> </span>
-<span id="cb50-4">  <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">geom_bar</span>(</span>
-<span id="cb50-5">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">position =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"fill"</span>,</span>
-<span id="cb50-6">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">linetype =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"blank"</span>,</span>
-<span id="cb50-7">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">width =</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span>,</span>
-<span id="cb50-8">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">show.legend =</span> <span class="cn" style="color: #8f5902;
-background-color: null;
-font-style: inherit;">FALSE</span></span>
-<span id="cb50-9">  ) </span></code></pre></div>
-<div class="cell-output-display column-screen-inset">
-<div class="quarto-figure quarto-figure-center">
-<figure class="figure">
-<p><img src="https://blog.djnavarro.net/posts/2022-12-18_crayola-crayon-colours/index_files/figure-html/third-plot-1.png" class="img-fluid figure-img" width="1152"></p>
-</figure>
-</div>
-</div>
-</div>
-<p>I mean… not that anyone really cares what this represents, but each concentric ring represents a year of data: 1903 is in the middle, and 2022 is on the outside. Within each annual ring there is an equal-angle segment for every crayon colour in the data for that year. Whenever the crayons changed, the rings shift a bit. The colours are arranged around the circle by hue. Well, the hue-like quantity computed from the chromaticity components of the LUV coordinates. Whatever.</p>
-<p>Alternatively, we could turn this into a racetrack plot, where each individual colour fills an angular section of constant size, and so only the year with the most crayon colours (2022) wraps the full way round the circle. That gives us this:</p>
-<div class="cell page-columns page-full" data-layout-align="center">
-<div class="sourceCode cell-code" id="cb51" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb51-1">base <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+</span> </span>
-<span id="cb51-2">  <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">theme_void</span>() <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+</span></span>
-<span id="cb51-3">  <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">coord_polar</span>(<span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">theta =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"y"</span>) <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+</span> </span>
-<span id="cb51-4">  <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">geom_bar</span>(</span>
-<span id="cb51-5">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">linetype =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"blank"</span>,</span>
-<span id="cb51-6">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">width =</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span>,</span>
-<span id="cb51-7">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">show.legend =</span> <span class="cn" style="color: #8f5902;
-background-color: null;
-font-style: inherit;">FALSE</span></span>
-<span id="cb51-8">  ) </span></code></pre></div>
-<div class="cell-output-display column-screen-inset">
-<div class="quarto-figure quarto-figure-center">
-<figure class="figure">
-<p><img src="https://blog.djnavarro.net/posts/2022-12-18_crayola-crayon-colours/index_files/figure-html/fourth-plot-1.png" class="img-fluid figure-img" width="1152"></p>
-</figure>
-</div>
-</div>
-</div>
-<p>I’m not sure it has a lot of value as a data visualisation but it is so very pretty!</p>
-<!--------------- appendices go here ----------------->
-
-
-</section>
-
-<div id="quarto-appendix" class="default"><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div id="quarto-reuse" class="quarto-appendix-contents"><div><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2022,
-  author = {Navarro, Danielle},
-  title = {Crayola Crayon Colours},
-  date = {2022-12-18},
-  url = {https://blog.djnavarro.net/posts/2022-12-18_crayola-crayon-colours},
-  langid = {en}
-}
-</code></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2022" class="csl-entry quarto-appendix-citeas">
-Navarro, Danielle. 2022. <span>“Crayola Crayon Colours.”</span> December
-18, 2022. <a href="https://blog.djnavarro.net/posts/2022-12-18_crayola-crayon-colours">https://blog.djnavarro.net/posts/2022-12-18_crayola-crayon-colours</a>.
-</div></div></section></div> ]]></description>
-  <category>R</category>
-  <category>Data Wrangling</category>
-  <category>Data Visualisation</category>
-  <guid>https://blog.djnavarro.net/posts/2022-12-18_crayola-crayon-colours/index.html</guid>
-  <pubDate>Sat, 17 Dec 2022 13:00:00 GMT</pubDate>
-  <media:content url="https://blog.djnavarro.net/posts/2022-12-18_crayola-crayon-colours/crayola.png" medium="image" type="image/png" height="144" width="144"/>
 </item>
 </channel>
 </rss>
