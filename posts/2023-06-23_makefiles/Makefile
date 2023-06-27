@@ -1,3 +1,6 @@
+
+
+
 cpp_src := $(wildcard src/*.cpp)
 cpp_out := $(patsubst src/%.cpp, bin/%, $(cpp_src))
 
@@ -26,5 +29,3 @@ clean:
 	@rm -rf $(site_path)
 	@echo "[deleting] " $(freeze_path)
 	@rm -rf $(freeze_path)
-
-
