@@ -1,4 +1,3 @@
-
 # lists of filenames
 src := $(wildcard src/*.cpp)
 bin := $(patsubst src/%.cpp, bin/%, $(src))
