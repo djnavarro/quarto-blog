@@ -152,7 +152,7 @@ make
 ```{bash}
 #| echo: false
 cd ./examples/version1
-make
+make --no-print-directory
 cd ../..
 ```
 
@@ -176,7 +176,7 @@ make clean
 ```{bash}
 #| echo: false
 cd ./examples/version1
-make clean
+make clean --no-print-directory
 cd ../..
 ```
 
@@ -223,7 +223,7 @@ make
 ```{bash}
 #| echo: false
 cd ./examples/version2
-make
+make --no-print-directory
 cd ../..
 ```
 
@@ -270,7 +270,7 @@ make
 ```{bash}
 #| echo: false
 cd ./examples/version3
-make
+make --no-print-directory
 cd ../..
 ```
 
@@ -282,3 +282,70 @@ cd ./examples/version3
 make clean
 cd ../..
 ```
+
+
+## Recursion is the death of hope, the catastrophic implosion of Makefiles
+
+
+```{Makefile}
+#| label: "makefile-this-post"
+#| file: "Makefile"
+#| code-line-numbers: true
+#| eval: false
+```
+
+When I call `make` on clean build I get this output 
+
+```
+
+[ making subproject v1 ]
+mkdir -p ./bin
+clang++ --std=c++20 src/collatz.cpp -o bin/collatz
+clang++ --std=c++20 src/species.cpp -o bin/species
+clang++ --std=c++20 src/swap.cpp -o bin/swap
+
+[ making subproject v2 ]
+mkdir -p ./bin
+clang++ --std=c++20 src/collatz.cpp -o bin/collatz
+clang++ --std=c++20 src/species.cpp -o bin/species
+clang++ --std=c++20 src/swap.cpp -o bin/swap
+
+[ making subproject v3 ]
+compiling src/collatz.cpp to bin/collatz
+compiling src/species.cpp to bin/species
+compiling src/swap.cpp to bin/swap
+
+[ rendering quarto document ]
+
+```
+
+When I call `make clean` it produces this:
+
+```
+
+[ cleaning subprojects ]
+rm -rf bin
+rm -rf bin
+deleting binary files
+
+[ deleting quarto output ]
+
+```
+
+
+There's some spectacularly unpleasant self-reference going on in all this because the quarto render for this document necessarily requires clean-and-remake for the subprojects, and this makes some things a tiny bit difficult for `make`. But this isn't a typical case for `make`: what I'm doing here is creating a makefile for this quarto document that renders this quarto document and recursively calls the makefiles for the subprojects... but at the same time this quarto document messes with the make status of the various subprojects. Not something I would do in the normal course of events, obviously. Anyway, the long and short of it is that with this makefile you have to call make twice in order to produce this as the output:
+
+```
+
+[ making subproject v1 ]
+mkdir -p ./bin
+
+[ making subproject v2 ]
+mkdir -p ./bin
+
+[ making subproject v3 ]
+
+```
+
+Basically, because this very quarto document is (on purpose!) fucking with the make status of the subprojects, calling make on this quarto post wreaks havoc on the make status of those subproject if (and only if) the top-level make file decides it needs to re-render this post. Suffice it to say this is not an ordinary use of make. Big picture? Weirdness abounds when some parts of your build are devolved to quarto (which implicitly calls make), and other parts are devolved to make (which implicitly calls quarto). Neither quarto nor make have the ability to track that kind of indirect recursion. 
+
