@@ -617,7 +617,7 @@ clang++ --std=c++20 src/swap.cpp -o bin/swap</code></pre>
 <span id="cb19-9"><a href="#cb19-9"></a>    mkdir -p ./bin</span>
 <span id="cb19-10"><a href="#cb19-10"></a></span>
 <span id="cb19-11"><a href="#cb19-11"></a><span class="co"># each C++ binary is a target, the source is its prerequisite</span></span>
-<span id="cb19-12"><a href="#cb19-12"></a><span class="dv">bin/%:</span><span class="dt"> src/%.cpp</span></span>
+<span id="cb19-12"><a href="#cb19-12"></a><span class="dv">$(bin_files):</span><span class="dt"> bin/%: src/%.cpp</span></span>
 <span id="cb19-13"><a href="#cb19-13"></a>    clang++ --std=c++20 <span class="ch">$&lt;</span> -o <span class="ch">$@</span></span>
 <span id="cb19-14"><a href="#cb19-14"></a></span>
 <span id="cb19-15"><a href="#cb19-15"></a><span class="dv">clean:</span></span>
@@ -625,24 +625,45 @@ clang++ --std=c++20 src/swap.cpp -o bin/swap</code></pre>
 </div>
 <p>Let’s go through this line by line. First, we can use wildcard matching to find all files in the <code>src</code> folder that end with the <code>.cpp</code> file extension:</p>
 <div class="sourceCode" id="cb20"><pre class="sourceCode makefile code-with-copy"><code class="sourceCode makefile"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a><span class="dt">src_files </span><span class="ch">:=</span><span class="st"> </span><span class="ch">$(</span><span class="kw">wildcard</span><span class="st"> src/*.cpp</span><span class="ch">)</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-<p>This line in the code creates a variable called <code>src_files</code> corresponding to the following values:</p>
+<p>It may not be immediately apparent to – oh, say, humans – but this is in fact a function call. The name of the function is <code>wildcard</code>, the <code>$( )</code> syntax with the function name inside the parentheses is the way you call functions in <code>make</code>,<a href="#fn5" class="footnote-ref" id="fnref5" role="doc-noteref"><sup>5</sup></a> and <code>src/*.cpp</code> is the argument passed to the function.</p>
+<p>It may also not be obvious upon first inspection – because again, why would it be? – why I’ve used <code>:=</code> instead of <code>=</code> in my assignment statement. The goal here is to create a new variable called <code>src_files</code> that contains the names of the various source files, that much is clear. But why use <code>:=</code>, exactly? The answer, of course, is that <code>make</code> supports several different kinds of assignment operators, and confusingly enough <code>=</code> is <em>not</em> the operator for “simple” assignment:</p>
+<ul>
+<li>Use <code>:=</code> if you want “simple assignment”: the assignment happens once and only once, the first time the assignment statement is encountered</li>
+<li>Use <code>=</code> if you want “recursive assignment”: the assignment is reevaluated every time the value of the right hand side changes (e.g., in this example, if a later make target changes the list of source files in the <code>src</code> folder, the value of <code>src_files</code> changes too)</li>
+<li>Use <code>?=</code> if you want “conditional assignment”: the assignment only happens if the variable doesn’t already have a value (sure, normal humans would use an if-statement for this, but as we all know keystrokes are a precious resource and must be conserved; preserving human sanity is of course a much less important goal)</li>
+<li>Use <code>+=</code> if you want the value of the right hand side to be added to the variable rather than replacing its existing value.</li>
+</ul>
+<p>It sure doesn’t seem like I should have had to write a small manuscript simply to explain one very modest line of code, but such is the nature of <code>make</code>.</p>
+<p>In any case, the thing that matters here is we’ve scanned the <code>src</code> folder and created a variable called <code>src_files</code> that lists all the C++ source code files in that folder. In other words, <code>src_files</code> is now a synonym for this:</p>
 <pre><code>src/collatz.cpp src/species.cpp src/swap.cpp</code></pre>
-<p>If we could be assured that the binary files always exist, we could use the same trick to list all binaries in the <code>bin</code> folder. But because those might not exist (e.g., if we delete the binaries when calling <code>make clean</code>), we can’t be assured of that. So instead, we’ll do a pattern substitution: we’ll take the <code>src_files</code> variable as input, strip the <code>.cpp</code> extension from the files, and replace <code>src</code> with <code>bin</code>.</p>
-<div class="sourceCode" id="cb22"><pre class="sourceCode makefile code-with-copy"><code class="sourceCode makefile"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a><span class="dt">bin_files </span><span class="ch">:=</span><span class="st"> </span><span class="ch">$(</span><span class="kw">patsubst</span><span class="st"> src/%.cpp</span><span class="kw">,</span><span class="st"> bin/%</span><span class="kw">,</span><span class="st"> </span><span class="ch">$(</span><span class="dt">src_files</span><span class="ch">))</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-<p>The <code>bin_files</code> variable contains these values:</p>
+<p>This will now form the basis by which we construct a list of build targets. Because our project is very simple and has a nice one-to-one mapping between source files and output files, what we really want to construct now is a variable that contains a list of build targets like this:</p>
 <pre><code>bin/collatz bin/species bin/swap</code></pre>
-<p>So now we have a variable (<code>bin_files</code>) listing the binary targets that our Makefile needs to create, as well as a variable (<code>src_file</code>) specifing the source files that need to be compiled in order to create those files. Now that we have this, we can set our “all” target as follows:</p>
-<div class="sourceCode" id="cb24"><pre class="sourceCode makefile code-with-copy"><code class="sourceCode makefile"><span id="cb24-1"><a href="#cb24-1" aria-hidden="true" tabindex="-1"></a><span class="dv">all:</span><span class="dt"> dir </span><span class="ch">$(</span><span class="dt">bin_files</span><span class="ch">)</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-<p>This is equivalent to:</p>
-<div class="sourceCode" id="cb25"><pre class="sourceCode makefile code-with-copy"><code class="sourceCode makefile"><span id="cb25-1"><a href="#cb25-1" aria-hidden="true" tabindex="-1"></a><span class="dv">all:</span><span class="dt"> dir bin/collatz bin/species bin/swap</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>If we could be assured that the binary files always exist, we could use the same trick to list all binaries in the <code>bin</code> folder. But because those might not exist (e.g., if we delete the binaries when calling <code>make clean</code>), we can’t be assured of that. So instead, we’ll use the <code>patsubst</code> function to do a pattern substitution: we’ll take the <code>src_files</code> variable as input, strip the <code>.cpp</code> extension from the files, and replace <code>src</code> with <code>bin</code>. Here’s what that looks like:</p>
+<div class="sourceCode" id="cb23"><pre class="sourceCode makefile code-with-copy"><code class="sourceCode makefile"><span id="cb23-1"><a href="#cb23-1" aria-hidden="true" tabindex="-1"></a><span class="dt">bin_files </span><span class="ch">:=</span><span class="st"> </span><span class="ch">$(</span><span class="kw">patsubst</span><span class="st"> src/%.cpp</span><span class="kw">,</span><span class="st"> bin/%</span><span class="kw">,</span><span class="st"> </span><span class="ch">$(</span><span class="dt">src_files</span><span class="ch">))</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>The <code>patsubst</code> function takes three arguments, and – of course – they are specified in a weird order. The data argument appears in the third position, because again… why not? The pattern to which we match the data appears in the first position, and the replacement pattern appears in the second position.<a href="#fn6" class="footnote-ref" id="fnref6" role="doc-noteref"><sup>6</sup></a> Anyway, the point here is that what this function call does is as follows: it takes all the filenames in <code>src_files</code>, matches them against <code>src/%.cpp</code> to find the “stem” (e.g., the stem for <code>src/collatz.cpp</code> is the part that matches the <code>%</code> operator, i.e., <code>collatz</code>), and then uses the replacement pattern <code>bin/%</code> to construct output values from the stems (e.g., <code>collatz</code> is transformed to <code>bin/collatz</code>). And so we end up with a variable <code>bin_files</code> that contains the list of target files we want to build:</p>
+<pre><code>bin/collatz bin/species bin/swap</code></pre>
+<p>Now that we have this, we can define the “all” target using this variable, as follows:</p>
+<div class="sourceCode" id="cb25"><pre class="sourceCode makefile code-with-copy"><code class="sourceCode makefile"><span id="cb25-1"><a href="#cb25-1" aria-hidden="true" tabindex="-1"></a><span class="dv">all:</span><span class="dt"> dir </span><span class="ch">$(</span><span class="dt">bin_files</span><span class="ch">)</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>From the <code>make</code> perspective this is equivalent to:</p>
+<div class="sourceCode" id="cb26"><pre class="sourceCode makefile code-with-copy"><code class="sourceCode makefile"><span id="cb26-1"><a href="#cb26-1" aria-hidden="true" tabindex="-1"></a><span class="dv">all:</span><span class="dt"> dir bin/collatz bin/species bin/swap</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <p>Or, to put it another way, by using the <code>bin_files</code> variable, we can programmatically ensure that the “all” target includes a target for every binary file that needs to be compiled.</p>
-<p>So our next task is to write a rule that will create targets for each of these binaries, and build them from the corresponding C++ source code:</p>
-<div class="sourceCode" id="cb26"><pre class="sourceCode makefile code-with-copy"><code class="sourceCode makefile"><span id="cb26-1"><a href="#cb26-1" aria-hidden="true" tabindex="-1"></a><span class="dv">bin/%:</span><span class="dt"> src/%.cpp</span></span>
-<span id="cb26-2"><a href="#cb26-2" aria-hidden="true" tabindex="-1"></a>    clang++ --std=c++20 <span class="ch">$&lt;</span> -o <span class="ch">$@</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-<p>The results are the same:</p>
+<p>Having defined a list of targets programmatically, our next<a href="#fn7" class="footnote-ref" id="fnref7" role="doc-noteref"><sup>7</sup></a> task is to write a <strong>static pattern rule</strong> that programmatically defines the targets themselves. Specifically, for every target listed in <code>bin_files</code>, we want (1) to assert that it relies on the corresponding source file as a prerequisite, and (2) to specify a build action that compiles the binary from the corresponding source.</p>
+<p>Here’s some code that does this:</p>
+<div class="sourceCode" id="cb27"><pre class="sourceCode makefile code-with-copy"><code class="sourceCode makefile"><span id="cb27-1"><a href="#cb27-1" aria-hidden="true" tabindex="-1"></a><span class="dv">$(bin_files):</span><span class="dt"> bin/%: src/%.cpp</span></span>
+<span id="cb27-2"><a href="#cb27-2" aria-hidden="true" tabindex="-1"></a>    clang++ --std=c++20 <span class="ch">$&lt;</span> -o <span class="ch">$@</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>The underlying syntax here is as follows:</p>
+<div class="sourceCode" id="cb28"><pre class="sourceCode makefile code-with-copy"><code class="sourceCode makefile"><span id="cb28-1"><a href="#cb28-1" aria-hidden="true" tabindex="-1"></a><span class="dv">targets:</span><span class="dt"> target-pattern: prerequisites-patterns</span></span>
+<span id="cb28-2"><a href="#cb28-2" aria-hidden="true" tabindex="-1"></a>    commands</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>For our example, the <code>bin_files</code> variable contains the list of targets specified by the pattern rule. The <code>bin/%</code> part (the target pattern) and the <code>src/%.cpp</code> part (the prerequisites pattern) are used for pattern substitution purposes. It’s essentially the same task that we saw when I called <code>patsubst</code> using these patterns earlier: in the previous example I used them to construct the name of a binary file from the corresponding source file, this time I’m going the other direction and constructing the name of the source file (to use as a rerequisite) from the binary file (which is used as the target).</p>
+<p>Okay, now let’s turn to the second line of the code snippet. In the orginal version of the code I wrote targets like this:</p>
+<div class="sourceCode" id="cb29"><pre class="sourceCode makefile code-with-copy"><code class="sourceCode makefile"><span id="cb29-1"><a href="#cb29-1" aria-hidden="true" tabindex="-1"></a><span class="dv">bin/collatz:</span><span class="dt"> src/collatz.cpp</span></span>
+<span id="cb29-2"><a href="#cb29-2" aria-hidden="true" tabindex="-1"></a>    clang++ --std=c++20 src/collatz.cpp -o bin/collatz</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<p>But in the static pattern rule version I’ve used <code>$&lt;</code> to refer to the prerequisite file (e.g., the source file <code>src/collatz.cpp</code>) and <code>$@</code> to refer to the file name of the target (e.g., the binary file <code>bin/collatz</code>). These are both examples of <a href="https://www.gnu.org/software/make/manual/html_node/Automatic-Variables.html">automatic variables</a> in <code>make</code>. There are quite a lot of these: <code>$@</code>, <code>$%</code>, <code>$&lt;</code>, <code>$?</code>, <code>$^</code>, <code>$+</code>, <code>$|</code>, <code>$*</code>. Some of these have “D” and “F” variants that specifically refer to directory paths or filenames: <code>$(@D)</code> and <code>$(@F)</code> are variations on <code>$@</code>, <code>$(*D)</code> and <code>$(*F)</code> are variants of <code>$*</code> and so on. If you desperately want to learn all these details the linked page explains them all. For our purposes it’s enough to note that in the example above, I’ve used <code>$&lt;</code> to refer to the source file and <code>$@</code> to refer to the output file.</p>
+<p>Right. After all that as explanatory background we can run <code>make</code>, and happily see that the results are indeed the same as before:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb27"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb27-1"><a href="#cb27-1" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb30"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb30-1"><a href="#cb30-1" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
+<p>And now that we’ve built the project we see that the filetree now contains the binaries:</p>
 <div class="cell">
 <div class="cell-output cell-output-stdout">
 <pre><code>mkdir -p ./bin
@@ -677,27 +698,27 @@ clang++ --std=c++20 src/swap.cpp -o bin/swap</code></pre>
 </div>
 <p>The third version is again the same in structure. But we now use <code>@</code> to prevent commands from echoing to the terminal, and instead write our own messages:</p>
 <div class="cell column-body-outset" data-file="examples/version3/Makefile">
-<div class="sourceCode cell-code" id="cb30"><pre class="sourceCode numberSource makefile number-lines code-with-copy"><code class="sourceCode makefile"><span id="cb30-1"><a href="#cb30-1"></a><span class="dt">src </span><span class="ch">:=</span><span class="st"> </span><span class="ch">$(</span><span class="kw">wildcard</span><span class="st"> src/*.cpp</span><span class="ch">)</span></span>
-<span id="cb30-2"><a href="#cb30-2"></a><span class="dt">bin </span><span class="ch">:=</span><span class="st"> </span><span class="ch">$(</span><span class="kw">patsubst</span><span class="st"> src/%.cpp</span><span class="kw">,</span><span class="st"> bin/%</span><span class="kw">,</span><span class="st"> </span><span class="ch">$(</span><span class="dt">src</span><span class="ch">))</span></span>
-<span id="cb30-3"><a href="#cb30-3"></a></span>
-<span id="cb30-4"><a href="#cb30-4"></a><span class="dv">all:</span><span class="dt"> dir </span><span class="ch">$(</span><span class="dt">bin</span><span class="ch">)</span></span>
-<span id="cb30-5"><a href="#cb30-5"></a></span>
-<span id="cb30-6"><a href="#cb30-6"></a><span class="co"># this target is silent</span></span>
-<span id="cb30-7"><a href="#cb30-7"></a><span class="dv">dir:</span></span>
-<span id="cb30-8"><a href="#cb30-8"></a>    <span class="ch">@</span><span class="fu">mkdir -p ./bin</span></span>
-<span id="cb30-9"><a href="#cb30-9"></a></span>
-<span id="cb30-10"><a href="#cb30-10"></a><span class="co"># this target prints a human readable message</span></span>
-<span id="cb30-11"><a href="#cb30-11"></a><span class="dv">bin/%:</span><span class="dt"> src/%.cpp</span></span>
-<span id="cb30-12"><a href="#cb30-12"></a>    <span class="ch">@</span><span class="fu">echo </span><span class="st">"compiling"</span><span class="fu"> </span><span class="ch">$&lt;</span><span class="fu"> </span><span class="st">"to"</span><span class="fu"> </span><span class="ch">$@</span></span>
-<span id="cb30-13"><a href="#cb30-13"></a>    <span class="ch">@</span><span class="fu">clang++ --std=c++20 </span><span class="ch">$&lt;</span><span class="fu"> -o </span><span class="ch">$@</span></span>
-<span id="cb30-14"><a href="#cb30-14"></a></span>
-<span id="cb30-15"><a href="#cb30-15"></a><span class="dv">clean:</span></span>
-<span id="cb30-16"><a href="#cb30-16"></a>    <span class="ch">@</span><span class="fu">echo </span><span class="st">"deleting binary files"</span></span>
-<span id="cb30-17"><a href="#cb30-17"></a>    <span class="ch">@</span><span class="fu">rm -rf bin</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb33"><pre class="sourceCode numberSource makefile number-lines code-with-copy"><code class="sourceCode makefile"><span id="cb33-1"><a href="#cb33-1"></a><span class="dt">src </span><span class="ch">:=</span><span class="st"> </span><span class="ch">$(</span><span class="kw">wildcard</span><span class="st"> src/*.cpp</span><span class="ch">)</span></span>
+<span id="cb33-2"><a href="#cb33-2"></a><span class="dt">bin </span><span class="ch">:=</span><span class="st"> </span><span class="ch">$(</span><span class="kw">patsubst</span><span class="st"> src/%.cpp</span><span class="kw">,</span><span class="st"> bin/%</span><span class="kw">,</span><span class="st"> </span><span class="ch">$(</span><span class="dt">src</span><span class="ch">))</span></span>
+<span id="cb33-3"><a href="#cb33-3"></a></span>
+<span id="cb33-4"><a href="#cb33-4"></a><span class="dv">all:</span><span class="dt"> dir </span><span class="ch">$(</span><span class="dt">bin</span><span class="ch">)</span></span>
+<span id="cb33-5"><a href="#cb33-5"></a></span>
+<span id="cb33-6"><a href="#cb33-6"></a><span class="co"># this target is silent</span></span>
+<span id="cb33-7"><a href="#cb33-7"></a><span class="dv">dir:</span></span>
+<span id="cb33-8"><a href="#cb33-8"></a>    <span class="ch">@</span><span class="fu">mkdir -p ./bin</span></span>
+<span id="cb33-9"><a href="#cb33-9"></a></span>
+<span id="cb33-10"><a href="#cb33-10"></a><span class="co"># this target prints a human readable message</span></span>
+<span id="cb33-11"><a href="#cb33-11"></a><span class="dv">bin/%:</span><span class="dt"> src/%.cpp</span></span>
+<span id="cb33-12"><a href="#cb33-12"></a>    <span class="ch">@</span><span class="fu">echo </span><span class="st">"compiling"</span><span class="fu"> </span><span class="ch">$&lt;</span><span class="fu"> </span><span class="st">"to"</span><span class="fu"> </span><span class="ch">$@</span></span>
+<span id="cb33-13"><a href="#cb33-13"></a>    <span class="ch">@</span><span class="fu">clang++ --std=c++20 </span><span class="ch">$&lt;</span><span class="fu"> -o </span><span class="ch">$@</span></span>
+<span id="cb33-14"><a href="#cb33-14"></a></span>
+<span id="cb33-15"><a href="#cb33-15"></a><span class="dv">clean:</span></span>
+<span id="cb33-16"><a href="#cb33-16"></a>    <span class="ch">@</span><span class="fu">echo </span><span class="st">"deleting binary files"</span></span>
+<span id="cb33-17"><a href="#cb33-17"></a>    <span class="ch">@</span><span class="fu">rm -rf bin</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <p>The same events take place, but the result is prettier:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb31"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb31-1"><a href="#cb31-1" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb34"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb34-1"><a href="#cb34-1" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <div class="cell">
 <div class="cell-output cell-output-stdout">
@@ -714,40 +735,40 @@ compiling src/swap.cpp to bin/swap</code></pre>
 <h2 class="anchored" data-anchor-id="death-of-the-authoress-recursion-is-the-exsanguination-of-hope-the-catastrophic-implosion-of-make">Death of the Authoress: Recursion is the exsanguination of hope, the catastrophic implosion of make</h2>
 <p><a href="https://www.gnu.org/software/make/manual/make.html#Recursion">Calling make recursively</a></p>
 <div class="cell column-body-outset" data-file="Makefile">
-<div class="sourceCode cell-code" id="cb33"><pre class="sourceCode numberSource makefile number-lines code-with-copy"><code class="sourceCode makefile"><span id="cb33-1"><a href="#cb33-1"></a><span class="dt">post </span><span class="ch">:=</span><span class="st"> 2023-06-23_makefiles</span></span>
-<span id="cb33-2"><a href="#cb33-2"></a><span class="dt">site_path </span><span class="ch">:=</span><span class="st"> ../../_site/posts/</span><span class="ch">$(</span><span class="dt">post</span><span class="ch">)</span></span>
-<span id="cb33-3"><a href="#cb33-3"></a><span class="dt">freeze_path </span><span class="ch">:=</span><span class="st"> ../../_freeze/posts/</span><span class="ch">$(</span><span class="dt">post</span><span class="ch">)</span></span>
-<span id="cb33-4"><a href="#cb33-4"></a><span class="dt">output_path </span><span class="ch">:=</span><span class="st"> ../../_site/posts/</span><span class="ch">$(</span><span class="dt">post</span><span class="ch">)</span><span class="st">/index.html</span></span>
-<span id="cb33-5"><a href="#cb33-5"></a></span>
-<span id="cb33-6"><a href="#cb33-6"></a><span class="dv">all:</span><span class="dt"> dirs subprojects </span><span class="ch">$(</span><span class="dt">output_path</span><span class="ch">)</span><span class="dt"> end</span></span>
-<span id="cb33-7"><a href="#cb33-7"></a></span>
-<span id="cb33-8"><a href="#cb33-8"></a><span class="dv">dirs:</span></span>
-<span id="cb33-9"><a href="#cb33-9"></a>    <span class="ch">@</span><span class="fu">mkdir -p ./bin</span></span>
-<span id="cb33-10"><a href="#cb33-10"></a></span>
-<span id="cb33-11"><a href="#cb33-11"></a><span class="dv">subprojects:</span></span>
-<span id="cb33-12"><a href="#cb33-12"></a>    <span class="ch">@</span><span class="fu">echo </span><span class="st">"\n[ making subproject v1 ]"</span></span>
-<span id="cb33-13"><a href="#cb33-13"></a>    <span class="ch">@$(</span><span class="dt">MAKE</span><span class="ch">)</span><span class="fu"> --directory=examples/version1 --no-print-directory</span></span>
-<span id="cb33-14"><a href="#cb33-14"></a>    <span class="ch">@</span><span class="fu">echo </span><span class="st">"\n[ making subproject v2 ]"</span></span>
-<span id="cb33-15"><a href="#cb33-15"></a>    <span class="ch">@$(</span><span class="dt">MAKE</span><span class="ch">)</span><span class="fu"> --directory=examples/version2 --no-print-directory</span></span>
-<span id="cb33-16"><a href="#cb33-16"></a>    <span class="ch">@</span><span class="fu">echo </span><span class="st">"\n[ making subproject v3 ]"</span></span>
-<span id="cb33-17"><a href="#cb33-17"></a>    <span class="ch">@$(</span><span class="dt">MAKE</span><span class="ch">)</span><span class="fu"> --directory=examples/version3 --no-print-directory</span></span>
-<span id="cb33-18"><a href="#cb33-18"></a></span>
-<span id="cb33-19"><a href="#cb33-19"></a><span class="dv">$(output_path):</span><span class="dt"> index.qmd</span></span>
-<span id="cb33-20"><a href="#cb33-20"></a>    <span class="ch">@</span><span class="fu">echo </span><span class="st">"\n[ rendering quarto document ]"</span></span>
-<span id="cb33-21"><a href="#cb33-21"></a>    <span class="ch">@</span><span class="fu">quarto render </span><span class="ch">$&lt;</span><span class="fu"> --quiet</span></span>
-<span id="cb33-22"><a href="#cb33-22"></a></span>
-<span id="cb33-23"><a href="#cb33-23"></a><span class="dv">end:</span></span>
-<span id="cb33-24"><a href="#cb33-24"></a>    <span class="ch">@</span><span class="fu">echo </span><span class="st">"\n"</span></span>
-<span id="cb33-25"><a href="#cb33-25"></a></span>
-<span id="cb33-26"><a href="#cb33-26"></a><span class="dv">clean:</span></span>
-<span id="cb33-27"><a href="#cb33-27"></a>    <span class="ch">@</span><span class="fu">echo </span><span class="st">"\n[ cleaning subprojects ]"</span></span>
-<span id="cb33-28"><a href="#cb33-28"></a>    <span class="ch">@$(</span><span class="dt">MAKE</span><span class="ch">)</span><span class="fu"> clean --directory=examples/version1 --no-print-directory</span></span>
-<span id="cb33-29"><a href="#cb33-29"></a>    <span class="ch">@$(</span><span class="dt">MAKE</span><span class="ch">)</span><span class="fu"> clean --directory=examples/version2 --no-print-directory</span></span>
-<span id="cb33-30"><a href="#cb33-30"></a>    <span class="ch">@$(</span><span class="dt">MAKE</span><span class="ch">)</span><span class="fu"> clean --directory=examples/version3 --no-print-directory</span></span>
-<span id="cb33-31"><a href="#cb33-31"></a>    <span class="ch">@</span><span class="fu">echo </span><span class="st">"\n[ deleting quarto output ]"</span></span>
-<span id="cb33-32"><a href="#cb33-32"></a>    <span class="ch">@</span><span class="fu">rm -rf </span><span class="ch">$(</span><span class="dt">site_path</span><span class="ch">)</span></span>
-<span id="cb33-33"><a href="#cb33-33"></a>    <span class="ch">@</span><span class="fu">rm -rf </span><span class="ch">$(</span><span class="dt">freeze_path</span><span class="ch">)</span></span>
-<span id="cb33-34"><a href="#cb33-34"></a>    <span class="ch">@</span><span class="fu">echo </span><span class="st">"\n"</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb36"><pre class="sourceCode numberSource makefile number-lines code-with-copy"><code class="sourceCode makefile"><span id="cb36-1"><a href="#cb36-1"></a><span class="dt">post </span><span class="ch">:=</span><span class="st"> 2023-06-23_makefiles</span></span>
+<span id="cb36-2"><a href="#cb36-2"></a><span class="dt">site_path </span><span class="ch">:=</span><span class="st"> ../../_site/posts/</span><span class="ch">$(</span><span class="dt">post</span><span class="ch">)</span></span>
+<span id="cb36-3"><a href="#cb36-3"></a><span class="dt">freeze_path </span><span class="ch">:=</span><span class="st"> ../../_freeze/posts/</span><span class="ch">$(</span><span class="dt">post</span><span class="ch">)</span></span>
+<span id="cb36-4"><a href="#cb36-4"></a><span class="dt">output_path </span><span class="ch">:=</span><span class="st"> ../../_site/posts/</span><span class="ch">$(</span><span class="dt">post</span><span class="ch">)</span><span class="st">/index.html</span></span>
+<span id="cb36-5"><a href="#cb36-5"></a></span>
+<span id="cb36-6"><a href="#cb36-6"></a><span class="dv">all:</span><span class="dt"> dirs subprojects </span><span class="ch">$(</span><span class="dt">output_path</span><span class="ch">)</span><span class="dt"> end</span></span>
+<span id="cb36-7"><a href="#cb36-7"></a></span>
+<span id="cb36-8"><a href="#cb36-8"></a><span class="dv">dirs:</span></span>
+<span id="cb36-9"><a href="#cb36-9"></a>    <span class="ch">@</span><span class="fu">mkdir -p ./bin</span></span>
+<span id="cb36-10"><a href="#cb36-10"></a></span>
+<span id="cb36-11"><a href="#cb36-11"></a><span class="dv">subprojects:</span></span>
+<span id="cb36-12"><a href="#cb36-12"></a>    <span class="ch">@</span><span class="fu">echo </span><span class="st">"\n[ making subproject v1 ]"</span></span>
+<span id="cb36-13"><a href="#cb36-13"></a>    <span class="ch">@$(</span><span class="dt">MAKE</span><span class="ch">)</span><span class="fu"> --directory=examples/version1 --no-print-directory</span></span>
+<span id="cb36-14"><a href="#cb36-14"></a>    <span class="ch">@</span><span class="fu">echo </span><span class="st">"\n[ making subproject v2 ]"</span></span>
+<span id="cb36-15"><a href="#cb36-15"></a>    <span class="ch">@$(</span><span class="dt">MAKE</span><span class="ch">)</span><span class="fu"> --directory=examples/version2 --no-print-directory</span></span>
+<span id="cb36-16"><a href="#cb36-16"></a>    <span class="ch">@</span><span class="fu">echo </span><span class="st">"\n[ making subproject v3 ]"</span></span>
+<span id="cb36-17"><a href="#cb36-17"></a>    <span class="ch">@$(</span><span class="dt">MAKE</span><span class="ch">)</span><span class="fu"> --directory=examples/version3 --no-print-directory</span></span>
+<span id="cb36-18"><a href="#cb36-18"></a></span>
+<span id="cb36-19"><a href="#cb36-19"></a><span class="dv">$(output_path):</span><span class="dt"> index.qmd</span></span>
+<span id="cb36-20"><a href="#cb36-20"></a>    <span class="ch">@</span><span class="fu">echo </span><span class="st">"\n[ rendering quarto document ]"</span></span>
+<span id="cb36-21"><a href="#cb36-21"></a>    <span class="ch">@</span><span class="fu">quarto render </span><span class="ch">$&lt;</span><span class="fu"> --quiet</span></span>
+<span id="cb36-22"><a href="#cb36-22"></a></span>
+<span id="cb36-23"><a href="#cb36-23"></a><span class="dv">end:</span></span>
+<span id="cb36-24"><a href="#cb36-24"></a>    <span class="ch">@</span><span class="fu">echo </span><span class="st">"\n"</span></span>
+<span id="cb36-25"><a href="#cb36-25"></a></span>
+<span id="cb36-26"><a href="#cb36-26"></a><span class="dv">clean:</span></span>
+<span id="cb36-27"><a href="#cb36-27"></a>    <span class="ch">@</span><span class="fu">echo </span><span class="st">"\n[ cleaning subprojects ]"</span></span>
+<span id="cb36-28"><a href="#cb36-28"></a>    <span class="ch">@$(</span><span class="dt">MAKE</span><span class="ch">)</span><span class="fu"> clean --directory=examples/version1 --no-print-directory</span></span>
+<span id="cb36-29"><a href="#cb36-29"></a>    <span class="ch">@$(</span><span class="dt">MAKE</span><span class="ch">)</span><span class="fu"> clean --directory=examples/version2 --no-print-directory</span></span>
+<span id="cb36-30"><a href="#cb36-30"></a>    <span class="ch">@$(</span><span class="dt">MAKE</span><span class="ch">)</span><span class="fu"> clean --directory=examples/version3 --no-print-directory</span></span>
+<span id="cb36-31"><a href="#cb36-31"></a>    <span class="ch">@</span><span class="fu">echo </span><span class="st">"\n[ deleting quarto output ]"</span></span>
+<span id="cb36-32"><a href="#cb36-32"></a>    <span class="ch">@</span><span class="fu">rm -rf </span><span class="ch">$(</span><span class="dt">site_path</span><span class="ch">)</span></span>
+<span id="cb36-33"><a href="#cb36-33"></a>    <span class="ch">@</span><span class="fu">rm -rf </span><span class="ch">$(</span><span class="dt">freeze_path</span><span class="ch">)</span></span>
+<span id="cb36-34"><a href="#cb36-34"></a>    <span class="ch">@</span><span class="fu">echo </span><span class="st">"\n"</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <p>When I call <code>make</code> on clean build I get this output</p>
 <pre><code>
@@ -802,6 +823,9 @@ mkdir -p ./bin
 <li id="fn2"><p>Traditionally a Makefile is simply named <code>Makefile</code> or <code>makefile</code>. It doesn’t have to be, but if you call it something else you need to explicitly tell <code>make</code> where to find the file using the <code>-f</code> flag. A command like <code>make -f my_make_file</code>, for example, specifies that the Makefile is called <code>my_make_file</code>.<a href="#fnref2" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
 <li id="fn3"><p>Admittedly, this implicitly assumes that I’m executing the <code>make</code> command from the same directory as the <code>Makefile</code> itself. That creates some awkwardness for this blog post because the quarto file is not in the same folder as the Makefile. So when you look at the source code for this post you’ll see I’m doing something slightly different. But let’s put those particular nightmares on layby shall we? Instead, let’s see what horrors escape from the particular Pandora’s box that happens to sit before us.<a href="#fnref3" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
 <li id="fn4"><p>Don’t include “clean” in the list of “all” targets, obviously: that would defeat the point entirely.<a href="#fnref4" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn5"><p>Oh yes, <code>make</code> uses infix notation for functions. Of course it does, for the same reason that it mandates tab indentation… because <code>make</code> is the very quintessence of evil design. It’s useful enough to weasel its way into your projects, at which point it then slowly drives you toward the pit of despair by making design choices that seem chosen deliberately to make you feel like an idiot. Case in point, you can use <code>${ }</code> instead of <code>$( )</code> to call a function if you like. Because why not?<a href="#fnref5" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn6"><p>The fact that this happens to be the same batshit argument ordering used in the base R <code>gsub()</code> function makes me suspect that there is some historical reason for this that involves being lectured about grep for about an hour. Anyway there’s a reason why almost everyone who uses R in real world vastly prefers the stringr pattern matching API over the base R API. But I digress.<a href="#fnref6" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn7"><p>I’m skipping over the <code>dir</code> target on lines 8 and 9, because the code here is the same as it was in the original version. It’s very boring: it just makes sure that a <code>bin</code> folder exists.<a href="#fnref7" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
 </ol>
 </section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div id="quarto-reuse" class="quarto-appendix-contents"><div><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2023,
   author = {Navarro, Danielle},
