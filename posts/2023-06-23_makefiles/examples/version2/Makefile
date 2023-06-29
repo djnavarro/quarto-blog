@@ -1,9 +1,9 @@
 # lists of filenames
-src := $(wildcard src/*.cpp)
-bin := $(patsubst src/%.cpp, bin/%, $(src))
+src_files := $(wildcard src/*.cpp)
+bin_files := $(patsubst src/%.cpp, bin/%, $(src_files))
 
 # the "all" target is much simpler now
-all: dir $(bin)
+all: dir $(bin_files)
 
 dir:
 	mkdir -p ./bin
