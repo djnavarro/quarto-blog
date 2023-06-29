@@ -1,14 +1,11 @@
-src := $(wildcard src/*.cpp)
-bin := $(patsubst src/%.cpp, bin/%, $(src))
+compile := $(patsubst src/%.cpp, bin/%, $(wildcard src/*.cpp))
 
-all: dir $(bin)
+all: dir $(compile)
 
-# this target is silent
 dir:
 	@mkdir -p ./bin
 
-# this target prints a human readable message
-bin/%: src/%.cpp
+$(compile): bin/%: src/%.cpp
 	@echo "compiling" $< "to" $@
 	@clang++ --std=c++20 $< -o $@
 
