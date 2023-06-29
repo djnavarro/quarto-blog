@@ -302,31 +302,48 @@ Let's go through this line by line. First, we can use wildcard matching to find 
 src_files := $(wildcard src/*.cpp)
 ```
 
-This line in the code creates a variable called `src_files` corresponding to the following values:
+It may not be immediately apparent to -- oh, say, humans -- but this is in fact a function call. The name of the function is `wildcard`, the `$( )` syntax with the function name inside the parentheses is the way you call functions in `make`,^[Oh yes, `make` uses infix notation for functions. Of course it does, for the same reason that it mandates tab indentation... because `make` is the very quintessence of evil design. It's useful enough to weasel its way into your projects, at which point it then slowly drives you toward the pit of despair by making design choices that seem chosen deliberately to make you feel like an idiot. Case in point, you can use `${ }` instead of `$( )` to call a function if you like. Because why not?] and `src/*.cpp` is the argument passed to the function. 
+
+It may also not be obvious upon first inspection -- because again, why would it be? -- why I've used `:=` instead of `=` in my assignment statement. The goal here is to create a new variable called `src_files` that contains the names of the various source files, that much is clear. But why use `:=`, exactly? The answer, of course, is that `make` supports several different kinds of assignment operators, and confusingly enough `=` is *not* the operator for "simple" assignment:
+
+- Use `:=` if you want "simple assignment": the assignment happens once and only once, the first time the assignment statement is encountered
+- Use `=` if you want "recursive assignment": the assignment is reevaluated every time the value of the right hand side changes (e.g., in this example, if a later make target changes the list of source files in the `src` folder, the value of `src_files` changes too)
+- Use `?=` if you want "conditional assignment": the assignment only happens if the variable doesn't already have a value (sure, normal humans would use an if-statement for this, but as we all know keystrokes are a precious resource and must be conserved; preserving human sanity is of course a much less important goal)
+- Use `+=` if you want the value of the right hand side to be added to the variable rather than replacing its existing value. 
+
+It sure doesn't seem like I should have had to write a small manuscript simply to explain one very modest line of code, but such is the nature of `make`.
+
+In any case, the thing that matters here is we've scanned the `src` folder and created a variable called `src_files` that lists all the C++ source code files in that folder. In other words, `src_files` is now a synonym for this:
 
 ```
 src/collatz.cpp src/species.cpp src/swap.cpp
 ```
 
-If we could be assured that the binary files always exist, we could use the same trick to list all binaries in the `bin` folder. But because those might not exist (e.g., if we delete the binaries when calling `make clean`), we can't be assured of that. So instead, we'll do a pattern substitution: we'll take the `src_files` variable as input, strip the `.cpp` extension from the files, and replace `src` with `bin`. 
-
-``` Makefile
-bin_files := $(patsubst src/%.cpp, bin/%, $(src_files))
-```
-
-The `bin_files` variable contains these values:
+This will now form the basis by which we construct a list of build targets. Because our project is very simple and has a nice one-to-one mapping between source files and output files, what we really want to construct now is a variable that contains a list of build targets like this:
 
 ```
 bin/collatz bin/species bin/swap
 ```
 
-So now we have a variable (`bin_files`) listing the binary targets that our Makefile needs to create, as well as a variable (`src_file`) specifing the source files that need to be compiled in order to create those files. Now that we have this, we can set our "all" target as follows:
+If we could be assured that the binary files always exist, we could use the same trick to list all binaries in the `bin` folder. But because those might not exist (e.g., if we delete the binaries when calling `make clean`), we can't be assured of that. So instead, we'll use the `patsubst` function to do a pattern substitution: we'll take the `src_files` variable as input, strip the `.cpp` extension from the files, and replace `src` with `bin`. Here's what that looks like:
+
+``` Makefile
+bin_files := $(patsubst src/%.cpp, bin/%, $(src_files))
+```
+
+The `patsubst` function takes three arguments, and -- of course -- they are specified in a weird order. The data argument appears in the third position, because again... why not? The pattern to which we match the data appears in the first position, and the replacement pattern appears in the second position.^[The fact that this happens to be the same batshit argument ordering used in the base R `gsub()` function makes me suspect that there is some historical reason for this that involves being lectured about grep for about an hour. Anyway there's a reason why almost everyone who uses R in real world vastly prefers the stringr pattern matching API over the base R API. But I digress.] Anyway, the point here is that what this function call does is as follows: it takes all the filenames in `src_files`, matches them against `src/%.cpp` to find the "stem" (e.g., the stem for `src/collatz.cpp` is the part that matches the `%` operator, i.e., `collatz`), and then uses the replacement pattern `bin/%` to construct output values from the stems (e.g., `collatz` is transformed to `bin/collatz`). And so we end up with a variable `bin_files` that contains the list of target files we want to build:
+
+```
+bin/collatz bin/species bin/swap
+```
+
+Now that we have this, we can define the "all" target using this variable, as follows:
 
 ``` Makefile
 all: dir $(bin_files)
 ```
 
-This is equivalent to:
+From the `make` perspective this is equivalent to:
 
 ``` Makefile
 all: dir bin/collatz bin/species bin/swap
@@ -334,19 +351,41 @@ all: dir bin/collatz bin/species bin/swap
 
 Or, to put it another way, by using the `bin_files` variable, we can programmatically ensure that the "all" target includes a target for every binary file that needs to be compiled. 
 
-So our next task is to write a rule that will create targets for each of these binaries, and build them from the corresponding C++ source code:
+Having defined a list of targets programmatically, our next^[I'm skipping over the `dir` target on lines 8 and 9, because the code here is the same as it was in the original version. It's very boring: it just makes sure that a `bin` folder exists.] task is to write a **static pattern rule** that programmatically defines the targets themselves. Specifically, for every target listed in `bin_files`, we want (1) to assert that it relies on the corresponding source file as a prerequisite, and (2) to specify a build action that compiles the binary from the corresponding source.
+
+Here's some code that does this:
 
 ``` Makefile
-bin/%: src/%.cpp
+$(bin_files): bin/%: src/%.cpp
 	clang++ --std=c++20 $< -o $@
 ```
 
-The results are the same:
+The underlying syntax here is as follows:
+
+``` Makefile
+targets: target-pattern: prerequisites-patterns
+    commands
+```
+
+For our example, the `bin_files` variable contains the list of targets specified by the pattern rule. The `bin/%` part (the target pattern) and the `src/%.cpp` part (the prerequisites pattern) are used for pattern substitution purposes. It's essentially the same task that we saw when I called `patsubst` using these patterns earlier: in the previous example I used them to construct the name of a binary file from the corresponding source file, this time I'm going the other direction and constructing the name of the source file (to use as a rerequisite) from the binary file (which is used as the target).
+
+Okay, now let's turn to the second line of the code snippet. In the orginal version of the code I wrote targets like this:
+
+``` Makefile
+bin/collatz: src/collatz.cpp
+	clang++ --std=c++20 src/collatz.cpp -o bin/collatz
+```
+
+But in the static pattern rule version I've used `$<` to refer to the prerequisite file (e.g., the source file `src/collatz.cpp`) and `$@` to refer to the file name of the target (e.g., the binary file `bin/collatz`). These are both examples of [automatic variables](https://www.gnu.org/software/make/manual/html_node/Automatic-Variables.html) in `make`. There are quite a lot of these: `$@`, `$%`, `$<`, `$?`, `$^`, `$+`, `$|`, `$*`. Some of these have "D" and "F" variants that specifically refer to directory paths or filenames: `$(@D)` and `$(@F)` are variations on `$@`, `$(*D)` and `$(*F)` are variants of `$*` and so on. If you desperately want to learn all these details the linked page explains them all. For our purposes it's enough to note that in the example above, I've used `$<` to refer to the source file and `$@` to refer to the output file. 
+
+Right. After all that as explanatory background we can run `make`, and happily see that the results are indeed the same as before:
 
 ```{bash}
 #| eval: false
 make
 ```
+
+And now that we've built the project we see that the filetree now contains the binaries:
 
 ```{bash}
 #| echo: false

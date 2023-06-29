@@ -9,7 +9,7 @@ dir:
 	mkdir -p ./bin
 
 # each C++ binary is a target, the source is its prerequisite
-bin/%: src/%.cpp
+$(bin_files): bin/%: src/%.cpp
 	clang++ --std=c++20 $< -o $@
 
 clean:
