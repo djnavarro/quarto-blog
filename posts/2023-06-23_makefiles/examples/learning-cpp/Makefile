@@ -1,39 +1,29 @@
-cpp_src := $(wildcard src/*.cpp)
-cpp_out := $(patsubst src/%.cpp, bin/%, $(cpp_src))
+cpp := $(patsubst src/%.cpp, bin/%, $(wildcard src/*.cpp))
+notes := $(patsubst notes/%.md, docs/%.html, $(wildcard notes/*.md))
+static := docs/.nojekyll docs/CNAME docs/style.css
 
-pandoc_src := $(wildcard notes/*.md)
-pandoc_out := $(patsubst notes/%.md, docs/%.html, $(pandoc_src))
-
-all: dirs $(cpp_out) $(pandoc_out) docs/style.css docs/.nojekyll docs/CNAME
+all: dirs $(cpp) $(static) $(notes)
 
 dirs:
 	@mkdir -p ./bin
 	@mkdir -p ./docs
 
-bin/%: src/%.cpp
+$(cpp): bin/%: src/%.cpp
 	@echo "[compiling]" $<
 	@clang++-15 --std=c++20 $< -o $@
 
-docs/style.css: pandoc/style.css
-	@echo "[copying]  " $<
-	@cp pandoc/style.css docs/style.css
+$(static): docs/%: static/%
+	@echo "[copying]" $< 
+	@cp $< $@
 
-docs/.nojekyll:
-	@echo "[writing]  " $@
-	@touch docs/.nojekyll
-
-docs/CNAME:
-	@echo "[writing]  " $@
-	@echo "learning-cpp.djnavarro.net" > docs/CNAME
-
-docs/%.html: notes/%.md
+$(notes): docs/%.html: notes/%.md
 	@echo "[rendering]" $<
 	@pandoc $< -o $@ --template=./pandoc/template.html \
 		--standalone --mathjax --toc --toc-depth 2
 
 clean:
-	@echo "[deleting]  docs"
-	@echo "[deleting]  bin"
+	@echo "[deleting] docs"
+	@echo "[deleting] bin"
 	@rm -rf docs
 	@rm -rf bin
 
