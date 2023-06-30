@@ -1,34 +1,28 @@
 post := 2023-06-23_makefiles
-site_path := ../../_site/posts/$(post)
-freeze_path := ../../_freeze/posts/$(post)
-output_path := ../../_site/posts/$(post)/index.html
+html := ../../_site/posts/$(post)/index.html
+examples = version1 version2 version3
 
-all: dirs subprojects $(output_path) end
+# explicitly state that these targets aren't file names
+.PHONY: all clean
+.PHONY: $(patsubst %, build_%, $(examples))
+.PHONY: $(patsubst %, clean_%, $(examples))
 
-dirs:
-	@mkdir -p ./bin
+all: $(patsubst %, build_%, $(examples)) $(html)
 
-subprojects:
-	@echo "\n[ making subproject v1 ]"
-	@$(MAKE) --directory=examples/version1 --no-print-directory
-	@echo "\n[ making subproject v2 ]"
-	@$(MAKE) --directory=examples/version2 --no-print-directory
-	@echo "\n[ making subproject v3 ]"
-	@$(MAKE) --directory=examples/version3 --no-print-directory
+$(patsubst %, build_%, $(examples)): build_%: examples/%
+	@echo "------------ building" $< "------------"
+	@$(MAKE) -C $< --no-print-directory
 
-$(output_path): index.qmd
-	@echo "\n[ rendering quarto document ]"
+$(html): index.qmd
+	@echo "------------ rendering quarto ------------"
+	@echo "rendering" $@
 	@quarto render $< --quiet
 
-end:
-	@echo "\n"
+$(patsubst %, clean_%, $(examples)): clean_%: examples/%
+	@$(MAKE) clean -C $< --no-print-directory
 
-clean:
-	@echo "\n[ cleaning subprojects ]"
-	@$(MAKE) clean --directory=examples/version1 --no-print-directory
-	@$(MAKE) clean --directory=examples/version2 --no-print-directory
-	@$(MAKE) clean --directory=examples/version3 --no-print-directory
-	@echo "\n[ deleting quarto output ]"
-	@rm -rf $(site_path)
-	@rm -rf $(freeze_path)
-	@echo "\n"
+clean_quarto: 
+	@rm -rf ../../_site/posts/$(post)
+	@rm -rf ../../_freeze/posts/$(post)
+
+clean: $(patsubst %, clean_%, $(examples)) clean_quarto
