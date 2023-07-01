@@ -1,0 +1,583 @@
+---
+title: "Makefiles. Or, the balrog and the submersible"
+description: "Fly, you fools!"
+date: "2023-06-30"
+image: img/gothmog.jpg
+image-alt: "Stylised art showing a balrog riding a dragon. The piece is called 'Gothmog at the Storming of Gondolin', and is CC-BY licenced by Tom Loback"
+fig-cap-location: margin
+--- 
+
+<!--------------- my typical setup ----------------->
+
+```{r}
+#| label: setup
+#| include: false
+very_wide <- 500
+wide <- 136
+narrow <- 76
+options(width = narrow)
+cache_images <- TRUE
+set.seed(1)
+```
+
+<!--------------- post begins here ----------------->
+
+I have a secret to confess: I have been writing code for over 20 years, and until about a month ago I have been loathe even to try using [Make](https://en.wikipedia.org/wiki/Make_(software)). For too long I have feared catastrophic implosion should I be reckless enough attempt to dive into these dark waters.^[I did ponder briefly the question of whether this joke is in poor taste. On the one hand, it probably is. On the other hand, I can't help but notice there's a remarkable number of people who suddenly come out of the woodwork to handwringing about the horrors of ordinary people making jokes at the expense of reckless rich people who came to a relatively painless end due to their own overwhelming hubris, while Dave Chappelle and Ricky Gervais are both out there making bank by mocking and belittling the most vulnerable people in society. Pick your battles my sweet things. Pick your battles.] Even now, as the sunlight fades and I pass below the surface into the treacherous realm below, I can hear the ominous sounds of compressive stress upon my psyche. I imagine the betentacled krakenlike beasts native to this realm congregating outside the hull.
+
+Drums, drums in the deep. 
+
+But I am here now and I cannot get out. I shall have to complete this blog post in the hope that a wizard and his merry little troupe of clueless hobbits may one day discover the tale of my tragic descent and eventual demise at the hands of build automation balrogs.
+
+<br>
+
+!["Gothmog at the Storming of Gondolin", depicting a balrog riding a dragon. The piece is CC-BY licenced by the artist [Tom Loback](https://en.wikipedia.org/wiki/Tom_Loback)](img/gothmog.jpg){fig-alt="Stylised art showing a balrog riding a dragon."}
+
+<br>
+
+## Farewell to the broad, Sunlit Uplands    
+
+Every tragic narrative begins with a fatal mistake, the hubris of the doomed making the terrible choice that sealed their fate well before the story gets underway. In this case, that mistake was deciding that now is the time to read a 1200 page book on C++. Absolutely cursed decision. There was no way I wasn't going to end up swallowed by a yawning hellmouth once that choice had been made. But -- as the saying goes -- when one descends into the abyss to be crushed by lovecraftian horrors, it's all about the journey and not the destination. 
+
+Here's how the sad story unfolded. Having read through the first hundred or so pages of the C++ necronomicon (the "fucking around" stage), I started encountering the inevitable consequences of the fact that (a) C++ is a compiled language, and (b) I am a person who obsessively takes notes as she reads and writes her own code to accompany the notes. And so it came to pass that (in the "finding out" stage of this tragedy) I was barely one chapter into the book and I'd written almost 50 little baby C++ programs, every one of them a helpless monster gnashing it's tiny teeth in ravenous hunger, demanding to be compiled before it can do anything useful.
+
+Oh no, my precious abominations, I said to them. I already have human children to feed and care for, I'll not fall into the trap of lovingly passing each of you individually to the compiler for nurture and sustenance with bespoke hand crafted calls to clang++. That way lies madness and chaos. No, I shall hire a metaphorical nanny/butler/build-manager to feed you and compile you when you need compiling, to politely inform me each time a little C++ demon has grown into to a new binary file, and to take care of sundry other drudgeries with which I do not wish to be burdened. I shall write a `Makefile`. 
+
+And with that my doomed submersible slipped below the waves. 
+
+## The decay of that colossal Wreck
+
+As the light fades away visions of my Ozymandian future cross my eyes. I imagine the Works that I will construct, upon which even the Mighty will gaze and despair. Hints of make targets that I will specify and the wonders that will get built with automations. 
+
+Behold! 
+
+Here is the `Makefile` I wrote for my side project. It's a minor incantation at best, a small spell to feed my tiresome C++ babies into the maw of clang++ whenever necessary, and renders all my boring markdown scratchings into graven html with the help of pandoc. 
+
+```{Makefile}
+#| label: "learning-cpp-makefile"
+#| file: "_examples/learning-cpp/Makefile"
+#| code-line-numbers: true
+#| eval: false
+```
+
+It is not very impressive, I know. But it does work, and it does help. So perhaps I should say a little about how I got to there from here?
+
+<br>
+
+![The Ulysses mosaic at the Bardo Museum in Tunis, Tunisia (2nd century AD), depicting the temptation of Odysseus by the Sirens. (Image appears to be public domain)](img/odysseus-and-the-sirens.jpg){fig-alt="Mosaic depicting the temptation of Odysseus by the Sirens."}
+
+<br>
+
+## Love me while your wrists are bound
+
+If I'm going to write something about Makefiles, I should perhaps start by acknowledging a few important truths: 
+
+- I'm not an expert. Everything I know about Makefiles is from [makefiletutorial.com](https://makefiletutorial.com). This post is not going to tell you anything you cannot find in Chase Lambert's lovely tutorial. 
+- There are many alternatives to Make. I've seen many projects use  [CMake](https://cmake.org/) for build automation, for example. Alternatively, if you're working in R you might prefer to use the [targets](https://docs.ropensci.org/targets/) package by Will Landau ([user manual here](https://books.ropensci.org/targets/)). There is nothing particularly special about Make per se that made me decide to learn it: it just happens to be a thing that has been around for a long time, and it was irritating me that I didn't know how to use it.
+- Like all things created by humans, it is cursed. Makefiles are indeed the Night That is Dark and Full of Terrors. The red priestesses warned us. 
+
+With that out of the way, let's begin. Reduced to its simplest form a Makefile is a collection of build **targets**, each of which is defined using syntax that looks something like this:
+
+```{Makefile}
+#| eval: false
+targets: prerequisites
+	command
+	command
+	command
+```
+
+It seems simple enough. The top level command provides the name of the target. In the simplest case, a target is a specific file that `make` needs to build, and the name of the target is the path to that file, though it's also possible to specify targets using arbitrary names 
+
+Optionally, a target can have a set of  **prerequisites** associated with that target. Prerequisites provide a method for specifying the dependencies for a build target. If the files listed as prerequisites have changed more recently than the output target, the build target is deemed to be "out of date", and the **commands** listed beneath it will be executed in order to rebuild that target. 
+
+A concrete example might help to make this a little clearer:
+
+```{Makefile}
+#| eval: false
+bin/collatz: src/collatz.cpp
+    clang++ --std=c++20 src/collatz.cpp -o bin/collatz
+```
+    
+
+Let's unpack what each part of this target means: 
+
+- `bin/collatz` is the target, and is specified as the path to the output file that we're asking `make` to build for us. 
+- `src/collatz.cpp` is a prerequisite file. If the `src/collatz.cpp` file has been modified more recently than the `bin/collatz` file created by the compilation command underneath, then that command will be executed when `make` is called
+- The third line is a shell command. In this instance, the command takes the `src/collatz.cpp` source file and uses clang to compile it to a binary executable file `bin/collatz`. (The `--std=c++20` flag indicates that C++ version 20 should be assumed)
+
+Targets and their prerequisites provide a mechanism by which a Makefile can be used to track the dependencies among the various files in your project. It's worth noting a few special cases:
+
+- If a target has no prerequisites it is always deemed out of date, so the commands will be executed every time.
+- If the name of the target doesn't correspond to an actual output file, it's considered to be a "phony" target and is always considered out of date, and hence the commands will always be executed.
+- A target can be explicitly labelled as "phony" even if the target name happens to be the same as a file in the project using the `.PHONY` keyword. We'll see an example of this later.
+
+It seems lovely, does it not? Of course it does my sweet Odysseus. You've been listening to the Sirens again, and fortunate indeed that your loved ones have tied you to the mast to prevent you from casting yourself overboard and drowning.
+
+> *"But Danielle, this seems so simple! It is lovely, alluring and sweet. I see no sign of eldritch horrors or evil creatures lurking in the depths here"*
+
+You say that, so I presume that you have absolutely noticed that all those `command` lines in the code snippet above are indented with tabs and not spaces, yes? No? Those tabs are like little glass knives buried in the sand beneath your soft, bare feet. You must use tabs for indentations in your Makefile, or it won't work.
+
+> *"But Danielle, my IDE is set to automatically convert tabs to spaces! This is going to mess me up and now I have to faff about making exceptions for specific files"*
+
+Indeed. Don't say I didn't warn you.
+
+::: {.column-margin}
+
+![The cover art to "A Hope in Hell", the fourth of [The Sandman comics](https://en.wikipedia.org/wiki/The_Sandman_(comic_book)). Written by Neil Gaiman, Sam Kieth and Mike Dringenberg, and part of the "Preludes and Nocturnes" collection. Likely a copyrighted image, but hopefully okay to reproduce here under fair use etc.](img/hope-in-hell.jpg){fig-alt="Cover art to 'A Hope in Hell', a Sandman comic."}
+
+:::
+
+
+## Hope in hell
+
+*Perhaps we won't die*, we whisper to ourselves as we open a blank Makefile, and point our vessel towards Scylla and Charybdis with the kind of blind optimism that typically ends with the Coroners Court issuing a lengthy report several months later. After all, our project is so very small. We are but hobbits crossing the Brandywine river looking for mushrooms or something, surely the Willow at the heart of the Old Forest won't eat us? 
+
+Sorry. Got a little distracted there, didn't I? I'm going to blame Morpheus... I haven't slept very well lately and my writing gets very weird when that happens.
+
+Getting back on track now. When your project is very small, it isn't hard to write a basic Makefile. Again, it helps to use concrete examples. Let us imagine a project that has this structure: 
+
+```{bash}
+#| echo: false
+#| results: hide
+cd ./_examples/version1
+make clean
+cd ../..
+```
+
+```{r}
+#| echo: false
+fs::dir_tree("./_examples/version1", all = TRUE)
+```
+
+In this happy fantasy Narnia -- which absolutely will never turn into a Fillory because happy endings are real, and life really truly is more than one barely-sublimated trauma after another -- we have a very easy thing to work with. In the `src` folder we have three .cpp files that each correspond to a small C++ program that needs to be compiled. 
+
+Being the sort of person who likes to separate inputs from outputs, we decide that the executable binary files should all be stored in a `bin` folder. Being also the cautious sort of person who understands the difference between inputs and outputs, our project has a `.gitignore` file that ensures that nothing we write to `bin` is placed under version control. 
+
+We also have a a file called `Makefile`,^[Traditionally a Makefile is simply named `Makefile` or `makefile`. It doesn't have to be, but if you call it something else you need to explicitly tell `make` where to find the file using the `-f` flag. A command like `make -f my_make_file`, for example, specifies that the Makefile is called `my_make_file`.] whose contents are as follows:
+
+```{Makefile}
+#| label: "makefile-1"
+#| file: "_examples/version1/Makefile"
+#| code-line-numbers: true
+#| eval: false
+```
+
+The central part of the Makefile is familiar. We're taking the "compile a C++ source file" recipe that I previously used as an example of makefile target, and repeating it three times over. It's so utterly dull that it actually reads better if we strip the comments:
+
+```{Makefile}
+bin/collatz: src/collatz.cpp
+	clang++ --std=c++20 src/collatz.cpp -o bin/collatz
+
+bin/species: src/species.cpp
+	clang++ --std=c++20 src/species.cpp -o bin/species
+
+bin/swap: src/swap.cpp
+	clang++ --std=c++20 src/swap.cpp -o bin/swap
+```
+
+It's repetitive, but for this toy project it works. If we want this project to build, we require that all three of these C++ source files be compiled to binaries.
+
+Sisyphus should be so lucky.
+
+The nature of make targets is that you can call them by name. In the snippet above I have three targets. To build each of these I could type this mind-meltingly tedious sequence of commands at the terminal:
+
+``` bash
+make bin/collatz
+make bin/species
+make bin/swap
+```
+
+It works fine when there are only a few targets, but becomes extremely painful once there are dozens of them. Life is short, and this is not the kind of masochism I enjoy. Building each target individually is simply not on my to-do list. Not now, not as Valyria sinks into its Doom, and not as Rome is burning. My fiddling time is preserved for something better than this, my babes. 
+
+To accommodate the need of the dead things like myself, `make` makes it possible to group multiple targets together:
+
+``` Makefile
+all: dir bin/collatz bin/species bin/swap
+```
+
+This is very helpful. Instead of typing this to make all four targets...
+
+``` bash
+make dir
+make bin/collatz
+make bin/species
+make bin/swap
+```
+
+...I can now type this and get the same result:
+
+``` bash
+make all
+```
+
+In fact, even this can be shortened, because "all" happens to be the first target listed in the Makefile. If you don't specify a target to build, `make` will use the first target in the file. It is conventional, then, to call the first target "all", and have that target consist of a list of all the *other* targets needed to build the whole project. Consequently, I can do this:^[Admittedly, this implicitly assumes that I'm executing the `make` command from the same directory as the `Makefile` itself. That creates some awkwardness for this blog post because the quarto file is not in the same folder as the Makefile. So when you look at the source code for this post you'll see I'm doing something slightly different. But let's put those particular nightmares on layby shall we? Instead, let's see what horrors escape from the particular Pandora's box that happens to sit before us.]
+
+```{bash}
+#| eval: false
+make
+```
+
+Here's what we get as output...
+
+```{bash}
+#| echo: false
+cd ./_examples/version1
+make --no-print-directory
+cd ../..
+```
+
+...and our project now contains the binary files:
+
+```{r}
+#| echo: false
+fs::dir_tree("./_examples/version1", all = TRUE)
+``` 
+
+Nice. 
+
+So, okay. This is the explanation of lines 1-19 of our Makefile. What's going on in lines 20-22? 
+
+I'm so glad you asked. 
+
+What happens if you want to burn it all down and revert to the initial (unbuilt) state of the project? `make` doesn't provide that functionality automatically, but it is traditional for writers of Makefiles to include a target called `clean` that includes commands that will perform this clean up job for you.^[Don't include "clean" in the list of "all" targets, obviously: that would defeat the point entirely.] That's generally a good thing to do, and for this project the cleanup process is very simple. All we have to do delete the `bin` folder and everything in it, so that's what our "clean" target does. 
+
+Because we have this target in the Makefile, all we have to do is type `make clean`:
+
+```{bash}
+#| eval: false
+make clean
+```
+
+```{bash}
+#| echo: false
+cd ./_examples/version1
+make clean --no-print-directory
+cd ../..
+```
+
+And just like that, we are back to the clean (unbuilt) state for our project:
+
+```{r}
+#| echo: false
+fs::dir_tree("./_examples/version1", all = TRUE)
+```
+
+Hope yet lives, despite our descent into Hell.  
+
+## The filetree Yggdrasil, reaching to the heavens
+
+In the Makefile I used in the last section, I created a separate target for every file, and wrote the code manually for every one of them. It's a little repetitive, but when you only have a handful of files that need to be processed (... regardless of whether "processing" means compiling a source file, rendering a markdown document, or anything else), it's not too onerous. However, it's very common for a project to grow much too large for this to be ideal. For example, here's the filetree for the side-project (including source files and output files) that motivated me to learn how to write Makefiles in the first place:
+
+::: {.column-margin}
+
+![The world tree Yggdrasil from Norse mythology, as depicted by [Friedrich Wilhelm Heine](https://en.wikipedia.org/wiki/Friedrich_Wilhelm_Heine) in 1886. (Public domain image)](img/yggdrasil.jpg){fig-alt="The world tree Yggdrasil."}
+
+:::
+
+
+```{bash}
+#| echo: false
+#| results: hide
+cd ./_examples/learning-cpp
+make
+cd ../..
+```
+
+```{r}
+#| echo: false
+fs::dir_tree("./_examples/learning-cpp", all = TRUE)
+```
+
+```{bash}
+#| echo: false
+#| results: hide
+cd ./_examples/learning-cpp
+make clean
+cd ../..
+```
+
+It's not a huge project by any stretch of the imagination, but it's big enough to illustrate the point. If I had to write a separate target telling `make` how to process each of these files I'd quickly lose my mind. Not only that, it would be difficult to maintain if -- for example -- I needed to change the command used to compile the C++ source files. 
+
+In practice, then, we want to write Makefiles that use pattern matching to process every file that matches that pattern. For instance, in the "learning-cpp" project shown above, one of the pattern rules I need is one that automatically compiles every .cpp file in the `src` folder to a binary file of the same name in the `bin` folder.^[This seems as good a moment as any to mention that yes, I am indeed aware of the [implicit rules](https://www.gnu.org/software/make/manual/html_node/Implicit-Rules.html) that are very often used in Makefiles to do common tasks like compiling C code without explicitly calling the compiler. I've chosen not to use those here because, quite frankly, implicit compilation rules make me uncomfortable.] Conveniently enough, that's exactly the same problem we needed to solve for the toy example. So let's revisit it, keeping in mind that although you don't really need pattern rules for a project as tiny as the toy project I'm using here, you really do need them as soon as your project moves into the real world. 
+
+
+
+<br>
+
+!["The kraken, as seen by the eye of imagination". Public domain image by John Gibson, published in [Monsters of the sea, legendary and authentic](https://www.biodiversitylibrary.org/page/54285093#page/85/mode/1up), 1887](img/kraken.jpg){fig-alt="'Kraken of the imagination', by John Gibson. 1887"}
+
+<br>
+
+
+## Release the kraken of the imagination
+
+```{bash}
+#| echo: false
+#| results: hide
+cd ./_examples/version2
+make clean
+cd ../..
+```
+
+Now comes the part of the post where turbulent waters are encountered, and we the dark beasts of the depths might claim us. That is to say, we'll start creating targets programmatically within our Makefile. To that end we'll return to the toy project. As before, our project has the following source files:
+
+```{r}
+#| echo: false
+fs::dir_tree("./_examples/version2", all = TRUE)
+```
+
+However, our Makefile this time around is a little different:
+
+```{Makefile}
+#| label: "makefile-2"
+#| file: "_examples/version2/Makefile"
+#| code-line-numbers: true
+#| eval: false
+```
+
+Let's go through this line by line. First, we can use wildcard matching to find all files in the `src` folder that end with the `.cpp` file extension:
+
+``` Makefile
+src_files := $(wildcard src/*.cpp)
+```
+
+It may not be immediately apparent to -- oh, say, humans -- but this is in fact a function call. The name of the function is `wildcard`, the `$( )` syntax with the function name inside the parentheses is the way you call functions in `make`,^[Oh yes, `make` uses infix notation for functions. Of course it does, for the same reason that it mandates tab indentation... because `make` is the very quintessence of evil design. It's useful enough to weasel its way into your projects, at which point it then slowly drives you toward the pit of despair by making design choices that seem chosen deliberately to make you feel like an idiot. Case in point, you can use `${ }` instead of `$( )` to call a function if you like. Because why not?] and `src/*.cpp` is the argument passed to the function. 
+
+It may also not be obvious upon first inspection -- because again, why would it be? -- why I've used `:=` instead of `=` in my assignment statement. The goal here is to create a new variable called `src_files` that contains the names of the various source files, that much is clear. But why use `:=`, exactly? The answer, of course, is that `make` supports several different kinds of assignment operators, and confusingly enough `=` is *not* the operator for "simple" assignment:
+
+- Use `:=` if you want "simple assignment": the assignment happens once and only once, the first time the assignment statement is encountered
+- Use `=` if you want "recursive assignment": the assignment is reevaluated every time the value of the right hand side changes (e.g., in this example, if a later make target changes the list of source files in the `src` folder, the value of `src_files` changes too)
+- Use `?=` if you want "conditional assignment": the assignment only happens if the variable doesn't already have a value (sure, normal humans would use an if-statement for this, but as we all know keystrokes are a precious resource and must be conserved; preserving human sanity is of course a much less important goal)
+- Use `+=` if you want the value of the right hand side to be added to the variable rather than replacing its existing value. 
+
+::: {.column-margin}
+It sure doesn't seem like I should have had to write a small manuscript simply to explain one very modest line of code, does it? But such is the nature of `make`.
+:::
+
+In any case, the thing that matters here is we've scanned the `src` folder and created a variable called `src_files` that lists all the C++ source code files in that folder. In other words, `src_files` is now a synonym for this:
+
+```
+src/collatz.cpp src/species.cpp src/swap.cpp
+```
+
+This will now form the basis by which we construct a list of build targets. Because our project is very simple and has a nice one-to-one mapping between source files and output files, what we really want to construct now is a variable that contains a list of build targets like this:
+
+```
+bin/collatz bin/species bin/swap
+```
+
+If we could be assured that the binary files always exist, we could use the same trick to list all binaries in the `bin` folder. But because those might not exist (e.g., if we delete the binaries when calling `make clean`), we can't be assured of that. So instead, we'll use the `patsubst` function to do a pattern substitution: we'll take the `src_files` variable as input, strip the `.cpp` extension from the files, and replace `src` with `bin`. Here's what that looks like:
+
+``` Makefile
+bin_files := $(patsubst src/%.cpp, bin/%, $(src_files))
+```
+
+The `patsubst` function takes three arguments, and -- of course -- they are specified in a weird order. The data argument appears in the third position, because again... why not? The pattern to which we match the data appears in the first position, and the replacement pattern appears in the second position.^[The fact that this happens to be the same batshit argument ordering used in the base R `gsub()` function makes me suspect that there is some historical reason for this that involves being lectured about grep for about an hour. Anyway there's a reason why almost everyone who uses R in real world vastly prefers the stringr pattern matching API over the base R API. But I digress.] Anyway, the point here is that what this function call does is as follows: it takes all the filenames in `src_files`, matches them against `src/%.cpp` to find the "stem" (e.g., the stem for `src/collatz.cpp` is the part that matches the `%` operator, i.e., `collatz`), and then uses the replacement pattern `bin/%` to construct output values from the stems (e.g., `collatz` is transformed to `bin/collatz`). And so we end up with a variable `bin_files` that contains the list of target files we want to build:
+
+```
+bin/collatz bin/species bin/swap
+```
+
+Now that we have this, we can define the "all" target using this variable, as follows:
+
+``` Makefile
+all: dir $(bin_files)
+```
+
+From the `make` perspective this is equivalent to:
+
+``` Makefile
+all: dir bin/collatz bin/species bin/swap
+```
+
+Or, to put it another way, by using the `bin_files` variable, we can programmatically ensure that the "all" target includes a target for every binary file that needs to be compiled. 
+
+Having defined a list of targets programmatically, our next task^[I'm skipping over the `dir` target on lines 8 and 9, because the code here is the same as it was in the original version. It's very boring: it just makes sure that a `bin` folder exists.] is to write a [static pattern rule](https://www.gnu.org/software/make/manual/html_node/Static-Usage.html) that programmatically defines the targets themselves. Specifically, for every target listed in `bin_files`, we want (1) to assert that it relies on the corresponding source file as a prerequisite, and (2) to specify a build action that compiles the binary from the corresponding source.
+
+Here's some code that does this:
+
+``` Makefile
+$(bin_files): bin/%: src/%.cpp
+	clang++ --std=c++20 $< -o $@
+```
+
+The underlying syntax here is as follows:
+
+``` Makefile
+targets: target-pattern: prerequisites-patterns
+    commands
+```
+
+For our example, the `bin_files` variable contains the list of targets specified by the pattern rule. The `bin/%` part (the target pattern) and the `src/%.cpp` part (the prerequisites pattern) are used for pattern substitution purposes. It's essentially the same task that we saw when I called `patsubst` using these patterns earlier: in the previous example I used them to construct the name of a binary file from the corresponding source file, this time I'm going the other direction and constructing the name of the source file (to use as a rerequisite) from the binary file (which is used as the target).
+
+Okay, now let's turn to the second line of the code snippet. In the orginal version of the code I wrote targets like this:
+
+``` Makefile
+bin/collatz: src/collatz.cpp
+	clang++ --std=c++20 src/collatz.cpp -o bin/collatz
+```
+
+But in the static pattern rule version I've used `$<` to refer to the prerequisite file (e.g., the source file `src/collatz.cpp`) and `$@` to refer to the file name of the target (e.g., the binary file `bin/collatz`). These are both examples of [automatic variables](https://www.gnu.org/software/make/manual/html_node/Automatic-Variables.html) in `make`. There are quite a lot of these: `$@`, `$%`, `$<`, `$?`, `$^`, `$+`, `$|`, `$*`. Some of these have "D" and "F" variants that specifically refer to directory paths or filenames: `$(@D)` and `$(@F)` are variations on `$@`, `$(*D)` and `$(*F)` are variants of `$*` and so on. If you desperately want to learn all these details the linked page explains them all. For our purposes it's enough to note that in the example above, I've used `$<` to refer to the source file and `$@` to refer to the output file. 
+
+Right. After all that as explanatory background we can run `make`, and happily see that the results are indeed the same as before:
+
+```{bash}
+#| eval: false
+make
+```
+
+```{bash}
+#| echo: false
+cd ./_examples/version2
+make --no-print-directory
+cd ../..
+```
+
+And now that we've built the project we see that the filetree now contains the binaries:
+
+```{r}
+#| echo: false
+fs::dir_tree("./_examples/version2", all = TRUE)
+```
+
+```{bash}
+#| echo: false
+#| results: hide
+cd ./_examples/version2
+make clean
+cd ../..
+```
+
+
+
+::: {.column-margin}
+
+!["Me(dusa) too". Oil painting of the mythological character, Medusa, reimagined through a contemporary feminist lens, in response to the #metoo movement.^[You probably know why this piece speaks to me, and why I chose to include it even though it's a slight departure from the narrative. If not, well, I'll leave it for you to guess.] Art by [Judy Takács](https://en.wikipedia.org/wiki/Judy_Tak%C3%A1cs). Released by the artist as CC-BY.](img/medusa-too.jpg){fig-alt="Oil painting of the mythological character, Medusa, reimagined through a contemporary feminist lens"}
+
+:::
+
+## The tragedy of Medusa, and what is permitted to be seen and said
+
+The last step in putting together a Makefile for our toy project is to tidy some of the code, and make choices about what messages are printed to the terminal when `make` is called. Let's start with the tidying. It was convenient for expository purposes to create the list of targets as a two-step process, so that I could talk about the `wildcard` function before introducing the `patsubst` function:
+
+``` Makefile
+src_files := $(wildcard src/*.cpp)
+bin_files := $(patsubst src/%.cpp, bin/%, $(src_files))
+```
+
+But realistically this doesn't need to be two lines, so I'll shorten it to a single line that generates the list of compilation targets:
+
+``` Makefile
+compile := $(patsubst src/%.cpp, bin/%, $(wildcard src/*.cpp))
+```
+
+The second task is to add some code modifying the messages printed when targets are built. To do this, I'll preface all my commands with the `@` symbol, which silences their raw output, thereby preventing them from being printed to the terminal whenever `make` is called. In place of the automatic printing, I'll use `echo` to write my own, more human-friendly output lines. So now my Makefile looks like this:
+
+```{bash}
+#| echo: false
+#| results: hide
+cd ./_examples/version3
+make clean
+cd ../..
+```
+
+
+```{Makefile}
+#| label: "makefile-3"
+#| file: "_examples/version3/Makefile"
+#| code-line-numbers: true
+#| eval: false
+```
+
+Let's have a look at what happens when we call `make` using this version of the Makefile. The same files are compiled, but the printed messages are prettier:
+
+```{bash}
+#| eval: false
+make
+```
+
+```{bash}
+#| echo: false
+cd ./_examples/version3
+make --no-print-directory
+cd ../..
+```
+
+```{bash}
+#| echo: false
+#| results: hide
+cd ./_examples/version3
+make clean
+cd ../..
+```
+
+Much nicer.
+
+<br>
+
+![Mosaic by [Sebald Beham](https://en.wikipedia.org/wiki/Sebald_Beham) depicting Hercules and Iolaus slaying the many-headed Hydra of Lerna, 1545. Public domain image.](img/hercules-slaying-the-hydra.jpg){fig-alt="Mosaic depicting Hercules and Iolaus slaying the Hydra of Lerna."}
+
+<br>
+
+
+## The fourth wall shatters into little shards of Recursion
+
+At this point, this post *has* covered all the tricks that I'm using in the Makefile for the accursed C++ side project that motivated me to learn `make`. What this post *hasn't* yet covered, though, are some of the tricks that I needed to use for... um... this post. This quarto blog post is a project, and it has a Makefile. But the folder that contains all the source for this blog post *also* contains source files for all the sub-projects that I've used as the examples... and each of those has its own Makefile. Our simple project has become a multi-headed monster, a poisonous serpentine water beast.
+
+To create a Makefile that works in this situation we need to call 
+[call make recursively](https://www.gnu.org/software/make/manual/make.html#Recursion), and though much beloved by computer scientists, I personally view recursion as the little death and the exsanguination of hope. To do this with `make` some care is required. The thing you *don't* want to do is literally use the `make` command inside a Makefile. That's exactly the kind of intuitive strategy that get us slain by the poison breath of the Hydra. Instead, we use the `$(MAKE)` variable as an alias for `make`. To illustrate this let's take a look at the actual Makefile used to build this post:
+
+```{Makefile}
+#| label: "makefile-this-post"
+#| file: "Makefile"
+#| code-line-numbers: true
+#| eval: false
+```
+
+There are some other new tricks in play here. When I call `make` via the `$(MAKE)` alias, I'm passing some additional flags: the `-C` flag tells `make` to change directories (I could also have used `--directory` here in place of `-C`), and the `--no-print-directory` flag asks `make` to do so without printing an annoyingly long message informing me that it has done so. As usual `$<` refers to a prerequisite (e.g., `example/version1`). In other words, this command...
+
+``` Makefile
+@$(MAKE) -C $< --no-print-directory
+```
+
+... has essentially the same effect as a bash command that changes to the appropriate directory, calling `make` there, and then returning to the original directory:
+
+``` bash
+cd example/version1
+make
+cd ../..
+```
+
+There's another trick in play here too. At the start of the file I've made use of `.PHONY` to declare explicitly that many of my targets don't refer to real files, and are merely labels for recipes. I've been lazy about that up till now,^[The `.ALLCAPS` thing going on here tells us that `.PHONY` is one of the [special built-in target names](https://www.gnu.org/software/make/manual/html_node/Special-Targets.html) that have particular meaning in `make`.] but it does matter in a lot of contexts. 
+
+In any case, here's what I get as output when I `make` this post:
+
+```{bash}
+#| eval: false
+make
+```
+
+```
+------------ building _examples/version1 ------------
+mkdir -p ./bin
+clang++ --std=c++20 src/collatz.cpp -o bin/collatz
+clang++ --std=c++20 src/species.cpp -o bin/species
+clang++ --std=c++20 src/swap.cpp -o bin/swap
+------------ building _examples/version2 ------------
+mkdir -p ./bin
+clang++ --std=c++20 src/collatz.cpp -o bin/collatz
+clang++ --std=c++20 src/species.cpp -o bin/species
+clang++ --std=c++20 src/swap.cpp -o bin/swap
+------------ building _examples/version3 ------------
+compiling src/collatz.cpp to bin/collatz
+compiling src/species.cpp to bin/species
+compiling src/swap.cpp to bin/swap
+------------ rendering quarto ------------
+rendering ../../_site/posts/2023-06-23_makefiles/index.html
+```
+
+Each of the example projects gets built, with a pretty header line to explain which project is building at each step of the process, and then finally the quarto document is rendered also. Somewhat awkwardly though, there's some indirect recursion going on also: the quarto document calls `make` several times internally in order to generate much of the output shown in this post. It doesn't actually break anything, but it does mean it's a little harder for `make` to infer when one of the submakes is out of date. Indirect recursion is a strange beast at the best of times, but fortunately it doesn't cause a lot of problems in this case.
+
+## Epilogue, and the Death of the Author
+
+This was a strange post, and I honestly have no idea how to wrap it all up. If you do want to learn more about Makefiles, I highly recommend the walkthrough at [makefiletutorial.com](https://makefiletutorial.com). It's how I learned. As for the rest of the narrative... I don't know what that was all about? I was bored, I guess.
+
