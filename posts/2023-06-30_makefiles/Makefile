@@ -3,7 +3,7 @@ html := ../../_site/posts/$(post)/index.html
 examples = version1 version2 version3
 
 # explicitly state that these targets aren't file names
-.PHONY: all clean
+.PHONY: all clean clean_quarto
 .PHONY: $(patsubst %, build_%, $(examples))
 .PHONY: $(patsubst %, clean_%, $(examples))
 
