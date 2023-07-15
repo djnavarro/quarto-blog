@@ -1,0 +1,109 @@
+---
+title: "Torsten"
+description: "This is a subtitle"
+date: "2023-07-15"
+--- 
+
+<!--------------- my typical setup ----------------->
+
+```{r}
+#| label: setup
+#| include: false
+very_wide <- 500
+wide <- 136
+narrow <- 76
+options(width = narrow)
+cache_images <- TRUE
+set.seed(1)
+```
+
+<!--------------- post begins here ----------------->
+
+[Torsten](https://metrumresearchgroup.github.io/Torsten/) is essentially a forked copy of [Stan](https://mc-stan.org/) that has a collection of functions added that can be useful in pharmacometric analyses. The website is quite clear that it is currently (as of version 0.89rc) a prototype:
+
+> WARNING: The current version of Torsten is a prototype. It is being released for review and comment, and to support limited research applications. It has not been rigorously tested and should not be used for critical applications without further testing or cross-checking by comparison with other methods. We encourage interested users to try Torsten out and are happy to assist. Please report issues, bugs, and feature requests on our GitHub page.
+
+The help documentation is a little sparse, but no moreso than one would expect for prototype software that is still in early development.
+
+## Installation
+
+Installing Torsten starts by cloning the [GitHub repository](https://github.com/metrumresearchgroup/Torsten)
+
+``` bash
+cd ~/GitHub
+gh repo clone metrumresearchgroup/Torsten
+```
+
+If you don't have the cmdstanr package, you need to install it first. The cmdstanr package isn't on CRAN but you can install it by adding the Stan repository to the `repos` path when calling `remotes::install_cran()`:
+
+```{r}
+#| label: install_cmdstanr
+#| eval: false
+remotes::install_cran(
+    pkgs = "cmdstanr", 
+    repos = c(
+        "https://mc-stan.org/r-packages/", 
+        getOption("repos")
+    )
+)
+```
+
+Next, you need to make sure that cmdstanr uses the Torsten version of Stan, and not any other version of Stan that you might have installed on your system. This is important because Torsten supplies various functions that we'll need:
+
+```{r}
+#| label: set-cmdstan-path
+torsten <- "~/GitHub/Torsten"
+cmdstanr::set_cmdstan_path(fs::path(torsten, "cmdstan"))
+```
+
+If you already have C++ compilers set up on your machine (which I do) then you probably don't need to do anything special to make sure that everything compiles properly, but just to be safe we'll check that the toolchain is set up correctly:
+
+```{r}
+#| label: check-toolchain
+cmdstanr::check_cmdstan_toolchain()
+```
+
+Excellent. Now comes the acid test: let's see if we can use Torsten to build and sample from a Stan model that specifically requires Torsten. I'm following the [instructions on the installation page](https://metrumresearchgroup.github.io/Torsten/installation/#testing) here, more or less. But I'm going to walk you through the process a little more slowly than those instructions do. 
+
+The first step here is to compile the stan model. The very first time you do this, it can take a moderately long time because two things are happening: 
+
+- First, the compiler need to compile the modified copy of Stan that Torsten ships with. That takes a while, but fortunately it only has to be done once.
+- Second, the compiler needs to compile the "pk2cpt" model itself. This is fairly fast. This compilation step only happens when the model binary is out of date. 
+
+Fortunately for me I've already done this step once before and I have both binaries compiled already, so the results on my system look like this:
+
+```{r}
+#| label: build-pk2cpt-model
+model_dir <- fs::path(torsten, "example-models", "pk2cpt")
+model_src <- fs::path(model_dir, "pk2cpt.stan")
+model <- cmdstanr::cmdstan_model(model_src)
+```
+
+The key thing to note here us that the "pk2cpt.stan" source code relies on Torsten-specific functions that don't exist in vanilla Stan. It won't work if you're not using the Torsten version of Stan. The mere fact that it compiles is itself telling us that it's all configured correctly. 
+
+So now we fit the model:
+
+```{r}
+#| label: sample-pk2cpt-model
+model_fit <- model$sample(
+    data = fs::path(model_dir, "pk2cpt.data.R"),
+    init = fs::path(model_dir, "pk2cpt.init.R"),
+    seed = 123,
+    chains = 4,
+    parallel_chains = 2,
+    refresh = 500,
+    show_messages = FALSE
+)
+```
+
+When doing this interactively, you should set `show_messages = TRUE` so that you can see the "informational messages". As I'm coming to learn, it's grossly typical of ODE models that you get a few warning messages during the early stages of warmup. But Stan messages tend to be quite good, and in this case they're quite helpful in reassuring us that there's not a problem in this instance (they occur early while the MCMC sampler is in a very weird part of the space and then disappear). I've suppressed them here because they make the quarto blog output messier than it needs to be. All good. 
+
+To draw a pretty picture showing the posterior distribution of the clearance rate parameter for this model (CL), we can do this:
+
+```{r}
+#| label: prettiness-pk2cpt-model
+# remotes::install_cran("bayesplot")
+bayesplot::mcmc_dens_overlay(model_fit$draws("CL"))
+```
+
+That looks right. Torsten is configured correctly, the model compiles, the sampler works, and the posterior distributions plotted here mirror the ones that are secretly tucked away in the "[torsten-path]/example-models/pk2cpt/deliv/figure/density/pdf" file. We are good to go!
