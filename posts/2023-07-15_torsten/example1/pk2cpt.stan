@@ -1,6 +1,4 @@
-// TwoCptModel.stan
-// Run two compartment model using built-in analytical solution 
-// Heavily anotated to help new users
+// Two compartment model using Torsten analytical solver 
 
 data{
   int<lower = 1> nt;  // number of events
@@ -8,21 +6,21 @@ data{
   array[nObs] int<lower = 1> iObs;  // index of observation
   
   // NONMEM data
-  array[nt] int<lower = 1> cmt;
-  array[nt] int evid;
-  array[nt] int addl;
-  array[nt] int ss;
-  array[nt] real amt;
-  array[nt] real time;
-  array[nt] real rate;
-  array[nt] real ii;
+  array[nt] int<lower = 1> cmt; // compartment number
+  array[nt] int evid; // event id (0=observation, 1=dose, 2=other)
+  array[nt] int addl; // number of additional identical doses given
+  array[nt] int ss; // steady-state dosing (0=false, 1=true)
+  array[nt] real amt; // dose amount administered at this time
+  array[nt] real time; // time of observation/administration 
+  array[nt] real rate; // rate of drug infusion (0 for bolus)
+  array[nt] real ii; // interdose interval, time between additional doses 
   
-  vector<lower = 0>[nObs] cObs;  // observed concentration (Dependent Variable)
+  vector<lower = 0>[nObs] cObs;  // observed concentration (the dv)
 }
 
 transformed data{
   vector[nObs] logCObs = log(cObs);
-  int nTheta = 5;  // number of ODE parameters in Two Compartment Model
+  int nTheta = 5;  // number of ODE parameters in 2-compartment model
   int nCmt = 3;  // number of compartments in model
 }
 
@@ -49,9 +47,8 @@ transformed parameters{
 
   x = pmx_solve_twocpt(time, amt, rate, ii, evid, cmt, addl, ss, theta);
 
-  cHat = x[2, :] ./ V1; // we're interested in the amount in the second compartment
-
-  cHatObs = cHat'[iObs]; // predictions for observed data recors
+  cHat = x[2, :] ./ V1; // drug amount in the second compartment
+  cHatObs = cHat'[iObs]; // predictions for observed data records
 }
 
 model{
@@ -68,8 +65,7 @@ model{
 
 generated quantities{
   array[nObs] real cObsPred;
-
-  for(i in 1:nObs){
-      cObsPred[i] = exp(normal_rng(log(cHatObs[i]), sigma));
-    }
+  for(i in 1:nObs) {
+    cObsPred[i] = exp(normal_rng(log(cHatObs[i]), sigma));
+  }
 }
