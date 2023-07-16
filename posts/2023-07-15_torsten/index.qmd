@@ -50,7 +50,7 @@ My goals in this post are modest:
 - [Install Torsten](#installation) and make sure it's working
 - Understand the [data format](#the-data-file) expected by the Torsten-specific solvers
 - Work my way through the [model file](#the-model-file) for simple two-compartment analysis
-- Work out what's going on regarding [analytic solvers in Torsten](#where-can-i-find-the-analytical-solutions)
+- Work out what's going on regarding [analytic solutions in Torsten](#where-can-i-find-the-analytical-solutions)
 
 As usual, the notes are mostly intended for the benefit of future-me, who absolutely will have forgotten all this in a week from now. But it's possible that other people may find them helpful too I suppose. Anyway, here goes...
 
@@ -83,8 +83,8 @@ Next, you need to make sure that cmdstanr uses the Torsten version of Stan, and 
 
 ```{r}
 #| label: set-cmdstan-path
-torsten <- "~/GitHub/Torsten"
-cmdstanr::set_cmdstan_path(fs::path(torsten, "cmdstan"))
+torsten_dir <- "~/GitHub/Torsten"
+cmdstanr::set_cmdstan_path(fs::path(torsten_dir, "cmdstan"))
 ```
 
 In a moment, I'm going to try to compile a Stan/Torsten model (and indeed compile Torsten itself), so it's important to make sure the C++ toolchain is set up properly. If you already have C++ compilers set up on your machine (which I do) then you probably don't need to do anything special to make sure that everything compiles properly, but just to be safe we'll check:
@@ -96,16 +96,16 @@ cmdstanr::check_cmdstan_toolchain()
 
 Excellent. Now comes the acid test: let's see if we can use Torsten to build and sample from a Stan model that specifically requires Torsten functions. I'm following the [instructions on the installation page](https://metrumresearchgroup.github.io/Torsten/installation/#testing) here, more or less. But I'm going to walk through the process a little more slowly than those instructions do. 
 
-The first step here is to compile the stan model. The very first time you do this, it can take a moderately long time because two things are happening: 
+The first step here is to compile the Stan model. The very first time you do this, it can take a moderately long time because two things are happening: 
 
 - First, the compiler need to compile the modified copy of Stan that Torsten ships with. That takes a while, but fortunately it only has to be done once.
 - Second, the compiler needs to compile the "pk2cpt" model itself. This is fairly fast. This compilation step only happens when the model binary is out of date. 
 
-Fortunately for me I've already done this step once before and I have both binaries compiled already, so the results on my system look like this:
+Fortunately for me I've already done this step once before and I have both binaries compiled already so it all happens instantaneously. In any case, here's the code:
 
 ```{r}
 #| label: build-pk2cpt-model
-model_dir <- fs::path(torsten, "example-models", "pk2cpt")
+model_dir <- fs::path(torsten_dir, "example-models", "pk2cpt")
 model_src <- fs::path(model_dir, "pk2cpt.stan")
 model <- cmdstanr::cmdstan_model(model_src)
 ```
@@ -140,7 +140,7 @@ bayesplot::mcmc_dens_overlay(model_fit$draws("CL"))
 That looks right. Torsten is configured correctly, the model compiles, the sampler works, and the posterior distributions plotted here mirror the ones that are secretly tucked away in an output file here:
 
 ```
-[path-to-torsten]/example-models/pk2cpt/deliv/figure/density.pdf
+[torsten-directory]/example-models/pk2cpt/deliv/figure/density.pdf
 ```
 
 My first goal is accomplished. We are good to go!
@@ -153,7 +153,7 @@ I'll start by taking a look at the data. I've cached a copy of the data file alo
 
 ```{r}
 #| label: pk2cpt-data
-source("example/pk2cpt_data.R")
+source("./example/pk2cpt_data.R")
 pk2cpt_data <- tibble::tibble(
     cmt = cmt,
     evid = evid,
@@ -214,7 +214,7 @@ I'm about 99% certain that the reason for this is that among pharmacometricians 
 
 ```{stan}
 #| eval: false
-#| filename: pk2cpt.stan
+#| filename: ./example/pk2cpt.stan
 #| file: example/pk2cpt.stan
 #| output.var: pk2cpt
 #| code-line-numbers: true
@@ -253,8 +253,8 @@ The differential equations are all expressed in terms of drug amounts rather tha
 
 | Stan transformation | Mathematical notatation    | Description                                  |
 |:-------------------:|:--------------------------:|:---------------------------------------------|
-| `x[2, :] ./ V1`     | $u_{cent} / V_\mbox{cent}$ | Drug concentration in central compartment    |
-| `x[3, :] ./ V2`     | $u_{peri} / V_\mbox{peri}$ | Drug concentration in peripheral compartment |
+| `x[2, :] ./ V1`     | $u_{\mbox{cent}} / V_\mbox{cent}$ | Drug concentration in central compartment    |
+| `x[3, :] ./ V2`     | $u_{\mbox{peri}} / V_\mbox{peri}$ | Drug concentration in peripheral compartment |
 
 Having written that out, the Stan code seems pretty interpretable. There's still something missing here insofar as it's not entirely clear *how* the `pmx_solve_twocpt()` function computes the drug amounts in each compartment at all time points, but at least it's now clear *what* it is computing. 
 
@@ -267,7 +267,7 @@ In my [previous post on pop-PK modelling](/posts/2023-06-10_pop-pk-models/), I m
 So presumably there *are* some analytical solutions somewhere! A little awkwardly, the documentation doesn't explicitly say what the analytical solutions for the two-compartment model are or where they are taken from, but a little bit of digging gives us some answers. First, looking through the Torsten source reveals the relevant parts of the code:
 
 - [This file](https://github.com/metrumresearchgroup/Torsten/blob/0168482d400e4b819acadbc28cc817dd1a037c1b/cmdstan/stan/lib/stan_math/stan/math/torsten/pmx_solve_twocpt.hpp) appears to be where the `torsten::pmx_solve_twocpt()` function is defined.
-- [This file](https://github.com/metrumresearchgroup/Torsten/blob/0168482d400e4b819acadbc28cc817dd1a037c1b/cmdstan/stan/lib/stan_math/stan/math/torsten/pmx_twocpt_model.hpp) appears to be the part of the code that specifies the analytical solution.
+- [This file](https://github.com/metrumresearchgroup/Torsten/blob/0168482d400e4b819acadbc28cc817dd1a037c1b/cmdstan/stan/lib/stan_math/stan/math/torsten/pmx_twocpt_model.hpp) appears to be where the analytical solutions are specified.
 
 Second, a little hunting around on the internet unearths this handy little paper by [D'Argenio and Bae (2019)](https://doi.org/10.12793/tcp.2019.27.2.43) that derives the analytical solutions of interest. Skimming the paper quickly suggests it's not too complicated an exercise to implement analytical solutions (especially if you're not trying to optimise for performance), and even the derivations don't look too painful. I may return to that topic in a later post, but for now I feel reassured that I know where to look when I want to dive deeper.
 
@@ -279,7 +279,7 @@ I suspect that at a future date I'll want to pick up from where this post leaves
 
 - [Flexible and efficient Bayesian pharmacometrics modeling using Stan and Torsten, Part I](https://doi.org/10.1002/psp4.12812). Journal article by Charles Margossian, Yi Zhang, and Bill Gillespie, April 2022.
 
-- [Bayesian modeling workflow for pharmacometric applications using bbr.bayes with Stan/Torsten](https://www.metrumrg.com/wp-content/uploads/2023/06/bbr.bayes_StanCon2023.pdf). Slides by Bill Gillespie, June 2023.
+- [Bayesian modeling workflow for pharmacometric applications using bbr.bayes with Stan/Torsten](https://www.metrumrg.com/wp-content/uploads/2023/06/bbr.bayes_StanCon2023.pdf). Slides by Bill Gillespie, June 2023.^[Thank you to Mike Smith for pointing me to this resource.]
 
 - [Bayesian Data Analysis Using Stan/Torsten for Pharmacometric Applications](https://metrumrg.com/wp-content/uploads/2018/05/BayesianPmetricsMBSW2018.pdf). Slides by Bill Gillespie, May 2018.
 
@@ -287,6 +287,9 @@ I suspect that at a future date I'll want to pick up from where this post leaves
 
 - *Kinetics of distribution of substances administered to the
 body. I. The extravascular modes of administration.* Journal article by Torsten Teorell, 1937. Discussed in [Torsten Teorell, the Father of Pharmacokinetics](https://doi.org/10.3109/03009739509178895) by Lennart Paalzow, 1995.
+
+- [Stan and R for Pharmacometrics](stanpmx.github.io/). Book by Casey Davis, Yasong Lu, Arya Pourzanjani, and Pavan Vaddady.^[Thank you to Tim Waterhouse for pointing me to this resource.]
+
 
 ## Done!
 
