@@ -1,8 +1,10 @@
 ---
-title: "Torsten"
-description: "This is a subtitle"
-categories: ["R", "Stan", "Torsten", "Pharmacokinetics"]
+title: "Getting started with Torsten"
+description: "Another small step along the path to Bayesian pharmacometrics"
+categories: ["R", "Stan", "Torsten", "Pharmacometrics"]
 date: "2023-07-15"
+image: torsten-crop.png
+image-alt: "Hand-drawn scientific diagram from 1937 showing 'blood circulation', 'tissue boundaries', and adding pharamacometric notation" 
 --- 
 
 <!--------------- my typical setup ----------------->
@@ -27,7 +29,15 @@ cmdstanr::register_knitr_engine()
 
 <!--------------- post begins here ----------------->
 
-[Torsten](https://metrumresearchgroup.github.io/Torsten/) is essentially a forked copy of [Stan](https://mc-stan.org/) that has a collection of functions added that can be useful in pharmacometric analyses. The website is quite clear that it is currently (as of version 0.89rc) a prototype:
+[Torsten](https://metrumresearchgroup.github.io/Torsten/) is essentially a forked copy of [Stan](https://mc-stan.org/) that has a collection of functions added that can be useful in pharmacometric analyses. As described by [Elmokadem et al (2023)](https://doi.org/10.1002/psp4.12926): 
+
+> Torsten is a library of Stan functions built to facilitate analysis of pharmacometric data ... [It] contains functions to build specific linear compartmental models as one and two-compartment models with first-order absorption into the central compartment, general linear models that can be expressed as a system of linear ordinary differential equations (ODEs), general compartmental models that can be expressed as a system of ODEs.
+
+The name "Torsten" refers to Torsten Teorell, described as the [father of pharmacokinetics](https://doi.org/10.3109/03009739509178895). The preview image of this post is taken from the figures in a 1937 paper by Teorell:
+
+![](torsten-figs.png)
+
+I do like knowing where the names of things come from, and the history to different disciplines. But to be fair that's not the purpose of this post, so let's set the history to one side and take a look at the software. The website is quite clear that Torsten is currently (as of version 0.89rc) a prototype:
 
 > WARNING: The current version of Torsten is a prototype. It is being released for review and comment, and to support limited research applications. It has not been rigorously tested and should not be used for critical applications without further testing or cross-checking by comparison with other methods. We encourage interested users to try Torsten out and are happy to assist. Please report issues, bugs, and feature requests on our GitHub page.
 
@@ -114,22 +124,20 @@ To draw a pretty picture showing the posterior distribution of the clearance rat
 bayesplot::mcmc_dens_overlay(model_fit$draws("CL"))
 ```
 
-That looks right. Torsten is configured correctly, the model compiles, the sampler works, and the posterior distributions plotted here mirror the ones that are secretly tucked away in the "[torsten-path]/example-models/pk2cpt/deliv/figure/density/pdf" file. We are good to go!
+That looks right. Torsten is configured correctly, the model compiles, the sampler works, and the posterior distributions plotted here mirror the ones that are secretly tucked away in an output file here:
+
+```
+[path-to-torsten]/example-models/pk2cpt/deliv/figure/density/pdf
+```
+
+We are good to go!
 
 ## What did we just do?
 
-This is the source code for the Torsten/Stan example that was fitted in the last section. I've added extra comments to explain the NONMEM nomenclature:
+### The data
 
-```{stan}
-#| eval: false
-#| filename: pk2cpt.stan
-#| file: example1/pk2cpt.stan
-#| output.var: pk2cpt
-#| code-line-numbers: true
-#| label: pk2cpt-stan
-```
 
-The data, organised in (almost) NONMEM format:
+The data, organised into a NONMEM-style [event schedule](https://metrumresearchgroup.github.io/Torsten/function/events/):
 
 ```{r}
 #| label: pk2cpt-data
@@ -167,3 +175,84 @@ pk2cpt_data |>
     ggplot2::labs(x = "Time", y = "Concentration") +
     ggplot2::theme(panel.grid = ggplot2::element_blank())
 ```
+
+
+### The model
+
+Let's take a look at the source code for the Torsten/Stan model that I fit in the last section. For the sake of my sanity I'm not going to use the actual .stan file that Torsten distributes. In the original version there's no explanation of what the parameters mean or what the data variables are. 
+
+I'm about 99% certain that the reason for this is that among pharmacometricians it is "understood" that everyone already knows the notational specifications used in [NONMEM](https://en.wikipedia.org/wiki/NONMEM), and consequently nobody bothers to say what those terms mean. To be honest I find it a little frustrating. If you want new users to consider Torsten as a viable modelling tool for pharmacometrics, I think it's a bad idea to make it a *prerequisite* that new users already know NONMEM. But as I am Queen only of this blog and not of statistics generally, and my guess is that the primary target audience for Torsten are pharmacometricians who have already used NONMEM for many years, I'll restrict myself to mild grumbling and simply fix the comments so that the "hidden curriculum" aspect to all this is no longer quite so hidden. Nevertheless, given that the vast majority of my readership belong to the 99.99% of statisticians and data scientists who aren't professional pharamacometricians,^[Number obviously fictitious but probably in the right ballpark.] I've added a lot more annotation to my version of the file:
+
+```{stan}
+#| eval: false
+#| filename: pk2cpt.stan
+#| file: example1/pk2cpt.stan
+#| output.var: pk2cpt
+#| code-line-numbers: true
+#| label: pk2cpt-stan
+#| column: body-outset
+```
+
+Even with the additional commenting, it's still a little impenetrable unless you're a pharmacometric insider, because the pharmacokinetic model is not represented anywhere in this Stan code. It's simply understood that this is a two-compartment model by virtue of the fact that the `pmx_solve_twocpt()` function is called, and all the details of what that *means* have been rendered invisible in the process. 
+
+That's not wrong from the Torsten perspective -- and probably necessary -- but at the same time it makes the code difficult to follow for anyone who isn't a pharmacometrician. So let's make it a bit more explicit, yes? What precisely is the ODE system solved by the `pmx_solve_twocpt()` function? Fortunately, the actual ODEs are described by [Margossian et al (2022)](https://doi.org/10.1002/psp4.12812) and are in fact the same ones I used in a previous post. 
+
+I'll reproduce the ODEs here in exactly the same form as they are presented by Margossian et al:^[The same ODE system appears in the [Torsten documentation for the two-compartment model](https://metrumresearchgroup.github.io/Torsten/function/two-cpt/), using $y$ in place of $u$ and $y^\prime$ in place of $d/dt u$.]
+
+$$
+\begin{array}{rcl} 
+\displaystyle\frac{du_{\mbox{gut}}}{dt} & = & -k_a u_{\mbox{gut}} \\ \\ 
+\displaystyle\frac{du_{\mbox{cent}}}{dt} & = & k_a u_{\mbox{gut}} - \left( \displaystyle\frac{\mbox{CL}}{V_{\mbox{cent}}} + \displaystyle\frac{Q}{V_\mbox{cent}} \right) u_{\mbox{cent}} + \displaystyle\frac{Q}{V_{\mbox{peri}}} u_{\mbox{peri}} \\ \\
+\displaystyle\frac{du_{\mbox{peri}}}{dt} & = & \displaystyle\frac{Q}{V_\mbox{cent}} u_{\mbox{cent}} - \displaystyle\frac{Q}{V_{\mbox{peri}}} u_{\mbox{peri}}
+\end{array}
+$$
+
+There's still a little friction here because mathematical notation is never precisely identical to variable naming in code (nor should it be). But it does help to have a little lookup table like this one:
+
+| Stan variable | Mathematical notatation | Description                           |
+|:-------------:|:-----------------------:|:--------------------------------------|
+| `x[1, :]`     | $u_{\mbox{gut}}$        | Drug amount in the gut                |
+| `x[2, :]`     | $u_{\mbox{cent}}$       | Drug amount in central compartment    |
+| `x[3, :]`     | $u_{\mbox{peri}}$       | Drug amount in peripheral compartment |
+| `ka`          | $k_a$                   | Absorption rate constant from gut     |
+| `CL`          | $\mbox{CL}$             | Elimination clearance from central    |
+| `Q`           | $Q$                     | Intercompartmental clearance          |
+| `V1`          | $V_\mbox{cent}$         | Volume of central compartment         |
+| `V2`          | $V_\mbox{peri}$         | Volume of peripheral compartment      |
+
+The differential equations are all expressed in terms of drug amounts rather than drug concentrations, and the `pmx_solve_twocpt()` function solves for drug amounts in each compartment at each point in time. However, pharmacometric functions specify how drug concentrations change over time, so the Stan code makes the appropriate transformation. With that in mind I find it helpful to extend the table slightly:
+
+| Stan transformation | Mathematical notatation    | Description                                  |
+|:-------------------:|:--------------------------:|:---------------------------------------------|
+| `x[2, :] ./ V1`     | $u_{cent} / V_\mbox{cent}$ | Drug concentration in central compartment    |
+| `x[3, :] ./ V2`     | $u_{peri} / V_\mbox{peri}$ | Drug concentration in peripheral compartment |
+
+Having written that out, the Stan code seems pretty interpretable. There's still something missing here insofar as it's not entirely clear *how* the `pmx_solve_twocpt()` function computes the drug amounts in each compartment at all time points, but at least it's now clear *what* it is computing. 
+
+## Where can I find the analytical solutions?
+
+In my [previous post on pop-PK modelling](/posts/2023-06-10_pop-pk-models/), I managed to get far enough along that I could implement my own two-compartment models in Stan, without using Torsten. However, in order to do that I had to rely on numerical ODE solvers to compute solutions to the pharmacokinetic functions. It turns out that was unnecessary. On the [Torsten home page](https://metrumresearchgroup.github.io/Torsten/), it indicates that:
+
+> One and two compartment models are based on analytical solutions of governing ODEs.
+
+So presumably there *are* some analytical solutions somewhere! A little awkwardly, the documentation doesn't explicitly say what the analytical solutions for the two-compartment model are or where they are taken from, but a little bit of digging gives us some answers. First, looking through the Torsten source reveals the relevant parts of the code:
+
+- [This file](https://github.com/metrumresearchgroup/Torsten/blob/0168482d400e4b819acadbc28cc817dd1a037c1b/cmdstan/stan/lib/stan_math/stan/math/torsten/pmx_solve_twocpt.hpp) appears to be where the `torsten::pmx_solve_twocpt()` function is defined.
+- [This file](https://github.com/metrumresearchgroup/Torsten/blob/0168482d400e4b819acadbc28cc817dd1a037c1b/cmdstan/stan/lib/stan_math/stan/math/torsten/pmx_twocpt_model.hpp) appears to be the part of the code that specifies the analytical solution.
+
+Second, a little hunting around on the internet unearths this handy little paper by [D'Argenio and Bae (2019)](https://doi.org/10.12793/tcp.2019.27.2.43) that derives the analytical solutions of interest. Skimming the paper quickly suggests it's not too complicated an exercise to implement analytical solutions (especially if you're not trying to optimise for performance), and even the derivations don't look too painful. I may return to that topic in a later post, but for now I feel reassured that I know where to look when I want to dive deeper.
+
+## Useful resources
+
+- [Bayesian PBPK modeling using R/Stan/Torsten and Julia/SciML/Turing.Jl](https://doi.org/10.1002/psp4.12926). Journal article by Ahmed Elmokadem, Yi Zhang, Timothy Knab, Eric Jordie, and Bill Gillespie, January 2023.
+
+- [Flexible and efficient Bayesian pharmacometrics modeling using Stan and Torsten, Part I](https://doi.org/10.1002/psp4.12812). Journal article by Charles Margossian, Yi Zhang, and Bill Gillespie, April 2022.
+
+- [Bayesian modeling workflow for pharmacometric applications using bbr.bayes with Stan/Torsten](https://www.metrumrg.com/wp-content/uploads/2023/06/bbr.bayes_StanCon2023.pdf). Slides by Bill Gillespie, June 2023.
+
+- [Bayesian Data Analysis Using Stan/Torsten for Pharmacometric Applications](https://metrumrg.com/wp-content/uploads/2018/05/BayesianPmetricsMBSW2018.pdf). Slides by Bill Gillespie, May 2018.
+
+- [Analytical solution of linear multi-compartment models with non-zero initial condition and its implementation with R](https://doi.org/10.12793/tcp.2019.27.2.43). Journal article by David D'Argenio and Kyun-Seop Bae, June 2019.
+
+- *Kinetics of distribution of substances administered to the
+body. I. The extravascular modes of administration.* Journal article by Torsten Teorell, 1937. Discussed in [Torsten Teorell, the Father of Pharmacokinetics](https://doi.org/10.3109/03009739509178895) by Lennart Paalzow, 1995.
