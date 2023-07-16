@@ -45,18 +45,27 @@ I do like knowing where the names of things come from, and the history to differ
 
 > WARNING: The current version of Torsten is a prototype. It is being released for review and comment, and to support limited research applications. It has not been rigorously tested and should not be used for critical applications without further testing or cross-checking by comparison with other methods. We encourage interested users to try Torsten out and are happy to assist. Please report issues, bugs, and feature requests on our GitHub page.
 
-The help documentation is a little sparse, but no moreso than one would expect for prototype software that is still in early development.
+My goals in this post are modest:
+
+- [Install Torsten](#installation) and make sure it's working
+- Understand the [data format](#the-data-file) expected by the Torsten-specific solvers
+- Work my way through the [model file](#the-model-file) for simple two-compartment analysis
+- Work out what's going on regarding [analytic solvers in Torsten](#where-can-i-find-the-analytical-solutions)
+
+As usual, the notes are mostly intended for the benefit of future-me, who absolutely will have forgotten all this in a week from now. But it's possible that other people may find them helpful too I suppose. Anyway, here goes...
 
 ## Installation
 
-Installing Torsten starts by cloning the [GitHub repository](https://github.com/metrumresearchgroup/Torsten)
+Installing Torsten starts by cloning the [GitHub repository](https://github.com/metrumresearchgroup/Torsten). Just recently I've gotten into the habit of using the [GitHub command line tool](https://cli.github.com/) for tasks like this, so the command I used was this:
 
 ``` bash
 cd ~/GitHub
 gh repo clone metrumresearchgroup/Torsten
 ```
 
-If you don't have the cmdstanr package, you need to install it first. The cmdstanr package isn't on CRAN but you can install it by adding the Stan repository to the `repos` path when calling `remotes::install_cran()`:
+But really, anything that clones a repository will work. 
+
+Once you have a copy of the repo, you can build Torsten in any number of ways. Given that I'm usually working from R, the most convenient way for me to do this is with the cmdstanr package. If you don't have the cmdstanr package, you need to install it first. It's not on CRAN but you can install it by adding the Stan repository to the `repos` path when calling `remotes::install_cran()`:
 
 ```{r}
 #| label: install_cmdstanr
@@ -70,7 +79,7 @@ remotes::install_cran(
 )
 ```
 
-Next, you need to make sure that cmdstanr uses the Torsten version of Stan, and not any other version of Stan that you might have installed on your system. This is important because Torsten supplies various functions that we'll need:
+Next, you need to make sure that cmdstanr uses the Torsten version of Stan, and not any other version of Stan that you might have installed on your system. This is important because Torsten supplies various functions that we'll need, and especially important in my case because I also have a "vanilla" copy of Stan installed elsewhere on my laptop. Here's how I do that:
 
 ```{r}
 #| label: set-cmdstan-path
@@ -78,14 +87,14 @@ torsten <- "~/GitHub/Torsten"
 cmdstanr::set_cmdstan_path(fs::path(torsten, "cmdstan"))
 ```
 
-If you already have C++ compilers set up on your machine (which I do) then you probably don't need to do anything special to make sure that everything compiles properly, but just to be safe we'll check that the toolchain is set up correctly:
+In a moment, I'm going to try to compile a Stan/Torsten model (and indeed compile Torsten itself), so it's important to make sure the C++ toolchain is set up properly. If you already have C++ compilers set up on your machine (which I do) then you probably don't need to do anything special to make sure that everything compiles properly, but just to be safe we'll check:
 
 ```{r}
 #| label: check-toolchain
 cmdstanr::check_cmdstan_toolchain()
 ```
 
-Excellent. Now comes the acid test: let's see if we can use Torsten to build and sample from a Stan model that specifically requires Torsten. I'm following the [instructions on the installation page](https://metrumresearchgroup.github.io/Torsten/installation/#testing) here, more or less. But I'm going to walk you through the process a little more slowly than those instructions do. 
+Excellent. Now comes the acid test: let's see if we can use Torsten to build and sample from a Stan model that specifically requires Torsten functions. I'm following the [instructions on the installation page](https://metrumresearchgroup.github.io/Torsten/installation/#testing) here, more or less. But I'm going to walk through the process a little more slowly than those instructions do. 
 
 The first step here is to compile the stan model. The very first time you do this, it can take a moderately long time because two things are happening: 
 
@@ -101,7 +110,7 @@ model_src <- fs::path(model_dir, "pk2cpt.stan")
 model <- cmdstanr::cmdstan_model(model_src)
 ```
 
-The key thing to note here us that the "pk2cpt.stan" source code relies on Torsten-specific functions that don't exist in vanilla Stan. It won't work if you're not using the Torsten version of Stan. The mere fact that it compiles is itself telling us that it's all configured correctly. 
+The key thing to note here is that the "pk2cpt.stan" source code relies on Torsten-specific functions that don't exist in vanilla Stan. It won't work if you're not using the Torsten version of Stan. The mere fact that it compiles is itself telling us that it's all configured correctly. 
 
 So now we fit the model:
 
@@ -131,21 +140,20 @@ bayesplot::mcmc_dens_overlay(model_fit$draws("CL"))
 That looks right. Torsten is configured correctly, the model compiles, the sampler works, and the posterior distributions plotted here mirror the ones that are secretly tucked away in an output file here:
 
 ```
-[path-to-torsten]/example-models/pk2cpt/deliv/figure/density/pdf
+[path-to-torsten]/example-models/pk2cpt/deliv/figure/density.pdf
 ```
 
-We are good to go!
+My first goal is accomplished. We are good to go!
 
-## What did we just do?
+## The data file
 
-### The data
+Okay, so now that I've succeeded in doing *something* with Torsten, it would be nice to have a better sense of what precisely I've done. Obviously^[I mean... "obvious" in the sense that I'm a person who has used Stan before and the output from the previous section is very familiar to me *as* Stan output.] I've run a Stan model of some kind on some data set, but the Torsten documentation doesn't really go into a lot of detail here. 
 
-
-The data, organised into a NONMEM-style [event schedule](https://metrumresearchgroup.github.io/Torsten/function/events/):
+I'll start by taking a look at the data. I've cached a copy of the data file along with this post, located at `./example/pk2cpt_data.R` relative to this quarto document. The file defines the variables needed by Stan as R vectors, but to make my life a little easier I'll organise them into a tibble that resembles a NONMEM-style [event schedule](https://metrumresearchgroup.github.io/Torsten/function/events/):
 
 ```{r}
 #| label: pk2cpt-data
-source("example1/pk2cpt_data.R")
+source("example/pk2cpt_data.R")
 pk2cpt_data <- tibble::tibble(
     cmt = cmt,
     evid = evid,
@@ -161,7 +169,21 @@ pk2cpt_data$dv[iObs] <- cObs
 pk2cpt_data
 ```
 
-Picture:
+I am firmly of the opinion that these aren't good variable names, but they are completely standard in the field so I'm just going to have to memorise them. To that end, and despite the fact that I have written a version of this about a dozen times already, here's what each of those variables refers to:
+
+- `cmt`: compartment number to which the row refers
+- `evid`: event id (0=observation, 1=dose, 2=other)
+- `addl`: number of additional identical doses given
+- `ss`: is it steady-state dosing? (0=false, 1=true)
+- `amt`: dose amount administered at this time
+- `time`: time of observation/administration 
+- `rate`: rate of drug infusion (=0 for bolus administration)
+- `ii`: interdose interval: time between additional doses 
+- `dv`: the dependent variable (observed concentration)
+
+The key point here is that (unlike in my previous post where I used a slightly different data structure in my bespoke Stan model), Torsten functions expect input variables that look very similar to those used in NONMEM. Fair enough. 
+
+Now that I have a sense of the data structure, let's plot it to see what the observed pharmacokinetic function looks like. In the plot below, the dotted vertical lines mark the moments at which additional doses were administered. The circular markers connected by solid lines represent the observed drug concentrations:
 
 ```{r}
 #| label: pk2cpt-plot
@@ -180,8 +202,11 @@ pk2cpt_data |>
     ggplot2::theme(panel.grid = ggplot2::element_blank())
 ```
 
+The solid lines connecting the dots are a bit misleading. For the first, second, and last doses, measurements are taken regularly enough that you can see the rise and fall of drug concentration associated with each dose. For all other doses, however, there's only a single measurement taken immediately before the dose is administered, with the result that it looks like a fairly flat function through the middle of the data. This makes total sense from an experimental design point of view, of course, it's just important to remember that there's a good reason why the observed data has this slightly odd shape.
 
-### The model
+Objective #2 accomplished. Time to move to the next one. 
+
+## The model file
 
 Let's take a look at the source code for the Torsten/Stan model that I fit in the last section. For the sake of my sanity I'm not going to use the actual .stan file that Torsten distributes. In the original version there's no explanation of what the parameters mean or what the data variables are. 
 
@@ -190,7 +215,7 @@ I'm about 99% certain that the reason for this is that among pharmacometricians 
 ```{stan}
 #| eval: false
 #| filename: pk2cpt.stan
-#| file: example1/pk2cpt.stan
+#| file: example/pk2cpt.stan
 #| output.var: pk2cpt
 #| code-line-numbers: true
 #| label: pk2cpt-stan
@@ -201,7 +226,7 @@ Even with the additional commenting, it's still a little impenetrable unless you
 
 That's not wrong from the Torsten perspective -- and probably necessary -- but at the same time it makes the code difficult to follow for anyone who isn't a pharmacometrician. So let's make it a bit more explicit, yes? What precisely is the ODE system solved by the `pmx_solve_twocpt()` function? Fortunately, the actual ODEs are described by [Margossian et al (2022)](https://doi.org/10.1002/psp4.12812) and are in fact the same ones I used in a previous post. 
 
-I'll reproduce the ODEs here in exactly the same form as they are presented by Margossian et al:^[The same ODE system appears in the [Torsten documentation for the two-compartment model](https://metrumresearchgroup.github.io/Torsten/function/two-cpt/), using $y$ in place of $u$ and $y^\prime$ in place of $d/dt u$.]
+I'll reproduce the ODEs here in exactly the same form as they are presented by Margossian et al:^[The same ODE system appears in the [Torsten documentation for the two-compartment model](https://metrumresearchgroup.github.io/Torsten/function/two-cpt/), using $y$ in place of $u$ and $y^\prime$ in place of $du/dt$. I probably should have used that version in this post, but I found the Margossian et al version first and I'm too lazy to rewrite the LaTeX expressions.]
 
 $$
 \begin{array}{rcl} 
@@ -248,6 +273,8 @@ Second, a little hunting around on the internet unearths this handy little paper
 
 ## Useful resources
 
+I suspect that at a future date I'll want to pick up from where this post leaves off. With that in mind, these are the resources I relied on when putting it together:
+
 - [Bayesian PBPK modeling using R/Stan/Torsten and Julia/SciML/Turing.Jl](https://doi.org/10.1002/psp4.12926). Journal article by Ahmed Elmokadem, Yi Zhang, Timothy Knab, Eric Jordie, and Bill Gillespie, January 2023.
 
 - [Flexible and efficient Bayesian pharmacometrics modeling using Stan and Torsten, Part I](https://doi.org/10.1002/psp4.12812). Journal article by Charles Margossian, Yi Zhang, and Bill Gillespie, April 2022.
@@ -260,3 +287,8 @@ Second, a little hunting around on the internet unearths this handy little paper
 
 - *Kinetics of distribution of substances administered to the
 body. I. The extravascular modes of administration.* Journal article by Torsten Teorell, 1937. Discussed in [Torsten Teorell, the Father of Pharmacokinetics](https://doi.org/10.3109/03009739509178895) by Lennart Paalzow, 1995.
+
+## Done!
+
+...and with that, I've accomplished my very limited goals for this post, and for once in my life I shall bloody well refrain from expanding on it further and turning a short blog post into a monograph. 
+

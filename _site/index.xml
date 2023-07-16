@@ -39,17 +39,25 @@
 <blockquote class="blockquote">
 <p>WARNING: The current version of Torsten is a prototype. It is being released for review and comment, and to support limited research applications. It has not been rigorously tested and should not be used for critical applications without further testing or cross-checking by comparison with other methods. We encourage interested users to try Torsten out and are happy to assist. Please report issues, bugs, and feature requests on our GitHub page.</p>
 </blockquote>
-<p>The help documentation is a little sparse, but no moreso than one would expect for prototype software that is still in early development.</p>
+<p>My goals in this post are modest:</p>
+<ul>
+<li>Install Torsten and make sure it’s working</li>
+<li>Understand the data format expected by the Torsten-specific solvers</li>
+<li>Work my way through the model file for simple two-compartment analysis</li>
+<li>Work out what’s going on regarding analytic solvers in Torsten</li>
+</ul>
+<p>As usual, the notes are mostly intended for the benefit of future-me, who absolutely will have forgotten all this in a week from now. But it’s possible that other people may find them helpful too I suppose. Anyway, here goes…</p>
 <section id="installation" class="level2">
 <h2 class="anchored" data-anchor-id="installation">Installation</h2>
-<p>Installing Torsten starts by cloning the <a href="https://github.com/metrumresearchgroup/Torsten">GitHub repository</a></p>
+<p>Installing Torsten starts by cloning the <a href="https://github.com/metrumresearchgroup/Torsten">GitHub repository</a>. Just recently I’ve gotten into the habit of using the <a href="https://cli.github.com/">GitHub command line tool</a> for tasks like this, so the command I used was this:</p>
 <div class="sourceCode" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb1-1"><span class="bu" style="color: null;
 background-color: null;
 font-style: inherit;">cd</span> ~/GitHub</span>
 <span id="cb1-2"><span class="ex" style="color: null;
 background-color: null;
 font-style: inherit;">gh</span> repo clone metrumresearchgroup/Torsten</span></code></pre></div>
-<p>If you don’t have the cmdstanr package, you need to install it first. The cmdstanr package isn’t on CRAN but you can install it by adding the Stan repository to the <code>repos</code> path when calling <code>remotes::install_cran()</code>:</p>
+<p>But really, anything that clones a repository will work.</p>
+<p>Once you have a copy of the repo, you can build Torsten in any number of ways. Given that I’m usually working from R, the most convenient way for me to do this is with the cmdstanr package. If you don’t have the cmdstanr package, you need to install it first. It’s not on CRAN but you can install it by adding the Stan repository to the <code>repos</code> path when calling <code>remotes::install_cran()</code>:</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb2" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1">remotes<span class="sc" style="color: #5E5E5E;
 background-color: null;
@@ -77,7 +85,7 @@ font-style: inherit;">"repos"</span>)</span>
 <span id="cb2-6">    )</span>
 <span id="cb2-7">)</span></code></pre></div>
 </div>
-<p>Next, you need to make sure that cmdstanr uses the Torsten version of Stan, and not any other version of Stan that you might have installed on your system. This is important because Torsten supplies various functions that we’ll need:</p>
+<p>Next, you need to make sure that cmdstanr uses the Torsten version of Stan, and not any other version of Stan that you might have installed on your system. This is important because Torsten supplies various functions that we’ll need, and especially important in my case because I also have a “vanilla” copy of Stan installed elsewhere on my laptop. Here’s how I do that:</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb3" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1">torsten <span class="ot" style="color: #003B4F;
 background-color: null;
@@ -99,7 +107,7 @@ font-style: inherit;">"cmdstan"</span>))</span></code></pre></div>
 <pre><code>CmdStan path set to: /home/danielle/GitHub/Torsten/cmdstan</code></pre>
 </div>
 </div>
-<p>If you already have C++ compilers set up on your machine (which I do) then you probably don’t need to do anything special to make sure that everything compiles properly, but just to be safe we’ll check that the toolchain is set up correctly:</p>
+<p>In a moment, I’m going to try to compile a Stan/Torsten model (and indeed compile Torsten itself), so it’s important to make sure the C++ toolchain is set up properly. If you already have C++ compilers set up on your machine (which I do) then you probably don’t need to do anything special to make sure that everything compiles properly, but just to be safe we’ll check:</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb5" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1">cmdstanr<span class="sc" style="color: #5E5E5E;
 background-color: null;
@@ -110,7 +118,7 @@ font-style: inherit;">check_cmdstan_toolchain</span>()</span></code></pre></div>
 <pre><code>The C++ toolchain required for CmdStan is setup properly!</code></pre>
 </div>
 </div>
-<p>Excellent. Now comes the acid test: let’s see if we can use Torsten to build and sample from a Stan model that specifically requires Torsten. I’m following the <a href="https://metrumresearchgroup.github.io/Torsten/installation/#testing">instructions on the installation page</a> here, more or less. But I’m going to walk you through the process a little more slowly than those instructions do.</p>
+<p>Excellent. Now comes the acid test: let’s see if we can use Torsten to build and sample from a Stan model that specifically requires Torsten functions. I’m following the <a href="https://metrumresearchgroup.github.io/Torsten/installation/#testing">instructions on the installation page</a> here, more or less. But I’m going to walk through the process a little more slowly than those instructions do.</p>
 <p>The first step here is to compile the stan model. The very first time you do this, it can take a moderately long time because two things are happening:</p>
 <ul>
 <li>First, the compiler need to compile the modified copy of Stan that Torsten ships with. That takes a while, but fortunately it only has to be done once.</li>
@@ -146,7 +154,7 @@ font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">cmdstan_model</span>(model_src)</span></code></pre></div>
 </div>
-<p>The key thing to note here us that the “pk2cpt.stan” source code relies on Torsten-specific functions that don’t exist in vanilla Stan. It won’t work if you’re not using the Torsten version of Stan. The mere fact that it compiles is itself telling us that it’s all configured correctly.</p>
+<p>The key thing to note here is that the “pk2cpt.stan” source code relies on Torsten-specific functions that don’t exist in vanilla Stan. It won’t work if you’re not using the Torsten version of Stan. The mere fact that it compiles is itself telling us that it’s all configured correctly.</p>
 <p>So now we fit the model:</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb8" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1">model_fit <span class="ot" style="color: #003B4F;
@@ -205,8 +213,8 @@ font-style: inherit;">FALSE</span></span>
 
 Chain 1 Iteration:    1 / 2000 [  0%]  (Warmup) 
 Chain 2 Iteration:    1 / 2000 [  0%]  (Warmup) 
-Chain 2 Iteration:  500 / 2000 [ 25%]  (Warmup) 
 Chain 1 Iteration:  500 / 2000 [ 25%]  (Warmup) 
+Chain 2 Iteration:  500 / 2000 [ 25%]  (Warmup) 
 Chain 1 Iteration: 1000 / 2000 [ 50%]  (Warmup) 
 Chain 1 Iteration: 1001 / 2000 [ 50%]  (Sampling) 
 Chain 2 Iteration: 1000 / 2000 [ 50%]  (Warmup) 
@@ -214,27 +222,27 @@ Chain 2 Iteration: 1001 / 2000 [ 50%]  (Sampling)
 Chain 1 Iteration: 1500 / 2000 [ 75%]  (Sampling) 
 Chain 2 Iteration: 1500 / 2000 [ 75%]  (Sampling) 
 Chain 1 Iteration: 2000 / 2000 [100%]  (Sampling) 
-Chain 1 finished in 7.3 seconds.
+Chain 1 finished in 7.6 seconds.
 Chain 2 Iteration: 2000 / 2000 [100%]  (Sampling) 
 Chain 3 Iteration:    1 / 2000 [  0%]  (Warmup) 
-Chain 2 finished in 7.3 seconds.
+Chain 2 finished in 7.6 seconds.
 Chain 4 Iteration:    1 / 2000 [  0%]  (Warmup) 
 Chain 3 Iteration:  500 / 2000 [ 25%]  (Warmup) 
 Chain 4 Iteration:  500 / 2000 [ 25%]  (Warmup) 
-Chain 3 Iteration: 1000 / 2000 [ 50%]  (Warmup) 
-Chain 3 Iteration: 1001 / 2000 [ 50%]  (Sampling) 
 Chain 4 Iteration: 1000 / 2000 [ 50%]  (Warmup) 
 Chain 4 Iteration: 1001 / 2000 [ 50%]  (Sampling) 
+Chain 3 Iteration: 1000 / 2000 [ 50%]  (Warmup) 
+Chain 3 Iteration: 1001 / 2000 [ 50%]  (Sampling) 
 Chain 4 Iteration: 1500 / 2000 [ 75%]  (Sampling) 
 Chain 3 Iteration: 1500 / 2000 [ 75%]  (Sampling) 
 Chain 4 Iteration: 2000 / 2000 [100%]  (Sampling) 
 Chain 4 finished in 7.0 seconds.
 Chain 3 Iteration: 2000 / 2000 [100%]  (Sampling) 
-Chain 3 finished in 7.3 seconds.
+Chain 3 finished in 7.5 seconds.
 
 All 4 chains finished successfully.
-Mean chain execution time: 7.2 seconds.
-Total execution time: 14.8 seconds.</code></pre>
+Mean chain execution time: 7.4 seconds.
+Total execution time: 15.2 seconds.</code></pre>
 </div>
 </div>
 <p>When doing this interactively, you should set <code>show_messages = TRUE</code> so that you can see the “informational messages”. As I’m coming to learn, it’s grossly typical of ODE models that you get a few warning messages during the early stages of warmup. But Stan messages tend to be quite good, and in this case they’re quite helpful in reassuring us that there’s not a problem in this instance (they occur early while the MCMC sampler is in a very weird part of the space and then disappear). I’ve suppressed them here because they make the quarto blog output messier than it needs to be. All good.</p>
@@ -259,20 +267,19 @@ font-style: inherit;">"CL"</span>))</span></code></pre></div>
 </div>
 </div>
 <p>That looks right. Torsten is configured correctly, the model compiles, the sampler works, and the posterior distributions plotted here mirror the ones that are secretly tucked away in an output file here:</p>
-<pre><code>[path-to-torsten]/example-models/pk2cpt/deliv/figure/density/pdf</code></pre>
-<p>We are good to go!</p>
+<pre><code>[path-to-torsten]/example-models/pk2cpt/deliv/figure/density.pdf</code></pre>
+<p>My first goal is accomplished. We are good to go!</p>
 </section>
-<section id="what-did-we-just-do" class="level2 page-columns page-full">
-<h2 class="anchored" data-anchor-id="what-did-we-just-do">What did we just do?</h2>
-<section id="the-data" class="level3">
-<h3 class="anchored" data-anchor-id="the-data">The data</h3>
-<p>The data, organised into a NONMEM-style <a href="https://metrumresearchgroup.github.io/Torsten/function/events/">event schedule</a>:</p>
+<section id="the-data-file" class="level2">
+<h2 class="anchored" data-anchor-id="the-data-file">The data file</h2>
+<p>Okay, so now that I’ve succeeded in doing <em>something</em> with Torsten, it would be nice to have a better sense of what precisely I’ve done. Obviously<sup>1</sup> I’ve run a Stan model of some kind on some data set, but the Torsten documentation doesn’t really go into a lot of detail here.</p>
+<p>I’ll start by taking a look at the data. I’ve cached a copy of the data file along with this post, located at <code>./example/pk2cpt_data.R</code> relative to this quarto document. The file defines the variables needed by Stan as R vectors, but to make my life a little easier I’ll organise them into a tibble that resembles a NONMEM-style <a href="https://metrumresearchgroup.github.io/Torsten/function/events/">event schedule</a>:</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb12" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb12-1"><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">source</span>(<span class="st" style="color: #20794D;
 background-color: null;
-font-style: inherit;">"example1/pk2cpt_data.R"</span>)</span>
+font-style: inherit;">"example/pk2cpt_data.R"</span>)</span>
 <span id="cb12-2">pk2cpt_data <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> tibble<span class="sc" style="color: #5E5E5E;
@@ -333,7 +340,20 @@ font-style: inherit;">&lt;-</span> cObs</span>
 # ℹ 44 more rows</code></pre>
 </div>
 </div>
-<p>Picture:</p>
+<p>I am firmly of the opinion that these aren’t good variable names, but they are completely standard in the field so I’m just going to have to memorise them. To that end, and despite the fact that I have written a version of this about a dozen times already, here’s what each of those variables refers to:</p>
+<ul>
+<li><code>cmt</code>: compartment number to which the row refers</li>
+<li><code>evid</code>: event id (0=observation, 1=dose, 2=other)</li>
+<li><code>addl</code>: number of additional identical doses given</li>
+<li><code>ss</code>: is it steady-state dosing? (0=false, 1=true)</li>
+<li><code>amt</code>: dose amount administered at this time</li>
+<li><code>time</code>: time of observation/administration</li>
+<li><code>rate</code>: rate of drug infusion (=0 for bolus administration)</li>
+<li><code>ii</code>: interdose interval: time between additional doses</li>
+<li><code>dv</code>: the dependent variable (observed concentration)</li>
+</ul>
+<p>The key point here is that (unlike in my previous post where I used a slightly different data structure in my bespoke Stan model), Torsten functions expect input variables that look very similar to those used in NONMEM. Fair enough.</p>
+<p>Now that I have a sense of the data structure, let’s plot it to see what the observed pharmacokinetic function looks like. In the plot below, the dotted vertical lines mark the moments at which additional doses were administered. The circular markers connected by solid lines represent the observed drug concentrations:</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb14" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb14-1">pk2cpt_data <span class="sc" style="color: #5E5E5E;
 background-color: null;
@@ -454,12 +474,14 @@ font-style: inherit;">element_blank</span>())</span></code></pre></div>
 <p><img src="https://blog.djnavarro.net/posts/2023-07-15_torsten/index_files/figure-html/pk2cpt-plot-1.png" class="img-fluid" width="672"></p>
 </div>
 </div>
+<p>The solid lines connecting the dots are a bit misleading. For the first, second, and last doses, measurements are taken regularly enough that you can see the rise and fall of drug concentration associated with each dose. For all other doses, however, there’s only a single measurement taken immediately before the dose is administered, with the result that it looks like a fairly flat function through the middle of the data. This makes total sense from an experimental design point of view, of course, it’s just important to remember that there’s a good reason why the observed data has this slightly odd shape.</p>
+<p>Objective #2 accomplished. Time to move to the next one.</p>
 </section>
-<section id="the-model" class="level3 page-columns page-full">
-<h3 class="anchored" data-anchor-id="the-model">The model</h3>
+<section id="the-model-file" class="level2 page-columns page-full">
+<h2 class="anchored" data-anchor-id="the-model-file">The model file</h2>
 <p>Let’s take a look at the source code for the Torsten/Stan model that I fit in the last section. For the sake of my sanity I’m not going to use the actual .stan file that Torsten distributes. In the original version there’s no explanation of what the parameters mean or what the data variables are.</p>
-<p>I’m about 99% certain that the reason for this is that among pharmacometricians it is “understood” that everyone already knows the notational specifications used in <a href="https://en.wikipedia.org/wiki/NONMEM">NONMEM</a>, and consequently nobody bothers to say what those terms mean. To be honest I find it a little frustrating. If you want new users to consider Torsten as a viable modelling tool for pharmacometrics, I think it’s a bad idea to make it a <em>prerequisite</em> that new users already know NONMEM. But as I am Queen only of this blog and not of statistics generally, and my guess is that the primary target audience for Torsten are pharmacometricians who have already used NONMEM for many years, I’ll restrict myself to mild grumbling and simply fix the comments so that the “hidden curriculum” aspect to all this is no longer quite so hidden. Nevertheless, given that the vast majority of my readership belong to the 99.99% of statisticians and data scientists who aren’t professional pharamacometricians,<sup>1</sup> I’ve added a lot more annotation to my version of the file:</p>
-<div class="cell column-body-outset" data-file="example1/pk2cpt.stan" data-output.var="pk2cpt">
+<p>I’m about 99% certain that the reason for this is that among pharmacometricians it is “understood” that everyone already knows the notational specifications used in <a href="https://en.wikipedia.org/wiki/NONMEM">NONMEM</a>, and consequently nobody bothers to say what those terms mean. To be honest I find it a little frustrating. If you want new users to consider Torsten as a viable modelling tool for pharmacometrics, I think it’s a bad idea to make it a <em>prerequisite</em> that new users already know NONMEM. But as I am Queen only of this blog and not of statistics generally, and my guess is that the primary target audience for Torsten are pharmacometricians who have already used NONMEM for many years, I’ll restrict myself to mild grumbling and simply fix the comments so that the “hidden curriculum” aspect to all this is no longer quite so hidden. Nevertheless, given that the vast majority of my readership belong to the 99.99% of statisticians and data scientists who aren’t professional pharamacometricians,<sup>2</sup> I’ve added a lot more annotation to my version of the file:</p>
+<div class="cell column-body-outset" data-file="example/pk2cpt.stan" data-output.var="pk2cpt">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
 <pre><strong>pk2cpt.stan</strong></pre>
@@ -800,7 +822,7 @@ font-style: inherit;">1</span>:nObs) {</span>
 </div>
 <p>Even with the additional commenting, it’s still a little impenetrable unless you’re a pharmacometric insider, because the pharmacokinetic model is not represented anywhere in this Stan code. It’s simply understood that this is a two-compartment model by virtue of the fact that the <code>pmx_solve_twocpt()</code> function is called, and all the details of what that <em>means</em> have been rendered invisible in the process.</p>
 <p>That’s not wrong from the Torsten perspective – and probably necessary – but at the same time it makes the code difficult to follow for anyone who isn’t a pharmacometrician. So let’s make it a bit more explicit, yes? What precisely is the ODE system solved by the <code>pmx_solve_twocpt()</code> function? Fortunately, the actual ODEs are described by <a href="https://doi.org/10.1002/psp4.12812">Margossian et al (2022)</a> and are in fact the same ones I used in a previous post.</p>
-<p>I’ll reproduce the ODEs here in exactly the same form as they are presented by Margossian et al:<sup>2</sup></p>
+<p>I’ll reproduce the ODEs here in exactly the same form as they are presented by Margossian et al:<sup>3</sup></p>
 <p><img src="https://latex.codecogs.com/png.latex?%0A%5Cbegin%7Barray%7D%7Brcl%7D%0A%5Cdisplaystyle%5Cfrac%7Bdu_%7B%5Cmbox%7Bgut%7D%7D%7D%7Bdt%7D%20&amp;%20=%20&amp;%20-k_a%20u_%7B%5Cmbox%7Bgut%7D%7D%20%5C%5C%20%5C%5C%0A%5Cdisplaystyle%5Cfrac%7Bdu_%7B%5Cmbox%7Bcent%7D%7D%7D%7Bdt%7D%20&amp;%20=%20&amp;%20k_a%20u_%7B%5Cmbox%7Bgut%7D%7D%20-%20%5Cleft(%20%5Cdisplaystyle%5Cfrac%7B%5Cmbox%7BCL%7D%7D%7BV_%7B%5Cmbox%7Bcent%7D%7D%7D%20+%20%5Cdisplaystyle%5Cfrac%7BQ%7D%7BV_%5Cmbox%7Bcent%7D%7D%20%5Cright)%20u_%7B%5Cmbox%7Bcent%7D%7D%20+%20%5Cdisplaystyle%5Cfrac%7BQ%7D%7BV_%7B%5Cmbox%7Bperi%7D%7D%7D%20u_%7B%5Cmbox%7Bperi%7D%7D%20%5C%5C%20%5C%5C%0A%5Cdisplaystyle%5Cfrac%7Bdu_%7B%5Cmbox%7Bperi%7D%7D%7D%7Bdt%7D%20&amp;%20=%20&amp;%20%5Cdisplaystyle%5Cfrac%7BQ%7D%7BV_%5Cmbox%7Bcent%7D%7D%20u_%7B%5Cmbox%7Bcent%7D%7D%20-%20%5Cdisplaystyle%5Cfrac%7BQ%7D%7BV_%7B%5Cmbox%7Bperi%7D%7D%7D%20u_%7B%5Cmbox%7Bperi%7D%7D%0A%5Cend%7Barray%7D%0A"></p>
 <p>There’s still a little friction here because mathematical notation is never precisely identical to variable naming in code (nor should it be). But it does help to have a little lookup table like this one:</p>
 <table class="table">
@@ -888,7 +910,6 @@ font-style: inherit;">1</span>:nObs) {</span>
 </table>
 <p>Having written that out, the Stan code seems pretty interpretable. There’s still something missing here insofar as it’s not entirely clear <em>how</em> the <code>pmx_solve_twocpt()</code> function computes the drug amounts in each compartment at all time points, but at least it’s now clear <em>what</em> it is computing.</p>
 </section>
-</section>
 <section id="where-can-i-find-the-analytical-solutions" class="level2">
 <h2 class="anchored" data-anchor-id="where-can-i-find-the-analytical-solutions">Where can I find the analytical solutions?</h2>
 <p>In my <a href="../../posts/2023-06-10_pop-pk-models/">previous post on pop-PK modelling</a>, I managed to get far enough along that I could implement my own two-compartment models in Stan, without using Torsten. However, in order to do that I had to rely on numerical ODE solvers to compute solutions to the pharmacokinetic functions. It turns out that was unnecessary. On the <a href="https://metrumresearchgroup.github.io/Torsten/">Torsten home page</a>, it indicates that:</p>
@@ -904,6 +925,7 @@ font-style: inherit;">1</span>:nObs) {</span>
 </section>
 <section id="useful-resources" class="level2">
 <h2 class="anchored" data-anchor-id="useful-resources">Useful resources</h2>
+<p>I suspect that at a future date I’ll want to pick up from where this post leaves off. With that in mind, these are the resources I relied on when putting it together:</p>
 <ul>
 <li><p><a href="https://doi.org/10.1002/psp4.12926">Bayesian PBPK modeling using R/Stan/Torsten and Julia/SciML/Turing.Jl</a>. Journal article by Ahmed Elmokadem, Yi Zhang, Timothy Knab, Eric Jordie, and Bill Gillespie, January 2023.</p></li>
 <li><p><a href="https://doi.org/10.1002/psp4.12812">Flexible and efficient Bayesian pharmacometrics modeling using Stan and Torsten, Part I</a>. Journal article by Charles Margossian, Yi Zhang, and Bill Gillespie, April 2022.</p></li>
@@ -912,6 +934,10 @@ font-style: inherit;">1</span>:nObs) {</span>
 <li><p><a href="https://doi.org/10.12793/tcp.2019.27.2.43">Analytical solution of linear multi-compartment models with non-zero initial condition and its implementation with R</a>. Journal article by David D’Argenio and Kyun-Seop Bae, June 2019.</p></li>
 <li><p><em>Kinetics of distribution of substances administered to the body. I. The extravascular modes of administration.</em> Journal article by Torsten Teorell, 1937. Discussed in <a href="https://doi.org/10.3109/03009739509178895">Torsten Teorell, the Father of Pharmacokinetics</a> by Lennart Paalzow, 1995.</p></li>
 </ul>
+</section>
+<section id="done" class="level2">
+<h2 class="anchored" data-anchor-id="done">Done!</h2>
+<p>…and with that, I’ve accomplished my very limited goals for this post, and for once in my life I shall bloody well refrain from expanding on it further and turning a short blog post into a monograph.</p>
 
 
 </section>
@@ -920,8 +946,9 @@ font-style: inherit;">1</span>:nObs) {</span>
 <div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
 
 <ol>
-<li id="fn1"><p>Number obviously fictitious but probably in the right ballpark.↩︎</p></li>
-<li id="fn2"><p>The same ODE system appears in the <a href="https://metrumresearchgroup.github.io/Torsten/function/two-cpt/">Torsten documentation for the two-compartment model</a>, using <img src="https://latex.codecogs.com/png.latex?y"> in place of <img src="https://latex.codecogs.com/png.latex?u"> and <img src="https://latex.codecogs.com/png.latex?y%5E%5Cprime"> in place of <img src="https://latex.codecogs.com/png.latex?d/dt%20u">.↩︎</p></li>
+<li id="fn1"><p>I mean… “obvious” in the sense that I’m a person who has used Stan before and the output from the previous section is very familiar to me <em>as</em> Stan output.↩︎</p></li>
+<li id="fn2"><p>Number obviously fictitious but probably in the right ballpark.↩︎</p></li>
+<li id="fn3"><p>The same ODE system appears in the <a href="https://metrumresearchgroup.github.io/Torsten/function/two-cpt/">Torsten documentation for the two-compartment model</a>, using <img src="https://latex.codecogs.com/png.latex?y"> in place of <img src="https://latex.codecogs.com/png.latex?u"> and <img src="https://latex.codecogs.com/png.latex?y%5E%5Cprime"> in place of <img src="https://latex.codecogs.com/png.latex?du/dt">. I probably should have used that version in this post, but I found the Margossian et al version first and I’m too lazy to rewrite the LaTeX expressions.↩︎</p></li>
 </ol>
 </section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div id="quarto-reuse" class="quarto-appendix-contents"><div><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2023,
   author = {Navarro, Danielle},
