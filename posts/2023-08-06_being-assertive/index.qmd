@@ -64,20 +64,21 @@ As a rule, of course, I don't *deliberately* pass bad inputs to my functions, bu
 
 ```{r}
 #| label: identifier function with checks
+#| column: body-outset
 identifier <- function(name, version, seed) {
   
   # throw error if any of the following assertions fail
   stopifnot(
-    length(name) == 1,
-    length(version) == 1,
-    length(seed) == 1,
-    rlang::is_integerish(version),
-    rlang::is_integerish(seed),
-    !stringr::str_detect(name, "[[:space:]._]"),
-    seed > 0, 
-    seed < 10000,
-    version > 0,
-    version < 100
+    length(name) == 1,    # name must be a scalar
+    length(version) == 1, # version must be a scalar
+    length(seed) == 1,    # seed must be a scalar
+    rlang::is_integerish(version),  # version must be a whole number
+    rlang::is_integerish(seed),     # seed must be a whole number
+    !stringr::str_detect(name, "[[:space:]._]"), # name can't have spaces, periods, or underscores 
+    seed > 0,      # seed must be positive
+    seed < 10000,  # seed must be less than 10000
+    version > 0,   # version must be positive
+    version < 100  # version must be less than 100
   )
   
   # the actual work of the function
@@ -92,12 +93,13 @@ Using `stopifnot()` in this way causes all of the following to error and throw i
 ```{r}
 #| label: identifier errors with bad input
 #| error: true
+#| column: body-outset
 identifier("r tistry", 1, 203)
 identifier("rtistry", 1.02, 203)
 identifier("rtistry", 1, 20013)
 ```
 
-The error messages aren't the prettiest, but they do the job. In each case you can look at the error message and figure out what went wrong when calling the `identifier()` function.
+The error messages aren't the prettiest, but they do the job. In each case you can look at the error message and figure out what went wrong when calling the `identifier()` function. That said, you can sort of see the limitations to `stopifnot()` by looking at my source code: because `stopifnot()` throws pretty generic error messages that you can't customise, my first instinct when writing the function was to group *all* my assertions into a single `stopifnot()` call, and then -- because there isn't a lot of structure to my assertion code -- I've added comments explaining what each assertion does. That's... fine. But not ideal. 
 
 **Summary**: `stopifnot()` is suprisingly effective. It's very general, and works for any expression that yields `TRUE` or `FALSE`. There are no dependencies since it's a base R function. It does have some downsides: the error messages are pretty generic, and the code isn't always the prettiest, but nevertheless it does the job that needs doing. 
 
@@ -106,9 +108,9 @@ The error messages aren't the prettiest, but they do the job. In each case you c
 The [assertive](https://bitbucket.org/richierocks/assertive/) package provides a large collection of `assert_*()` functions that are each tailored to a specific type of assertion, and designed to produce error messages that are tailored to that specific case:
 
 ```{r}
+#| label: identifier function with assertive checks
 library(assertive)
 
-#| label: identifier function with assertive checks
 identifier <- function(name, version, seed) {
 
   # all inputs should be scalars
@@ -142,6 +144,7 @@ Let's see what happens:
 ```{r}
 #| label: identifier errors with bad input 2
 #| error: true
+#| column: body-outset
 identifier("r tistry", 1L, 203L)
 identifier("rtistry", 1.02, 203L)
 identifier("rtistry", 1L, 20013L)
@@ -150,6 +153,7 @@ identifier("rtistry", 1L, 20013L)
 You'll notice that I explicitly passed integer classed values (e.g., `203L`) to the `identifier()` function here. There's a reason for this. The `assert_is_integer()` function uses the base `is.integer()` function to test for integer status, which returns `TRUE` only when passed an actual integer. It returns `FALSE` when passed an "integerish" double:
 
 ```{r}
+#| label: integers
 is.integer(203L)
 is.integer(203)
 ```
@@ -159,6 +163,7 @@ Because my assertion is a check for integer status not "integerish" status, this
 ```{r}
 #| label: identifier errors with "goodish" input
 #| error: true
+#| column: body-outset
 identifier("rtistry", 1, 203)
 ```
 
@@ -170,6 +175,9 @@ That being said, it's vanishingly rare for this to actually matter in my generat
 
 ## Just `assert_that()`, Kat
 
+The [assertthat](https://github.com/hadley/assertthat) package is designed to provide a drop-in replacement for the `stopifnot()` function, one that allows you to compose your own error messages when an assertion fails. It does have a variety of other convenience functions, but to be honest the main advantage over `stopifnot()` is the superior control over the error message. In practice, I find that this functionality allows me to write assertion code that is (a) easier to read, and (b) produces better error messages when an assertion fails. 
+
+To illustrate, here's the code I end up with when I revisit my generative art `identifier()` function using assertthat:
 
 ```{r}
 #| label: identifier function with assertthat checks
@@ -229,49 +237,67 @@ identifier("rtistry", 1.02, 203)
 identifier("rtistry", 1, 20013)
 ```
 
+I find myself preferring this as a way of generating error messages when input arguments to a function don't receive appropriate input. Because I know what I want the function to do, I'm able to write concise but informative error messages that are appropriate to the specific set of assertions that I've included within any particular `assert_that()` call. 
+
 **Summary**: The assertthat package has a pretty specific aim: to provide an `assert_that()` function works as a drop-in replacement for `stopifnot()` that allows custom error messages. Given that limited goal, it works nicely.
 
 ## Just assertr, Carr
 
-The assertr package solves a different problem to the other three methods discussed here. The other three approaches are general-purpose tools and I find them easiest to think about in the context of checking an arbitrary function input. The assertr package is more specialised: it focuses on checking a *data* input, specifically a tabular data onject like a data frame or a tibble. Because it's focused on that particular -- and extremely important -- special case, it's able to provide a more powerful way of checking input data. In that sense it's complementary to the other three. You could use assertr to check the `data` input to a function that takes a data frame as the primary argument, and then use assertthat to test the others. 
+The [assertr](https://docs.ropensci.org/assertr/) package solves a different problem to the other three methods discussed here. The other three approaches are general-purpose tools and -- with various strengths and weaknesses -- they're deisgned to be used when checking an *arbitrary* input. The assertr package is more specialised: it focuses on checking a *data* input, specifically a tabular data onject like a data frame or a tibble. Because it's focused on that particular -- and extremely important -- special case, it's able to provide a more powerful way of validating the content of a data frame. 
+
+In that sense, assertr is complementary to the other three approaches. For example, you could use assertr to check the `data` input to a function that takes a data frame as the primary argument, but then use assertthat to test the others. 
+
+Let's start with some data:
 
 ```{r}
-library(dplyr, warn.conflicts = FALSE)
+#| label: archibald data
+archibald <- readr::read_csv("archibald.csv", show_col_types = FALSE)
+archibald
+```
+
+Load packages:
+
+```{r}
+#| label: package load
+#| message: false
+#| warning: false
+library(dplyr)
+library(ggplot2)
 library(assertr)
-
-mtcars |>
-  
-  # chain of assertions that all succeed
-  chain_start() |>
-  verify(has_all_names("mpg", "vs", "am", "wt")) |>
-  verify(mpg > 0) |>
-  insist(within_n_sds(4), mpg) |>
-  assert(in_set(0, 1), am, vs) |>
-  assert_rows(num_row_NAs, within_bounds(0, 2), everything()) |>
-  assert_rows(col_concat, is_uniq, mpg, am, wt) |>
-  insist_rows(maha_dist, within_n_mads(10), everything()) |>
-  chain_end() |>
-  
-  # the data analysis takes place because the assertions pass
-  group_by(cyl) |>
-  summarise(mean_mpg = mean(mpg))
 ```
 
+Here's an example where the validation checks pass and the analysis goes forward:
 
 ```{r}
-#| error: true
-mtcars |>
-  
-  # chain of assertions that will fail
-  chain_start() |>
-  assert(in_set(1, 2, 3, 4), carb) |>
-  assert_rows(rowMeans, within_bounds(0,5), gear:carb) |>
-  verify(mpg < 32) |>
-  chain_end() |>
-  
-  # the data analysis doesn't happen because assertions fail
-  group_by(cyl) |>
-  summarise(mean_mpg = mean(mpg))
+#| label: assertr example
+archibald |> 
+  verify(has_all_names("prize", "artist")) |>
+  assert(is.character, "prize", "artist") |>
+  count(artist, prize) |>
+  arrange(desc(n))
 ```
 
+
+Here's an example where the validation checks fail:
+
+```{r}
+#| label: assertr example 2
+#| error: true
+not_missing <- \(x) !is.na(x)
+
+archibald |> 
+  verify(has_all_names("prize", "n_finalists")) |>
+  filter(prize == "Archibald Prize") |>
+  assert(not_missing, "n_finalists") |>  
+  ggplot(aes(n_finalists)) + geom_histogram(bins = 20)
+```
+
+If we're okay with ignoring the missing data cases, we can filter them out:
+
+```{r}
+archibald |> 
+  verify(has_all_names("prize", "n_finalists")) |>
+  filter(prize == "Archibald Prize", not_missing(n_finalists)) |>
+  ggplot(aes(n_finalists)) + geom_histogram(bins = 20)
+```
 
