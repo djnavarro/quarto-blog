@@ -101,77 +101,8 @@ identifier("rtistry", 1, 20013)
 
 The error messages aren't the prettiest, but they do the job. In each case you can look at the error message and figure out what went wrong when calling the `identifier()` function. That said, you can sort of see the limitations to `stopifnot()` by looking at my source code: because `stopifnot()` throws pretty generic error messages that you can't customise, my first instinct when writing the function was to group *all* my assertions into a single `stopifnot()` call, and then -- because there isn't a lot of structure to my assertion code -- I've added comments explaining what each assertion does. That's... fine. But not ideal. 
 
-**Summary**: `stopifnot()` is suprisingly effective. It's very general, and works for any expression that yields `TRUE` or `FALSE`. There are no dependencies since it's a base R function. It does have some downsides: the error messages are pretty generic, and the code isn't always the prettiest, but nevertheless it does the job that needs doing. 
+**Summary**: `stopifnot()` is suprisingly effective. It's very general, and works for any expression that yields `TRUE` or `FALSE`. There are no dependencies since it's a base R function. It does have some downsides: the error messages are pretty generic, and the code isn't always the prettiest, but nevertheless it does the job that needs doing.
 
-## Just `assert_*()` it, Kit
-
-The [assertive](https://bitbucket.org/richierocks/assertive/) package provides a large collection of `assert_*()` functions that are each tailored to a specific type of assertion, and designed to produce error messages that are tailored to that specific case:
-
-```{r}
-#| label: identifier function with assertive checks
-library(assertive)
-
-identifier <- function(name, version, seed) {
-
-  # all inputs should be scalars
-  assert_is_scalar(version)
-  assert_is_scalar(name)
-  assert_is_scalar(seed)
-  
-  # version and seed should be integers
-  assert_is_integer(version)
-  assert_is_integer(seed)
-  
-  # version and seed should be positive 
-  assert_all_are_positive(c(seed, version))
-  
-  # version and seed should not exceed their upper bounds
-  assert_all_are_less_than(seed, 10000)
-  assert_all_are_less_than(version, 100)
-  
-  # name should not match the regex
-  assert_all_are_not_matching_regex(name, "[[:space:]._]")
-
-  # the actual work of the function
-  version <- stringr::str_pad(version, width = 2, pad = "0")
-  seed <- stringr::str_pad(seed, width = 4, pad = "0")
-  paste(name, version, seed, sep = "_") 
-}
-```
-
-Let's see what happens:
-
-```{r}
-#| label: identifier errors with bad input 2
-#| error: true
-#| column: body-outset
-identifier("r tistry", 1L, 203L)
-identifier("rtistry", 1.02, 203L)
-identifier("rtistry", 1L, 20013L)
-```
-
-You'll notice that I explicitly passed integer classed values (e.g., `203L`) to the `identifier()` function here. There's a reason for this. The `assert_is_integer()` function uses the base `is.integer()` function to test for integer status, which returns `TRUE` only when passed an actual integer. It returns `FALSE` when passed an "integerish" double:
-
-```{r}
-#| label: integers
-is.integer(203L)
-is.integer(203)
-```
-
-Because my assertion is a check for integer status not "integerish" status, this version of the `identifier()` function is somewhat strict about type checking, and this fails:
-
-```{r}
-#| label: identifier errors with "goodish" input
-#| error: true
-#| column: body-outset
-identifier("rtistry", 1, 203)
-```
-
-To be fair, there are many situations where you really do want to be strict about type checking: the integer representation of `203L` is in fact a different underlying object to the floating point representation of `203`, and while R is usually pretty chill about this, it's important to keep in mind that doubles and integers are fundamentally different data types.
-
-That being said, it's vanishingly rare for this to actually matter in my generative art process, and I'd prefer to let this one slide. Unfortunately, there isn't a specific assertion function for "integerish" status in the assertive package.
-
-**Summary**: Because it provides a huge number of well-named assertion functions, the assertive package tends to produce very readable code, and because each of those functions produces errors that are tailored to that check, the error messages tend to be useful too. It does get a little awkward when there isn't an assertion for your use case, but usually there's a way to work around that. 
 
 ## Just `assert_that()`, Kat
 
@@ -241,11 +172,105 @@ I find myself preferring this as a way of generating error messages when input a
 
 **Summary**: The assertthat package has a pretty specific aim: to provide an `assert_that()` function works as a drop-in replacement for `stopifnot()` that allows custom error messages. Given that limited goal, it works nicely.
 
+
+## Just `assert_*()` it, Kit
+
+The [assertive](https://bitbucket.org/richierocks/assertive/) package provides a large collection of `assert_*()` functions that are each tailored to a specific type of assertion, and designed to produce error messages that are tailored to that specific case. Here's an example where I apply this approach to checking the inputs to the `identifier()` function:
+
+```{r}
+#| label: identifier function with assertive checks
+library(assertive)
+
+identifier <- function(name, version, seed) {
+
+  assert_is_scalar(version)
+  assert_is_scalar(name)
+  assert_is_scalar(seed)
+  
+  assert_is_integer(version)
+  assert_is_integer(seed)
+  assert_all_are_positive(c(seed, version))
+  assert_all_are_less_than(seed, 10000)
+  assert_all_are_less_than(version, 100)
+  
+  assert_all_are_not_matching_regex(name, "[[:space:]._]")
+
+  # the actual work of the function
+  version <- stringr::str_pad(version, width = 2, pad = "0")
+  seed <- stringr::str_pad(seed, width = 4, pad = "0")
+  paste(name, version, seed, sep = "_") 
+}
+```
+
+I'd probably argue that this is the most readable version of the code yet. The `assert_*()` functions have such transparently informative names that there's no need at all for comments. However, there are some downsides to this approach, which become a little more apparent when we look at the error messages that it throws when I pass bad inputs to the `identifier()` function:
+
+```{r}
+#| label: identifier errors with bad input 2
+#| error: true
+#| column: body-outset
+identifier("r tistry", 1L, 203L)
+identifier("rtistry", 1.02, 203L)
+identifier("rtistry", 1L, 20013L)
+```
+
+Because I don't have custom error message code in my assertions, the errors that get returned to the user are a little bit opaque. They're more informative than the `stopifnot()` versions, and because each assertion throws its own error message tailored to that function, the results are rather better suited to the context. Even so, they're still quite long and there's some cognitive effort required by the user to figure out what happened. 
+
+There's a second issue here. Notice that when I wanted to pass a good input for `seed` or `version` in this version of the function, I used explicitly integer-classed values (e.g., `203L` not `203`). There's a reason I did that. The `assert_is_integer()` function uses `is.integer()` test for integer status, which returns `TRUE` only when passed an actual integer. It returns `FALSE` when passed an "integerish" double:
+
+```{r}
+#| label: integers
+is.integer(203L)
+is.integer(203)
+```
+
+Because my assertion is a check for integer status not "integerish" status, this version of the `identifier()` function is more strict about type checking than I really want it to be, and this fails:
+
+```{r}
+#| label: identifier errors with "goodish" input
+#| error: true
+#| column: body-outset
+identifier("rtistry", 1, 203)
+```
+
+Now, to be fair, there are of course many situations where you really do want to be strict about type checking integers: the integer representation of `203L` is a different underlying object to the floating point representation of `203`, and while R is usually pretty chill about this, it's important to keep in mind that doubles and integers are fundamentally different data types. That being said, it's vanishingly rare for this to actually matter in my generative art process, and I'd prefer to let this one slide. 
+
+This kind of thing is where you can run into some difficulties using the `assert_*()` functions. If there isn't a specific assertion function tailored for your use case (as occurs with "integerish" check in `identifier()`) you're left with the dilemma of either choosing an assertion that isn't quite right, or else falling back on a general-purpose assertion like `assert_all_are_true()`. For example, this works...
+
+```{r}
+#| label: identifier function with assertive checks 2
+library(assertive)
+
+identifier <- function(name, version, seed) {
+
+  assert_is_scalar(version)
+  assert_is_scalar(name)
+  assert_is_scalar(seed)
+  
+  assert_all_are_true(rlang::is_integerish(c(seed, version)))
+  assert_all_are_positive(c(seed, version))
+  assert_all_are_less_than(seed, 10000)
+  assert_all_are_less_than(version, 100)
+  
+  assert_all_are_not_matching_regex(name, "[[:space:]._]")
+
+  # the actual work of the function
+  version <- stringr::str_pad(version, width = 2, pad = "0")
+  seed <- stringr::str_pad(seed, width = 4, pad = "0")
+  paste(name, version, seed, sep = "_") 
+}
+
+identifier("rtistry", 1, 203)
+```
+
+...but it's not quite as elegant as you might hope. Nevertheless, I'm not being critical here. It's impossible to write a package like assertive in a way that covers every use case, and it's pretty impressive that it has the breadth that it does. 
+
+**Summary**: Because it provides a huge number of well-named assertion functions, the assertive package tends to produce very readable code, and because each of those functions produces errors that are tailored to that check, the error messages tend to be useful too. It does get a little awkward when there isn't an assertion for your use case, but usually there's a way to work around that. 
+
 ## Just assertr, Carr
 
 The [assertr](https://docs.ropensci.org/assertr/) package solves a different problem to the other three methods discussed here. The other three approaches are general-purpose tools and -- with various strengths and weaknesses -- they're deisgned to be used when checking an *arbitrary* input. The assertr package is more specialised: it focuses on checking a *data* input, specifically a tabular data onject like a data frame or a tibble. Because it's focused on that particular -- and extremely important -- special case, it's able to provide a more powerful way of validating the content of a data frame. 
 
-In that sense, assertr is complementary to the other three approaches. For example, you could use assertr to check the `data` input to a function that takes a data frame as the primary argument, but then use assertthat to test the others. 
+In that sense, assertr is complementary to the other three approaches. For example, you could use assertr to check the `data` input to a function that takes a data frame as the primary argument, but then use (say) `assert_that()` to test the others. 
 
 Let's start with some data:
 
@@ -283,7 +308,7 @@ Here's an example where the validation checks fail:
 ```{r}
 #| label: assertr example 2
 #| error: true
-not_missing <- \(x) !is.na(x)
+not_missing <- function(x) !is.na(x)
 
 archibald |> 
   verify(has_all_names("prize", "n_finalists")) |>
@@ -295,6 +320,7 @@ archibald |>
 If we're okay with ignoring the missing data cases, we can filter them out:
 
 ```{r}
+#| label: assertr example 3
 archibald |> 
   verify(has_all_names("prize", "n_finalists")) |>
   filter(prize == "Archibald Prize", not_missing(n_finalists)) |>
