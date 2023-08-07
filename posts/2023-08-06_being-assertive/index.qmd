@@ -272,32 +272,90 @@ The [assertr](https://docs.ropensci.org/assertr/) package solves a different pro
 
 In that sense, assertr is complementary to the other three approaches. For example, you could use assertr to check the `data` input to a function that takes a data frame as the primary argument, but then use (say) `assert_that()` to test the others. 
 
-Let's start with some data:
-
-```{r}
-#| label: archibald data
-archibald <- readr::read_csv("archibald.csv", show_col_types = FALSE)
-archibald
-```
-
-Load packages:
+To get started, I'll load the packages I'm going to use in this section:
 
 ```{r}
 #| label: package load
 #| message: false
 #| warning: false
 library(dplyr)
+library(readr)
 library(ggplot2)
 library(assertr)
 ```
 
-Here's an example where the validation checks pass and the analysis goes forward:
+The assertr package provides three primary verbs, `verify()`, `assert()`, and `insist()`. They all take a data set as the first argument and (by default) returns the original data set unaltered if the checks pass, which makes it include them as part of a data pipeline. I'll illustrate them one at a time. Let's start with `verify()`, the simplest of the three. The `verify()` function expects to receive an expression as the first non-data argument amd yields a logical value, which is then evaluated in the data context. If the expression evaluates to `FALSE`, an error is thrown.
+
+Here's a simple example using `verify()`. My data set comes from the [List of Archibald Prize Winners](https://en.wikipedia.org/wiki/List_of_Archibald_Prize_winners) wikipedia page. The Archibald Prize is a one of the most prestigious art prizes in Australia, awarded for painted portraits, and has been awarded (almost!) annually since 1921. My data set looks like this:
+
+```{r}
+#| label: archibald data
+archibald <- read_csv("archibald.csv", show_col_types = FALSE)
+archibald
+```
+
+To be precise, there are actually three different prizes included in the data set. There's the original Archibald Prize (the famous one), and two more recent additions that are awarded using the same pool of entrants: the People's Choice Award (which is what you'd think), and the Packing Room Prize (awarded by the staff who install the portraits in the gallery).
+
+For my first analysis then, I want to do a simple tabulation: count the number of times any given artist has won a particular prize, and sort the results in descending count order. So the analysis part of my data pipeline would look like this:
+
+```{r}
+#| label: unevaluated analysis
+#| eval: false
+archibald |> 
+  count(artist, prize) |>
+  arrange(desc(n))
+```
+
+However, I might want to `verify()` a few things first. I'd like to check that `prize` and `artist` both exist as columns in the data, and both contain character data. I can use the base R function `exists()` to check that the variables exist within the data context, and `is.character()` to check the variable type: 
 
 ```{r}
 #| label: assertr example
 archibald |> 
+  verify(exists("prize")) |>
+  verify(exists("artist")) |>
+  verify(is.character("prize")) |>
+  verify(is.character("artist")) |>
+  count(artist, prize) |>
+  arrange(desc(n))
+```
+
+In this case, all the `verify()` checks pass, so no errors are thrown and the analysis proceeds in the usual way. But suppose that the `artist` variable was actually supposed to be called `painter`:
+
+```{r}
+#| label: assertr example, verify fails
+#| error: true
+archibald |> 
+  verify(exists("prize")) |>
+  verify(exists("painter")) |>
+  verify(is.character("prize")) |>
+  verify(is.character("painter")) |>
+  count(painter, prize) |>
+  arrange(desc(n))
+```
+
+There is no `painter` variable in the data set, so the assertion checks fail, and an error message is thrown. The form of the error message is rather elaborate though. There is a reason why assertr defaults to this strange-looking format, and I'll get to that momentarily. For now, let's move on. 
+
+There's something a little repetitive about the validation code I wrote above. If my analysis pipeline involved many variables, it would be a bit obnoxious to write a separate `verify()` line to check that they all exist. For the column name checks, assertr provides a convenience function `has_all_names()` that you can use specifically for this purpose:^[In general, assertr doesn't supply lots of convenience functions, but `has_all_names()` is an important special case because it's used to check for the *existence* of columns, and that requires a special workflow. For type checking assertions, I can group together multiple `verify()` checks into a single `assert()` check that takes a tidy selection of columns. But for that to work the columns actually have to exist, so you can't use `assert()` for existence checks! Hence (I presume) the inclusion of the `has_all_names()` convenience function.]
+
+```{r}
+#| label: assertr example with has_all_names
+archibald |> 
   verify(has_all_names("prize", "artist")) |>
-  assert(is.character, "prize", "artist") |>
+  verify(is.character("prize")) |>
+  verify(is.character("artist")) |>
+  count(artist, prize) |>
+  arrange(desc(n))
+```
+
+For the type checking, however, there's no equivalent convenience function and if you want to group multiple `verify()` checks what you want to do is use the `assert()` function. The first non-data argument to `assert()` specifies a predicate function that is applied to a set of columns.^[Column names are unquoted and are passed through the dots `...`. The documentation notes that the dots are passed to `dplyr::select()`, and accordingly the `assert()` function supports tidy selection.] If the predicate function returns `FALSE`, the `assert()` function errors. 
+
+Rewriting the `verify()` code from our "successful" example as `assert()` checks gives us this:
+
+```{r}
+#| label: assert succeeds
+archibald |> 
+  verify(has_all_names("prize", "artist")) |>
+  assert(is.character, prize, artist) |>
   count(artist, prize) |>
   arrange(desc(n))
 ```
