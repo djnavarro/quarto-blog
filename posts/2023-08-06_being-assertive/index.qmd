@@ -1,5 +1,5 @@
 ---
-title: "Four ways to be assertive"
+title: "Four ways to write assertion checks in R"
 description: "It's not 50 ways to leave your lover, but spend enough time talking about assertive programming in the bedroom and you'll only have 49 more to discover"
 categories: ["R"]
 date: "2023-08-06"
@@ -22,7 +22,23 @@ set.seed(1)
 
 <!--------------- post begins here ----------------->
 
-Let's talk about four different approaches to writing assertions in R.^[It should be noted that these aren't the only packages out there to support assertions in R. There are at least three others that I'm aware of but haven't yet tried, and probably many others that I don't know about. For what it's worth, these are the other three I know of: the [ensurer](https://github.com/smbache/ensurer), [checkmate](https://github.com/mllg/checkmate), and [tester](https://github.com/gastonstat/tester) packages can all be used for this purpose, and I'm sure I could come up with terrible rhymes for those too, but there's a limit to how much effort I want to put into this post.]
+Once upon a time in a land far, far away, I was a bright young thing who wrote my data analyses with the kind of self-assured confidence that only a bright young thing can have. I trusted myself to write analysis code that does exactly what I wanted it to do. After all, I was a smart lady who knows her data and knows her analysis tools. In those halycon days of yore, before I'd been badly burned by sequentially arriving data that don't have precisely the same structure every single time the data updates, I had the naivete to believe that if something changed in unexpected ways, *I'd notice it*. 
+
+Sweet summer child. 
+
+What I have learned since then, following the well-trodden path of every embittered old data analyst whose heart has shrivelled into a dark ball of data cynicism, is that none of this is true:
+
+- I don't know the tools as well as I think I do.
+- I don't know the data as well as I think I do.
+- When the data change unexpectedly, I don't always notice it.
+
+Worst of all: **when my assumptions fail, my code can silently do the wrong thing and never throw an error**. This happens very, very easily when data structure can change over time, or when code is reused in a new context. Which... happens a lot, actually.
+
+Real world data are horrible.
+
+Learning my lessons the hard way has taught me the importance of writing assertion checks. The idea behind an assertion check is very simple: write some code that makes sure that your code fails loudly by throwing an error as soon as an assumption is violated.^[The idea is very similar to writing unit checks for software development. The difference is that unit tests are run at build time, whereas assertions apply at run time.] As the saying goes, you want your analysis code to fail fast and fail loudly every time that something is not "as expected".
+
+So. Let's talk about four different approaches to writing assertions in R.^[It should be noted that these aren't the only packages out there to support assertions in R. There are at least three others that I'm aware of but haven't yet tried, and probably many others that I don't know about. For what it's worth, these are the other three I know of: the [ensurer](https://github.com/smbache/ensurer), [checkmate](https://github.com/mllg/checkmate), and [tester](https://github.com/gastonstat/tester) packages can all be used for this purpose, and I'm sure I could come up with terrible rhymes for those too, but there's a limit to how much effort I want to put into this post.]
 
 ## Just `stopifnot()`, Scott
 
@@ -360,28 +376,46 @@ archibald |>
   arrange(desc(n))
 ```
 
-
-Here's an example where the validation checks fail:
+One thing I really like about the design of assertr is that pipe-friendly assertion checks make it possible to add your assertion checks at the appropriate point in the analysis pipeline. For instance, let's suppose I want to look at the number of finalists in the Archibald Prize each year. The raw data only records `n_finalists` for the Archibald Prize, not the Packing Room Prize or the People's Choice Award. Rows in the data corresponding to those latter prizes will always have `NA` values for `n_finalists`, but that isn't a problem for my proposed analysis. The *only* missingness of possible concern to me is for the Archibald Prize proper. So I can write my assertion checks like this:
 
 ```{r}
-#| label: assertr example 2
+#| label: interspersed assertions fail
 #| error: true
-not_missing <- function(x) !is.na(x)
-
 archibald |> 
   verify(has_all_names("prize", "n_finalists")) |>
+  assert(is.character, prize) |>
+  assert(is.numeric, n_finalists) |>
   filter(prize == "Archibald Prize") |>
-  assert(not_missing, "n_finalists") |>  
-  ggplot(aes(n_finalists)) + geom_histogram(bins = 20)
+  assert(\(x) !is.na(x), n_finalists) |>
+  summarise(
+    min_finalists = min(n_finalists),
+    median_finalists = median(n_finalists),
+    max_finlists = max(n_finalists)
+  )
 ```
 
-If we're okay with ignoring the missing data cases, we can filter them out:
+Okay, so there is in fact a case where missingness is a problem in two rows of the data set, *for the explicit subset of the data I care about*. As it happens though, I simply don't care when it's only those two years, so for the purposes of this example I'll filter those rows out before they even hit the assertion check, and unsurprisingly this runs without erroring:
 
 ```{r}
-#| label: assertr example 3
+#| label: interspersed assertions succeed
 archibald |> 
   verify(has_all_names("prize", "n_finalists")) |>
-  filter(prize == "Archibald Prize", not_missing(n_finalists)) |>
-  ggplot(aes(n_finalists)) + geom_histogram(bins = 20)
+  assert(is.character, prize) |>
+  assert(is.numeric, n_finalists) |>
+  filter(prize == "Archibald Prize", !is.na(n_finalists)) |>
+  assert(\(x) !is.na(x), n_finalists) |>
+  summarise(
+    min_finalists = min(n_finalists),
+    median_finalists = median(n_finalists),
+    max_finlists = max(n_finalists)
+  )
 ```
+
+In addition to `verify()` and `assert()`, there are three other assertion functions in assertr. I'm not going to dive into those for the purposes of this post -- that's what the package documentation is there for! -- but the TL;DR is as follows:
+
+- `insist()` works like `assert()` but it takes a "predicate generator" function instead of a "predicate" function, which makes it possible to specify an assertion check for a tidy selection of columns and have the predicate generator handle each column according to its own logic
+- `assert_rows()` is a row-wise version of `assert()`
+- `insist_rows()` is a row-wise version of `insist()`
+
+**Summary**: My overall feeling is that assertr is probably the most powerful tool for assertion checks applied to tabular data. It lacks the generality of the other tools, true, but the special case that it works for is a really important one for data analysts. Data objects tend to have their own special issues, and pretty much every data analysis takes at least one data frame as an input, so it's really convenient to have a specialised tool for that scenario. 
 
