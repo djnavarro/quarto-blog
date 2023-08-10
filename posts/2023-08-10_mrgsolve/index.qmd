@@ -1,0 +1,252 @@
+---
+title: "mrgsolve"
+description: "This is a subtitle"
+date: "2023-08-10"
+--- 
+
+<!--------------- my typical setup ----------------->
+
+```{r}
+#| label: setup
+#| include: false
+very_wide <- 500
+wide <- 136
+narrow <- 76
+options(width = narrow)
+cache_images <- TRUE
+set.seed(1)
+```
+
+<!--------------- post begins here ----------------->
+
+```{r}
+#| label: package-load
+library(mrgsolve, warn.conflicts = FALSE)
+```
+
+- Working from this vignette: https://mrgsolve.org/vignettes/01-get-started.html
+- mrgsolve wraps the public domain fortran library ODEPACK
+- the R package uses S4 for functional OOP
+
+## Building a model
+
+### Using `modlib()`
+
+The mrgsolve has a set of predefined pharmacokinetic models that you can work with when getting started. They're stored in a package library whose location is accessible by calling `modlib()` with no arguments:
+
+```{r}
+#| label: modlib-path
+modlib()
+```
+
+To see the names of the models:
+
+```{r}
+#| label: list-modlib-models
+modlib(list = TRUE)
+```
+
+To load one of these models:
+
+```{r}
+#| label: build-modlib-model
+mod <- modlib("pk1")
+```
+
+The first time you call this it compiles the model, which doesn't take very long but nevertheless the package is smart enough to cache compiled models, so if you call it again it'll just load the cached version.
+
+### Using `mread()`
+
+When I first started using mrgsolve I used the `modlib()` function quite a bit just so that I could dive into running simulations without having to think much about what's going on internally, but now that I've gotten more of a sense of it this isn't my preferred workflow. I'm always a bit uncomfortable with functions that return quite dramatically different output based on the parameters you pass. They're harder to program with. So instead, here's how I would now think about the same commands. First, the models that come bundled with mrgsolve are stored as package files, so:
+
+```{r}
+model_path <- fs::path_package("mrgsolve", "models")
+model_path
+```
+
+To get file paths to all the model files in this folder, I could do something like `fs::dir_ls(model_path)`. The TL;DR though is that the file name for the "pk1" model that I built in the previous section is `pk1.cpp`, and the other models that come bundled with mrgsolve are named similarly. 
+
+Using the built-in models strikes me as something of an unusual case where the model code is stored outside the R project from which you're invoking it, and I suppose the `modlib()` function is written to provide users with an easy way to access that model code. A more general purpose (and, happily, more type stable) workflow is provided by the `mread()` function:
+
+```{r}
+mod <- mread(model = "pk1", project = model_path)
+```
+
+Optionally you can explicitly provide the file name for the model (within the `project` folder), but in this case we don't need to: if the `file` argument is not specified `mread()` assumes by default that the file name is the same as the `model` name with file extension `.cpp`. 
+
+## Model objects
+
+What precisely have we just constructed?
+
+```{r}
+class(mod)
+```
+
+The mrgsolve package is build using S4 classes, so we can use `print()` or `show()` to get a summary of the object:
+
+```{r}
+show(mod)
+```
+
+Perhaps more usefully, there is also a `see()` function we call to inspect the source code of the model file:^[If you want to be a jerk you can pull the same information from the object attributes using `attr(mod, "code")`, but if you bypass the API provided by the developer like that, it's "off-label" usage and there's absolutely no guarantee that it will work in the future.]
+
+```{r}
+see(mod)
+```
+
+Parameters can be extracted using `param()`:
+
+```{r}
+param(mod)
+```
+
+What actually happens here is that it returns a "parameter_list" object, and the output looks nice and pretty because it has a print method. But internally it's basically just a list (...sort of, not exactly), and it has a define `$` operator, so you can extract the clearance parameter as `param()$CL`
+
+```{r}
+param()$CL
+```
+
+## Event objects
+
+Model objects represent the underlying ODE system. They don't store information about "interventions" (external forcers) on the system. In the pharmacokinetic context the main intervention we're thinking about is dosing. An events object returned by `ev()` returns a event schedule that would be familiar to NONMEM users^[I really need to *learn* NONMEM. It's becoming a bit absurd that I'm learning everything else before NONMEM. Oh well, I was never someone to do things in the proper order.]
+
+```{r}
+#| label: event-schedule
+events <- ev(amt = 100, ii = 24, addl = 9)
+events
+```
+
+The arguments are consistent with NONMEM standard names:
+
+- `amt` is the amount of drug
+- `ii` is the interdose interval
+- `addl` is number of additional doses
+
+A tiny bit of care is needed here. The `events` object looks like a data frame, and it has a defined `$` operator that behaves as you'd expect if it were a data frame, but this errors:
+
+```{r}
+#| error: true
+events[1, ]
+```
+
+Again this is an S4 class and there is in fact a data frame stored internally^[Yes, I'm a jerk: you can find it with `attr(events, "data")`], but if you want to coerce it explicitly to a data frame or a tibble you'll need to convert it explicitly. For instance, this...
+
+```{r}
+tibble::as_tibble(events)
+```
+
+...is in fact a tibble. 
+
+<!--
+
+# simulations -------------------------------------------------------------
+
+# okay, the example in the vignette shows a workflow using pipes...
+pk1_mod |> ev(evnt) |> mrgsim(end = 480, delta = 0.1)
+
+
+# ... but weirdly I find it unhelpful, so let's run the same analysis with a 
+# single call to mrgsim(). this is equivalent:
+pk1_out <- mrgsim(
+  x = pk1_mod,
+  events = evnt,
+  end = 480,
+  delta = 0.1
+)
+pk1_out # this is an "mrgsims" object, coercible to data frame
+
+# ... or a tibble
+tibble::as_tibble(pk1_out)
+
+# there's some difficulty following the vignette here because end and delta 
+# aren't named arguments to mrgsim(), they're passed via the dots to update().
+# what's actually happening here is that the explicitly specified values for
+# end and delta are used to override the default times (in pk1_mod???) that
+# simulations are run for. You can access these using stime()
+stime(pk1_mod)
+
+# and if we run the simulation *without* setting end and delta in mrgsim()
+# these are the timepoints returned:
+mrgsim(pk1_mod, events = evnt)
+
+
+# ... anyway, mrgsim objects have a default plot method:
+plot(pk1_out)
+
+# the plot uses lattice graphics so you can capture and modify it should you
+# really want to:
+x <- plot(pk1_out)
+class(x)
+
+# but honestly if I wanted to customise I'd probably just switch to 
+# ggplot2. it's very little work to do the conversion and from there
+# you have access to the full ggplot2 ecosystem...
+dat <- pk1_out |> 
+  tibble::as.tibble() |>
+  tidyr::pivot_longer(
+    cols = c(EV, CENT, CP), 
+    names_to = "variable", 
+    values_to = "value"
+  )
+
+library(ggplot2)
+ggplot(dat, aes(time, value)) + 
+  geom_line() + 
+  facet_wrap(~ variable, scales = "free_y")
+
+-->
+
+<!-- EXAMPLE 02 -->
+
+<!-- 
+
+# I am working through this:
+# https://mrgsolve.org/vignettes/events.html
+#
+# But... note: in keeping with the "yolo design" that mrgsolve seems to 
+# embody, the "events vignette" directly linked from the home page is NOT
+# the same as the "events vignette" in the pkgdown site. For reasons that
+# utterly escape me, they don't even use the same model??????
+#
+# diving a little deeper into event schedules. but first, a model:
+# see: https://mrgsolve.org/docs/reference/modlib_pk.html
+#
+# mread at least seems type stable, so let's use it. loading the pk1cmt
+# model, and overriding the default simulation time points
+mod <- mread("pk1cmt", modlib(), end = 216, delta = 0.1)
+
+# creating an event object with ev()
+# note ev() is not type stable, it behaves differently if passed a model object
+e <- ev(amt=100, ii=24, addl=6)
+
+# a better example of a piped workflow than the earlier one...
+mod |> 
+  mrgsim(events = e) |> 
+  plot(EV1 + CP ~ time)
+
+# digression.... okay here's what I hate about ev(). you can do this... 
+mod |> 
+  mrgsim(events = ev(amt = 100, ii = 24, addl = 6)) |> 
+  plot(EV1 + CP ~ time)
+
+# and, in what I can only call an example of batshit polymorphism, also this...
+mod |> 
+  ev(amt = 100, ii = 24, addl = 6) |>
+  mrgsim() |> 
+  plot(EV1 + CP ~ time)
+
+# ...unpacking the madness, here's what's actually happening in the second 
+# pipeline: it's actually returning a model object (class mrgmod), *not* an
+# events object (class ev)
+m <- ev(x = mod, amt = 100, ii = 24, addl = 6)
+class(m)
+
+# however... tucked away in the attributes is the events object:
+e_attr <- attr(m, "args")$events
+
+# explanation (sort of) is in the docs on the mrgmod class:
+# https://mrgsolve.org/docs/reference/mrgmod-class.html
+
+-->
+
+

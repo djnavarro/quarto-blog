@@ -15,7 +15,349 @@
 <link>https://blog.djnavarro.net/index.html</link>
 </image>
 <generator>quarto-1.3.353</generator>
-<lastBuildDate>Mon, 07 Aug 2023 14:00:00 GMT</lastBuildDate>
+<lastBuildDate>Wed, 09 Aug 2023 14:00:00 GMT</lastBuildDate>
+<item>
+  <title>mrgsolve</title>
+  <dc:creator>Danielle Navarro</dc:creator>
+  <link>https://blog.djnavarro.net/posts/2023-08-10_mrgsolve/index.html</link>
+  <description><![CDATA[ 
+
+
+
+
+<!--------------- my typical setup ----------------->
+<!--------------- post begins here ----------------->
+<div class="cell">
+<div class="sourceCode cell-code" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">library</span>(mrgsolve, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">warn.conflicts =</span> <span class="cn" style="color: #8f5902;
+background-color: null;
+font-style: inherit;">FALSE</span>)</span></code></pre></div>
+</div>
+<ul>
+<li>Working from this vignette: https://mrgsolve.org/vignettes/01-get-started.html</li>
+<li>mrgsolve wraps the public domain fortran library ODEPACK</li>
+<li>the R package uses S4 for functional OOP</li>
+</ul>
+<section id="building-a-model" class="level2">
+<h2 class="anchored" data-anchor-id="building-a-model">Building a model</h2>
+<section id="using-modlib" class="level3">
+<h3 class="anchored" data-anchor-id="using-modlib">Using <code>modlib()</code></h3>
+<p>The mrgsolve has a set of predefined pharmacokinetic models that you can work with when getting started. They’re stored in a package library whose location is accessible by calling <code>modlib()</code> with no arguments:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb2" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">modlib</span>()</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] "/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models"</code></pre>
+</div>
+</div>
+<p>To see the names of the models:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb4" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">modlib</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">list =</span> <span class="cn" style="color: #8f5902;
+background-color: null;
+font-style: inherit;">TRUE</span>)</span></code></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>mrgsolve internal library:</code></pre>
+</div>
+<div class="cell-output cell-output-stderr">
+<pre><code>  effect  tmdd  viral1  viral2  emax  irm1  irm2  irm3  irm4  pk1cmt  pk2cmt  pk3cmt  pk1  pk2  pk2iv  popex  pred1  pbpk  1005  nm-like</code></pre>
+</div>
+</div>
+<p>To load one of these models:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb7" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1">mod <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">modlib</span>(<span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"pk1"</span>)</span></code></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Building pk1 ... done.</code></pre>
+</div>
+</div>
+<p>The first time you call this it compiles the model, which doesn’t take very long but nevertheless the package is smart enough to cache compiled models, so if you call it again it’ll just load the cached version.</p>
+</section>
+<section id="using-mread" class="level3">
+<h3 class="anchored" data-anchor-id="using-mread">Using <code>mread()</code></h3>
+<p>When I first started using mrgsolve I used the <code>modlib()</code> function quite a bit just so that I could dive into running simulations without having to think much about what’s going on internally, but now that I’ve gotten more of a sense of it this isn’t my preferred workflow. I’m always a bit uncomfortable with functions that return quite dramatically different output based on the parameters you pass. They’re harder to program with. So instead, here’s how I would now think about the same commands. First, the models that come bundled with mrgsolve are stored as package files, so:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb9" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1">model_path <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> fs<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">path_package</span>(<span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"mrgsolve"</span>, <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"models"</span>)</span>
+<span id="cb9-2">model_path</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models</code></pre>
+</div>
+</div>
+<p>To get file paths to all the model files in this folder, I could do something like <code>fs::dir_ls(model_path)</code>. The TL;DR though is that the file name for the “pk1” model that I built in the previous section is <code>pk1.cpp</code>, and the other models that come bundled with mrgsolve are named similarly.</p>
+<p>Using the built-in models strikes me as something of an unusual case where the model code is stored outside the R project from which you’re invoking it, and I suppose the <code>modlib()</code> function is written to provide users with an easy way to access that model code. A more general purpose (and, happily, more type stable) workflow is provided by the <code>mread()</code> function:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb11" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb11-1">mod <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">mread</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">model =</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"pk1"</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">project =</span> model_path)</span></code></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Building pk1 ... (waiting) ...
+done.</code></pre>
+</div>
+</div>
+<p>Optionally you can explicitly provide the file name for the model (within the <code>project</code> folder), but in this case we don’t need to: if the <code>file</code> argument is not specified <code>mread()</code> assumes by default that the file name is the same as the <code>model</code> name with file extension <code>.cpp</code>.</p>
+</section>
+</section>
+<section id="model-objects" class="level2">
+<h2 class="anchored" data-anchor-id="model-objects">Model objects</h2>
+<p>What precisely have we just constructed?</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb13" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">class</span>(mod)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] "mrgmod"
+attr(,"package")
+[1] "mrgsolve"</code></pre>
+</div>
+</div>
+<p>The mrgsolve package is build using S4 classes, so we can use <code>print()</code> or <code>show()</code> to get a summary of the object:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb15" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb15-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">show</span>(mod)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+
+-----------------  source: pk1.cpp  -----------------
+
+  project: /home/danielle/R...gsolve/models
+  shared object: pk1-so-2b2023329d66 
+
+  time:          start: 0 end: 24 delta: 1
+                 add: &lt;none&gt;
+
+  compartments:  EV CENT [2]
+  parameters:    CL V KA [3]
+  captures:      CP [1]
+  omega:         0x0 
+  sigma:         0x0 
+
+  solver:        atol: 1e-08 rtol: 1e-08 maxsteps: 20k
+------------------------------------------------------</code></pre>
+</div>
+</div>
+<p>Perhaps more usefully, there is also a <code>see()</code> function we call to inspect the source code of the model file:<sup>1</sup></p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb17" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb17-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">see</span>(mod)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+Model file:  pk1.cpp 
+$PARAM @annotated
+CL   :  1 : Clearance (volume/time)
+V    : 20 : Central volume (volume)
+KA   :  1 : Absorption rate constant (1/time)
+
+$CMT  @annotated
+EV   : Extravascular compartment
+CENT : Central compartment
+
+$GLOBAL
+#define CP (CENT/V)
+
+$PKMODEL ncmt = 1, depot = TRUE
+
+$CAPTURE @annotated
+CP : Plasma concentration (mass/volume)</code></pre>
+</div>
+</div>
+<p>Parameters can be extracted using <code>param()</code>:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb19" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb19-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">param</span>(mod)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+ Model parameters (N=3):
+ name value . name value
+ CL   1     | V    20   
+ KA   1     | .    .    </code></pre>
+</div>
+</div>
+<p>What actually happens here is that it returns a “parameter_list” object, and the output looks nice and pretty because it has a print method. But internally it’s basically just a list (…sort of, not exactly), and it has a define <code>$</code> operator, so you can extract the clearance parameter as <code>param()$CL</code></p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb21" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb21-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">param</span>()<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span>CL</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>NULL</code></pre>
+</div>
+</div>
+</section>
+<section id="event-objects" class="level2">
+<h2 class="anchored" data-anchor-id="event-objects">Event objects</h2>
+<p>Model objects represent the underlying ODE system. They don’t store information about “interventions” (external forcers) on the system. In the pharmacokinetic context the main intervention we’re thinking about is dosing. An events object returned by <code>ev()</code> returns a event schedule that would be familiar to NONMEM users<sup>2</sup></p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb23" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb23-1">events <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">ev</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">amt =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">100</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">ii =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">24</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">addl =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">9</span>)</span>
+<span id="cb23-2">events</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Events:
+  time amt ii addl cmt evid
+1    0 100 24    9   1    1</code></pre>
+</div>
+</div>
+<p>The arguments are consistent with NONMEM standard names:</p>
+<ul>
+<li><code>amt</code> is the amount of drug</li>
+<li><code>ii</code> is the interdose interval</li>
+<li><code>addl</code> is number of additional doses</li>
+</ul>
+<p>A tiny bit of care is needed here. The <code>events</code> object looks like a data frame, and it has a defined <code>$</code> operator that behaves as you’d expect if it were a data frame, but this errors:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb25" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb25-1">events[<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">1</span>, ]</span></code></pre></div>
+<div class="cell-output cell-output-error">
+<pre><code>Error in events[1, ]: object of type 'S4' is not subsettable</code></pre>
+</div>
+</div>
+<p>Again this is an S4 class and there is in fact a data frame stored internally<sup>3</sup>, but if you want to coerce it explicitly to a data frame or a tibble you’ll need to convert it explicitly. For instance, this…</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb27" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb27-1">tibble<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">as_tibble</span>(events)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 1 × 6
+   time   amt    ii  addl   cmt  evid
+  &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;
+1     0   100    24     9     1     1</code></pre>
+</div>
+</div>
+<p>…is in fact a tibble.</p>
+<!--
+
+# simulations -------------------------------------------------------------
+
+# okay, the example in the vignette shows a workflow using pipes...
+pk1_mod |> ev(evnt) |> mrgsim(end = 480, delta = 0.1)
+
+
+# ... but weirdly I find it unhelpful, so let's run the same analysis with a 
+# single call to mrgsim(). this is equivalent:
+pk1_out <- mrgsim(
+  x = pk1_mod,
+  events = evnt,
+  end = 480,
+  delta = 0.1
+)
+pk1_out # this is an "mrgsims" object, coercible to data frame
+
+# ... or a tibble
+tibble::as_tibble(pk1_out)
+
+# there's some difficulty following the vignette here because end and delta 
+# aren't named arguments to mrgsim(), they're passed via the dots to update().
+# what's actually happening here is that the explicitly specified values for
+# end and delta are used to override the default times (in pk1_mod???) that
+# simulations are run for. You can access these using stime()
+stime(pk1_mod)
+
+# and if we run the simulation *without* setting end and delta in mrgsim()
+# these are the timepoints returned:
+mrgsim(pk1_mod, events = evnt)
+
+
+# ... anyway, mrgsim objects have a default plot method:
+plot(pk1_out)
+
+# the plot uses lattice graphics so you can capture and modify it should you
+# really want to:
+x <- plot(pk1_out)
+class(x)
+
+# but honestly if I wanted to customise I'd probably just switch to 
+# ggplot2. it's very little work to do the conversion and from there
+# you have access to the full ggplot2 ecosystem...
+dat <- pk1_out |> 
+  tibble::as.tibble() |>
+  tidyr::pivot_longer(
+    cols = c(EV, CENT, CP), 
+    names_to = "variable", 
+    values_to = "value"
+  )
+
+library(ggplot2)
+ggplot(dat, aes(time, value)) + 
+  geom_line() + 
+  facet_wrap(~ variable, scales = "free_y")
+
+-->
+
+
+</section>
+
+
+<div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
+
+<ol>
+<li id="fn1"><p>If you want to be a jerk you can pull the same information from the object attributes using <code>attr(mod, "code")</code>, but if you bypass the API provided by the developer like that, it’s “off-label” usage and there’s absolutely no guarantee that it will work in the future.↩︎</p></li>
+<li id="fn2"><p>I really need to <em>learn</em> NONMEM. It’s becoming a bit absurd that I’m learning everything else before NONMEM. Oh well, I was never someone to do things in the proper order.↩︎</p></li>
+<li id="fn3"><p>Yes, I’m a jerk: you can find it with <code>attr(events, "data")</code>↩︎</p></li>
+</ol>
+</section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div id="quarto-reuse" class="quarto-appendix-contents"><div><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2023,
+  author = {Navarro, Danielle},
+  title = {Mrgsolve},
+  date = {2023-08-10},
+  url = {https://blog.djnavarro.net/posts/2023-08-10_mrgsolve},
+  langid = {en}
+}
+</code></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2023" class="csl-entry quarto-appendix-citeas">
+Navarro, Danielle. 2023. <span>“Mrgsolve.”</span> August 10, 2023. <a href="https://blog.djnavarro.net/posts/2023-08-10_mrgsolve">https://blog.djnavarro.net/posts/2023-08-10_mrgsolve</a>.
+</div></div></section></div> ]]></description>
+  <guid>https://blog.djnavarro.net/posts/2023-08-10_mrgsolve/index.html</guid>
+  <pubDate>Wed, 09 Aug 2023 14:00:00 GMT</pubDate>
+</item>
 <item>
   <title>Four ways to write assertion checks in R</title>
   <dc:creator>Danielle Navarro</dc:creator>
@@ -22442,2522 +22784,6 @@ Observable.js in Quarto.”</span> January 14, 2023. <a href="https://blog.djnav
   <guid>https://blog.djnavarro.net/posts/2023-01-14_p5js/index.html</guid>
   <pubDate>Fri, 13 Jan 2023 13:00:00 GMT</pubDate>
   <media:content url="https://blog.djnavarro.net/posts/2023-01-14_p5js/donut.jpg" medium="image" type="image/jpeg"/>
-</item>
-<item>
-  <title>Deploying R with kubernetes</title>
-  <dc:creator>Danielle Navarro</dc:creator>
-  <link>https://blog.djnavarro.net/posts/2023-01-10_kubernetes/index.html</link>
-  <description><![CDATA[ 
-
-
-
-
-<!--------------- my typical setup ----------------->
-<!--------------- post begins here ----------------->
-<p><strong>NOTE:</strong> The donuts app is no longer live. It was starting to cost me money! :-)</p>
-<blockquote class="blockquote">
-<p>Me: ooh I made a kubernetes app <br> 10yo: I made a paper dragon <br> Me: yeah… yours is cooler <br> &nbsp; – My daughter, reminding me that perspective is a thing</p>
-</blockquote>
-<p>Story time. There was a very weird moment in machine learning history, about 20 years ago, when the probabilistic AI folks were completely obsessed with Bayesian nonparametrics, and a disproportionate number of papers at NeurIPS had titles like “[Cutesy prefix]: An infinite dimensional model of [something really boring]”. In most cases, you’d dig into the paper and discover that they hadn’t done anything very special. All they’d done is implement a Bayesian model of [boring thing] that was ambiguous about the number of [components], and instead of thinking about what prior constraints make sense for the problem they were trying to solve, the authors used a <a href="https://en.wikipedia.org/wiki/Chinese_restaurant_process">Chinese restaurant process</a> (CRP) to specify the conditional prior distribution over allocations of observations to components. The CRP has the mildly-interesting property that for any finite sample size there is a non-negligible conditional probability that the next observation belongs to a hitherto unobserved component, and asymptotically the partitions over observations it generates have a countably infinite number of components. Alas, exactly zero of these papers happened to have an infinitely large data set to train the model on, and without fail the results in the papers didn’t appear to have anything “infinite dimensional” about them whatsoever.</p>
-<p>I say this with love and gentleness, dear reader, because I wrote quite a few of those papers myself.</p>
-<p>Why do I tell this story in a blog post that has absolutely nothing to do with machine learning, statistics, or Bayesian inference? Because in a fit of pique, somewhere around 2006, I decided to do the damned reading myself and learned quite a lot of Bayesian nonparametrics. Not because I thought it would be useful, but because I was curious and I was getting extremely irritated at overconfident machine learning boys telling me that as a mere psychologist I couldn’t possibly understand the depth of their thinking.</p>
-<p>Which brings me, naturally enough, to <a href="https://kubernetes.io/">kubernetes</a>.</p>
-<p><br></p>
-<section id="ggplot2-on-kubernetes" class="level2">
-<h2 class="anchored" data-anchor-id="ggplot2-on-kubernetes">ggplot2 on kubernetes</h2>
-<p>Let’s start at the ending, shall we? The art shown below is generated at <a href="https://donut.djnavarro.net">donut.djnavarro.net</a>, and it is more-or-less unique. The site is designed to serve a different image every time it is accessed, using the timestamp as the seed to a generative art system written in R with ggplot2. If you refresh this page, the artwork will change:</p>
-<a href="https://donut.djnavarro.net"><img width="100%" src="https://blog.djnavarro.net/posts/2023-01-10_kubernetes/https:/donut.djnavarro.net" title="donut.djnavarro.net"></a>
-<p><br></p>
-<p>Under the hood, the site is a kubernetes app running containerised R code with google kubernetes engine. Sounds fancy, right?</p>
-<p>Well, maybe. Shall we take a look at how it works? Perhaps, like so many other things in this world, it will turn out not to be anywhere near as complicated as it is made out to be.</p>
-<p><br></p>
-</section>
-<section id="um.-what-is-kubernetes-do-i-care" class="level2">
-<h2 class="anchored" data-anchor-id="um.-what-is-kubernetes-do-i-care">Um. What is kubernetes? Do I care?</h2>
-<p>There’s nothing I love more than looking at the website for a software tool and trying to work out what it does by reading how the developers have chosen to describe it. On the <a href="https://kubernetes.io/">kubernetes</a> website they’ve gone with the headline <em>“Production-Grade Container Orchestration”</em>, and started with this:</p>
-<blockquote class="blockquote">
-<p>Kubernetes, also known as K8s, is an open-source system for automating deployment, scaling, and management of containerized applications.</p>
-</blockquote>
-<p>As opening lines go it wouldn’t get you a lot of attention on grindr<sup>1</sup> but context makes a difference and it’s not so terrible as a description of what kubernetes does. It’s a useful tool if you need to deploy an application on a cluster<sup>2</sup> and have that application run smoothly as you “scale” your cluster by adding more “nodes”<sup>3</sup> to the cluster. For the application I’m about to write, kubernetes is overkill. I don’t actually need kubernetes to run something this simple, but this is a learning exercise. I’m doing it so that I can familiarise myself with core concepts. When I get to the part of the post that actually <em>does</em> something with kubernetes I’ll start introducing terminology, but for now that’s enough for us.</p>
-<p>Should you care as an R user? I mean, probably not. If you want a proper answer, Roel Hogervorst has an excellent blog post called <a href="https://www.r-bloggers.com/2022/04/wtf-is-kubernetes-and-should-i-care-as-r-user/"><em>“WTF is Kubernetes and Should I Care as R User?”</em></a> I won’t duplicate content here: you should read the original post. But the short answer is that you probably won’t need to run your own application using kubernetes, but you might need to contribute code to a larger application that uses it. If so, you may want to play around with kubernetes to make sure you understand what it does.</p>
-<p><br></p>
-</section>
-<section id="write-the-r-code" class="level2 page-columns page-full">
-<h2 class="anchored" data-anchor-id="write-the-r-code">Write the R code</h2>
-<blockquote class="blockquote">
-<p>Likes to watch me in the glass room, bathroom <br> Chateau Marmont, slippin’ on my red dress, puttin’ on my makeup <br> Glass room, perfume, cognac, lilac fumes <br> Says it feels like heaven to him <br> &nbsp; – Lana Del Rey<sup>4</sup></p>
-</blockquote>
-<p>Let’s begin at the beginning. Anytime you want to write something, it helps to have something to say. There is nothing more tiresome than an op-ed writer trying to fill out 1000 words to make the Saturday paper deadline, but tech writing that tries to demonstrate a tool<sup>5</sup> without anything even remotely resembling an application runs a very close second. So let’s at least <em>pretend</em> we have a use case for this yeah?</p>
-<p>In real life I am an unemployed 40-something woman who smokes and drinks too much and makes very poor choices around men, but in my spare moments I make <a href="https://art.djnavarro.net/">generative art</a> using R. It’s an extremely unprofitable hobby<sup>6</sup> but it’s not completely without market value. Among other things the lovely folks at Posit were kind enough to pay me to put together an <a href="https://art-from-code.netlify.app">“art from code”</a> workshop last year, and thanks to their kindness and my weird priorities there is now a nice little online tutorial that you can use to learn how to make generative art in R. What I’m going to do in this post is build a little kubernetes app that creates generative in R. It won’t be very fancy, but hopefully you can see how an app like this could be expanded<sup>7</sup> to create a platform for “long form generative art” with R, not dissimilar to what <a href="https://www.artblocks.io/">artblocks</a> or <a href="https://www.fxhash.xyz/">fxhash</a> allow generative artists to do with javascript. The artist supplies code (in this case using R) that generates artwork, and the server uses that code to generate an arbitrary number of pieces that… idk, I guess you could sell them? Whatever. Do I look like a capitalist to you?</p>
-<p>To build something like this we’ll need some R code that creates generative art. I won’t try to make anything too fancy here. In fact, I’ll reuse code for the “donuts” system I used in my <a href="https://blog.djnavarro.net/queue/">multi-threaded task queues post</a>. It’s a good choice for this application because the donuts system is something that is extremely easy to implement in R because the ggplot2 package provides tooling for creating data visualisations that use polar geometry<sup>8</sup></p>
-<p>Here’s how you build the system. I won’t go into detail because this system is a very minor variation on <a href="https://art-from-code.netlify.app/day-1/session-1/#composition">this one in my art-from-code tutorial</a>, but here’s the gist. First, the plot is going to need a colour scheme, so we’ll define a function that samples a palette randomly with the assistance of the ggthemes package:</p>
-<div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>server.R</strong></pre>
-</div>
-<div class="sourceCode cell-code" id="cb1" data-startfrom="4" style="background: #f1f3f5;"><pre class="sourceCode numberSource r numberLines number-lines code-with-copy"><code class="sourceCode r" style="counter-reset: source-line 3;"><span id="cb1-4">sample_canva <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">function</span>(<span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">seed =</span> <span class="cn" style="color: #8f5902;
-background-color: null;
-font-style: inherit;">NULL</span>) {</span>
-<span id="cb1-5">  <span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">if</span>(<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">!</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">is.null</span>(seed)) <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">set.seed</span>(seed)</span>
-<span id="cb1-6">  <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">sample</span>(ggthemes<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span>canva_palettes, <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span>)[[<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span>]]</span>
-<span id="cb1-7">}</span></code></pre></div>
-</div>
-</div>
-<p>Next, we’ll have a function that generates a table full of random numbers that we will later on map onto various plot aesthetics to make a pretty picture:</p>
-<div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>server.R</strong></pre>
-</div>
-<div class="sourceCode cell-code" id="cb2" data-startfrom="10" style="background: #f1f3f5;"><pre class="sourceCode numberSource r numberLines number-lines code-with-copy"><code class="sourceCode r" style="counter-reset: source-line 9;"><span id="cb2-10">sample_data <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">function</span>(<span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">seed =</span> <span class="cn" style="color: #8f5902;
-background-color: null;
-font-style: inherit;">NULL</span>, <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">n =</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">100</span>){</span>
-<span id="cb2-11">  <span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">if</span>(<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">!</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">is.null</span>(seed)) <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">set.seed</span>(seed)</span>
-<span id="cb2-12">  dat <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> tibble<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">tibble</span>(</span>
-<span id="cb2-13">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">x0 =</span> stats<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">runif</span>(n),</span>
-<span id="cb2-14">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">y0 =</span> stats<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">runif</span>(n),</span>
-<span id="cb2-15">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">x1 =</span> x0 <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+</span> stats<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">runif</span>(n, <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">min =</span> <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span>.<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span>, <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">max =</span> .<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span>),</span>
-<span id="cb2-16">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">y1 =</span> y0 <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+</span> stats<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">runif</span>(n, <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">min =</span> <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span>.<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span>, <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">max =</span> .<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span>),</span>
-<span id="cb2-17">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">shade =</span> stats<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">runif</span>(n),</span>
-<span id="cb2-18">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">size =</span> stats<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">runif</span>(n),</span>
-<span id="cb2-19">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">shape =</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">factor</span>(<span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">sample</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">0</span><span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">:</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">22</span>, <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">size =</span> n, <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">replace =</span> <span class="cn" style="color: #8f5902;
-background-color: null;
-font-style: inherit;">TRUE</span>))</span>
-<span id="cb2-20">  )</span>
-<span id="cb2-21">}</span></code></pre></div>
-</div>
-</div>
-<p>Now comes the part of the system that does most of the artistic work, by defining a visual layout for any plots that are created using the system:</p>
-<div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>server.R</strong></pre>
-</div>
-<div class="sourceCode cell-code" id="cb3" data-startfrom="24" style="background: #f1f3f5;"><pre class="sourceCode numberSource r numberLines number-lines code-with-copy"><code class="sourceCode r" style="counter-reset: source-line 23;"><span id="cb3-24">donut_style <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">function</span>(<span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">data =</span> <span class="cn" style="color: #8f5902;
-background-color: null;
-font-style: inherit;">NULL</span>, palette) {</span>
-<span id="cb3-25">  ggplot2<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">ggplot</span>(</span>
-<span id="cb3-26">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">data =</span> data,</span>
-<span id="cb3-27">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">mapping =</span> ggplot2<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">aes</span>(</span>
-<span id="cb3-28">      <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">x =</span> x0,</span>
-<span id="cb3-29">      <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">y =</span> y0,</span>
-<span id="cb3-30">      <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">xend =</span> x1,</span>
-<span id="cb3-31">      <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">yend =</span> y1,</span>
-<span id="cb3-32">      <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">colour =</span> shade,</span>
-<span id="cb3-33">      <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">linewidth =</span> size</span>
-<span id="cb3-34">    )) <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+</span></span>
-<span id="cb3-35">    ggplot2<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">coord_polar</span>(<span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">clip =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"off"</span>) <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+</span></span>
-<span id="cb3-36">    ggplot2<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">scale_y_continuous</span>(</span>
-<span id="cb3-37">      <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">expand =</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">c</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">0</span>, <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">0</span>),</span>
-<span id="cb3-38">      <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">limits =</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">c</span>(<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span>, <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span>),</span>
-<span id="cb3-39">      <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">oob =</span> scales<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span>oob_keep</span>
-<span id="cb3-40">    ) <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+</span></span>
-<span id="cb3-41">    ggplot2<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">scale_x_continuous</span>(</span>
-<span id="cb3-42">      <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">expand =</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">c</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">0</span>, <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">0</span>),</span>
-<span id="cb3-43">      <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">limits =</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">c</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">0</span>, <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span>),</span>
-<span id="cb3-44">      <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">oob =</span> scales<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span>oob_keep</span>
-<span id="cb3-45">    ) <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+</span></span>
-<span id="cb3-46">    ggplot2<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">scale_colour_gradientn</span>(<span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">colours =</span> palette) <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+</span></span>
-<span id="cb3-47">    ggplot2<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">scale_linewidth</span>(<span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">range =</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">c</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">0</span>, <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">6</span>)) <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+</span></span>
-<span id="cb3-48">    ggplot2<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">theme_void</span>() <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+</span></span>
-<span id="cb3-49">    ggplot2<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">theme</span>(</span>
-<span id="cb3-50">      <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">panel.background =</span> ggplot2<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">element_rect</span>(</span>
-<span id="cb3-51">        <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">fill =</span> palette[<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span>], <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">colour =</span> palette[<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span>]</span>
-<span id="cb3-52">      )</span>
-<span id="cb3-53">    ) <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+</span></span>
-<span id="cb3-54">    ggplot2<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">guides</span>(</span>
-<span id="cb3-55">      <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">colour =</span> ggplot2<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">guide_none</span>(),</span>
-<span id="cb3-56">      <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">linewidth =</span> ggplot2<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">guide_none</span>(),</span>
-<span id="cb3-57">      <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">fill =</span> ggplot2<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">guide_none</span>(),</span>
-<span id="cb3-58">      <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">shape =</span> ggplot2<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">guide_none</span>()</span>
-<span id="cb3-59">    )</span>
-<span id="cb3-60">}</span></code></pre></div>
-</div>
-</div>
-<p>The last step is a function that puts it all together. The <code>donut()</code> function takes a single integer-valued input and returns a plot object that happens to look slightly pretty:</p>
-<div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>server.R</strong></pre>
-</div>
-<div class="sourceCode cell-code" id="cb4" data-startfrom="63" style="background: #f1f3f5;"><pre class="sourceCode numberSource r numberLines number-lines code-with-copy"><code class="sourceCode r" style="counter-reset: source-line 62;"><span id="cb4-63">donut <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">function</span>(seed) {</span>
-<span id="cb4-64"></span>
-<span id="cb4-65">  dat <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">sample_data</span>(<span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">n =</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">200</span>, <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">seed =</span> seed) <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span></span>
-<span id="cb4-66">    dplyr<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">mutate</span>(<span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">y1 =</span> y0, <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">size =</span> size <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">/</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">3</span>)</span>
-<span id="cb4-67"></span>
-<span id="cb4-68">  line_spec <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">sample</span>(<span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">c</span>(<span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"331311"</span>, <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"11"</span>, <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"111115"</span>), <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span>)</span>
-<span id="cb4-69"></span>
-<span id="cb4-70">  pic <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">donut_style</span>(<span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">palette =</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">sample_canva</span>(<span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">seed =</span> seed)) <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+</span></span>
-<span id="cb4-71">    ggplot2<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">geom_segment</span>(<span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">data =</span> dat, <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">linetype =</span> line_spec)</span>
-<span id="cb4-72"></span>
-<span id="cb4-73">  <span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">if</span>(stats<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">runif</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span>) <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">&lt;</span> .<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">5</span>) {</span>
-<span id="cb4-74">    pic <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> pic <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+</span></span>
-<span id="cb4-75">      ggplot2<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">geom_segment</span>(</span>
-<span id="cb4-76">        <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">data =</span> dat <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span> dplyr<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">mutate</span>(<span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">y1 =</span> y1 <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span> .<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span>, <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">y0 =</span> y0 <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span> .<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span>),</span>
-<span id="cb4-77">        <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">linetype =</span> line_spec</span>
-<span id="cb4-78">      )</span>
-<span id="cb4-79">  }</span>
-<span id="cb4-80">  <span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">if</span>(stats<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">runif</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span>) <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">&lt;</span> .<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">5</span>) {</span>
-<span id="cb4-81">    pic <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> pic <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+</span></span>
-<span id="cb4-82">      ggplot2<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">geom_segment</span>(</span>
-<span id="cb4-83">        <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">data =</span> dat <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|&gt;</span> dplyr<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">mutate</span>(<span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">y1 =</span> y1 <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span> .<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">4</span>, <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">y0 =</span> y0 <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span> .<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">4</span>),</span>
-<span id="cb4-84">        <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">linetype =</span> line_spec</span>
-<span id="cb4-85">      )</span>
-<span id="cb4-86">  }</span>
-<span id="cb4-87"></span>
-<span id="cb4-88">  pic</span>
-<span id="cb4-89">}</span></code></pre></div>
-</div>
-</div>
-<p>Here it is in action:</p>
-<div class="page-columns page-full">
-<div class="sourceCode cell-code" id="cb5" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1"><span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">for</span>(seed <span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">in</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span><span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">:</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">6</span>) <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">plot</span>(<span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">donut</span>(seed))</span></code></pre></div>
-<div class="cell column-page quarto-layout-panel">
-<div class="quarto-layout-row quarto-layout-valign-top">
-<div class="cell-output-display quarto-layout-cell" style="flex-basis: 33.3%;justify-content: center;">
-<p><img src="https://blog.djnavarro.net/posts/2023-01-10_kubernetes/index_files/figure-html/donut-examples-1.png" class="img-fluid" width="576"></p>
-</div>
-<div class="cell-output-display quarto-layout-cell" style="flex-basis: 33.3%;justify-content: center;">
-<p><img src="https://blog.djnavarro.net/posts/2023-01-10_kubernetes/index_files/figure-html/donut-examples-2.png" class="img-fluid" width="576"></p>
-</div>
-<div class="cell-output-display quarto-layout-cell" style="flex-basis: 33.3%;justify-content: center;">
-<p><img src="https://blog.djnavarro.net/posts/2023-01-10_kubernetes/index_files/figure-html/donut-examples-3.png" class="img-fluid" width="576"></p>
-</div>
-</div>
-<div class="quarto-layout-row quarto-layout-valign-top">
-<div class="cell-output-display quarto-layout-cell" style="flex-basis: 33.3%;justify-content: center;">
-<p><img src="https://blog.djnavarro.net/posts/2023-01-10_kubernetes/index_files/figure-html/donut-examples-4.png" class="img-fluid" width="576"></p>
-</div>
-<div class="cell-output-display quarto-layout-cell" style="flex-basis: 33.3%;justify-content: center;">
-<p><img src="https://blog.djnavarro.net/posts/2023-01-10_kubernetes/index_files/figure-html/donut-examples-5.png" class="img-fluid" width="576"></p>
-</div>
-<div class="cell-output-display quarto-layout-cell" style="flex-basis: 33.3%;justify-content: center;">
-<p><img src="https://blog.djnavarro.net/posts/2023-01-10_kubernetes/index_files/figure-html/donut-examples-6.png" class="img-fluid" width="576"></p>
-</div>
-</div>
-</div>
-</div>
-<p>Not my finest work, but still pretty enough to be fun.</p>
-<p><br></p>
-</section>
-<section id="expose-an-api" class="level2">
-<h2 class="anchored" data-anchor-id="expose-an-api">Expose an API</h2>
-<blockquote class="blockquote">
-<p>Are you posting hole on main again? <br> &nbsp; – Everyone who knows me, eventually</p>
-</blockquote>
-<p>The next step in the process is to define a public API that specifies how visitors to the website can interact with the underlying R code. That’s not something we typically do with R code because we aren’t usually in the business of writing web applications in R, but thanks to endless joy that is the <a href="https://www.rplumber.io/">plumber</a> this task can be accomplished with a few lines of code decoration:</p>
-<div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>server.R</strong></pre>
-</div>
-<div class="sourceCode cell-code" id="cb6" data-startfrom="91" style="background: #f1f3f5;"><pre class="sourceCode numberSource r numberLines number-lines code-with-copy"><code class="sourceCode r" style="counter-reset: source-line 90;"><span id="cb6-91"><span class="co" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">#* draws a donut plot</span></span>
-<span id="cb6-92"><span class="co" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">#* @serializer svg list(width = 10, height = 10)</span></span>
-<span id="cb6-93"><span class="co" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">#* @get /</span></span>
-<span id="cb6-94"><span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">function</span>(<span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">seed =</span> <span class="cn" style="color: #8f5902;
-background-color: null;
-font-style: inherit;">NA</span>) {</span>
-<span id="cb6-95">  <span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">if</span>(<span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">is.na</span>(seed)) {</span>
-<span id="cb6-96">    seed <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">as.integer</span>(<span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">Sys.time</span>())</span>
-<span id="cb6-97">  }</span>
-<span id="cb6-98">  <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">print</span>(<span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">donut</span>(seed))</span>
-<span id="cb6-99">}</span></code></pre></div>
-</div>
-</div>
-<p>There are a few things to note here:</p>
-<ul>
-<li><p>The code decoration on line 93 specifies that the function defined in lines 94-99 will be called whenever an HTML <code>GET</code> request is sent to the <code>/</code> endpoint. Or, in simpler language, whenever someone visits the main page for the website that eventually ended up being hosted at <a href="https://donut.djnavarro.net">donut.djnavarro.net</a>.</p></li>
-<li><p>The code decoration on line 92 how the output from the R function (an in-memory data structure) will be serialised (to a binary stream) and transmitted to the user.<sup>9</sup> In this case, the output is a plot object that would normally be handled by the R graphics device. What I’ve used plumber to do here, is have this output converted to an svg file. It’s that svg file that the website will serve to the user.</p></li>
-<li><p>Finally, notice that the function does take a <code>seed</code> argument.<sup>10</sup> I’ve set <code>NA</code> as the default value rather than the more conventional <code>NULL</code> because plumber won’t accept a <code>NULL</code> default in this context.</p></li>
-</ul>
-<p>Noting that all the code I’ve presented so far belongs to a file called <a href="https://github.com/djnavarro/donut/blob/main/server.R"><code>server.R</code></a> (the link goes to the github repo for this “donut” side-project), I can start the web server running locally on port 3456 like this:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb7" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1">plumber<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">plumb</span>(<span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">file=</span><span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"server.R"</span>)<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">$</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">run</span>(<span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">port =</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">3456</span>)</span></code></pre></div>
-</div>
-<p><br></p>
-</section>
-<section id="containerise-it" class="level2 page-columns page-full">
-<h2 class="anchored" data-anchor-id="containerise-it">Containerise it</h2>
-<p>At this point in the process I have a perfectly functional webserver… that only runs on my machine which just happens to have the dependencies installed, and is only accessible locally from that machine. We’ll need to fix both of those problems.</p>
-<p>Let’s start by fixing the first one by running the website from within a docker container. Under normal circumstances I’d walk you through that process, but since I wrote a <a href="https://blog.djnavarro.net/playing-with-docker/">long blog post about docker</a> just the other day, I’ll jump straight to showing you the <a href="https://github.com/djnavarro/donut/blob/main/Dockerfile"><code>Dockerfile</code></a>:</p>
-<div class="column-page-right">
-<div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>Dockerfile</strong></pre>
-</div>
-<div class="sourceCode cell-code" id="cb8" style="background: #f1f3f5;"><pre class="sourceCode numberSource dockerfile number-lines code-with-copy"><code class="sourceCode dockerfile"><span id="cb8-1"><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">FROM</span> rocker/r-ver:4.2.2</span>
-<span id="cb8-2"></span>
-<span id="cb8-3"><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">LABEL</span> org.opencontainers.image.source <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"https://github.com/djnavarro/donut"</span></span>
-<span id="cb8-4"><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">LABEL</span> org.opencontainers.image.authors <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"Danielle Navarro &lt;djnavarro@protonmail.com&gt;"</span></span>
-<span id="cb8-5"><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">LABEL</span> org.opencontainers.image.description DESCRIPTION</span>
-<span id="cb8-6"><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">LABEL</span> org.opencontainers.image.licenses <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"MIT"</span></span>
-<span id="cb8-7"></span>
-<span id="cb8-8"><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">RUN</span> <span class="ex" style="color: null;
-background-color: null;
-font-style: inherit;">Rscript</span> <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">-e</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">'install.packages(c("ggplot2", "scales", "tibble", "dplyr", "plumber", "ggthemes"))'</span></span>
-<span id="cb8-9"><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">COPY</span> server.R /home/server.R</span>
-<span id="cb8-10"><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">EXPOSE</span> 80</span>
-<span id="cb8-11"><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">CMD</span> <span class="ex" style="color: null;
-background-color: null;
-font-style: inherit;">Rscript</span> <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">-e</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">'plumber::plumb(file="/home/server.R")$run(host="0.0.0.0", port = 80)'</span></span></code></pre></div>
-</div>
-</div>
-</div>
-<p>Every instruction in this dockerfile is something I covered in the last post, except for the <a href="https://docs.docker.com/engine/reference/builder/#expose"><code>EXPOSE</code></a> instruction on line 10. That one tells the container to listen on port 80. It doesn’t necessarily publish the output anywhere accessible from outside the container<sup>11</sup> but it does mean that the plumber web server running inside the container is listening on port 80 and can create a response when it receives a request. I’ll deal with the publishing issue later.</p>
-<p><br></p>
-</section>
-<section id="push-it-to-the-registry" class="level2 page-columns page-full">
-<h2 class="anchored" data-anchor-id="push-it-to-the-registry">Push it to the registry</h2>
-<p>The next step in the process is to host the image created from this dockerfile on a public registry.<sup>12</sup> I talked about that process in the last post too, so again I’ll keep things simple. The process I followed for the donut project is essentially identical to the one I used in this <a href="https://blog.djnavarro.net/posts/2023-01-01_playing-with-docker/#hosting-images">section of the docker post</a>. I’ve created a github actions workflow that automatically builds the image on github and hosts it with the github container registry. The resulting image name is <code>ghcr.io/djnavarro/donut:main</code> and here’s the <a href="https://github.com/djnavarro/donut/blob/main/.github/workflows/build-image.yaml"><code>build-image.yaml</code></a> workflow I’m using:</p>
-<div class="column-page-right">
-<div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>.github/workflows/build-image.yaml</strong></pre>
-</div>
-<div class="sourceCode cell-code" id="cb9" style="background: #f1f3f5;"><pre class="sourceCode numberSource yaml number-lines code-with-copy"><code class="sourceCode yaml"><span id="cb9-1"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">name</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> publish donut image</span></span>
-<span id="cb9-2"></span>
-<span id="cb9-3"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">on</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb9-4"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">  </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">push</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb9-5"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">    </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">branches</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> </span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">[</span><span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">'main'</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">]</span></span>
-<span id="cb9-6"></span>
-<span id="cb9-7"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">env</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb9-8"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">  </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">REGISTRY</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> ghcr.io</span></span>
-<span id="cb9-9"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">  </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">IMAGE_NAME</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> ${{ github.repository }}</span></span>
-<span id="cb9-10"></span>
-<span id="cb9-11"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">jobs</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb9-12"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">  </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">build-and-push-image</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb9-13"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">    </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">runs-on</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> ubuntu-latest</span></span>
-<span id="cb9-14"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">    </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">strategy</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb9-15"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">      </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">fail-fast</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> </span><span class="ch" style="color: #20794D;
-background-color: null;
-font-style: inherit;">false</span></span>
-<span id="cb9-16"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">      </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">matrix</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb9-17"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">        </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">include</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb9-18"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">          </span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">-</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">dockerfile</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> ./Dockerfile</span></span>
-<span id="cb9-19"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">            </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">image</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> ghcr.io/djnavarro/donut</span></span>
-<span id="cb9-20"></span>
-<span id="cb9-21"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">    </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">permissions</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb9-22"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">      </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">contents</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> read</span></span>
-<span id="cb9-23"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">      </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">packages</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> write</span></span>
-<span id="cb9-24"></span>
-<span id="cb9-25"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">    </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">steps</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb9-26"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">      </span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">-</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">name</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> checkout repository</span></span>
-<span id="cb9-27"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">        </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">uses</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> actions/checkout@v2</span></span>
-<span id="cb9-28"></span>
-<span id="cb9-29"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">      </span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">-</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">name</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> login to the container registry</span></span>
-<span id="cb9-30"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">        </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">uses</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> docker/login-action@f054a8b539a109f9f41c372932f1ae047eff08c9</span></span>
-<span id="cb9-31"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">        </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">with</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb9-32"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">          </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">registry</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> ${{ env.REGISTRY }}</span></span>
-<span id="cb9-33"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">          </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">username</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> ${{ github.actor }}</span></span>
-<span id="cb9-34"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">          </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">password</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> ${{ secrets.GITHUB_TOKEN }}</span></span>
-<span id="cb9-35"></span>
-<span id="cb9-36"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">      </span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">-</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">name</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> extract metadata (tags, labels) for docker</span></span>
-<span id="cb9-37"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">        </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">id</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> meta</span></span>
-<span id="cb9-38"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">        </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">uses</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> docker/metadata-action@98669ae865ea3cffbcbaa878cf57c20bbf1c6c38</span></span>
-<span id="cb9-39"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">        </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">with</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb9-40"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">          </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">images</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> ${{ matrix.image }}</span></span>
-<span id="cb9-41"></span>
-<span id="cb9-42"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">      </span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">-</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">name</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> build and push docker image</span></span>
-<span id="cb9-43"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">        </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">uses</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> docker/build-push-action@ad44023a93711e3deb337508980b4b5e9bcdc5dc</span></span>
-<span id="cb9-44"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">        </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">with</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb9-45"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">          </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">context</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> .</span></span>
-<span id="cb9-46"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">          </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">file</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> ${{ matrix.dockerfile }}</span></span>
-<span id="cb9-47"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">          </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">push</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> </span><span class="ch" style="color: #20794D;
-background-color: null;
-font-style: inherit;">true</span></span>
-<span id="cb9-48"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">          </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">tags</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> ${{ steps.meta.outputs.tags }}</span></span>
-<span id="cb9-49"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">          </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">labels</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> ${{ steps.meta.outputs.labels }}</span></span></code></pre></div>
-</div>
-</div>
-</div>
-<p>At long, long last we have all the precursors in place. We have a little web application that runs inside a docker container, and the image describing that container is hosted on a registry.<sup>13</sup> We can get started on the kubernetes side of things…</p>
-<p><br></p>
-</section>
-<section id="create-a-kubernetes-cluster" class="level2">
-<h2 class="anchored" data-anchor-id="create-a-kubernetes-cluster">Create a kubernetes cluster</h2>
-<p>At the risk of stating the bloody obvious, if you want to use kubernetes to deploy an application on a cluster… you’re probably going to need a cluster running kubernetes. You can get yourself one of these in lots of different ways but the way I’m going to do it is with GKE, the <a href="https://cloud.google.com/kubernetes-engine">google kubernetes engine</a>. You’ll need a google account to do this, and yes this is something that they charge actual money for, but the good news is that when you sign up for google cloud services you get a few hundred dollars of credit to start with. That’s pretty useful for novices: it’s nice to be able to play around and learn the basics before you have to start worrying about what it’s going to cost.</p>
-<p>If you go down that path you can access your projects from the cloud console, located at <a href="https://console.cloud.google.com/">console.cloud.google.com</a>. Once there you can navigate to the various pages you’ll need by clicking on links and menu items, but google offers a lot of different cloud services and it does take a little while for the interface to start feeling familiar, so I’ll link to the pages you need directly as well.</p>
-<p>Before you can create a cluster of your very own, you need to create a project. Pretty much everything you do with google cloud services is organised into projects so that’s where we’ll start. To create a project, go to <a href="https://console.cloud.google.com/projectcreate">console.cloud.google.com/projectcreate</a> and follow the prompts. Give your project a fancy name that makes you sound cool: I called mine <code>donut-art</code>.</p>
-<p>Now that you have a project, you’ll need to enable the specific google cloud services that your project will need access to. In this example the only thing I’ll need is GKE itself, but in other situations you might need access to google cloud storage or something like that. To enable GKE on your current project go to <a href="https://console.cloud.google.com/kubernetes/">console.cloud.google.com/kubernetes/</a>. If it hasn’t already been enabled for the project the page will ask if you want to. Even more conveniently, if you don’t have a cluster running it will ask if you want to create one.<sup>14</sup> It will give you two options: an “autopilot” cluster is one where google will automatically manage the configuration for you, whereas for a “standard” cluster you’ll have to be more explicit about how many nodes you want and how they are organised. There are situations where you need to use the standard cluster,<sup>15</sup> but this is not one of those so I went with the autopilot approach because it’s simpler. I didn’t need to change any of the defaults: I called my cluster <code>donut-cluster</code>, and created it in the region <code>australia-southeast1</code>.<sup>16</sup></p>
-<p>Here’s a screenshot showing you what the relevant bit of the google kubernetes engine console looks like for me now that I have a cluster up and running:</p>
-<p><img src="https://blog.djnavarro.net/posts/2023-01-10_kubernetes/donut-cluster.png" class="img-fluid"></p>
-<p>If I click on the “donut-cluster” link it takes me to a page with a lot more detail, but you can see that some of the information is the same:</p>
-<p><br></p>
-<p><img src="https://blog.djnavarro.net/posts/2023-01-10_kubernetes/donut-cluster-detail.png" class="img-fluid"></p>
-<p><br></p>
-</section>
-<section id="command-line-tools" class="level2">
-<h2 class="anchored" data-anchor-id="command-line-tools">Command line tools</h2>
-<p>Time for a little digression.</p>
-<p>Take a look at the menu shown in the last screenshot. If I click on the “connect” button and it will reveal a command I can use to connect to the cluster from the terminal on my laptop… but it requires me to have the gcloud command line tools installed. Now, if you don’t want to install the tools locally you can avoid this by selecting the “run in cloud shell” option that also appears on the dialog box. However, I dislike the cloud shell and prefer to work from my own terminal. So, the next step is to install the command line tools. For this project, the two things I need are gcloud (to interact with google cloud services) and kubectl (to interact with kubernetes).</p>
-<section id="installing-gcloud" class="level3">
-<h3 class="anchored" data-anchor-id="installing-gcloud">Installing gcloud</h3>
-<p>It turns out that installing the command line tools is relatively straightforward, and is made a lot easier thanks to the <a href="https://cloud.google.com/sdk/docs/install">gcloud installation instructions</a> which are detailed and not too hard to follow. In addition to the basic tools, I installed the “gke-gcloud-auth-plugin” which are needed for authentication. Once the command line tools are installed, authentication from your terminal is a one-line command:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb10" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb10-1"><span class="ex" style="color: null;
-background-color: null;
-font-style: inherit;">gcloud</span> auth login</span></code></pre></div>
-</div>
-<p>I can now interact with my google cloud projects from my command line.</p>
-</section>
-<section id="installing-kubectl" class="level3">
-<h3 class="anchored" data-anchor-id="installing-kubectl">Installing kubectl</h3>
-<p>The second tool I need for this project is <a href="https://kubernetes.io/docs/reference/kubectl/">kubectl</a>, a command line tool used to control a kubernetes cluster. You can find installation instructions for different operating systems by visiting the kubernetes <a href="https://kubernetes.io/docs/tasks/tools/">install tools</a> page. I’m doing this from a linux machine, so I also found it useful to enable autocompletion of kubectl commands within the bash shell. The instructions for this are included in the kubectl install page for linux.</p>
-</section>
-<section id="connect-to-the-cluster" class="level3">
-<h3 class="anchored" data-anchor-id="connect-to-the-cluster">Connect to the cluster</h3>
-<p>Now that I have gcloud and kubectl running, I can connect to my cluster. The first thing to do is use gcloud to get the credentials needed to connect to my cluster:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb11" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb11-1">  <span class="bu" style="color: null;
-background-color: null;
-font-style: inherit;">export</span> <span class="va" style="color: #111111;
-background-color: null;
-font-style: inherit;">USE_GKE_GCLOUD_AUTH_PLUGIN</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span>True</span>
-<span id="cb11-2">  <span class="ex" style="color: null;
-background-color: null;
-font-style: inherit;">gcloud</span> container clusters get-credentials donut-cluster <span class="dt" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">\</span></span>
-<span id="cb11-3">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">--zone</span> australia-southeast1 <span class="dt" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">\</span></span>
-<span id="cb11-4">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">--project</span> donut-art</span></code></pre></div>
-</div>
-<pre><code>Fetching cluster endpoint and auth data.
-kubeconfig entry generated for donut-cluster.</code></pre>
-<p>Then I can use kubectl to verify that it can connect to my cluster:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb13" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb13-1"><span class="ex" style="color: null;
-background-color: null;
-font-style: inherit;">kubectl</span> cluster-info</span></code></pre></div>
-</div>
-<pre><code>Kubernetes control plane is running at blah blah blah
-GLBCDefaultBackend is running at blah blah blah
-KubeDNS is running at blah blah blah
-KubeDNSUpstream is running at blah blah blah
-Metrics-server is running at blah blah blah</code></pre>
-<p>Okay, I may have edited the output slightly. The missing bits are the various URLs. They aren’t very interesting… the main thing to notice is that yes, kubectl can connect to my cluster and the cluster is up and running.</p>
-<p><br></p>
-</section>
-</section>
-<section id="kubernetes-terminology" class="level2">
-<h2 class="anchored" data-anchor-id="kubernetes-terminology">Kubernetes terminology</h2>
-<p>Not surprisingly, kubernetes has a lot of terminology. That’s quite daunting when you’re getting started and I’m not going to attempt a complete glossary here. Instead, let’s start with these four terms, since we’ll use them a lot:</p>
-<ul>
-<li><strong>Container</strong>. This has the same meaning it has in other contexts: a container is a self-contained executable that bundles up dependencies and runs isolated from other processes on the machine. Kubernetes supports other types of containers besides docker containers, but let’s pretend we’re only talking about docker here.</li>
-<li><strong>Pod</strong>. A pod is the smallest deployable unit you can create: it is an abstraction that refers to one or more containers working together. An application can have many pods running on many machines (nodes) but each pod runs on one machine. Pods are considered ephemeral. Kubernetes will have no qualms about shutting down a pod if it doesn’t seem to be doing its job, or creating new pods to replace it if it needs to,<br>
-</li>
-<li><strong>Deployment</strong>. A deployment is an abstraction that specifies a collection of pods that your application runs. Essentially it describes your “desired state” for the application. When you “apply” a deployment kubernetes will start the application running (more or less), and try to make the thing that’s actually running look like your stated deployment configuration.</li>
-<li><strong>Service</strong>. A service is an abstraction that specifies how the pods running on your kubernetes cluster communicate with the outside world. They’re awfully handy things to have if you want your application to be accessible on the web.</li>
-</ul>
-<p>Conceptually, it’s also helpful to know these terms at the very beginning, even though frankly I’m not going to do anything with them here:</p>
-<ul>
-<li><strong>Node</strong>. A node refers one of the machines running in your cluster.</li>
-<li><strong>Control Plane</strong>. The control plane refers to a collection of processes that run together on a single node and are in charge of actually running the whole thing. We won’t need to do anything to the control plane in this post other than leave it alone and let it do its job, but it does help to know the term because it shows up everywhere.</li>
-</ul>
-<p>More terms will appears as we go along – and I’ll try to explain all those when they pop up – but these are the ones that I wish I’d understood properly before I started trying to play with kubernetes clusters.</p>
-<p><br></p>
-</section>
-<section id="create-a-deployment" class="level2">
-<h2 class="anchored" data-anchor-id="create-a-deployment">Create a deployment</h2>
-<p>The way to configure your kubernetes cluster is with manifest files that are written in <a href="https://en.wikipedia.org/wiki/YAML">yaml</a> format and use the <code>kubectl apply</code> command to update your cluster using the instructions laid out in the manifest file. You can use a manifest to modify any aspect to your cluster configuration, and later in this post I’ll show a few more manifests, but for now here’s the <a href="https://github.com/djnavarro/donut/blob/main/deployment.yaml"><code>deployment.yaml</code></a> file I’m using to specify a deployment for the donuts application:</p>
-<div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>deployment.yaml</strong></pre>
-</div>
-<div class="sourceCode cell-code" id="cb15" style="background: #f1f3f5;"><pre class="sourceCode numberSource yaml number-lines code-with-copy"><code class="sourceCode yaml"><span id="cb15-1"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">apiVersion</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> apps/v1</span></span>
-<span id="cb15-2"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">kind</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> Deployment</span></span>
-<span id="cb15-3"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">metadata</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb15-4"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">  </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">labels</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb15-5"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">    </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">app.kubernetes.io/name</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> donut-example</span></span>
-<span id="cb15-6"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">  </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">name</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> donut</span></span>
-<span id="cb15-7"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">spec</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb15-8"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">  </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">replicas</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> </span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span></span>
-<span id="cb15-9"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">  </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">selector</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb15-10"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">    </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">matchLabels</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb15-11"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">      </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">app.kubernetes.io/name</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> donut-example</span></span>
-<span id="cb15-12"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">  </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">template</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb15-13"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">    </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">metadata</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb15-14"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">      </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">labels</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb15-15"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">        </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">app.kubernetes.io/name</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> donut-example</span></span>
-<span id="cb15-16"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">    </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">spec</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb15-17"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">      </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">containers</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb15-18"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">        </span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">-</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">name</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> donut</span></span>
-<span id="cb15-19"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">          </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">image</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> ghcr.io/djnavarro/donut:main</span></span>
-<span id="cb15-20"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">          </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">imagePullPolicy</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> Always</span></span>
-<span id="cb15-21"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">          </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">resources</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb15-22"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">            </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">requests</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb15-23"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">              </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">memory</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> </span><span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"64Mi"</span></span>
-<span id="cb15-24"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">              </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">cpu</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> </span><span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"250m"</span></span>
-<span id="cb15-25"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">            </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">limits</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb15-26"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">              </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">memory</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> </span><span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"128Mi"</span></span>
-<span id="cb15-27"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">              </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">cpu</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> </span><span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"500m"</span></span>
-<span id="cb15-28"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">          </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">ports</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb15-29"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">            </span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">-</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">containerPort</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> </span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">80</span></span></code></pre></div>
-</div>
-</div>
-<p>For the moment, let’s censor the metadata and everything that uses the metadata so that we can focus on what the rest of the manifest is doing:</p>
-<div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>deployment.yaml</strong></pre>
-</div>
-<div class="sourceCode cell-code" id="cb16" style="background: #f1f3f5;"><pre class="sourceCode numberSource yaml number-lines code-with-copy"><code class="sourceCode yaml"><span id="cb16-1"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">apiVersion</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> apps/v1</span></span>
-<span id="cb16-2"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">kind</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> Deployment</span></span>
-<span id="cb16-3"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">metadata</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> </span></span>
-<span id="cb16-4"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">  </span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">[</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">some metadata</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">]</span></span>
-<span id="cb16-5"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">spec</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb16-6"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">  </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">replicas</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> </span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span></span>
-<span id="cb16-7"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">  </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">selector</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb16-8"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">    </span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">[</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">use some metadata</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">]</span></span>
-<span id="cb16-9"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">  </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">template</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb16-10"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">    </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">metadata</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb16-11"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">      </span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">[</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">some metadata</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">]</span></span>
-<span id="cb16-12"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">    </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">spec</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb16-13"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">      </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">containers</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb16-14"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">        </span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">-</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">name</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> </span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">[</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">names are metadata</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">]</span></span>
-<span id="cb16-15"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">          </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">image</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> ghcr.io/djnavarro/donut:main</span></span>
-<span id="cb16-16"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">          </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">imagePullPolicy</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> Always</span></span>
-<span id="cb16-17"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">          </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">resources</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb16-18"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">            </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">requests</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb16-19"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">              </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">memory</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> </span><span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"64Mi"</span></span>
-<span id="cb16-20"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">              </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">cpu</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> </span><span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"250m"</span></span>
-<span id="cb16-21"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">            </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">limits</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb16-22"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">              </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">memory</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> </span><span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"128Mi"</span></span>
-<span id="cb16-23"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">              </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">cpu</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> </span><span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"500m"</span></span>
-<span id="cb16-24"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">          </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">ports</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb16-25"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">            </span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">-</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">containerPort</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> </span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">80</span></span></code></pre></div>
-</div>
-</div>
-<p>There’s a lot going on here, so for the moment let’s focus on the bottom.<sup>17</sup> The section of the code from lines 13-25 is used to specify the docker containers<sup>18</sup> that my cluster is going to deploy. There’s only one container listed in this section, and the line that reads <code>image: ghcr.io/djnavarro/donut:main</code> is the way that I’ve specified the docker image to use when creating the container. There are other settings I’ve used to set up this container: I’ve asked kubernetes to allocate memory and cpu resources to the container, and I’ve exposed container port 80 (which, if you can remember back that far, is where the plumber web API is running inside the container). I’ve also set <code>imagePullPolicy: Always</code> to ensure that every time I update this deployment kubernetes will pull the image from the registry afresh. I did that because more often than not while I was writing code for the kubernetes deployment I was tweaking the image too, and I wanted to make sure that I was always trying to deploy the most recent version of the image.</p>
-<p>Okay, now that we know what’s going on in that section of the code, let’s collapse that part and think about the manifest file like this:</p>
-<div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>deployment.yaml</strong></pre>
-</div>
-<div class="sourceCode cell-code" id="cb17" style="background: #f1f3f5;"><pre class="sourceCode numberSource yaml number-lines code-with-copy"><code class="sourceCode yaml"><span id="cb17-1"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">apiVersion</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> apps/v1</span></span>
-<span id="cb17-2"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">kind</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> Deployment</span></span>
-<span id="cb17-3"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">metadata</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> </span></span>
-<span id="cb17-4"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">  </span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">[</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">some metadata</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">]</span></span>
-<span id="cb17-5"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">spec</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb17-6"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">  </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">replicas</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> </span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span></span>
-<span id="cb17-7"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">  </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">selector</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb17-8"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">    </span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">[</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">use some metadata</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">]</span></span>
-<span id="cb17-9"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">  </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">template</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb17-10"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">    </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">metadata</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb17-11"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">      </span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">[</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">some metadata</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">]</span></span>
-<span id="cb17-12"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">    </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">spec</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb17-13"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">      </span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">[</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">details of one or more containers</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">]</span></span></code></pre></div>
-</div>
-</div>
-<p>Okay, so now let’s think about the bottom part of this code too. Lines 9-13 of this condensed pseudo-manifest describe some kind of template. But a template for what? Well, as clearly stated on line 13 in human(ish) language, it’s a template for “one or more containers”. In kubernetes terminology, a deployable thing that holds one or more containers is a pod… so this section of the code is describing a <a href="https://kubernetes.io/docs/concepts/workloads/pods/#pod-templates">pod template</a>. It’s an instruction to kubernetes that says… “hey, when you create a pod as part of this deployment, here’s the template you should use”. So we can simplify again:</p>
-<div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>deployment.yaml</strong></pre>
-</div>
-<div class="sourceCode cell-code" id="cb18" style="background: #f1f3f5;"><pre class="sourceCode numberSource yaml number-lines code-with-copy"><code class="sourceCode yaml"><span id="cb18-1"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">apiVersion</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> apps/v1</span></span>
-<span id="cb18-2"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">kind</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> Deployment</span></span>
-<span id="cb18-3"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">metadata</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> </span></span>
-<span id="cb18-4"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">  </span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">[</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">some metadata</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">]</span></span>
-<span id="cb18-5"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">spec</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb18-6"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">  </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">replicas</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> </span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span></span>
-<span id="cb18-7"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">  </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">selector</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb18-8"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">    </span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">[</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">use some metadata</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">]</span></span>
-<span id="cb18-9"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">  </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">template</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb18-10"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">    </span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">[</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">details of the pod template</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">]</span></span></code></pre></div>
-</div>
-</div>
-<p>In this condensed form we can see that lines 5-10 provide a specification of the deployment itself. I’ve given it a pod template that tells kubernetes what the pods should look like, and I’ve specified the number of “replicas”. How many copies of this pod do I want it to run in this deployment: for no good reason at all I decided to run two (i.e., two replicas).</p>
-<p>If we simplify the manifest yet again, we can see the top-level description:</p>
-<div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>deployment.yaml</strong></pre>
-</div>
-<div class="sourceCode cell-code" id="cb19" style="background: #f1f3f5;"><pre class="sourceCode numberSource yaml number-lines code-with-copy"><code class="sourceCode yaml"><span id="cb19-1"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">apiVersion</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> apps/v1</span></span>
-<span id="cb19-2"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">kind</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> Deployment</span></span>
-<span id="cb19-3"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">metadata</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> </span></span>
-<span id="cb19-4"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">  </span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">[</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">some metadata</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">]</span></span>
-<span id="cb19-5"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">spec</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb19-6"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">  </span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">[</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">details of the deployment</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">]</span></span></code></pre></div>
-</div>
-</div>
-<p>The only other things to point out right now is that the “kind” field is used to tell kubernetes what type of object to create (a Deployment), and the “apiVersion” field is used to specify which version of the kubernetes API to use when interpreting the manifest. That’s handy to note because later on I’ll be using APIs that are a bit more specific to the google kubernetes engine.</p>
-<p>Okay, so now that we have some sense of what’s going on in the <code>deployment.yaml</code> file (ignoring the fact that I’ve glossed over the metadata bits), let’s actually apply it to our cluster:<sup>19</sup></p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb20" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb20-1"><span class="ex" style="color: null;
-background-color: null;
-font-style: inherit;">kubectl</span> apply <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">-f</span> deployment.yaml</span></code></pre></div>
-</div>
-<p>To see if it’s working we can use <code>kubectl get deployments</code>:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb21" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb21-1"><span class="ex" style="color: null;
-background-color: null;
-font-style: inherit;">kubectl</span> get deployments</span></code></pre></div>
-</div>
-<pre><code>NAME    READY   UP-TO-DATE   AVAILABLE   AGE
-donut   2/2     2            2           19h</code></pre>
-<p>It is alive.</p>
-<p>For more details on this part of the process, check out the kubernetes documentation on <a href="https://kubernetes.io/docs/tasks/run-application/run-stateless-application-deployment/">deploying a stateless application</a>. You may also want to look at the page on <a href="https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/">managing container resources</a> at this point.</p>
-<p><br></p>
-</section>
-<section id="expose-the-deployment-no-https" class="level2">
-<h2 class="anchored" data-anchor-id="expose-the-deployment-no-https">Expose the deployment (no https)</h2>
-<p>At this point my little donut application is running happily on the cluster, but it doesn’t have a public IP address. No-one can visit it. To expose the deployment to the world you’ll need to start a service running that takes care of this for you. Exactly how you go about doing this depends on whether you want to enable https on the website. If you’re not too fussed about https the process is fairly simple and you can find details on how to do it by reading the <a href="https://kubernetes.io/docs/tutorials/stateless-application/expose-external-ip-address/">tutorial on exposing an external IP address</a>, and you may find the kubernetes <a href="https://kubernetes.io/docs/concepts/services-networking/service/">documentation on services</a> helpful too. The TL;DR is that it’s simple enough that you don’t even need to bother with a manifest file:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb23" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb23-1"><span class="ex" style="color: null;
-background-color: null;
-font-style: inherit;">kubectl</span> expose deployment donut <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">--type</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span>LoadBalancer <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">--name</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span>donut-service</span></code></pre></div>
-</div>
-<p>The application is now online. It has a public IP address that you can find, and if you own a domain that you want to map to that IP address all you have to do is create a DNS record that points the URL at the appropriate IP. With any luck your domain provider will have some decent documentation for this. For instance, I use google domains for <code>djnavarro.net</code> domain, and they have some pretty decent <a href="https://support.google.com/a/answer/2579934?hl=en">instructions on configuring DNS records</a> that I could use to point <code>donut.djnavarro.net</code> at the IP address for my kubernetes application.</p>
-<p>Unfortunately for me, I am a masochist, and as such I chose the option that delivers pain.</p>
-<p><br></p>
-</section>
-<section id="expose-the-deployment-with-https" class="level2">
-<h2 class="anchored" data-anchor-id="expose-the-deployment-with-https">Expose the deployment (with https)</h2>
-<blockquote class="blockquote">
-<p>I like the kick in the face <br> And the things you do to me <br> I love the way that it hurts <br> I don’t miss you, I miss the misery <br> &nbsp; – Halestorm</p>
-</blockquote>
-<p>Configuring the kubernetes application to use https is a bit of a pain in the ass.<sup>20</sup> I’m deploying all this through google kubernetes engine, so the approach I took was to follow the guide for using <a href="https://cloud.google.com/kubernetes-engine/docs/how-to/managed-certs">google-managed ssl certificates</a>. The guide is excellent… apart from a couple of minor… issues… that really fucked me<sup>21</sup> when I tried to follow it. I’ll mention those as I go.</p>
-<section id="get-a-static-ip" class="level3">
-<h3 class="anchored" data-anchor-id="get-a-static-ip">Get a static IP</h3>
-<p>The first thing you have to do is create a static IP address that you’ll later use for your cluster. The <code>gcloud compute addresses create</code> command does that for you. Here’s how I did that for my cluster:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb24" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb24-1"><span class="ex" style="color: null;
-background-color: null;
-font-style: inherit;">gcloud</span> compute addresses create donut-ip-address <span class="dt" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">\</span></span>
-<span id="cb24-2">  <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">--global</span> <span class="dt" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">\</span></span>
-<span id="cb24-3">  <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">--project</span> donut-art</span></code></pre></div>
-</div>
-<!-- :::{.column-page-right} -->
-<!-- ``` -->
-<!-- Created [https://www.googleapis.com/compute/v1/projects/donut-art/global/addresses/donut-ip-address] -->
-<!-- ``` -->
-<!-- ::: -->
-<p>This prints out a very boring message that informs you that the ID address has been created. More helpfully, now that the IP address exists you can ask google to tell you what it is:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb25" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb25-1"><span class="ex" style="color: null;
-background-color: null;
-font-style: inherit;">gcloud</span> compute addresses describe donut-ip-address <span class="dt" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">\</span></span>
-<span id="cb25-2">  <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">--global</span> <span class="dt" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">\</span></span>
-<span id="cb25-3">  <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">--project</span> donut-art</span></code></pre></div>
-</div>
-<p>When you do this, the output prints out the IP address and some other details. Later on, this is the address you’ll create a DNS record for so that – in my case – the <a href="https://donut.djnavarro.net/">https://donut.djnavarro.net/</a> address points to the correct location.</p>
-</section>
-<section id="get-a-certificate" class="level3">
-<h3 class="anchored" data-anchor-id="get-a-certificate">Get a certificate</h3>
-<p>The next step in the process is to create a managed certificate. Somebody needs to certify that my website is what it says it is.<sup>22</sup> I’m going to need a manifest file for this, which I’ve saved as <a href="https://github.com/djnavarro/donut/blob/main/managed-cert.yaml"><code>managed-cert.yaml</code></a>:</p>
-<div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>managed-cert.yaml</strong></pre>
-</div>
-<div class="sourceCode cell-code" id="cb26" style="background: #f1f3f5;"><pre class="sourceCode numberSource yaml number-lines code-with-copy"><code class="sourceCode yaml"><span id="cb26-1"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">apiVersion</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> networking.gke.io/v1</span></span>
-<span id="cb26-2"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">kind</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> ManagedCertificate</span></span>
-<span id="cb26-3"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">metadata</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb26-4"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">  </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">name</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> managed-cert</span></span>
-<span id="cb26-5"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">spec</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb26-6"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">  </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">domains</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb26-7"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">    </span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">-</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> donut.djnavarro.net</span></span></code></pre></div>
-</div>
-</div>
-<p>Notice that the <code>apiVersion</code> field here is using something specific to GKE: I’m using google infrastructure here and they’ve kindly<sup>23</sup> provided an API that makes it easy to use their managed certificates. The yaml here is pretty simple: I’m asking google to supply me with a certificate for my kubernetes application, which will be valid for the domain <code>donut.djnavarro.net</code> (you can list more than one here but I didn’t).</p>
-<p>Now that I have a manifest, I apply it to my cluster in the usual way:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb27" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb27-1"><span class="ex" style="color: null;
-background-color: null;
-font-style: inherit;">kubectl</span> apply <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">-f</span> managed-cert.yaml</span></code></pre></div>
-</div>
-<p>Okay, at this point in the guide it warns you that it might take an hour or so for the certificate to be provisioned. I manage so many websites now that I’d stopped paying attention to this warning because like, 90% of the time, the thing actually happens in 20 seconds. Yeah nah, not this time babe. This one actually took an hour. We’ll come back to it. I mean, if you want to check you can try this command:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb28" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb28-1"><span class="ex" style="color: null;
-background-color: null;
-font-style: inherit;">kubectl</span> describe managedcertificate managed-cert</span></code></pre></div>
-</div>
-<p>It will print out a bunch of stuff, but when you scroll through the output you’ll very likely come across something that says that the certificate is “Provisioning”. It did work for me but it took a while so let’s move on while that is happening.</p>
-</section>
-<section id="create-a-service" class="level3">
-<h3 class="anchored" data-anchor-id="create-a-service">Create a service</h3>
-<p>Next up is the step that fucked me in the worst possible way. It failed, because I did a copy-paste on a bit of code that I needed to edit. I did that because the guide on the google website doesn’t flag this as something you need to edit. Worse yet, it failed silently because kubernetes had no bloody way to know my manifest was fucked up. Worst of all, for at least three hours I was convinced that my error was in the <em>later</em> step because this step failed silently.</p>
-<p>Siiiiiiiiiiiiiigh. Computers were a mistake.</p>
-<p>Anyway, let’s start by looking at the manifest file, which I’ve called <a href="https://github.com/djnavarro/donut/blob/main/mc-service.yaml"><code>mc-service.yaml</code></a>:</p>
-<div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>mc-service.yaml</strong></pre>
-</div>
-<div class="sourceCode cell-code" id="cb29" style="background: #f1f3f5;"><pre class="sourceCode numberSource yaml number-lines code-with-copy"><code class="sourceCode yaml"><span id="cb29-1"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">apiVersion</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> v1</span></span>
-<span id="cb29-2"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">kind</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> Service</span></span>
-<span id="cb29-3"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">metadata</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb29-4"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">  </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">name</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> mc-service</span></span>
-<span id="cb29-5"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">spec</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb29-6"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">  </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">selector</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb29-7"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">    </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">app.kubernetes.io/name</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> donut-example</span></span>
-<span id="cb29-8"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">  </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">type</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> NodePort</span></span>
-<span id="cb29-9"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">  </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">ports</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb29-10"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">    </span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">-</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">protocol</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> TCP</span></span>
-<span id="cb29-11"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">      </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">port</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> </span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">80</span></span>
-<span id="cb29-12"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">      </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">targetPort</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> </span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">80</span></span></code></pre></div>
-</div>
-</div>
-<p>At this point in the process I freely admit I’m at the edge of my own knowledge, and I don’t want to say too much about something I only barely understand myself, but there are two things I will point out about this:</p>
-<ul>
-<li><p>Notice that under <code>spec.selector</code> (lines 5-7) I’m referring to the name of my deployment (<code>donut-example</code>). That’s what the kubernetes docs tell you to do when setting up a NodePort service (see <a href="https://kubernetes.io/docs/concepts/services-networking/service/">here</a>), but the guide on the the corresponding google page that I linked to earlier (i.e., <a href="https://cloud.google.com/kubernetes-engine/docs/how-to/managed-certs">this one</a>) misled me. It made me think I was supposed to use the name of the service (<code>mc-service</code>). You want this service to point at your deployment!</p></li>
-<li><p>Notice I’m doing everything on port 80? You probably don’t need to do this, but I found some discussion online about an old issue with kubernetes where they were hardcoding port 80 somewhere. I’m pretty certain that’s been properly resolved now and I don’t need to use port 80 for everything, but it was one of the tweaks I made on the way to figuring out the problem with <code>spec.selector</code> and… well… fuck it. The current version works and I’m new to kubernetes so I’m not changing it today.</p></li>
-</ul>
-<p>In any case, now that I have a manifest file I can apply it to the cluster:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb30" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb30-1"><span class="ex" style="color: null;
-background-color: null;
-font-style: inherit;">kubectl</span> apply <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">-f</span> mc-service.yaml</span></code></pre></div>
-</div>
-</section>
-<section id="create-the-dns-record" class="level3">
-<h3 class="anchored" data-anchor-id="create-the-dns-record">Create the DNS record</h3>
-<p>The next step in the process was to create a DNS record (with google domains in my case) for <code>donut.djnavarro.net</code> that points this subdomain to the appropriate IP address. I talked about this earlier in the post, so let’s move on…</p>
-</section>
-<section id="create-an-ingress" class="level3">
-<h3 class="anchored" data-anchor-id="create-an-ingress">Create an ingress</h3>
-<p>If the gods were kind we would be done, but of course we are not. I have a managed certificate and I have a service that exposes my deployment. That <em>doesn’t</em> mean that my application is configured to serve pages over https. To do this I need to create an <a href="https://kubernetes.io/docs/concepts/services-networking/ingress/">ingress</a> that manages external access to the service I created earlier and handles the SSL bit. Which is the thing I really need in order to make https work. Again…</p>
-<p>Siiiiiiiiiiiigh.</p>
-<p>Okay, here’s my <a href="https://github.com/djnavarro/donut/blob/main/mc-ingress.yaml"><code>mc-ingress.yaml</code></a> manifest file for that:</p>
-<div class="cell">
-<div class="code-with-filename">
-<div class="code-with-filename-file">
-<pre><strong>mc-ingress.yaml</strong></pre>
-</div>
-<div class="sourceCode cell-code" id="cb31" style="background: #f1f3f5;"><pre class="sourceCode numberSource yaml number-lines code-with-copy"><code class="sourceCode yaml"><span id="cb31-1"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">apiVersion</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> networking.k8s.io/v1</span></span>
-<span id="cb31-2"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">kind</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> Ingress</span></span>
-<span id="cb31-3"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">metadata</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb31-4"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">  </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">name</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> mc-ingress</span></span>
-<span id="cb31-5"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">  </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">annotations</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb31-6"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">    </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">kubernetes.io/ingress.global-static-ip-name</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> donut-ip-address</span></span>
-<span id="cb31-7"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">    </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">networking.gke.io/managed-certificates</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> managed-cert</span></span>
-<span id="cb31-8"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">    </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">kubernetes.io/ingress.class</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> </span><span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"gce"</span></span>
-<span id="cb31-9"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">spec</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb31-10"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">  </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">defaultBackend</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb31-11"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">    </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">service</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb31-12"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">      </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">name</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> mc-service</span></span>
-<span id="cb31-13"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">      </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">port</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span></span>
-<span id="cb31-14"><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">        </span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">number</span><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">:</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;"> </span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">80</span></span></code></pre></div>
-</div>
-</div>
-<p>This manifest uses the static IP address I created (<code>donut-ip-address</code>), as well as the TLS certificate that I’ve asked google to provide me (<code>managed-cert</code>), and it specifies the <code>mc-service</code> I created as the backend. These things together give me https… apparently.</p>
-<p>As usual, I apply the manifest to my cluster:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb32" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb32-1"><span class="ex" style="color: null;
-background-color: null;
-font-style: inherit;">kubectl</span> apply <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">-f</span> mc-ingress.yaml </span></code></pre></div>
-</div>
-<p>I can inspect the results with <code>kubectl get ingress</code>:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb33" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb33-1"><span class="ex" style="color: null;
-background-color: null;
-font-style: inherit;">kubectl</span> get ingress</span></code></pre></div>
-</div>
-<pre><code>NAME         CLASS    HOSTS   ADDRESS         PORTS   AGE
-mc-ingress   &lt;none&gt;   *       34.149.195.33   80      98s</code></pre>
-<p>I might still have to wait for the certificate provisioning to finish, so I’d better check again:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb35" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb35-1"><span class="ex" style="color: null;
-background-color: null;
-font-style: inherit;">kubectl</span> describe managedcertificate managed-cert</span></code></pre></div>
-</div>
-<p>Here’s the relevant bit of the output showing what it looks like once it’s all working:</p>
-<pre><code>Spec:
-  Domains:
-    donut.djnavarro.net
-Status:
-  Certificate Name:    mcrt-b2204ff4-ad92-4811-a56d-f007190bb659
-  Certificate Status:  Active
-  Domain Status:
-    Domain:     donut.djnavarro.net
-    Status:     Active</code></pre>
-<p>At last. I have https. It works, which I can verify simply by visiting <a href="https://donut.djnavarro.net">https://donut.djnavarro.net</a> and seeing if my app is working. Obviously I know that it is, because the embedded image at the start of the post is doing what it’s supposed to, but just for fun I’ll do it again:</p>
-<a href="https://donut.djnavarro.net"><img width="100%" src="https://blog.djnavarro.net/posts/2023-01-10_kubernetes/https:/donut.djnavarro.net" title="donut.djnavarro.net"></a>
-<p><br></p>
-<p>Excellent. It works.</p>
-<p><br></p>
-</section>
-</section>
-<section id="epilogue" class="level2">
-<h2 class="anchored" data-anchor-id="epilogue">Epilogue</h2>
-<p>The application I built is very limited, and I think it’s important to point to the things that I know it does poorly. I am sure there are others, but the big one is storage. As currently designed, the app generates a new image every time the site is visited. That’s wasteful, especially if you’re going to reuse images. You can do better than this by enabling google cloud storage, connecting to it as a volume, and writing generated images to storage when they are create. The plumber app would then check for the relevant files before trying to generate a new one. There’s a useful <a href="https://cloud.google.com/kubernetes-engine/docs/how-to/volumes">tutorial on volumes</a> if you want to explore this with the google kubernetes engine.</p>
-<p>It’s also worth pointing out that I have completely ignored <a href="https://helm.sh/">helm</a>, the package manager for kubernetes. Helm is excellent, and when the time comes that you want to deploy an application that someone else has designed properly, the thing you actually do is use a helm “chart”. For example, the one time I actually got <a href="https://spark.apache.org/">spark</a> running properly on a kubernetes cluster, the way I did it was using a terribly-useful helm chart provided by Bitnami: <a href="https://bitnami.com/stack/spark/helm">bitnami.com/stack/spark/helm</a>. There’s a lot of useful tooling built up around kubernetes, and you might as well take advantage of that!</p>
-<p>That being said… yes there’s a lot more to talk about, but I’m done with this post. I’m tired and unemployed, and since nobody is paying me for any of this I’m going to call it quits for today.</p>
-<!--------------- appendices go here ----------------->
-
-
-</section>
-
-
-<div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
-
-<ol>
-<li id="fn1"><p>Though who knows: there’s a lot of strange on grindr.↩︎</p></li>
-<li id="fn2"><p>Lots of computers working as a single unit.↩︎</p></li>
-<li id="fn3"><p>Also known colloquially as “computers”. A node in a cluster is one of the machines that makes up the cluster. I’m endlessly entertained by the human ability to make concepts impenetrable to outsiders by writing in jargon that is never explained to novices.↩︎</p></li>
-<li id="fn4"><p>Oh look it’s a trans who likes Lana, how original.↩︎</p></li>
-<li id="fn5"><p>The author does not count.↩︎</p></li>
-<li id="fn6"><p>Unless you are Thomas Lin Pedersen, but I think it is very clear that he is much taller than me.↩︎</p></li>
-<li id="fn7"><p>After a <em>staggering</em> amount of work, mind you…↩︎</p></li>
-<li id="fn8"><p>To be honest I am still not convinced <code>coord_polar()</code> is particularly useful for visualisation because I very rarely have anything to say that is naturally expressed as a pie chart, but it’s brilliant for generative art.↩︎</p></li>
-<li id="fn9"><p>This isn’t the right place for a deep dive on <a href="https://blog.djnavarro.net/serialisation-with-rds/">serialising R objects</a>, but I’ve written about it before.↩︎</p></li>
-<li id="fn10"><p>Arguments can be passed to a plumber endpoint through the query string. For instance, the URL <a href="http://donut.djnavarro.net/?seed=6">http://donut.djnavarro.net/?seed=6</a> fixes the <code>seed</code> to 6, so the output will always be the same as the red and black donut shown in the bottom right of the output above.↩︎</p></li>
-<li id="fn11"><p>Here’s a blog post on the difference between <a href="https://nickjanetakis.com/blog/docker-tip-59-difference-between-exposing-and-publishing-ports">exposing and publishing ports</a> in docker if you need it!↩︎</p></li>
-<li id="fn12"><p>It doesn’t have to be public: kubernetes can pull images from private registries too, but I’m not going to bother with that sort of thing here↩︎</p></li>
-<li id="fn13"><p>If this were something fancier you’d probably have more than one container, but I’m keeping this as simple as possible for the sake of what’s left of my sanity.↩︎</p></li>
-<li id="fn14"><p>I should mention that yes you can do all this with the <code>gcloud</code> command line tool, but I haven’t reached the point in the post where I talk about that yet, and in any case the point-and-click process is actually pretty easy.↩︎</p></li>
-<li id="fn15"><p>An example would be if you plan to deploy <a href="https://spark.apache.org/">spark</a> on kubernetes. I’ve been playing around with that a little and for that you really need to have google back off and not delete nodes whenever the autopilot thinks you don’t need them. But that’s not the case for the donut app so I’m keeping it simple.↩︎</p></li>
-<li id="fn16"><p>Also known as “Sydney” to those of us who live here↩︎</p></li>
-<li id="fn17"><p>Too obvious.↩︎</p></li>
-<li id="fn18"><p>Kubernetes supports other types of containers besides docker, but let’s not complicate matters.↩︎</p></li>
-<li id="fn19"><p>The <code>-f</code> argument in <code>kubectl apply</code> here tells it to use the manifest <strong>f</strong>ile.↩︎</p></li>
-<li id="fn20"><p>Which may be your thing in an appropriate mutually consensual context, but it’s not everyone’s cup of tea.↩︎</p></li>
-<li id="fn21"><p>Not in the fun way.↩︎</p></li>
-<li id="fn22"><p>I could go on a long ramble about all my issues with authority figures at this point, but frankly I don’t think that certification authorities are a bad thing so perhaps just this once I’ll be a good girl and use the damn service. It’s convenient and it’s useful.↩︎</p></li>
-<li id="fn23"><p>lol no. This is a figure of speech. Nothing that google or any large tech company does is a kindness. It is self interest on their part, of course, but it’s convenient for my purposes here.↩︎</p></li>
-</ol>
-</section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div id="quarto-reuse" class="quarto-appendix-contents"><div><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2023,
-  author = {Navarro, Danielle},
-  title = {Deploying {R} with Kubernetes},
-  date = {2023-01-10},
-  url = {https://blog.djnavarro.net/posts/2023-01-10_kubernetes},
-  langid = {en}
-}
-</code></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2023" class="csl-entry quarto-appendix-citeas">
-Navarro, Danielle. 2023. <span>“Deploying R with Kubernetes.”</span>
-January 10, 2023. <a href="https://blog.djnavarro.net/posts/2023-01-10_kubernetes">https://blog.djnavarro.net/posts/2023-01-10_kubernetes</a>.
-</div></div></section></div> ]]></description>
-  <category>R</category>
-  <category>Docker</category>
-  <category>Kubernetes</category>
-  <category>Plumber</category>
-  <guid>https://blog.djnavarro.net/posts/2023-01-10_kubernetes/index.html</guid>
-  <pubDate>Mon, 09 Jan 2023 13:00:00 GMT</pubDate>
-  <media:content url="https://blog.djnavarro.net/posts/2023-01-10_kubernetes/donut.png" medium="image" type="image/png" height="144" width="144"/>
 </item>
 </channel>
 </rss>
