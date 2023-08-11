@@ -254,7 +254,7 @@ modlib("pk1", quiet = TRUE) |>
   mrgsim(end = 480, delta = 0.1)
 ```
 
-It's a very clever trick, and I imagine it's something that a lot of data analysts find super handy. That said, it's not something I would want to use myself. I'm a simple girl who likes her coffee black and her functions type stable, so for my own workflows I'm probably going to write code that looks more like this:
+It's a very clever trick, and I imagine it's something that a lot of data analysts find super handy. That said, it's not something I would want to use myself. I'm a simple girl who likes her coffee black and her functions type stable, so I'm more keen on code that looks like this:
 
 ```{r}
 out <- mrgsim_e(
@@ -292,40 +292,71 @@ So perhaps there's no need to worry about this outlandish scenario. Danielle wra
 
 ### Running simulations
 
-Here's what we get as the output:
+We're almost done unpacking the simple example, but I want to rewrite the code one last time. Previously, when I called `mrgsim_e()` I passed arguments `end` and `delta` as a way to override the default assumptions about what time points we would use when running our simulations. Internally, these arguments are used to construct a "tgrid" object. We can construct this object explicitly by calling `tgrid()`:
+
+```{r}
+tgrid(start = 0, end = 480, delta = 0.1)
+```
+
+For the simple example, calling `tgrid()` explicitly doesn't by us much, but if you dive into the documentation a little you discover that there are tools for working with tgrid objects that allow you to define the simulation times in much richer ways than a simple grid.
+
+But -- again -- I digress. 
+
+The real point of mentioning it here is that -- at least in my mind -- a simulation has three main components (model, events, and time points), and we now have separate functions that handle each component: we can use `mread()` to define a model, `ev()` to define an event schedule, and `tgrid()` to define the simulation times. So now, after considerable refactoring, we end up with code that looks like this:
+
+```{r}
+# define model, events, and times
+mod <- mread_file(file = "pk1.cpp", project = modlib_dir, quiet = TRUE)
+events <- ev(amt = 100, ii = 24, addl = 9)
+times <- tgrid(start = 0, end = 480, delta = 0.1)
+
+# run simulation
+out <- mrgsim_e(x = mod, events = events, tgrid = times)
+```
+
+All that remains is to have a look at the output we've created:
 
 ```{r}
 out
 ```
 
-Again, this is not technically a data frame, but it's easily coercible to one, so if that's what you want you can do this:^[Although, if you want a data frame as output, it's probably easier to call the convenience function `mrgsim_df()` which returns a data frame.]
+As you've probably come to expect at this point, this is not technically a data frame, it's an S4 object of class "mrgsims", and can easily be coerced to a data frame using `as.data.frame()` or `as_tibble()`. 
 
-```{r}
-tibble::as_tibble(out)
-```
-
-### Plotting the results
-
-We can use the regular `plot()` method here:
+The mrgsolve package supplies a plot method for mrgsims objects that generates nice looking lattice plots, making it very easy to quickly produce helpful data visualisations:
 
 ```{r}
 plot(out)
 ```
 
-But there's nothing stopping us from converting the output to a tibble and then tinkering to your hearts content using ggplot2 or whatever:
+If additional customisation is needed, however, it's pretty easy to convert the output to a tibble and then using ggplot2 to create the specific visualisation you want:
 
 ```{r}
-out_lon <- out |>
+library(ggplot2)
+
+out |>
   tibble::as_tibble() |>
   tidyr::pivot_longer(
     cols = c(EV, CENT, CP), 
     names_to = "variable", 
     values_to = "value"
+  ) |> 
+  dplyr::mutate(
+    variable = dplyr::case_when(
+      variable == "EV" ~ "Gut amount",
+      variable == "CENT" ~ "Central amount",
+      variable == "CP" ~ "Central concentration"
+    )
+  ) |>
+  ggplot(aes(time, value)) + 
+  geom_line() +
+  facet_wrap(~ variable, scales = "free_y") + 
+  theme_bw() +
+  theme(strip.background = element_rect(fill = "white")) + 
+  labs(
+    title = "Drug amounts and concentrations over time",
+    x = "Time (hours)",
+    y = NULL
   )
-
-ggplot2::ggplot(out_lon, ggplot2::aes(time, value)) + 
-  ggplot2::geom_line() + 
-  ggplot2::facet_wrap(~ variable, scales = "free_y")
 ```
 
 ## Resources
