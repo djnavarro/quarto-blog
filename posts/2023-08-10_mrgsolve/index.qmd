@@ -267,21 +267,41 @@ mod |>
   mrgsim(end = 480, delta = 0.1)
 ```
 
-In essence, that's how the magic works here. It's a very clever trick, and I imagine it's something that a lot of data analysts find super handy... but not something I'd want to do when writing package code. When calling mrgsolve in a more programmatic way I'd probably write code that looks more like this:
+In essence, that's how the magic works here. It's a very clever trick, and I imagine it's something that a lot of data analysts find super handy... but not something I'd want to do when writing package code. When calling mrgsolve in a programmatic way I'd probably write code that looks more like this:
 
 ```{r}
-mod <- mread(model = "pk1", project = modlib_dir, quiet = TRUE)
-events <- ev(amt = 100, ii = 24, addl = 9)
-
-out <- mrgsim(
-  x = mod,
-  events = events,
+out <- mrgsim_e(
+  x = mread_file(file = "pk1.cpp", project = modlib_dir, quiet = TRUE),
+  events = ev(amt = 100, ii = 24, addl = 9),
   end = 480,
   delta = 0.1
 )
 ```
 
-Okay, now that we've resolved that question, let's return to the business of running simulations?
+Notice that: I called `mrgsim_e()` here rather than `mrgsim()`. Because mrgsolve recognises that sometimes developers might want to call it programmatically, this version of the function requires the user to pass an event object. The sneaky "event-schedule-inside-the-model-object" piping trick I showed at the start of the post does not work with `mrgsim_e()`, which makes it a safer choice when running simulations programmatically.^[There are several other variants on `mrgsim()` that enforce different constraints. I haven't talked about `data_set()` and related functions in this post, for instance, but there's a `mrgsim_d()` variant that requires the user to pass a data set object.] Theoretically, I suppose, still be potential for strange errors caused by method dispatch in `ev()` if I wrote something like this:
+
+```{r}
+foolish_simulation <- function(...) {
+  mrgsim_e(
+    x = mread_file(file = "pk1.cpp", project = modlib_dir, quiet = TRUE),
+    events = ev(...),
+    end = 480,
+    delta = 0.1
+  )
+}
+```
+
+This code is extremely unwise, because the user could really mess with things depending on what gets pass to `ev()` via the dots. In the most absurd case, if the user tried to pass `x = 100` here thinking that it would add a column labelled `x` to  the event schedule it would actually trigger method dispatch on the `x` object, and since `ev()` doesn't have a method for that case, the user would receive a weird error. But... this seems like a bizarre edge case frankly. *Even* if the user somehow passed an mrgmod object to `ev()` in this fashion, the result is still an error: 
+
+```{r}
+#| error: true
+foolish_simulation(amt = 100, ii = 24, addl = 9, x = 100)
+foolish_simulation(amt = 100, ii = 24, addl = 9, x = mod)
+```
+
+About the absolute worst case I can think of is if (a) the developer wrote some code that was exactly as absurd as `foolish_simulation()` and then (b) the user passed an argument to `ev()` that altered the event table itself. But that's... not worth worrying about. 
+
+TL;DR: Danielle wrapped herself up in knots trying to get a handle on method dispatch in `ev()`. That's the only thing going on here, so let's move along shall we?
 
 ### Running simulations
 
@@ -291,7 +311,7 @@ Here's what we get as the output:
 out
 ```
 
-Again, this is not technically a data frame, but it's easily coercible to one, so of that's what you want you can do this:
+Again, this is not technically a data frame, but it's easily coercible to one, so if that's what you want you can do this:^[Although, if you want a data frame as output, it's probably easier to call the convenience function `mrgsim_df()` which returns a data frame.]
 
 ```{r}
 tibble::as_tibble(out)
@@ -344,10 +364,10 @@ pk1_mod |> ev(evnt) |> mrgsim(end = 480, delta = 0.1)
 # ... but weirdly I find it unhelpful, so let's run the same analysis with a 
 # single call to mrgsim(). this is equivalent:
 pk1_out <- mrgsim(
-  x = pk1_mod,
-  events = evnt,
-  end = 480,
-  delta = 0.1
+x = pk1_mod,
+events = evnt,
+end = 480,
+delta = 0.1
 )
 pk1_out # this is an "mrgsims" object, coercible to data frame
 
@@ -378,17 +398,17 @@ class(x)
 # ggplot2. it's very little work to do the conversion and from there
 # you have access to the full ggplot2 ecosystem...
 dat <- pk1_out |> 
-  tibble::as.tibble() |>
-  tidyr::pivot_longer(
-    cols = c(EV, CENT, CP), 
-    names_to = "variable", 
-    values_to = "value"
-  )
+tibble::as.tibble() |>
+tidyr::pivot_longer(
+cols = c(EV, CENT, CP), 
+names_to = "variable", 
+values_to = "value"
+)
 
 library(ggplot2)
 ggplot(dat, aes(time, value)) + 
-  geom_line() + 
-  facet_wrap(~ variable, scales = "free_y")
+geom_line() + 
+facet_wrap(~ variable, scales = "free_y")
 
 -->
 
@@ -417,19 +437,19 @@ e <- ev(amt=100, ii=24, addl=6)
 
 # a better example of a piped workflow than the earlier one...
 mod |> 
-  mrgsim(events = e) |> 
-  plot(EV1 + CP ~ time)
+mrgsim(events = e) |> 
+plot(EV1 + CP ~ time)
 
 # digression.... okay here's what I hate about ev(). you can do this... 
 mod |> 
-  mrgsim(events = ev(amt = 100, ii = 24, addl = 6)) |> 
-  plot(EV1 + CP ~ time)
+mrgsim(events = ev(amt = 100, ii = 24, addl = 6)) |> 
+plot(EV1 + CP ~ time)
 
 # and, in what I can only call an example of batshit polymorphism, also this...
 mod |> 
-  ev(amt = 100, ii = 24, addl = 6) |>
-  mrgsim() |> 
-  plot(EV1 + CP ~ time)
+ev(amt = 100, ii = 24, addl = 6) |>
+mrgsim() |> 
+plot(EV1 + CP ~ time)
 
 # ...unpacking the madness, here's what's actually happening in the second 
 # pipeline: it's actually returning a model object (class mrgmod), *not* an
