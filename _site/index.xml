@@ -27,36 +27,184 @@
 
 <!--------------- my typical setup ----------------->
 <!--------------- post begins here ----------------->
+<p>Continuing my informal series of “Danielle learns <a href="https://blog.djnavarro.net/category/pharmacometrics">pharmacometric modelling</a>” posts, today I’ve decided to sit down and teach myself how to use the <a href="https://mrgsolve.org/">mrgsolve</a> package in R.</p>
+<p>As I’m rapidly coming to realise, the world of pharmacometric modelling is an intersting space where there are a large number of domain-specific languages that have been designed to solve a particular subset of the modelling problems faced by analysts in the field, and R serves as a lingua franca that stitches them all together and makes it possible to write analysis scripts that call on multiple tools.<sup>1</sup></p>
+<p>With that as the structure of the ecosystem, what you tend to find are packages that carve out a specific niche by building on top of some other tool. For this post, the niche we’re talking about is <strong>model-based simulation</strong>. In this context, it’s assumed that the analyst has a specific pharmacometric model in mind (e.g., one-compartment PK model,<sup>2</sup> two-compartment PK model, etc etc). We are not attempting to estimate parameters from data, nor are we runing a model testing exercise. The model is presumed to exist already, usually because the analyst has already done the model fitting exercise using their tool of choice.<sup>3</sup></p>
+<p>Within the specific “model simulation” niche there are a number of R packages that people seem to use frequently. There’s the RxODE package<sup>4</sup> and its successor <a href="https://nlmixr2.github.io/rxode2/">rxode2</a>, for example, and mrgsolve falls within the same general niche.</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><span class="fu" style="color: #4758AB;
 background-color: null;
-font-style: inherit;">library</span>(mrgsolve, <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">warn.conflicts =</span> <span class="cn" style="color: #8f5902;
-background-color: null;
-font-style: inherit;">FALSE</span>)</span></code></pre></div>
+font-style: inherit;">library</span>(mrgsolve)</span></code></pre></div>
 </div>
-<ul>
-<li>Working from this vignette: https://mrgsolve.org/vignettes/01-get-started.html</li>
-<li>mrgsolve wraps the public domain fortran library ODEPACK</li>
-<li>the R package uses S4 for functional OOP</li>
-</ul>
-<section id="building-a-model" class="level2">
-<h2 class="anchored" data-anchor-id="building-a-model">Building a model</h2>
-<section id="using-modlib" class="level3">
-<h3 class="anchored" data-anchor-id="using-modlib">Using <code>modlib()</code></h3>
-<p>The mrgsolve has a set of predefined pharmacokinetic models that you can work with when getting started. They’re stored in a package library whose location is accessible by calling <code>modlib()</code> with no arguments:</p>
+<section id="a-simple-example" class="level2">
+<h2 class="anchored" data-anchor-id="a-simple-example">A simple example</h2>
+<p>Okay, let’s get started. When I started looking into mrgsolve, the place I started was with the vignettes on the package website, so I’ll start this post by using a simple modelling example taken from the <a href="https://mrgsolve.org/vignettes/01-get-started.html">get started</a> page.</p>
+<p>The way mrgsolve is designed allows you to write your own custom models, and later in the post I’ll talk about how this is done, but it also comes with a collection of predefined models that you can access using the <code>modlib()</code> function. So I’ll start there:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb2" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1"><span class="fu" style="color: #4758AB;
+<div class="sourceCode cell-code" id="cb2" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1">mod <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">modlib</span>(<span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"pk1"</span>)</span></code></pre></div>
+<div class="cell-output cell-output-stderr">
+<pre><code>Building pk1 ... done.</code></pre>
+</div>
+</div>
+<p>In this code, <code>"pk1"</code> refers to the name of one of the model that comes bundled with mrgsolve… and there will be exactly zero pharmacometricians in this world that are surprised to discover that this is a one-compartment PK model with first-order absorption into the central compartment, and first-order elimination from the central compartment. To see what parameters are used in this version of the model we can call <code>param()</code>…</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb4" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">param</span>(mod)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+ Model parameters (N=3):
+ name value . name value
+ CL   1     | V    20   
+ KA   1     | .    .    </code></pre>
+</div>
+</div>
+<p>…and we see that out model assumes a clearance (CL) of 1, an aborption rate constant (KA) of 1, and a volume of distribution equal to 20. The mrgsolve package doesn’t keep track of units: it’s up to the user to make sure all the units are on the appropriate scale.</p>
+<p>The message printed to the console is probably equally unsurprising, but I’ll be good and explain it. The mrgsolve package is build on top of an open source ODE solver,<sup>5</sup> but the user doesn’t need to call it directly. Instead, a model is constructed using a model specification file (more on that later) that is then compiled to C++. This compiled model is used to run simulations, and it’s this compiled model that calls the ODE solvers. So when I called <code>modlib("pk1")</code>, it reads the model specification file and builds the compiled model.<sup>6</sup></p>
+<p>Okay so now we have a model object <code>mod</code> that specifies all our pharmacokinetic assumptions. In order to run a simulation, we also need to provide an <strong>event schedule</strong> that provides dosing information, and we’ll also need to say something about the time points at which we want to simulate the various pharmacokinetic quantities of interest. You can do this in a few different ways (which I’ll get to momentarily) but for the purposes of the initial example I’ll do it the same way that the “get started” vignette does, use a pipe-friendly workflow:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb6" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1">mod <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span> </span>
+<span id="cb6-2">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">ev</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">amt =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">100</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">ii =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">24</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">addl =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">9</span>) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span></span>
+<span id="cb6-3">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">mrgsim</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">start =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">0</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">end =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">480</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">delta =</span> <span class="fl" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">0.1</span>)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Model:  pk1 
+Dim:    4802 x 5 
+Time:   0 to 480 
+ID:     1 
+    ID time     EV   CENT     CP
+1:   1  0.0   0.00  0.000 0.0000
+2:   1  0.0 100.00  0.000 0.0000
+3:   1  0.1  90.48  9.492 0.4746
+4:   1  0.2  81.87 18.034 0.9017
+5:   1  0.3  74.08 25.715 1.2858
+6:   1  0.4  67.03 32.619 1.6309
+7:   1  0.5  60.65 38.819 1.9409
+8:   1  0.6  54.88 44.383 2.2191</code></pre>
+</div>
+</div>
+<p>Here we take the <code>mod</code> object, pipe it to the <code>ev()</code> function that builds the event schedule, and then pipe the output to <code>mrgsim()</code> which then runs the simulation. In this code, the arguments to <code>ev()</code> are all very standard in the field:</p>
+<ul>
+<li><code>amt</code> is the amount of drug</li>
+<li><code>ii</code> is the interdose interval</li>
+<li><code>addl</code> is number of additional doses</li>
+</ul>
+<p>The arguments to <code>mrgsim()</code> are used to specify the time points:</p>
+<ul>
+<li><code>start</code> is the initial time point (I actually didn’t need to specify it in ths case because the default value is 0)</li>
+<li><code>end</code> is the final time point</li>
+<li><code>delta</code> is the step size (i.e., the amount of time between successive time points)</li>
+</ul>
+<p>The output here is a tabular data structure – not technically a data frame, but I’ll get to that – with sensible column names:</p>
+<ul>
+<li><code>ID</code> is a subject identifier (always 1 for this simple example)</li>
+<li><code>time</code> is the time point for the simulated measurement</li>
+<li><code>EV</code> is the drug amount in the extravascular compartment (e.g., the gut, if we’re talking about oral dosing)</li>
+<li><code>CENT</code> is the drug amount in the central compartment</li>
+<li><code>CP</code> is the drug concentration in the central compartment</li>
+</ul>
+<p>To help you get a sense of what the simulation results look like, the mrgsolve package provides a plot method for simulation results, so if I’d wanted to I could add a call to <code>plot()</code> at the end of the pipeline, and get this as the output:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb8" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1">mod <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span> </span>
+<span id="cb8-2">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">ev</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">amt =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">100</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">ii =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">24</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">addl =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">9</span>) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span></span>
+<span id="cb8-3">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">mrgsim</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">start =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">0</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">end =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">480</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">delta =</span> <span class="fl" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">0.1</span>) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span></span>
+<span id="cb8-4">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">plot</span>()</span></code></pre></div>
+<div class="cell-output-display">
+<p><img src="https://blog.djnavarro.net/posts/2023-08-10_mrgsolve/index_files/figure-html/unnamed-chunk-6-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>Very nice.</p>
+</section>
+<section id="unpacking-the-example" class="level2">
+<h2 class="anchored" data-anchor-id="unpacking-the-example">Unpacking the example</h2>
+<p>Now things get a little messier. Under the hood the mrgsolve package is doing quite a lot of magic to make it all work, and there are some design choices here that you need to be aware of if you’re planning to call mrgsolve functions programmatically. In particular, some of the functions – by design – do not produce <a href="https://design.tidyverse.org/out-type-stability.html">type stable output</a>, so some care is involved if you’re going to write automations around them or call mrgsolve from another package.<sup>7</sup></p>
+<section id="the-model-library" class="level3">
+<h3 class="anchored" data-anchor-id="the-model-library">The model library</h3>
+<p>Let’s start by taking a closer look at the library of pre-specified models that come bundled with mrgsolve. They’re stored in a package folder whose location is accessible by calling <code>modlib()</code> with no arguments:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb9" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1"><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">modlib</span>()</span></code></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>[1] "/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models"</code></pre>
 </div>
 </div>
-<p>To see the names of the models:</p>
+<p>As you can see, when called with no inputs <code>modlib()</code> doesn’t return a compiled model, and it simply returns the path to the model library folder. If you want a list of the models that come bundled with mrgsolve, you can call <code>modlib()</code> setting <code>list = TRUE</code>:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb4" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><span class="fu" style="color: #4758AB;
+<div class="sourceCode cell-code" id="cb11" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb11-1"><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">modlib</span>(<span class="at" style="color: #657422;
 background-color: null;
@@ -70,26 +218,39 @@ font-style: inherit;">TRUE</span>)</span></code></pre></div>
 <pre><code>  effect  tmdd  viral1  viral2  emax  irm1  irm2  irm3  irm4  pk1cmt  pk2cmt  pk3cmt  pk1  pk2  pk2iv  popex  pred1  pbpk  1005  nm-like</code></pre>
 </div>
 </div>
-<p>To load one of these models:</p>
+<p>Finally, if you want to build and use one of these model you can call <code>modlib()</code> and pass the name of the model you want as the <code>model</code> argument:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb7" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1">mod <span class="ot" style="color: #003B4F;
+<div class="sourceCode cell-code" id="cb14" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb14-1">mod <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
 background-color: null;
-font-style: inherit;">modlib</span>(<span class="st" style="color: #20794D;
+font-style: inherit;">modlib</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">model =</span> <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"pk1"</span>)</span></code></pre></div>
 <div class="cell-output cell-output-stderr">
-<pre><code>Building pk1 ... done.</code></pre>
+<pre><code>Loading model from cache.</code></pre>
 </div>
 </div>
-<p>The first time you call this it compiles the model, which doesn’t take very long but nevertheless the package is smart enough to cache compiled models, so if you call it again it’ll just load the cached version.</p>
-</section>
-<section id="using-mread" class="level3">
-<h3 class="anchored" data-anchor-id="using-mread">Using <code>mread()</code></h3>
-<p>When I first started using mrgsolve I used the <code>modlib()</code> function quite a bit just so that I could dive into running simulations without having to think much about what’s going on internally, but now that I’ve gotten more of a sense of it this isn’t my preferred workflow. I’m always a bit uncomfortable with functions that return quite dramatically different output based on the parameters you pass. They’re harder to program with. So instead, here’s how I would now think about the same commands. First, the models that come bundled with mrgsolve are stored as package files, so:</p>
+<p>If you’re working interactively or with a script that isn’t going to be repeatedly reused with different inputs, the <code>modlib()</code> function is pretty handy. On the other hand if you’re a developer calling mrgsolve programmatically it’s probably better to rely on a different workflow. For instance, if you want to access the mrgsolve package folder that contains the models, you’d do something like this:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb9" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1">model_path <span class="ot" style="color: #003B4F;
+<div class="sourceCode cell-code" id="cb16" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb16-1">fs<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">path_package</span>(<span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"mrgsolve"</span>, <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"models"</span>)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models</code></pre>
+</div>
+</div>
+<p>If you want to construct file paths to the various model specification files contained within the package, you probably want to find paths to all the <code>.cpp</code> files in the model folder:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb18" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1">modlib_dir <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> fs<span class="sc" style="color: #5E5E5E;
 background-color: null;
@@ -100,15 +261,54 @@ background-color: null;
 font-style: inherit;">"mrgsolve"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"models"</span>)</span>
-<span id="cb9-2">model_path</span></code></pre></div>
+<span id="cb18-2">modlib_cpp <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> fs<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">dir_ls</span>(modlib_dir, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">regexp =</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"</span><span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">\\</span><span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">.cpp$"</span>)</span>
+<span id="cb18-3">modlib_cpp</span></code></pre></div>
 <div class="cell-output cell-output-stdout">
-<pre><code>/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models</code></pre>
+<pre><code>/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/1005.cpp
+/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/effect.cpp
+/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/emax.cpp
+/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/irm1.cpp
+/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/irm2.cpp
+/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/irm3.cpp
+/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/irm4.cpp
+/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/nm-like.cpp
+/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/pbpk.cpp
+/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/pk1.cpp
+/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/pk1cmt.cpp
+/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/pk1cmt_pop.cpp
+/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/pk2.cpp
+/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/pk2cmt.cpp
+/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/pk2iv.cpp
+/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/pk3cmt.cpp
+/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/pkExample.cpp
+/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/popex.cpp
+/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/pred1.cpp
+/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/tmdd.cpp
+/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/viral1.cpp
+/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/viral2.cpp</code></pre>
 </div>
 </div>
-<p>To get file paths to all the model files in this folder, I could do something like <code>fs::dir_ls(model_path)</code>. The TL;DR though is that the file name for the “pk1” model that I built in the previous section is <code>pk1.cpp</code>, and the other models that come bundled with mrgsolve are named similarly.</p>
-<p>Using the built-in models strikes me as something of an unusual case where the model code is stored outside the R project from which you’re invoking it, and I suppose the <code>modlib()</code> function is written to provide users with an easy way to access that model code. A more general purpose (and, happily, more type stable) workflow is provided by the <code>mread()</code> function:</p>
+<p>Easy done.</p>
+</section>
+<section id="building-models-from-file" class="level3">
+<h3 class="anchored" data-anchor-id="building-models-from-file">Building models from file</h3>
+<p>Building one of the bundled models using <code>modlib()</code> is a perfectly sensible thing to do when you’re working interactively or when you’re just starting out with mrgsolve, but after a while you might want to pivot to a different workflow. To that end, there’s an <code>mread()</code> function – and related functions <code>mread_file()</code> and <code>mread_cache()</code> – that reads a model specification file and returns the model object linked to the compiled code. As an example, here’s how I’d build the one-compartment model in the previous section, except using <code>mread()</code> this time:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb11" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb11-1">mod <span class="ot" style="color: #003B4F;
+<div class="sourceCode cell-code" id="cb20" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb20-1">mod <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
 background-color: null;
@@ -118,31 +318,55 @@ font-style: inherit;">model =</span> <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"pk1"</span>, <span class="at" style="color: #657422;
 background-color: null;
-font-style: inherit;">project =</span> model_path)</span></code></pre></div>
+font-style: inherit;">project =</span> modlib_dir)</span></code></pre></div>
 <div class="cell-output cell-output-stderr">
 <pre><code>Building pk1 ... (waiting) ...
 done.</code></pre>
 </div>
 </div>
-<p>Optionally you can explicitly provide the file name for the model (within the <code>project</code> folder), but in this case we don’t need to: if the <code>file</code> argument is not specified <code>mread()</code> assumes by default that the file name is the same as the <code>model</code> name with file extension <code>.cpp</code>.</p>
+<p>Optionally you can provide a file name for the model specification file that sits within the <code>project</code> folder, but in this case we don’t need to: if the <code>file</code> argument is unspecified <code>mread()</code> assumes that the file name is the same as the <code>model</code> name with file extension <code>.cpp</code>.<sup>8</sup></p>
 </section>
-</section>
-<section id="model-objects" class="level2">
-<h2 class="anchored" data-anchor-id="model-objects">Model objects</h2>
-<p>What precisely have we just constructed?</p>
+<section id="s4-classes-in-mrgsolve" class="level3">
+<h3 class="anchored" data-anchor-id="s4-classes-in-mrgsolve">S4 classes in mrgsolve</h3>
+<p>The mrgsolve package is build using S4 classes and of the great many object oriented programming systems available in R that’s the one I’m least comfortable with.<sup>9</sup> But hey… I’ve just reread the <a href="https://adv-r.hadley.nz/s4.html">S4 chapter in Advanced R</a>, so let’s see how we go with this, shall we?</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb13" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1"><span class="fu" style="color: #4758AB;
+<div class="sourceCode cell-code" id="cb22" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb22-1"><span class="fu" style="color: #4758AB;
 background-color: null;
-font-style: inherit;">class</span>(mod)</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>[1] "mrgmod"
-attr(,"package")
-[1] "mrgsolve"</code></pre>
+font-style: inherit;">library</span>(methods)</span></code></pre></div>
 </div>
-</div>
-<p>The mrgsolve package is build using S4 classes, so we can use <code>print()</code> or <code>show()</code> to get a summary of the object:</p>
+</section>
+<section id="model-objects" class="level3">
+<h3 class="anchored" data-anchor-id="model-objects">Model objects</h3>
+<p>To begin with, let’s find out what kind of object <code>mod</code> is and what methods are defined for it:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb15" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb15-1"><span class="fu" style="color: #4758AB;
+<div class="sourceCode cell-code" id="cb23" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb23-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">is</span>(mod)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] "mrgmod"</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb25" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb25-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">methods</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">class =</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"mrgmod"</span>)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code> [1] [              [[             $              all.equal     
+ [5] as.environment as.list        blocks         cmtn          
+ [9] data_set       ev_rx          ev             evd           
+[13] idata_set      init           initialize     knobs         
+[17] loadso         names          omat           param         
+[21] req            Req            revar          see           
+[25] show           smat           stime          summary       
+[29] update         within         zero_re       
+see '?methods' for accessing help and source code</code></pre>
+</div>
+</div>
+<p>A lot of those methods are unsurprising. For example, the <code>show()</code> method is just the S4 analog of <code>print()</code>. When we print the <code>mod</code> object at the console we’re just calling its <code>show()</code> method:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb27" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb27-1"><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">show</span>(mod)</span></code></pre></div>
 <div class="cell-output cell-output-stdout">
@@ -151,7 +375,7 @@ font-style: inherit;">show</span>(mod)</span></code></pre></div>
 -----------------  source: pk1.cpp  -----------------
 
   project: /home/danielle/R...gsolve/models
-  shared object: pk1-so-2b2023329d66 
+  shared object: pk1-so-cc0539be991a 
 
   time:          start: 0 end: 24 delta: 1
                  add: &lt;none&gt;
@@ -166,9 +390,9 @@ font-style: inherit;">show</span>(mod)</span></code></pre></div>
 ------------------------------------------------------</code></pre>
 </div>
 </div>
-<p>Perhaps more usefully, there is also a <code>see()</code> function we call to inspect the source code of the model file:<sup>1</sup></p>
+<p>But there are other methods that are kind of handy when inspecting a mrgmod object. For example, if we wanted to see the source code for the corresponding model specification file we could call the <code>see()</code> method:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb17" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb17-1"><span class="fu" style="color: #4758AB;
+<div class="sourceCode cell-code" id="cb29" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb29-1"><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">see</span>(mod)</span></code></pre></div>
 <div class="cell-output cell-output-stdout">
@@ -192,36 +416,47 @@ $CAPTURE @annotated
 CP : Plasma concentration (mass/volume)</code></pre>
 </div>
 </div>
-<p>Parameters can be extracted using <code>param()</code>:</p>
+<p>If we didn’t want quite that much detail, a <code>summary()</code> would have sufficed:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb19" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb19-1"><span class="fu" style="color: #4758AB;
+<div class="sourceCode cell-code" id="cb31" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb31-1"><span class="fu" style="color: #4758AB;
 background-color: null;
-font-style: inherit;">param</span>(mod)</span></code></pre></div>
+font-style: inherit;">summary</span>(mod)</span></code></pre></div>
 <div class="cell-output cell-output-stdout">
-<pre><code>
- Model parameters (N=3):
- name value . name value
- CL   1     | V    20   
- KA   1     | .    .    </code></pre>
+<pre><code>Model: pk1
+- Parameters: [3]
+  CL, V, KA
+- Compartments: [2]
+  EV, CENT
+- Captured: [1]
+  CP
+- Outputs: [3]
+  EV, CENT, CP</code></pre>
 </div>
 </div>
-<p>What actually happens here is that it returns a “parameter_list” object, and the output looks nice and pretty because it has a print method. But internally it’s basically just a list (…sort of, not exactly), and it has a define <code>$</code> operator, so you can extract the clearance parameter as <code>param()$CL</code></p>
+<p>I don’t intend to do an exhaustive walk through of all the methods defined for mrgmod objects. That would be tiresome, and in any case I don’t even know what all of them do yet. But what I will mention is that many of the methods exist to provide public accessors for these internal slots of a mrgmod object. To illustrate, here’s a list of all the slot names:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb21" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb21-1"><span class="fu" style="color: #4758AB;
+<div class="sourceCode cell-code" id="cb33" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb33-1"><span class="fu" style="color: #4758AB;
 background-color: null;
-font-style: inherit;">param</span>()<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">$</span>CL</span></code></pre></div>
+font-style: inherit;">slotNames</span>(mod)</span></code></pre></div>
 <div class="cell-output cell-output-stdout">
-<pre><code>NULL</code></pre>
+<pre><code> [1] "model"    "modfile"  "package"  "soloc"    "project"  "start"   
+ [7] "end"      "delta"    "add"      "tscale"   "digits"   "quiet"   
+[13] "verbose"  "debug"    "preclean" "atol"     "rtol"     "ss_rtol" 
+[19] "ss_atol"  "maxsteps" "hmin"     "hmax"     "ixpr"     "mxhnil"  
+[25] "shlib"    "funs"     "omega"    "sigma"    "request"  "param"   
+[31] "init"     "capture"  "Icap"     "capL"     "Icmt"     "cmtL"    
+[37] "args"     "fixed"    "advan"    "trans"    "mindt"    "code"    
+[43] "annot"    "envir"    "plugin"   "ss_cmt"  </code></pre>
 </div>
 </div>
+<p>Okay so one of the slots is called “param”, and denoted <code>@param</code> to remind us that it’s a slot of an S4 object.<sup>10</sup> Calling the <code>param()</code> method is the appropriate way to access the <code>@param</code> slot, for instance.<sup>11</sup> The <code>see()</code> method is slightly fancier, but it too is essentially an accessor function for the <code>@modelfile</code> and <code>@code</code> slots. If I were an extremely unwise woman who ignored all the best practices for S4 classes I could use a command like <code>cat(mod@code, sep = "\n")</code> and get roughly the same output. This is of course a terrible idea: the slots of an S4 object are considered internal details and not part of the package API. Accessing them directly is considered a faux pas and you have only yourself to blame if the developer later changes the structure of the slots and your code breaks.</p>
+<p>Indeed, the <em>only</em> reason I’m talking about them here is that I find it helpful for building my own mental model of what mrgsolve does, which will become apparent in the next section when I tackle the puzzlingly magical behaviour of the <code>ev()</code> function.</p>
 </section>
-<section id="event-objects" class="level2">
-<h2 class="anchored" data-anchor-id="event-objects">Event objects</h2>
-<p>Model objects represent the underlying ODE system. They don’t store information about “interventions” (external forcers) on the system. In the pharmacokinetic context the main intervention we’re thinking about is dosing. An events object returned by <code>ev()</code> returns a event schedule that would be familiar to NONMEM users<sup>2</sup></p>
+<section id="event-objects" class="level3">
+<h3 class="anchored" data-anchor-id="event-objects">Event objects</h3>
+<p>Model objects represent the underlying ODE system. They don’t store information about “interventions” (external forcers) on the system. In the pharmacokinetic context the main intervention we’re thinking about is dosing. An events object returned by <code>ev()</code> returns a event schedule that would be familiar to NONMEM users<sup>12</sup></p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb23" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb23-1">events <span class="ot" style="color: #003B4F;
+<div class="sourceCode cell-code" id="cb35" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb35-1">events <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
 background-color: null;
@@ -238,31 +473,34 @@ background-color: null;
 font-style: inherit;">addl =</span> <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">9</span>)</span>
-<span id="cb23-2">events</span></code></pre></div>
+<span id="cb35-2">events</span></code></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>Events:
   time amt ii addl cmt evid
 1    0 100 24    9   1    1</code></pre>
 </div>
 </div>
-<p>The arguments are consistent with NONMEM standard names:</p>
-<ul>
-<li><code>amt</code> is the amount of drug</li>
-<li><code>ii</code> is the interdose interval</li>
-<li><code>addl</code> is number of additional doses</li>
-</ul>
-<p>A tiny bit of care is needed here. The <code>events</code> object looks like a data frame, and it has a defined <code>$</code> operator that behaves as you’d expect if it were a data frame, but this errors:</p>
+<p>The <code>events</code> object looks a lot like a data frame, but is technically an S4 object with class ev. We can verify this by calling <code>is()</code>:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb25" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb25-1">events[<span class="dv" style="color: #AD0000;
+<div class="sourceCode cell-code" id="cb37" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb37-1"><span class="fu" style="color: #4758AB;
 background-color: null;
-font-style: inherit;">1</span>, ]</span></code></pre></div>
-<div class="cell-output cell-output-error">
-<pre><code>Error in events[1, ]: object of type 'S4' is not subsettable</code></pre>
+font-style: inherit;">is</span>(events)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] "ev"</code></pre>
 </div>
 </div>
-<p>Again this is an S4 class and there is in fact a data frame stored internally<sup>3</sup>, but if you want to coerce it explicitly to a data frame or a tibble you’ll need to convert it explicitly. For instance, this…</p>
+<p>However, if you take a look and see what slot names are defined for the <code>events</code> object, you might be unsurprised to discover that it only has two slots and is essentially just a data frame:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb27" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb27-1">tibble<span class="sc" style="color: #5E5E5E;
+<div class="sourceCode cell-code" id="cb39" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb39-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">slotNames</span>(events)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] "data" "case"</code></pre>
+</div>
+</div>
+<p>As such you’ll not be surprised to learn that there are <code>as.data.frame()</code> and <code>as_tibble()</code> methods defined for ev objects, so you can coerce it to whatever your preferred form of tabular data object happens to be. I’m a tibble girl myself so…</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb41" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb41-1">tibble<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
 background-color: null;
@@ -274,7 +512,368 @@ font-style: inherit;">as_tibble</span>(events)</span></code></pre></div>
 1     0   100    24     9     1     1</code></pre>
 </div>
 </div>
-<p>…is in fact a tibble.</p>
+</section>
+<section id="danielle-briefly-loses-her-mind" class="level3">
+<h3 class="anchored" data-anchor-id="danielle-briefly-loses-her-mind">Danielle briefly loses her mind</h3>
+<p>Okay, it’s almost time move on to <code>mrgsim()</code>, the function that we use to run the simulation itself. But we have one little matter to clear up first.</p>
+<p>Earlier I promised you a “Danielle gets confused by <code>ev()</code>” moment, but the previous section makes it look as if <code>ev()</code> is very simple. To see where Danielle kind of lost her mind momentarily, let’s return to the “simple” model simulation pipeline that I used at the start of the post:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb43" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb43-1">mod <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span> </span>
+<span id="cb43-2">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">ev</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">amt =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">100</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">ii =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">24</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">addl =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">9</span>) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span></span>
+<span id="cb43-3">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">mrgsim</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">end =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">480</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">delta =</span> <span class="fl" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">0.1</span>)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Model:  pk1 
+Dim:    4802 x 5 
+Time:   0 to 480 
+ID:     1 
+    ID time     EV   CENT     CP
+1:   1  0.0   0.00  0.000 0.0000
+2:   1  0.0 100.00  0.000 0.0000
+3:   1  0.1  90.48  9.492 0.4746
+4:   1  0.2  81.87 18.034 0.9017
+5:   1  0.3  74.08 25.715 1.2858
+6:   1  0.4  67.03 32.619 1.6309
+7:   1  0.5  60.65 38.819 1.9409
+8:   1  0.6  54.88 44.383 2.2191</code></pre>
+</div>
+</div>
+<p>If you’re expecting <code>ev()</code> to return an “ev” object, this pipeline makes absolutely no sense whatsoever. An ev object like <code>events</code> simply does not have the information required to run the simulations, so… something weird is happening. It shouldn’t work, but it does???</p>
+<p>I cried briefly. Then I read the documentation properly. Then I cried some more.</p>
+<p>Okay, an explanation is required. What’s going on here is that much like <code>modlib()</code>m the <code>ev()</code> function is not type stable, and returns a qualitatively different kind of object when called with a different signature. When passed a model object as the first argument, it doesn’t in fact return an events schedule. It returns a model object:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb45" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb45-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">ev</span>(mod, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">amt =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">100</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">ii =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">24</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">addl =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">9</span>)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+
+-----------------  source: pk1.cpp  -----------------
+
+  project: /home/danielle/R...gsolve/models
+  shared object: pk1-so-cc0539be991a 
+
+  time:          start: 0 end: 24 delta: 1
+                 add: &lt;none&gt;
+
+  compartments:  EV CENT [2]
+  parameters:    CL V KA [3]
+  captures:      CP [1]
+  omega:         0x0 
+  sigma:         0x0 
+
+  solver:        atol: 1e-08 rtol: 1e-08 maxsteps: 20k
+------------------------------------------------------</code></pre>
+</div>
+</div>
+<p>This model output <em>looks</em> to be the same as the original model object <code>mod</code>, but it isn’t, because it now has an ev object secretly tucked away in the <code>@args</code> slot (see, I told you that this weird excursion into mrgmod object slots was going to become relevant!)</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb47" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb47-1">mod_with_ev <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">ev</span>(mod, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">amt =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">100</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">ii =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">24</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">addl =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">9</span>)</span></code></pre></div>
+</div>
+<p>Compare the pair:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb48" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb48-1">mod<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">@</span>args</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>list()</code></pre>
+</div>
+<div class="sourceCode cell-code" id="cb50" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb50-1">mod_with_ev<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">@</span>args</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>$events
+Events:
+  time amt ii addl cmt evid
+1    0 100 24    9   1    1</code></pre>
+</div>
+</div>
+<p>The <code>mrgsim()</code> function has been written to accommodate this kind of workflow, and so is able to extract all the information it needs when called at the end of a pipeline like this one:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb52" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb52-1">mod <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span> </span>
+<span id="cb52-2">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">ev</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">amt =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">100</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">ii =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">24</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">addl =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">9</span>) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span></span>
+<span id="cb52-3">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">mrgsim</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">end =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">480</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">delta =</span> <span class="fl" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">0.1</span>)</span></code></pre></div>
+</div>
+<p>In essence, that’s how the magic works here. It’s a very clever trick, and I imagine it’s something that a lot of data analysts find super handy… but not something I’d want to do when writing package code. When calling mrgsolve in a more programmatic way I’d probably write code that looks more like this:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb53" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb53-1">mod <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">mread</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">model =</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"pk1"</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">project =</span> modlib_dir, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">quiet =</span> <span class="cn" style="color: #8f5902;
+background-color: null;
+font-style: inherit;">TRUE</span>)</span>
+<span id="cb53-2">events <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">ev</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">amt =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">100</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">ii =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">24</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">addl =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">9</span>)</span>
+<span id="cb53-3"></span>
+<span id="cb53-4">out <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">mrgsim</span>(</span>
+<span id="cb53-5">  <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">x =</span> mod,</span>
+<span id="cb53-6">  <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">events =</span> events,</span>
+<span id="cb53-7">  <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">end =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">480</span>,</span>
+<span id="cb53-8">  <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">delta =</span> <span class="fl" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">0.1</span></span>
+<span id="cb53-9">)</span></code></pre></div>
+</div>
+<p>Okay, now that we’ve resolved that question, let’s return to the business of running simulations?</p>
+</section>
+<section id="running-simulations" class="level3">
+<h3 class="anchored" data-anchor-id="running-simulations">Running simulations</h3>
+<p>Here’s what we get as the output:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb54" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb54-1">out</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Model:  pk1 
+Dim:    4802 x 5 
+Time:   0 to 480 
+ID:     1 
+    ID time     EV   CENT     CP
+1:   1  0.0   0.00  0.000 0.0000
+2:   1  0.0 100.00  0.000 0.0000
+3:   1  0.1  90.48  9.492 0.4746
+4:   1  0.2  81.87 18.034 0.9017
+5:   1  0.3  74.08 25.715 1.2858
+6:   1  0.4  67.03 32.619 1.6309
+7:   1  0.5  60.65 38.819 1.9409
+8:   1  0.6  54.88 44.383 2.2191</code></pre>
+</div>
+</div>
+<p>Again, this is not technically a data frame, but it’s easily coercible to one, so of that’s what you want you can do this:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb56" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb56-1">tibble<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">as_tibble</span>(out)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code># A tibble: 4,802 × 5
+      ID  time    EV  CENT    CP
+   &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;
+ 1     1   0     0    0    0    
+ 2     1   0   100    0    0    
+ 3     1   0.1  90.5  9.49 0.475
+ 4     1   0.2  81.9 18.0  0.902
+ 5     1   0.3  74.1 25.7  1.29 
+ 6     1   0.4  67.0 32.6  1.63 
+ 7     1   0.5  60.7 38.8  1.94 
+ 8     1   0.6  54.9 44.4  2.22 
+ 9     1   0.7  49.7 49.4  2.47 
+10     1   0.8  44.9 53.8  2.69 
+# ℹ 4,792 more rows</code></pre>
+</div>
+</div>
+</section>
+<section id="plotting-the-results" class="level3">
+<h3 class="anchored" data-anchor-id="plotting-the-results">Plotting the results</h3>
+<p>We can use the regular <code>plot()</code> method here:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb58" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb58-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">plot</span>(out)</span></code></pre></div>
+<div class="cell-output-display">
+<p><img src="https://blog.djnavarro.net/posts/2023-08-10_mrgsolve/index_files/figure-html/unnamed-chunk-31-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>But there’s nothing stopping us from converting the output to a tibble and then tinkering to your hearts content using ggplot2 or whatever:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb59" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb59-1">out_lon <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> out <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span></span>
+<span id="cb59-2">  tibble<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">as_tibble</span>() <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span></span>
+<span id="cb59-3">  tidyr<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">pivot_longer</span>(</span>
+<span id="cb59-4">    <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">cols =</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">c</span>(EV, CENT, CP), </span>
+<span id="cb59-5">    <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">names_to =</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"variable"</span>, </span>
+<span id="cb59-6">    <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">values_to =</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"value"</span></span>
+<span id="cb59-7">  )</span>
+<span id="cb59-8"></span>
+<span id="cb59-9">ggplot2<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">ggplot</span>(out_lon, ggplot2<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">aes</span>(time, value)) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">+</span> </span>
+<span id="cb59-10">  ggplot2<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">geom_line</span>() <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">+</span> </span>
+<span id="cb59-11">  ggplot2<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">facet_wrap</span>(<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">~</span> variable, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">scales =</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"free_y"</span>)</span></code></pre></div>
+<div class="cell-output-display">
+<p><img src="https://blog.djnavarro.net/posts/2023-08-10_mrgsolve/index_files/figure-html/unnamed-chunk-32-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+</section>
+</section>
+<section id="resources" class="level2">
+<h2 class="anchored" data-anchor-id="resources">Resources</h2>
+<ul>
+<li><p>The <a href="https://mrgsolve.org/user-guide/">mrgsolve user guide</a> is probably not the place you want to start, because it very quickly dives in deep and talks about the domain specific language used to specify models, but once you’ve wrapped your head around the basics that’s the place to look for details.</p></li>
+<li><p>The <a href="https://mrgsolve.org/vignettes/">mrgsolve vignettes</a> provide a nice place to start, but one thing you need to keep in mind is that the vignettes posted at <a href="https://mrgsolve.org/vignettes/">mrgsolve.org/vignettes</a> are not identical to the vignettes that appear on the pkgdown website (i.e., <a href="https://mrgsolve.org/docs/articles/">mrgsolve.org/docs/articles</a>), so it’s worth being careful to check which one you’re looking at!</p></li>
+<li><p>Speaking of which, the <a href="https://mrgsolve.org/docs/">mrgsolve pkgdown site</a> provides all the usual documentation that you’d expect of an R package in the usual format. Function reference guides, some vignettes, links to github, etc., all that is there.</p></li>
+<li><p>The <a href="https://mrgsolve.org/learn.html">learn mrgsolve</a> page on the mrgsolve website has links to presentations, courses, and other things that can be helpful in getting started.</p></li>
+<li><p>Finally, there’s a <a href="https://mrgsolve.org/blog/">blog</a> associated with the package that has a variety of tips, tricks, updates and news.</p></li>
+</ul>
 <!--
 
 # simulations -------------------------------------------------------------
@@ -333,6 +932,58 @@ ggplot(dat, aes(time, value)) +
   facet_wrap(~ variable, scales = "free_y")
 
 -->
+<!-- EXAMPLE 02 -->
+
+<!-- 
+
+# I am working through this:
+# https://mrgsolve.org/vignettes/events.html
+#
+# But... note: in keeping with the "yolo design" that mrgsolve seems to 
+# embody, the "events vignette" directly linked from the home page is NOT
+# the same as the "events vignette" in the pkgdown site. For reasons that
+# utterly escape me, they don't even use the same model??????
+#
+# diving a little deeper into event schedules. but first, a model:
+# see: https://mrgsolve.org/docs/reference/modlib_pk.html
+#
+# mread at least seems type stable, so let's use it. loading the pk1cmt
+# model, and overriding the default simulation time points
+mod <- mread("pk1cmt", modlib(), end = 216, delta = 0.1)
+
+# creating an event object with ev()
+# note ev() is not type stable, it behaves differently if passed a model object
+e <- ev(amt=100, ii=24, addl=6)
+
+# a better example of a piped workflow than the earlier one...
+mod |> 
+  mrgsim(events = e) |> 
+  plot(EV1 + CP ~ time)
+
+# digression.... okay here's what I hate about ev(). you can do this... 
+mod |> 
+  mrgsim(events = ev(amt = 100, ii = 24, addl = 6)) |> 
+  plot(EV1 + CP ~ time)
+
+# and, in what I can only call an example of batshit polymorphism, also this...
+mod |> 
+  ev(amt = 100, ii = 24, addl = 6) |>
+  mrgsim() |> 
+  plot(EV1 + CP ~ time)
+
+# ...unpacking the madness, here's what's actually happening in the second 
+# pipeline: it's actually returning a model object (class mrgmod), *not* an
+# events object (class ev)
+m <- ev(x = mod, amt = 100, ii = 24, addl = 6)
+class(m)
+
+# however... tucked away in the attributes is the events object:
+e_attr <- attr(m, "args")$events
+
+# explanation (sort of) is in the docs on the mrgmod class:
+# https://mrgsolve.org/docs/reference/mrgmod-class.html
+
+-->
 
 
 </section>
@@ -341,9 +992,18 @@ ggplot(dat, aes(time, value)) +
 <div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
 
 <ol>
-<li id="fn1"><p>If you want to be a jerk you can pull the same information from the object attributes using <code>attr(mod, "code")</code>, but if you bypass the API provided by the developer like that, it’s “off-label” usage and there’s absolutely no guarantee that it will work in the future.↩︎</p></li>
-<li id="fn2"><p>I really need to <em>learn</em> NONMEM. It’s becoming a bit absurd that I’m learning everything else before NONMEM. Oh well, I was never someone to do things in the proper order.↩︎</p></li>
-<li id="fn3"><p>Yes, I’m a jerk: you can find it with <code>attr(events, "data")</code>↩︎</p></li>
+<li id="fn1"><p>In this respect R is the unchallenged queen of languages in pharmacometrics. It’s very different to data science in the tech space, where Python is the lingua franca and R is seen as a second-class citizen. I have not yet seen a single example of anyone using Python for data analysis in this world. Judging from papers I’ve read, Julia has a small presence (e.g., you can use Turing.jl for building ODE models in Julia), but that’s the only time I’ve ever seen any statistical language other than R in this space.↩︎</p></li>
+<li id="fn2"><p>The acronym PK is universally used as shorthand for “pharmacokinetics”, and a PK model is one where the primary variable you’re interested in modelling is the plasma concentration over time for some drug. If you’re totally new to this space, the post I wrote on <a href="../../posts/2023-04-26_non-compartmental-analysis/">non-compartmental analysis</a> was written from a total-newbie perspective and spells out a lot the basic terminology used in PK modelling.↩︎</p></li>
+<li id="fn3"><p>There are a <em>lot</em> of tools in this space: NONMEM is the oldest and most-widely used, but in addition there’s Stan/Torsten, Monolix, nlmixr, Phoenix NLME, and probably many others I don’t know about yet…↩︎</p></li>
+<li id="fn4"><p>I’m can’t tell if the original package is still under active development or if it’s been deprecated. The <a href="https://nlmixrdevelopment.github.io/RxODE/">RxODE</a> package still appears on the nlmixr website and on GitHub, but the package is (at present?) archived on CRAN.↩︎</p></li>
+<li id="fn5"><p>Specifically, it wraps the public domain Fortran library <a href="https://computing.llnl.gov/projects/odepack">ODEPACK</a>↩︎</p></li>
+<li id="fn6"><p>As far as I can tell, the mrgsolve package builds on a per-session basis, so if I were to repeat the same command in the R session that knits this blog post, I’d see a different message informing me that mrgsolve is using the cached version of the compiled model.↩︎</p></li>
+<li id="fn7"><p>I should say, for the record, that I’m not being critical here. Software developers who don’t work in statistics have a tendency to get very angry at R (and R developers) for writing hyper-flexible functions that produce wildly different output types depending on the input. While I do understand that annoyance, I also think it’s often misplaced. R is fundamentally a <em>statistical programming language</em>. It’s not trying to be Python, and it’s even less interested in being Rust. You wouldn’t think it from browsing the “rstats” hashtag on social media (which is massively biased towards developers), but the typical R user is someone working interactively at the console, constructing a script iteratively as they explore and work with the data set they’ve been tasked to analyse. In that context, the hyper-flexibility of a lot of R functions is designed for the convenience of the <em>analyst</em>. It’s not there for your convenience as a developer. Of course, I also think that package developers should always ensure that there are type-stable versions of their functions that other R developers can call in package code, but… for example, mrgsolve does in fact support this. If you’re a developer calling <code>mrgsolve::modlib()</code> from within a package then IMO you don’t get to whine about mrgsolve doing it wrong. In that scenario you get what you deserve for writing <em>your</em> package the wrong way.↩︎</p></li>
+<li id="fn8"><p>Developers reading this are probably wondering where the model shared object ends up when compilation happens. By default <code>mread()</code> puts the compiled model in the R temp folder, but you can override this in a persistent way by setting the <code>"mrgsolve.soloc"</code> option, or overriding it in the call to <code>mread()</code> via the <code>soloc</code> argument. You can also suppress compilation if you want bt setting <code>compile = FALSE</code>. But probably any devs reading this would likely discover that within 5 minutes of reading the documentation anyway so there’s no real need for me to mention it.↩︎</p></li>
+<li id="fn9"><p>I mean… of the <em>widely-used</em> OOP systems, it’s the one I’m least comfortable with. The wild abandon with which R spawns new object oriented programming systems is… a lot to keep up with. Honestly it’s exhausting.↩︎</p></li>
+<li id="fn10"><p>Why yes, this blog post is <em>also</em> an exercise in “Danielle reminds herself how S4 works and no she bloody well is not going to talk about multiple inheritance and multiple dispatch in S4 here she’s not that much of a masochist”.↩︎</p></li>
+<li id="fn11"><p>As an aside, <code>param(mod)</code> returns an S4 object of class “parameter_list” which in turn has a <code>show()</code> method that provides that prettified looking table pf parameters, but from a practical perspective you might just want to coerce it to a regular list using <code>as.list(param(mod))</code>.↩︎</p></li>
+<li id="fn12"><p>I really need to <em>learn</em> NONMEM. It’s becoming a bit absurd that I’m learning everything else before NONMEM. Oh well, I was never someone to do things in the proper order.↩︎</p></li>
 </ol>
 </section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div id="quarto-reuse" class="quarto-appendix-contents"><div><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2023,
   author = {Navarro, Danielle},
