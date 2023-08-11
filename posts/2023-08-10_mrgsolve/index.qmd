@@ -148,17 +148,15 @@ mod <- mread(model = "pk1", project = modlib_dir)
 
 Optionally you can provide a file name for the model specification file that sits within the `project` folder, but in this case we don't need to: if the `file` argument is unspecified `mread()` assumes that the file name is the same as the `model` name with file extension `.cpp`.^[Developers reading this are probably wondering where the model shared object ends up when compilation happens. By default `mread()` puts the compiled model in the R temp folder, but you can override this in a persistent way by setting the `"mrgsolve.soloc"` option, or overriding it in the call to `mread()` via the `soloc` argument. You can also suppress compilation if you want bt setting `compile = FALSE`. But probably any devs reading this would likely discover that within 5 minutes of reading the documentation anyway so there's no real need for me to mention it.]
 
-### S4 classes in mrgsolve
+### Model objects
 
-The mrgsolve package is build using S4 classes and of the great many object oriented programming systems available in R that's the one I'm least comfortable with.^[I mean... of the *widely-used* OOP systems, it's the one I'm least comfortable with. The wild abandon with which R spawns new object oriented programming systems is... a lot to keep up with. Honestly it's exhausting.] But hey... I've just reread the [S4 chapter in Advanced R](https://adv-r.hadley.nz/s4.html), so let's see how we go with this, shall we?
+The mrgsolve package is built using S4 classes and of the great many object oriented programming systems available in R that's the one I'm least comfortable with.^[I mean... of the *widely-used* OOP systems, it's the one I'm least comfortable with. The wild abandon with which R spawns new object oriented programming systems is... a lot to keep up with. Honestly it's exhausting.] But hey... I've just reread the [S4 chapter in Advanced R](https://adv-r.hadley.nz/s4.html), so let's see how we go with this, shall we? First, I'll be polite and explicitly load the methods package:
 
 ```{r}
 library(methods)
 ```
 
-### Model objects
-
-To begin with, let's find out what kind of object `mod` is and what methods are defined for it:
+Next let's see what kind of object `mod` is and what methods are defined for it:
 
 ```{r}
 is(mod)
@@ -204,26 +202,15 @@ events <- ev(amt = 100, ii = 24, addl = 9)
 events
 ```
 
-The `events` object looks a lot like a data frame, but is technically an S4 object with class ev. We can verify this by calling `is()`:
-
-```{r}
-is(events)
-```
-
-However, if you take a look and see what slot names are defined for the `events` object, you might be unsurprised to discover that it only has two slots and is essentially just a data frame:
-
-```{r}
-slotNames(events)
-```
-
-As such you'll not be surprised to learn that there are `as.data.frame()` and `as_tibble()` methods defined for ev objects, so you can coerce it to whatever your preferred form of tabular data object happens to be. I'm a tibble girl myself so...
+The `events` object looks a lot like a data frame, but is technically an S4 object with class "ev". However, an ev object has only two slots, one of which is `@data` and -- as you'd expect -- it stores the data set as a data frame internally. So... yeah, it's basically a data frame, and since there are `as.data.frame()` and `as_tibble()` methods defined for ev objects, so you can coerce it to whatever your preferred form of tabular data object happens to be.^[There is also an `as.ev()` function that allows conversion in the other direction.] I'm a tibble girl myself so...
 
 ```{r}
 tibble::as_tibble(events)
 ```
 
+I'll talk more about the fancier ways in which you can use `ev()` and the related function `data_set()` to define simulations with elaborate dosing schedule and allow variation in dosing schedules across individuals, but we're not at the point where that's necessary yet. Right now, all we're trying to do is understand what happens in the simple simulation I showed at the start of this post.
 
-### Danielle briefly loses her mind
+### Danielle briefly loses her f**king mind
 
 Okay, it's almost time move on to `mrgsim()`, the function that we use to run the simulation itself. But we have one little matter to clear up first.
 
@@ -237,37 +224,37 @@ mod |>
 
 If you're expecting `ev()` to return an "ev" object, this pipeline makes absolutely no sense whatsoever. An ev object like `events` simply does not have the information required to run the simulations, so... something weird is happening. It shouldn't work, but it does???
 
-I cried briefly. Then I read the documentation properly. Then I cried some more. 
+I cried briefly. Then I read the [documentation](https://mrgsolve.org/docs/reference/ev.html) properly. Then I cried some more. 
 
-Okay, an explanation is required. What's going on here is that much like `modlib()`m the `ev()` function is not type stable, and returns a qualitatively different kind of object when called with a different signature. When passed a model object as the first argument, it doesn't in fact return an events schedule. It returns a model object:
+After reading the documentation carefully, I now understand what's going on here, but an explanation is required because if you don't look closely it looks like magic. Recall from earlier in the post I mentioned that `modlib()` is not type stable: you get qualitatively different results depending on what kind of input you pass it. The `ev()` function has the same property. When passed a model object as the first argument, it doesn't in fact return an events schedule. It returns... a model object?^[To be precise, `ev()` is an S4 generic function that does method dispatch on the `x` argument. If `x` is missing, the relevant `ev()` method returns an "ev" object. However, if `x` has class "mrgmod", the relevant method returns another "mrgmod" object. I'll confess this makes me a little uneasy.]
 
 ```{r}
 ev(mod, amt = 100, ii = 24, addl = 9)
 ```
 
-This model output *looks* to be the same as the original model object `mod`, but it isn't, because it now has an ev object secretly tucked away in the `@args` slot (see, I told you that this weird excursion into mrgmod object slots was going to become relevant!)
+Looking at the printed output, you might think that the output here is identical to the original model object `mod`, but in this case looks are deceving. The new model stores the event schedule internally: it's tucked away in the `@args` slot.^[Oh look, that apparently-irrelevant excursion she did talking about the mrgmod object slots turns out to be relevant! It's almost as if she's written things before!] To illustrate, let's assign the output to a variable:
 
 ```{r}
 mod_with_ev <- ev(mod, amt = 100, ii = 24, addl = 9)
 ```
 
-Compare the pair:
+Now compare the pair:
 
 ```{r}
 mod@args
 mod_with_ev@args
 ```
 
-The `mrgsim()` function has been written to accommodate this kind of workflow, and so is able to extract all the information it needs when called at the end of a pipeline like this one:
+So now things become a little clearer. After seeing this, what you might -- correctly! -- conclude is that at the other end of the pipeline the `mrgsim()` function is aware that the event schedule might not be passed explicitly, and knows to check within the model object if that is the case. Knowing all this, we're now in a position to understand what happens during a pipeline like this: 
 
 ```{r}
 #| results: hide
-mod |> 
+modlib("pk1", quiet = TRUE) |> 
   ev(amt = 100, ii = 24, addl = 9) |>
   mrgsim(end = 480, delta = 0.1)
 ```
 
-In essence, that's how the magic works here. It's a very clever trick, and I imagine it's something that a lot of data analysts find super handy... but not something I'd want to do when writing package code. When calling mrgsolve in a programmatic way I'd probably write code that looks more like this:
+It's a very clever trick, and I imagine it's something that a lot of data analysts find super handy. That said, it's not something I would want to use myself. I'm a simple girl who likes her coffee black and her functions type stable, so for my own workflows I'm probably going to write code that looks more like this:
 
 ```{r}
 out <- mrgsim_e(
@@ -278,7 +265,9 @@ out <- mrgsim_e(
 )
 ```
 
-Notice that: I called `mrgsim_e()` here rather than `mrgsim()`. Because mrgsolve recognises that sometimes developers might want to call it programmatically, this version of the function requires the user to pass an event object. The sneaky "event-schedule-inside-the-model-object" piping trick I showed at the start of the post does not work with `mrgsim_e()`, which makes it a safer choice when running simulations programmatically.^[There are several other variants on `mrgsim()` that enforce different constraints. I haven't talked about `data_set()` and related functions in this post, for instance, but there's a `mrgsim_d()` variant that requires the user to pass a data set object.] Theoretically, I suppose, still be potential for strange errors caused by method dispatch in `ev()` if I wrote something like this:
+Notice that: I called `mrgsim_e()` here rather than `mrgsim()`. Because mrgsolve recognises that sometimes developers might want to call it programmatically, this version of the function requires the user to pass an event object. The sneaky "event-schedule-inside-the-model-object" piping trick I showed at the start of the post does not work with `mrgsim_e()`, which makes it a safer choice when running simulations programmatically.^[There are several other variants on `mrgsim()` that enforce different constraints. I haven't talked about `data_set()` and related functions in this post, for instance, but there's a `mrgsim_d()` variant that requires the user to pass a data set object.] 
+
+Theoretically, I suppose, there's still a risk in my code because I'm calling `ev()` and might one day forget that it has this special case, but after a bit of thought it seems pretty outlandish. I mean, yes, let's suppose I wrote a very silly function like this one:
 
 ```{r}
 foolish_simulation <- function(...) {
@@ -291,7 +280,7 @@ foolish_simulation <- function(...) {
 }
 ```
 
-This code is extremely unwise, because the user could really mess with things depending on what gets pass to `ev()` via the dots. In the most absurd case, if the user tried to pass `x = 100` here thinking that it would add a column labelled `x` to  the event schedule it would actually trigger method dispatch on the `x` object, and since `ev()` doesn't have a method for that case, the user would receive a weird error. But... this seems like a bizarre edge case frankly. *Even* if the user somehow passed an mrgmod object to `ev()` in this fashion, the result is still an error: 
+This code is unwise, because the user could really mess with things depending on what gets pass to `ev()` via the dots. In the most absurd case, if the user tried to pass `x = 100` here thinking that it would add a column labelled `x` to  the event schedule^[A trick that would work perfectly well if the user wanted to add a column labelled `y`, I might add...] it would actually trigger method dispatch on the `x` object, and since `ev()` doesn't have a method for numeric-valued `x` argument, the user would receive a weird error. But this seems like a bizarre edge case -- whyyyyy would I ever write this function in the first place????? -- and *even* if the user somehow passed an mrgmod object to `ev()` in this fashion, the result is still an error: 
 
 ```{r}
 #| error: true
@@ -299,9 +288,7 @@ foolish_simulation(amt = 100, ii = 24, addl = 9, x = 100)
 foolish_simulation(amt = 100, ii = 24, addl = 9, x = mod)
 ```
 
-About the absolute worst case I can think of is if (a) the developer wrote some code that was exactly as absurd as `foolish_simulation()` and then (b) the user passed an argument to `ev()` that altered the event table itself. But that's... not worth worrying about. 
-
-TL;DR: Danielle wrapped herself up in knots trying to get a handle on method dispatch in `ev()`. That's the only thing going on here, so let's move along shall we?
+So perhaps there's no need to worry about this outlandish scenario. Danielle wrapped herself up in knots trying to get a handle on method dispatch in `ev()`. That's not very exciting, so let's move along shall we?
 
 ### Running simulations
 
