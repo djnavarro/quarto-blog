@@ -500,6 +500,8 @@ As before, I haven't tried to choose model parameters in the principled way: I j
 
 ### Example 3: Other customisations
 
+I'll go through one last example, just to illustrate some of the other things you can build into your model specification file. The code below specifies a one-compartment population-PK model, and it incorporates a few features that haven't appeared in any of the examples so far. First, the code:
+
 ```{cpp}
 #| filename: "example3.cpp"
 #| file: "example3.cpp"
@@ -507,34 +509,61 @@ As before, I haven't tried to choose model parameters in the principled way: I j
 #| code-line-numbers: true
 ```
 
-Simulation with two male subjects both at 70kg weight:
+There's a few things to note here.
+
+- There is a binary-valued covariate `SEX`^[I am absolutely **not** going to enter into any discussion of the respects in which sex is not strictly a binary variable, not in this post. There is a time and a place for that conversation, and this is neither that time nor that place. I mean, we're talking about a category of statistical models that simplify the entire human body into "a couple of leaky buckets and a tinfoil ODE system". They are extremely **useful** models, per George Box's famous aphorism, but one does not ever presume they are biologically accurate. That would be absurd.] and a continuous covariate `WT` (weight) specified in the `[PARAM]` block. Coefficients specifying the effect of sex on distribution volume `SEXV` and the effect of weight on clearance `WTCL` are also included in the `[PARAM]` block. Although from a statistical perspective the value of the covariate that varies across person (`WT`) and the regression coefficient specifying an effect `WTCL` are very different kinds of thing, from a simulation perspective they're both just numbers you can feed into the expressions in the `[MAIN]` block that define the pharmacokinetic quantities `CL`, `V`, and `KA`.  
+
+- The `[OMEGA]` block now has correlated random effects. I've used the `@block` option to indicate that the off-diagonal elements are included in the code block, and the `@correlation` option to indicate that the off-diagonal elements are correlations (rather than covariances).
+
+- We now have sources of measurement error included in the model specification. The scale of the noise terms is set in the [`[SIGMA]`](https://mrgsolve.org/user-guide/specification.html#sec-block-sigma) code block, and for this model we include both proportional error (variability scales proportional to the true value) and additive error (constant variability of error). Note that the `[SIGMA]` block is used only to declare the variables and set their values. To actually incorporate the measurement error into the model code, we use the `[TABLE]` block.
+
+- The [`[TABLE]`](https://mrgsolve.org/user-guide/specification.html#sec-block-table) block contains C++ code that is executed at the end of each time step, before the simulation steps forward to the next point in time. At this point the drug amounts in each compartment have been computed, as have any time-point dependent stochastic terms (i.e., the noise terms specified in the `[SIGMA]` block), and we can use them to calculate other quantities. In this case, I've used the `[TABLE]` block to calculate the blood plasma concentration `CP`, and to calculate a hypothetical dependent variable `DV` that has noise added.  
+
+- The `[ODE]` block has been replaced with a [`[PKMODEL]`](https://mrgsolve.org/user-guide/specification.html#pkmodel) block. This is used to indicate that mrgsolve should use analytic solutions rather than an ODE solver. As you might expect, this is only possible for a smallish subset of models that (a) have analytic solutions that (b) are known to mrgsolve. In this particular case the model is a standard one-compartment model, for which analytic solutions are available. The `ncmt = 1` part of this block indicates that it's a one-compartment model, and the `depot = TRUE` part indicates that the dosing compartment (the gut, in this case) should be included in the model even though it's not a "real" compartment. Additional information on how this code block is parsed is [here](https://mrgsolve.org/docs/reference/PKMODEL.html).
+
+To see all this at work, let's run a small simulation. First, we'll read the model specification file and compile the model:
 
 ```{r}
-# read model from file
 mod <- mread_file(file = "example3.cpp", quiet = TRUE)
+```
 
-# show default parameters
+Next, let's take a look at the default parameters in this model. As you can see in the output, by default the subject is presumed to be a male who weighs 70kg:
+
+```{r}
 param(mod)
+```
 
-# define events and times
+As usual, we'll specify some dosing events and some time points at which the simulation will be evaluated. I'll also set it up that we always simulate two subjects at whatever parameter values we feed into the simulation:
+
+```{r}
 events <- ev_expand(amt = 10, ii = 48, addl = 3, ID = 1:2)
 times  <- tgrid(start = 0, end = 240, delta = 0.5)
+```
 
-# run simulation and plot results
+Okay, now let's run a simulation at the default parameter values. Here's some data from two male subjects who both weigh 70kg:
+
+```{r}
 out <- mrgsim_d(mod, data = events, tgrid = times)
 plot(out, ~ CP + DV)
 ```
 
-Update parameters and rerun as two female subjects with weight 60kg:
+The `~ CP + DV` formula in the `plot()` command is used to control which variables are plotted. I don't want to show everything in these plots: we're showing the drug concentration in the central compartment `CP`, and the hypothetical dependent variable `DV` obtained by adding measurement error to the `CP` value.
+
+But suppose we didn't actually want to simulate a 70kg male, and instead we want a 60kg female. To specify this, we have to update the relevant parameters in the model: 
 
 ```{r}
-# update model parameters
 mod <- param(mod, SEX = 1, WT = 60)
+```
 
-# show model parameters
+So now our model parameters look like this:
+
+```{r}
 param(mod)
+```
 
-# run simulation and plot results
+Simulating from the model at these parameter settings gives us this:
+
+```{r}
 out <- mrgsim_d(mod, data = events, tgrid = times)
 plot(out, ~ CP + DV)
 ```
