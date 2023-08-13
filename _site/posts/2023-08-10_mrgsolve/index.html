@@ -241,17 +241,46 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </div>
 <section id="a-simple-example" class="level2">
 <h2 class="anchored" data-anchor-id="a-simple-example">A simple example</h2>
-<p>Okay, let’s get started. When I started looking into mrgsolve, the place I started was with the vignettes on the package website, so I’ll start this post by using a simple modelling example taken from the <a href="https://mrgsolve.org/vignettes/01-get-started.html">get started</a> page.</p>
-<p>The way mrgsolve is designed allows you to write your own custom models, and later in the post I’ll talk about how this is done, but it also comes with a collection of predefined models that you can access using the <code>modlib()</code> function. So I’ll start there:</p>
+<p>Okay, let’s get started. The mrgsolve package is build on top of an open source ODE solver,<a href="#fn5" class="footnote-ref" id="fnref5" role="doc-noteref"><sup>5</sup></a> but the user doesn’t need to call it directly. Instead, a model is constructed using a <strong>model specification file</strong> (more on that later) that is then compiled to C++. This compiled model is used to run simulations, and it’s this compiled model that calls the ODE solvers. As a example, let’s use this code taken from the <a href="https://mrgsolve.org/vignettes/01-get-started.html">get started</a> page, which uses <code>modlib()</code> to use one of the predefined model specifications that come bundled with mrgsolve:</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb2"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a>mod <span class="ot">&lt;-</span> <span class="fu">modlib</span>(<span class="st">"pk1"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stderr">
 <pre><code>Building pk1 ... done.</code></pre>
 </div>
 </div>
-<p>In this code, <code>"pk1"</code> refers to the name of one of the model that comes bundled with mrgsolve… and there will be exactly zero pharmacometricians in this world that are surprised to discover that this is a one-compartment PK model with first-order absorption into the central compartment, and first-order elimination from the central compartment. To see what parameters are used in this version of the model we can call <code>param()</code>…</p>
+<p>In this code, <code>"pk1"</code> refers to the name of one of the model that comes bundled with mrgsolve… and there will be exactly zero pharmacometricians in this world that are surprised to discover that this is a one-compartment PK model with first-order absorption into the central compartment, and first-order elimination from the central compartment. If we print out the model object, we get a nice little summary:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb4"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="fu">param</span>(mod)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb4"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a>mod</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+
+-----------------  source: pk1.cpp  -----------------
+
+  project: /home/danielle/R...gsolve/models
+  shared object: pk1-so-1c599424c5263 
+
+  time:          start: 0 end: 24 delta: 1
+                 add: &lt;none&gt;
+
+  compartments:  EV CENT [2]
+  parameters:    CL V KA [3]
+  captures:      CP [1]
+  omega:         0x0 
+  sigma:         0x0 
+
+  solver:        atol: 1e-08 rtol: 1e-08 maxsteps: 20k
+------------------------------------------------------</code></pre>
+</div>
+</div>
+<p>A few months ago very little of this would have made sense to me, but I’ve – apparently – become familiar enough with conventions in pharamacometrics that this now looks very easy to read. For this initial example, the bits that matter most are these:</p>
+<ul>
+<li><p>We have a list of compartments: CENT refers to the central compartment, and EV refers to an extravascular dosing compartment through which the drug is administered. Note that although there are two listed compartments, this is really a one-compartment model: the extravascular dosing compartments are a necessary part of the model formalism, but no more than that.</p></li>
+<li><p>We have a list of parameters: clearance (CL) is a measure representing the volume of blood that can be fully cleared of the drug per unit time, volume of distribution (V) measures the size of the central compartment, and KA is the absorption rate constant governing how quickly the drug is absorbed from the extravascular compartment into the central compartment.</p></li>
+<li><p>When running a simulation, the drug amounts in the compartments CENT and EV will be returned as part of the output. However, we can also specify other “captured” quantities, which in this case adds CP, the drug concentration in the central compartment.<a href="#fn6" class="footnote-ref" id="fnref6" role="doc-noteref"><sup>6</sup></a></p></li>
+</ul>
+<p>The parameter values (i.e.&nbsp;CL, V, KA) are part of the model specification, and you can see the values assigned to those parameters by calling <code>param()</code>:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb6"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="fu">param</span>(mod)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>
  Model parameters (N=3):
@@ -260,13 +289,13 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
  KA   1     | .    .    </code></pre>
 </div>
 </div>
-<p>…and we see that out model assumes a clearance (CL) of 1, an aborption rate constant (KA) of 1, and a volume of distribution equal to 20. The mrgsolve package doesn’t keep track of units: it’s up to the user to make sure all the units are on the appropriate scale.</p>
-<p>The message printed to the console is probably equally unsurprising, but I’ll be good and explain it. The mrgsolve package is build on top of an open source ODE solver,<a href="#fn5" class="footnote-ref" id="fnref5" role="doc-noteref"><sup>5</sup></a> but the user doesn’t need to call it directly. Instead, a model is constructed using a model specification file (more on that later) that is then compiled to C++. This compiled model is used to run simulations, and it’s this compiled model that calls the ODE solvers. So when I called <code>modlib("pk1")</code>, it reads the model specification file and builds the compiled model.<a href="#fn6" class="footnote-ref" id="fnref6" role="doc-noteref"><sup>6</sup></a></p>
+<p>We see that our model assumes a clearance (CL) of 1, an aborption rate constant (KA) of 1, and a volume of distribution equal to 20. The mrgsolve package doesn’t keep track of units: it’s up to the user to make sure all the units are on the appropriate scale.</p>
+<p>Also note that <code>param()</code> function is both the “getter” and the “setter” for model parameters: <code>param(mod)</code> returns a parameter list object containing the parameters of <code>mod</code>, whereas <code>param(mod, CL = 2, KA = 2)</code> returns a modified model object with updated parameters.<a href="#fn7" class="footnote-ref" id="fnref7" role="doc-noteref"><sup>7</sup></a></p>
 <p>Okay so now we have a model object <code>mod</code> that specifies all our pharmacokinetic assumptions. In order to run a simulation, we also need to provide an <strong>event schedule</strong> that provides dosing information, and we’ll also need to say something about the time points at which we want to simulate the various pharmacokinetic quantities of interest. You can do this in a few different ways (which I’ll get to momentarily) but for the purposes of the initial example I’ll do it the same way that the “get started” vignette does, use a pipe-friendly workflow:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb6"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a>mod <span class="sc">|&gt;</span> </span>
-<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ev</span>(<span class="at">amt =</span> <span class="dv">100</span>, <span class="at">ii =</span> <span class="dv">24</span>, <span class="at">addl =</span> <span class="dv">9</span>) <span class="sc">|&gt;</span></span>
-<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mrgsim</span>(<span class="at">start =</span> <span class="dv">0</span>, <span class="at">end =</span> <span class="dv">480</span>, <span class="at">delta =</span> <span class="fl">0.1</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb8"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a>mod <span class="sc">|&gt;</span> </span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ev</span>(<span class="at">amt =</span> <span class="dv">100</span>, <span class="at">ii =</span> <span class="dv">24</span>, <span class="at">addl =</span> <span class="dv">9</span>) <span class="sc">|&gt;</span></span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mrgsim</span>(<span class="at">start =</span> <span class="dv">0</span>, <span class="at">end =</span> <span class="dv">480</span>, <span class="at">delta =</span> <span class="fl">0.1</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>Model:  pk1 
 Dim:    4802 x 5 
@@ -305,31 +334,31 @@ ID:     1
 </ul>
 <p>To help you get a sense of what the simulation results look like, the mrgsolve package provides a plot method for simulation results, so if I’d wanted to I could add a call to <code>plot()</code> at the end of the pipeline, and get this as the output:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb8"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a>mod <span class="sc">|&gt;</span> </span>
-<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ev</span>(<span class="at">amt =</span> <span class="dv">100</span>, <span class="at">ii =</span> <span class="dv">24</span>, <span class="at">addl =</span> <span class="dv">9</span>) <span class="sc">|&gt;</span></span>
-<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mrgsim</span>(<span class="at">start =</span> <span class="dv">0</span>, <span class="at">end =</span> <span class="dv">480</span>, <span class="at">delta =</span> <span class="fl">0.1</span>) <span class="sc">|&gt;</span></span>
-<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">plot</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb10"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a>mod <span class="sc">|&gt;</span> </span>
+<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ev</span>(<span class="at">amt =</span> <span class="dv">100</span>, <span class="at">ii =</span> <span class="dv">24</span>, <span class="at">addl =</span> <span class="dv">9</span>) <span class="sc">|&gt;</span></span>
+<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mrgsim</span>(<span class="at">start =</span> <span class="dv">0</span>, <span class="at">end =</span> <span class="dv">480</span>, <span class="at">delta =</span> <span class="fl">0.1</span>) <span class="sc">|&gt;</span></span>
+<span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">plot</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output-display">
-<p><img src="index_files/figure-html/unnamed-chunk-6-1.png" class="img-fluid" width="672"></p>
+<p><img src="index_files/figure-html/unnamed-chunk-7-1.png" class="img-fluid" width="672"></p>
 </div>
 </div>
 <p>Very nice.</p>
 </section>
 <section id="unpacking-the-example" class="level2">
 <h2 class="anchored" data-anchor-id="unpacking-the-example">Unpacking the example</h2>
-<p>Now things get a little messier. Under the hood the mrgsolve package is doing quite a lot of magic to make it all work, and there are some design choices here that you need to be aware of if you’re planning to call mrgsolve functions programmatically. In particular, some of the functions – by design – do not produce <a href="https://design.tidyverse.org/out-type-stability.html">type stable output</a>, so some care is involved if you’re going to write automations around them or call mrgsolve from another package.<a href="#fn7" class="footnote-ref" id="fnref7" role="doc-noteref"><sup>7</sup></a></p>
+<p>Now things get a little messier. Under the hood the mrgsolve package is doing quite a lot of magic to make it all work, and there are some design choices here that you need to be aware of if you’re planning to call mrgsolve functions programmatically. In particular, some of the functions – by design – do not produce <a href="https://design.tidyverse.org/out-type-stability.html">type stable output</a>, so some care is involved if you’re going to write automations around them or call mrgsolve from another package.<a href="#fn8" class="footnote-ref" id="fnref8" role="doc-noteref"><sup>8</sup></a></p>
 <section id="the-model-library" class="level3">
 <h3 class="anchored" data-anchor-id="the-model-library">The model library</h3>
 <p>Let’s start by taking a closer look at the library of pre-specified models that come bundled with mrgsolve. They’re stored in a package folder whose location is accessible by calling <code>modlib()</code> with no arguments:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb9"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="fu">modlib</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb11"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="fu">modlib</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>[1] "/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models"</code></pre>
 </div>
 </div>
 <p>As you can see, when called with no inputs <code>modlib()</code> doesn’t return a compiled model, and it simply returns the path to the model library folder. If you want a list of the models that come bundled with mrgsolve, you can call <code>modlib()</code> setting <code>list = TRUE</code>:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb11"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="fu">modlib</span>(<span class="at">list =</span> <span class="cn">TRUE</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb13"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="fu">modlib</span>(<span class="at">list =</span> <span class="cn">TRUE</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stderr">
 <pre><code>mrgsolve internal library:</code></pre>
 </div>
@@ -339,65 +368,35 @@ ID:     1
 </div>
 <p>Finally, if you want to build and use one of these model you can call <code>modlib()</code> and pass the name of the model you want as the <code>model</code> argument:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb14"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a>mod <span class="ot">&lt;-</span> <span class="fu">modlib</span>(<span class="at">model =</span> <span class="st">"pk1"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb16"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a>mod <span class="ot">&lt;-</span> <span class="fu">modlib</span>(<span class="at">model =</span> <span class="st">"pk1"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stderr">
 <pre><code>Loading model from cache.</code></pre>
 </div>
 </div>
-<p>If you’re working interactively or with a script that isn’t going to be repeatedly reused with different inputs, the <code>modlib()</code> function is pretty handy. On the other hand if you’re a developer calling mrgsolve programmatically it’s probably better to rely on a different workflow. For instance, if you want to access the mrgsolve package folder that contains the models, you’d do something like this:</p>
+<p>It’s probably stating the obvious, but while the <code>modlib()</code> function works nicely as a tool to support analysts interactively, you probably wouldn’t call it as a developer. For instance, if you want to access the mrgsolve package folder that contains the models, you’d write code that makes very clear that you’re looking for a path (not trying to build a model). Something like this would work better:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb16"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a>fs<span class="sc">::</span><span class="fu">path_package</span>(<span class="st">"mrgsolve"</span>, <span class="st">"models"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb18"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a>fs<span class="sc">::</span><span class="fu">path_package</span>(<span class="st">"mrgsolve"</span>, <span class="st">"models"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models</code></pre>
 </div>
 </div>
-<p>If you want to construct file paths to the various model specification files contained within the package, you probably want to find paths to all the <code>.cpp</code> files in the model folder:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb18"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a>modlib_dir <span class="ot">&lt;-</span> fs<span class="sc">::</span><span class="fu">path_package</span>(<span class="st">"mrgsolve"</span>, <span class="st">"models"</span>)</span>
-<span id="cb18-2"><a href="#cb18-2" aria-hidden="true" tabindex="-1"></a>modlib_cpp <span class="ot">&lt;-</span> fs<span class="sc">::</span><span class="fu">dir_ls</span>(modlib_dir, <span class="at">regexp =</span> <span class="st">"</span><span class="sc">\\</span><span class="st">.cpp$"</span>)</span>
-<span id="cb18-3"><a href="#cb18-3" aria-hidden="true" tabindex="-1"></a>modlib_cpp</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/1005.cpp
-/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/effect.cpp
-/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/emax.cpp
-/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/irm1.cpp
-/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/irm2.cpp
-/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/irm3.cpp
-/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/irm4.cpp
-/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/nm-like.cpp
-/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/pbpk.cpp
-/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/pk1.cpp
-/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/pk1cmt.cpp
-/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/pk1cmt_pop.cpp
-/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/pk2.cpp
-/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/pk2cmt.cpp
-/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/pk2iv.cpp
-/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/pk3cmt.cpp
-/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/pkExample.cpp
-/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/popex.cpp
-/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/pred1.cpp
-/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/tmdd.cpp
-/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/viral1.cpp
-/home/danielle/R/x86_64-pc-linux-gnu-library/4.3/mrgsolve/models/viral2.cpp</code></pre>
-</div>
-</div>
-<p>Easy done.</p>
+<p>Similarly, if you want to find the models in the model library folder, that’s easy enough to do with <code>fs::dir_ls()</code> and a simple regular expression. Easy done.</p>
 </section>
 <section id="building-models-from-file" class="level3">
 <h3 class="anchored" data-anchor-id="building-models-from-file">Building models from file</h3>
-<p>Building one of the bundled models using <code>modlib()</code> is a perfectly sensible thing to do when you’re working interactively or when you’re just starting out with mrgsolve, but after a while you might want to pivot to a different workflow. To that end, there’s an <code>mread()</code> function – and related functions <code>mread_file()</code> and <code>mread_cache()</code> – that reads a model specification file and returns the model object linked to the compiled code. As an example, here’s how I’d build the one-compartment model in the previous section, except using <code>mread()</code> this time:</p>
+<p>Along the same lines, building one of the bundled models using <code>modlib()</code> is a perfectly sensible thing to do when you’re just starting out and don’t want to write your own model specification files, but after a while you might want to pivot to a different workflow. To that end, there’s an <code>mread()</code> function – and related functions <code>mread_file()</code> and <code>mread_cache()</code> – that reads a model specification file and returns the model object linked to the compiled code. As an example, here’s how I’d build the one-compartment model in the previous section, except using <code>mread()</code> this time:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb20"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a>mod <span class="ot">&lt;-</span> <span class="fu">mread</span>(<span class="at">model =</span> <span class="st">"pk1"</span>, <span class="at">project =</span> modlib_dir)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb20"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a>mod <span class="ot">&lt;-</span> <span class="fu">mread</span>(<span class="at">model =</span> <span class="st">"pk1"</span>, <span class="at">project =</span> fs<span class="sc">::</span><span class="fu">path_package</span>(<span class="st">"mrgsolve"</span>, <span class="st">"models"</span>))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stderr">
 <pre><code>Building pk1 ... (waiting) ...
 done.</code></pre>
 </div>
 </div>
-<p>Optionally you can provide a file name for the model specification file that sits within the <code>project</code> folder, but in this case we don’t need to: if the <code>file</code> argument is unspecified <code>mread()</code> assumes that the file name is the same as the <code>model</code> name with file extension <code>.cpp</code>.<a href="#fn8" class="footnote-ref" id="fnref8" role="doc-noteref"><sup>8</sup></a></p>
+<p>Optionally you can provide a file name for the model specification file that sits within the <code>project</code> folder, but in this case we don’t need to: if the <code>file</code> argument is unspecified <code>mread()</code> assumes that the file name is the same as the <code>model</code> name with file extension <code>.cpp</code>.<a href="#fn9" class="footnote-ref" id="fnref9" role="doc-noteref"><sup>9</sup></a></p>
 </section>
 <section id="model-objects" class="level3">
 <h3 class="anchored" data-anchor-id="model-objects">Model objects</h3>
-<p>The mrgsolve package is built using S4 classes and of the great many object oriented programming systems available in R that’s the one I’m least comfortable with.<a href="#fn9" class="footnote-ref" id="fnref9" role="doc-noteref"><sup>9</sup></a> But hey… I’ve just reread the <a href="https://adv-r.hadley.nz/s4.html">S4 chapter in Advanced R</a>, so let’s see how we go with this, shall we? First, I’ll be polite and explicitly load the methods package:</p>
+<p>The mrgsolve package is built using S4 classes and of the great many object oriented programming systems available in R that’s the one I’m least comfortable with.<a href="#fn10" class="footnote-ref" id="fnref10" role="doc-noteref"><sup>10</sup></a> But hey… I’ve just reread the <a href="https://adv-r.hadley.nz/s4.html">S4 chapter in Advanced R</a>, so let’s see how we go with this, shall we? First, I’ll be polite and explicitly load the methods package:</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb22"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(methods)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
@@ -429,7 +428,7 @@ see '?methods' for accessing help and source code</code></pre>
 -----------------  source: pk1.cpp  -----------------
 
   project: /home/danielle/R...gsolve/models
-  shared object: pk1-so-15d117408c12e 
+  shared object: pk1-so-1c59949762c15 
 
   time:          start: 0 end: 24 delta: 1
                  add: &lt;none&gt;
@@ -497,12 +496,12 @@ CP : Plasma concentration (mass/volume)</code></pre>
 [43] "annot"    "envir"    "plugin"   "ss_cmt"  </code></pre>
 </div>
 </div>
-<p>Okay so one of the slots is called “param”, and denoted <code>@param</code> to remind us that it’s a slot of an S4 object.<a href="#fn10" class="footnote-ref" id="fnref10" role="doc-noteref"><sup>10</sup></a> Calling the <code>param()</code> method is the appropriate way to access the <code>@param</code> slot, for instance.<a href="#fn11" class="footnote-ref" id="fnref11" role="doc-noteref"><sup>11</sup></a> The <code>see()</code> method is slightly fancier, but it too is essentially an accessor function for the <code>@modelfile</code> and <code>@code</code> slots. If I were an extremely unwise woman who ignored all the best practices for S4 classes I could use a command like <code>cat(mod@code, sep = "\n")</code> and get roughly the same output. This is of course a terrible idea: the slots of an S4 object are considered internal details and not part of the package API. Accessing them directly is considered a faux pas and you have only yourself to blame if the developer later changes the structure of the slots and your code breaks.</p>
+<p>Okay so one of the slots is called “param”, and denoted <code>@param</code> to remind us that it’s a slot of an S4 object.<a href="#fn11" class="footnote-ref" id="fnref11" role="doc-noteref"><sup>11</sup></a> Calling the <code>param()</code> method is the appropriate way to access the <code>@param</code> slot, for instance.<a href="#fn12" class="footnote-ref" id="fnref12" role="doc-noteref"><sup>12</sup></a> The <code>see()</code> method is slightly fancier, but it too is essentially an accessor function for the <code>@modelfile</code> and <code>@code</code> slots. If I were an extremely unwise woman who ignored all the best practices for S4 classes I could use a command like <code>cat(mod@code, sep = "\n")</code> and get roughly the same output. This is of course a terrible idea: the slots of an S4 object are considered internal details and not part of the package API. Accessing them directly is considered a faux pas and you have only yourself to blame if the developer later changes the structure of the slots and your code breaks.</p>
 <p>Indeed, the <em>only</em> reason I’m talking about them here is that I find it helpful for building my own mental model of what mrgsolve does, which will become apparent in the next section when I tackle the puzzlingly magical behaviour of the <code>ev()</code> function.</p>
 </section>
 <section id="event-objects" class="level3">
 <h3 class="anchored" data-anchor-id="event-objects">Event objects</h3>
-<p>Model objects represent the underlying ODE system. They don’t store information about “interventions” (external forcers) on the system. In the pharmacokinetic context the main intervention we’re thinking about is dosing. An events object returned by <code>ev()</code> returns a event schedule that would be familiar to NONMEM users<a href="#fn12" class="footnote-ref" id="fnref12" role="doc-noteref"><sup>12</sup></a></p>
+<p>Model objects represent the underlying ODE system. They don’t store information about “interventions” (external forcers) on the system. In the pharmacokinetic context the main intervention we’re thinking about is dosing. An events object returned by <code>ev()</code> returns a event schedule that would be familiar to NONMEM users<a href="#fn13" class="footnote-ref" id="fnref13" role="doc-noteref"><sup>13</sup></a></p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb35"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb35-1"><a href="#cb35-1" aria-hidden="true" tabindex="-1"></a>events <span class="ot">&lt;-</span> <span class="fu">ev</span>(<span class="at">amt =</span> <span class="dv">100</span>, <span class="at">ii =</span> <span class="dv">24</span>, <span class="at">addl =</span> <span class="dv">9</span>)</span>
 <span id="cb35-2"><a href="#cb35-2" aria-hidden="true" tabindex="-1"></a>events</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
@@ -512,7 +511,7 @@ CP : Plasma concentration (mass/volume)</code></pre>
 1    0 100 24    9   1    1</code></pre>
 </div>
 </div>
-<p>The <code>events</code> object looks a lot like a data frame, but is technically an S4 object with class “ev”. However, an ev object has only two slots, one of which is <code>@data</code> and – as you’d expect – it stores the data set as a data frame internally. So… yeah, it’s basically a data frame, and since there are <code>as.data.frame()</code> and <code>as_tibble()</code> methods defined for ev objects, so you can coerce it to whatever your preferred form of tabular data object happens to be.<a href="#fn13" class="footnote-ref" id="fnref13" role="doc-noteref"><sup>13</sup></a> I’m a tibble girl myself so…</p>
+<p>The <code>events</code> object looks a lot like a data frame, but is technically an S4 object with class “ev”. However, an ev object has only two slots, one of which is <code>@data</code> and – as you’d expect – it stores the data set as a data frame internally. So… yeah, it’s basically a data frame, and since there are <code>as.data.frame()</code> and <code>as_tibble()</code> methods defined for ev objects, so you can coerce it to whatever your preferred form of tabular data object happens to be.<a href="#fn14" class="footnote-ref" id="fnref14" role="doc-noteref"><sup>14</sup></a> I’m a tibble girl myself so…</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb37"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb37-1"><a href="#cb37-1" aria-hidden="true" tabindex="-1"></a>tibble<span class="sc">::</span><span class="fu">as_tibble</span>(events)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
@@ -550,7 +549,7 @@ ID:     1
 </div>
 <p>If you’re expecting <code>ev()</code> to return an “ev” object, this pipeline makes absolutely no sense whatsoever. An ev object like <code>events</code> simply does not have the information required to run the simulations, so… something weird is happening. It shouldn’t work, but it does???</p>
 <p>I cried briefly. Then I read the <a href="https://mrgsolve.org/docs/reference/ev.html">documentation</a> properly. Then I cried some more.</p>
-<p>After reading the documentation carefully, I now understand what’s going on here, but an explanation is required because if you don’t look closely it looks like magic. Recall from earlier in the post I mentioned that <code>modlib()</code> is not type stable: you get qualitatively different results depending on what kind of input you pass it. The <code>ev()</code> function has the same property. When passed a model object as the first argument, it doesn’t in fact return an events schedule. It returns… a model object?<a href="#fn14" class="footnote-ref" id="fnref14" role="doc-noteref"><sup>14</sup></a></p>
+<p>After reading the documentation carefully, I now understand what’s going on here, but an explanation is required because if you don’t look closely it looks like magic. Recall from earlier in the post I mentioned that <code>modlib()</code> is not type stable: you get qualitatively different results depending on what kind of input you pass it. The <code>ev()</code> function has the same property. When passed a model object as the first argument, it doesn’t in fact return an events schedule. It returns… a model object?<a href="#fn15" class="footnote-ref" id="fnref15" role="doc-noteref"><sup>15</sup></a></p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb41"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb41-1"><a href="#cb41-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ev</span>(mod, <span class="at">amt =</span> <span class="dv">100</span>, <span class="at">ii =</span> <span class="dv">24</span>, <span class="at">addl =</span> <span class="dv">9</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
@@ -559,7 +558,7 @@ ID:     1
 -----------------  source: pk1.cpp  -----------------
 
   project: /home/danielle/R...gsolve/models
-  shared object: pk1-so-15d117408c12e 
+  shared object: pk1-so-1c59949762c15 
 
   time:          start: 0 end: 24 delta: 1
                  add: &lt;none&gt;
@@ -574,7 +573,7 @@ ID:     1
 ------------------------------------------------------</code></pre>
 </div>
 </div>
-<p>Looking at the printed output, you might think that the output here is identical to the original model object <code>mod</code>, but in this case looks are deceving. The new model stores the event schedule internally: it’s tucked away in the <code>@args</code> slot.<a href="#fn15" class="footnote-ref" id="fnref15" role="doc-noteref"><sup>15</sup></a> To illustrate, let’s assign the output to a variable:</p>
+<p>Looking at the printed output, you might think that the output here is identical to the original model object <code>mod</code>, but in this case looks are deceving. The new model stores the event schedule internally: it’s tucked away in the <code>@args</code> slot.<a href="#fn16" class="footnote-ref" id="fnref16" role="doc-noteref"><sup>16</sup></a> To illustrate, let’s assign the output to a variable:</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb43"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb43-1"><a href="#cb43-1" aria-hidden="true" tabindex="-1"></a>mod_with_ev <span class="ot">&lt;-</span> <span class="fu">ev</span>(mod, <span class="at">amt =</span> <span class="dv">100</span>, <span class="at">ii =</span> <span class="dv">24</span>, <span class="at">addl =</span> <span class="dv">9</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
@@ -598,45 +597,30 @@ Events:
 <span id="cb48-2"><a href="#cb48-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ev</span>(<span class="at">amt =</span> <span class="dv">100</span>, <span class="at">ii =</span> <span class="dv">24</span>, <span class="at">addl =</span> <span class="dv">9</span>) <span class="sc">|&gt;</span></span>
 <span id="cb48-3"><a href="#cb48-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mrgsim</span>(<span class="at">end =</span> <span class="dv">480</span>, <span class="at">delta =</span> <span class="fl">0.1</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
-<p>It’s a very clever trick, and I imagine it’s something that a lot of data analysts find super handy. That said, it’s not something I would want to use myself. I’m a simple girl who likes her coffee black and her functions type stable, so I’m more keen on code that looks like this:</p>
+<p>It’s a very clever trick, and I imagine it’s something that a lot of data analysts find super handy. That said, it’s not something I would want to use myself. I’m a simple girl who likes her coffee black and her functions boring, so I’m more keen on code that looks like this:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb49"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb49-1"><a href="#cb49-1" aria-hidden="true" tabindex="-1"></a>out <span class="ot">&lt;-</span> <span class="fu">mrgsim_e</span>(</span>
-<span id="cb49-2"><a href="#cb49-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">x =</span> <span class="fu">mread_file</span>(<span class="at">file =</span> <span class="st">"pk1.cpp"</span>, <span class="at">project =</span> modlib_dir, <span class="at">quiet =</span> <span class="cn">TRUE</span>),</span>
-<span id="cb49-3"><a href="#cb49-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">events =</span> <span class="fu">ev</span>(<span class="at">amt =</span> <span class="dv">100</span>, <span class="at">ii =</span> <span class="dv">24</span>, <span class="at">addl =</span> <span class="dv">9</span>),</span>
-<span id="cb49-4"><a href="#cb49-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">end =</span> <span class="dv">480</span>,</span>
-<span id="cb49-5"><a href="#cb49-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">delta =</span> <span class="fl">0.1</span></span>
-<span id="cb49-6"><a href="#cb49-6" aria-hidden="true" tabindex="-1"></a>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb49"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb49-1"><a href="#cb49-1" aria-hidden="true" tabindex="-1"></a>mod <span class="ot">&lt;-</span> <span class="fu">mread_file</span>(</span>
+<span id="cb49-2"><a href="#cb49-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">file =</span> <span class="st">"pk1.cpp"</span>, </span>
+<span id="cb49-3"><a href="#cb49-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">project =</span> fs<span class="sc">::</span><span class="fu">path_package</span>(<span class="st">"mrgsolve"</span>, <span class="st">"models"</span>), </span>
+<span id="cb49-4"><a href="#cb49-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">quiet =</span> <span class="cn">TRUE</span></span>
+<span id="cb49-5"><a href="#cb49-5" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb49-6"><a href="#cb49-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb49-7"><a href="#cb49-7" aria-hidden="true" tabindex="-1"></a>events <span class="ot">&lt;-</span> <span class="fu">ev</span>(<span class="at">amt =</span> <span class="dv">100</span>, <span class="at">ii =</span> <span class="dv">24</span>, <span class="at">addl =</span> <span class="dv">9</span>)</span>
+<span id="cb49-8"><a href="#cb49-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb49-9"><a href="#cb49-9" aria-hidden="true" tabindex="-1"></a>out <span class="ot">&lt;-</span> <span class="fu">mrgsim_e</span>(</span>
+<span id="cb49-10"><a href="#cb49-10" aria-hidden="true" tabindex="-1"></a>  <span class="at">x =</span> mod,</span>
+<span id="cb49-11"><a href="#cb49-11" aria-hidden="true" tabindex="-1"></a>  <span class="at">events =</span> events,</span>
+<span id="cb49-12"><a href="#cb49-12" aria-hidden="true" tabindex="-1"></a>  <span class="at">end =</span> <span class="dv">480</span>,</span>
+<span id="cb49-13"><a href="#cb49-13" aria-hidden="true" tabindex="-1"></a>  <span class="at">delta =</span> <span class="fl">0.1</span></span>
+<span id="cb49-14"><a href="#cb49-14" aria-hidden="true" tabindex="-1"></a>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
-<p>Notice that: I called <code>mrgsim_e()</code> here rather than <code>mrgsim()</code>. Because mrgsolve recognises that sometimes developers might want to call it programmatically, this version of the function requires the user to pass an event object. The sneaky “event-schedule-inside-the-model-object” piping trick I showed at the start of the post does not work with <code>mrgsim_e()</code>, which makes it a safer choice when running simulations programmatically.<a href="#fn16" class="footnote-ref" id="fnref16" role="doc-noteref"><sup>16</sup></a></p>
-<p>Theoretically, I suppose, there’s still a risk in my code because I’m calling <code>ev()</code> and might one day forget that it has this special case, but after a bit of thought it seems pretty outlandish. I mean, yes, let’s suppose I wrote a very silly function like this one:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb50"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb50-1"><a href="#cb50-1" aria-hidden="true" tabindex="-1"></a>foolish_simulation <span class="ot">&lt;-</span> <span class="cf">function</span>(...) {</span>
-<span id="cb50-2"><a href="#cb50-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mrgsim_e</span>(</span>
-<span id="cb50-3"><a href="#cb50-3" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> <span class="fu">mread_file</span>(<span class="at">file =</span> <span class="st">"pk1.cpp"</span>, <span class="at">project =</span> modlib_dir, <span class="at">quiet =</span> <span class="cn">TRUE</span>),</span>
-<span id="cb50-4"><a href="#cb50-4" aria-hidden="true" tabindex="-1"></a>    <span class="at">events =</span> <span class="fu">ev</span>(...),</span>
-<span id="cb50-5"><a href="#cb50-5" aria-hidden="true" tabindex="-1"></a>    <span class="at">end =</span> <span class="dv">480</span>,</span>
-<span id="cb50-6"><a href="#cb50-6" aria-hidden="true" tabindex="-1"></a>    <span class="at">delta =</span> <span class="fl">0.1</span></span>
-<span id="cb50-7"><a href="#cb50-7" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb50-8"><a href="#cb50-8" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-</div>
-<p>This code is unwise, because the user could really mess with things depending on what gets pass to <code>ev()</code> via the dots. In the most absurd case, if the user tried to pass <code>x = 100</code> here thinking that it would add a column labelled <code>x</code> to the event schedule<a href="#fn17" class="footnote-ref" id="fnref17" role="doc-noteref"><sup>17</sup></a> it would actually trigger method dispatch on the <code>x</code> object, and since <code>ev()</code> doesn’t have a method for numeric-valued <code>x</code> argument, the user would receive a weird error. But this seems like a bizarre edge case – whyyyyy would I ever write this function in the first place????? – and <em>even</em> if the user somehow passed an mrgmod object to <code>ev()</code> in this fashion, the result is still an error:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb51"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb51-1"><a href="#cb51-1" aria-hidden="true" tabindex="-1"></a><span class="fu">foolish_simulation</span>(<span class="at">amt =</span> <span class="dv">100</span>, <span class="at">ii =</span> <span class="dv">24</span>, <span class="at">addl =</span> <span class="dv">9</span>, <span class="at">x =</span> <span class="dv">100</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-<div class="cell-output cell-output-error">
-<pre><code>Error in (function (classes, fdef, mtable) : unable to find an inherited method for function 'ev' for signature '"numeric"'</code></pre>
-</div>
-<div class="sourceCode cell-code" id="cb53"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb53-1"><a href="#cb53-1" aria-hidden="true" tabindex="-1"></a><span class="fu">foolish_simulation</span>(<span class="at">amt =</span> <span class="dv">100</span>, <span class="at">ii =</span> <span class="dv">24</span>, <span class="at">addl =</span> <span class="dv">9</span>, <span class="at">x =</span> mod)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
-<div class="cell-output cell-output-error">
-<pre><code>Error: invalid 'events' argument</code></pre>
-</div>
-</div>
-<p>So perhaps there’s no need to worry about this outlandish scenario. Danielle wrapped herself up in knots trying to get a handle on method dispatch in <code>ev()</code>. That’s not very exciting, so let’s move along shall we?</p>
+<p>Notice that: I called <code>mrgsim_e()</code> here rather than <code>mrgsim()</code>. Because mrgsolve recognises that sometimes developers might want to call it programmatically, this version of the function requires the user to pass an event object. The sneaky “event-schedule-inside-the-model-object” piping trick I showed at the start of the post does not work with <code>mrgsim_e()</code>, which makes it a safer choice when running simulations programmatically.<a href="#fn17" class="footnote-ref" id="fnref17" role="doc-noteref"><sup>17</sup></a> Anyway, I feel like this is all a bit off topic. Danielle wrapped herself up in knots trying to get a handle on method dispatch in <code>ev()</code>. That’s not very exciting, so let’s move along shall we?</p>
 </section>
 <section id="running-simulations" class="level3">
 <h3 class="anchored" data-anchor-id="running-simulations">Running simulations</h3>
 <p>We’re almost done unpacking the simple example, but I want to rewrite the code one last time. Previously, when I called <code>mrgsim_e()</code> I passed arguments <code>end</code> and <code>delta</code> as a way to override the default assumptions about what time points we would use when running our simulations. Internally, these arguments are used to construct a “tgrid” object. We can construct this object explicitly by calling <code>tgrid()</code>:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb55"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb55-1"><a href="#cb55-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tgrid</span>(<span class="at">start =</span> <span class="dv">0</span>, <span class="at">end =</span> <span class="dv">480</span>, <span class="at">delta =</span> <span class="fl">0.1</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb50"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb50-1"><a href="#cb50-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tgrid</span>(<span class="at">start =</span> <span class="dv">0</span>, <span class="at">end =</span> <span class="dv">480</span>, <span class="at">delta =</span> <span class="fl">0.1</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>start:  0  end:    480  delta:  0.1  offset: 0  min:    0   max:    480 </code></pre>
 </div>
@@ -645,17 +629,21 @@ Events:
 <p>But – again – I digress.</p>
 <p>The real point of mentioning it here is that – at least in my mind – a simulation has three main components (model, events, and time points), and we now have separate functions that handle each component: we can use <code>mread()</code> to define a model, <code>ev()</code> to define an event schedule, and <code>tgrid()</code> to define the simulation times. So now, after considerable refactoring, we end up with code that looks like this:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb57"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb57-1"><a href="#cb57-1" aria-hidden="true" tabindex="-1"></a><span class="co"># define model, events, and times</span></span>
-<span id="cb57-2"><a href="#cb57-2" aria-hidden="true" tabindex="-1"></a>mod <span class="ot">&lt;-</span> <span class="fu">mread_file</span>(<span class="at">file =</span> <span class="st">"pk1.cpp"</span>, <span class="at">project =</span> modlib_dir, <span class="at">quiet =</span> <span class="cn">TRUE</span>)</span>
-<span id="cb57-3"><a href="#cb57-3" aria-hidden="true" tabindex="-1"></a>events <span class="ot">&lt;-</span> <span class="fu">ev</span>(<span class="at">amt =</span> <span class="dv">100</span>, <span class="at">ii =</span> <span class="dv">24</span>, <span class="at">addl =</span> <span class="dv">9</span>)</span>
-<span id="cb57-4"><a href="#cb57-4" aria-hidden="true" tabindex="-1"></a>times <span class="ot">&lt;-</span> <span class="fu">tgrid</span>(<span class="at">start =</span> <span class="dv">0</span>, <span class="at">end =</span> <span class="dv">480</span>, <span class="at">delta =</span> <span class="fl">0.1</span>)</span>
-<span id="cb57-5"><a href="#cb57-5" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb57-6"><a href="#cb57-6" aria-hidden="true" tabindex="-1"></a><span class="co"># run simulation</span></span>
-<span id="cb57-7"><a href="#cb57-7" aria-hidden="true" tabindex="-1"></a>out <span class="ot">&lt;-</span> <span class="fu">mrgsim_e</span>(<span class="at">x =</span> mod, <span class="at">events =</span> events, <span class="at">tgrid =</span> times)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb52"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb52-1"><a href="#cb52-1" aria-hidden="true" tabindex="-1"></a><span class="co"># define model, events, and times</span></span>
+<span id="cb52-2"><a href="#cb52-2" aria-hidden="true" tabindex="-1"></a>mod <span class="ot">&lt;-</span> <span class="fu">mread_file</span>(</span>
+<span id="cb52-3"><a href="#cb52-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">file =</span> <span class="st">"pk1.cpp"</span>, </span>
+<span id="cb52-4"><a href="#cb52-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">project =</span> fs<span class="sc">::</span><span class="fu">path_package</span>(<span class="st">"mrgsolve"</span>, <span class="st">"models"</span>), </span>
+<span id="cb52-5"><a href="#cb52-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">quiet =</span> <span class="cn">TRUE</span></span>
+<span id="cb52-6"><a href="#cb52-6" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb52-7"><a href="#cb52-7" aria-hidden="true" tabindex="-1"></a>events <span class="ot">&lt;-</span> <span class="fu">ev</span>(<span class="at">amt =</span> <span class="dv">100</span>, <span class="at">ii =</span> <span class="dv">24</span>, <span class="at">addl =</span> <span class="dv">9</span>)</span>
+<span id="cb52-8"><a href="#cb52-8" aria-hidden="true" tabindex="-1"></a>times <span class="ot">&lt;-</span> <span class="fu">tgrid</span>(<span class="at">start =</span> <span class="dv">0</span>, <span class="at">end =</span> <span class="dv">480</span>, <span class="at">delta =</span> <span class="fl">0.1</span>)</span>
+<span id="cb52-9"><a href="#cb52-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb52-10"><a href="#cb52-10" aria-hidden="true" tabindex="-1"></a><span class="co"># run simulation</span></span>
+<span id="cb52-11"><a href="#cb52-11" aria-hidden="true" tabindex="-1"></a>out <span class="ot">&lt;-</span> <span class="fu">mrgsim_e</span>(<span class="at">x =</span> mod, <span class="at">events =</span> events, <span class="at">tgrid =</span> times)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <p>All that remains is to have a look at the output we’ve created:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb58"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb58-1"><a href="#cb58-1" aria-hidden="true" tabindex="-1"></a>out</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb53"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb53-1"><a href="#cb53-1" aria-hidden="true" tabindex="-1"></a>out</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>Model:  pk1 
 Dim:    4802 x 5 
@@ -675,111 +663,124 @@ ID:     1
 <p>As you’ve probably come to expect at this point, this is not technically a data frame, it’s an S4 object of class “mrgsims”, and can easily be coerced to a data frame using <code>as.data.frame()</code> or <code>as_tibble()</code>.</p>
 <p>The mrgsolve package supplies a plot method for mrgsims objects that generates nice looking lattice plots, making it very easy to quickly produce helpful data visualisations:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb60"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb60-1"><a href="#cb60-1" aria-hidden="true" tabindex="-1"></a><span class="fu">plot</span>(out)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb55"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb55-1"><a href="#cb55-1" aria-hidden="true" tabindex="-1"></a><span class="fu">plot</span>(out)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output-display">
-<p><img src="index_files/figure-html/unnamed-chunk-32-1.png" class="img-fluid" width="672"></p>
+<p><img src="index_files/figure-html/unnamed-chunk-30-1.png" class="img-fluid" width="672"></p>
 </div>
 </div>
 <p>If additional customisation is needed, however, it’s pretty easy to convert the output to a tibble and then using ggplot2 to create the specific visualisation you want:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb61"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb61-1"><a href="#cb61-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(ggplot2)</span>
-<span id="cb61-2"><a href="#cb61-2" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb61-3"><a href="#cb61-3" aria-hidden="true" tabindex="-1"></a>out <span class="sc">|&gt;</span></span>
-<span id="cb61-4"><a href="#cb61-4" aria-hidden="true" tabindex="-1"></a>  tibble<span class="sc">::</span><span class="fu">as_tibble</span>() <span class="sc">|&gt;</span></span>
-<span id="cb61-5"><a href="#cb61-5" aria-hidden="true" tabindex="-1"></a>  tidyr<span class="sc">::</span><span class="fu">pivot_longer</span>(</span>
-<span id="cb61-6"><a href="#cb61-6" aria-hidden="true" tabindex="-1"></a>    <span class="at">cols =</span> <span class="fu">c</span>(EV, CENT, CP), </span>
-<span id="cb61-7"><a href="#cb61-7" aria-hidden="true" tabindex="-1"></a>    <span class="at">names_to =</span> <span class="st">"variable"</span>, </span>
-<span id="cb61-8"><a href="#cb61-8" aria-hidden="true" tabindex="-1"></a>    <span class="at">values_to =</span> <span class="st">"value"</span></span>
-<span id="cb61-9"><a href="#cb61-9" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">|&gt;</span> </span>
-<span id="cb61-10"><a href="#cb61-10" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">mutate</span>(</span>
-<span id="cb61-11"><a href="#cb61-11" aria-hidden="true" tabindex="-1"></a>    <span class="at">variable =</span> dplyr<span class="sc">::</span><span class="fu">case_when</span>(</span>
-<span id="cb61-12"><a href="#cb61-12" aria-hidden="true" tabindex="-1"></a>      variable <span class="sc">==</span> <span class="st">"EV"</span> <span class="sc">~</span> <span class="st">"Gut amount"</span>,</span>
-<span id="cb61-13"><a href="#cb61-13" aria-hidden="true" tabindex="-1"></a>      variable <span class="sc">==</span> <span class="st">"CENT"</span> <span class="sc">~</span> <span class="st">"Central amount"</span>,</span>
-<span id="cb61-14"><a href="#cb61-14" aria-hidden="true" tabindex="-1"></a>      variable <span class="sc">==</span> <span class="st">"CP"</span> <span class="sc">~</span> <span class="st">"Central concentration"</span></span>
-<span id="cb61-15"><a href="#cb61-15" aria-hidden="true" tabindex="-1"></a>    )</span>
-<span id="cb61-16"><a href="#cb61-16" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">|&gt;</span></span>
-<span id="cb61-17"><a href="#cb61-17" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>(<span class="fu">aes</span>(time, value)) <span class="sc">+</span> </span>
-<span id="cb61-18"><a href="#cb61-18" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_line</span>() <span class="sc">+</span></span>
-<span id="cb61-19"><a href="#cb61-19" aria-hidden="true" tabindex="-1"></a>  <span class="fu">facet_wrap</span>(<span class="sc">~</span> variable, <span class="at">scales =</span> <span class="st">"free_y"</span>) <span class="sc">+</span> </span>
-<span id="cb61-20"><a href="#cb61-20" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_bw</span>() <span class="sc">+</span></span>
-<span id="cb61-21"><a href="#cb61-21" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme</span>(<span class="at">strip.background =</span> <span class="fu">element_rect</span>(<span class="at">fill =</span> <span class="st">"white"</span>)) <span class="sc">+</span> </span>
-<span id="cb61-22"><a href="#cb61-22" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(</span>
-<span id="cb61-23"><a href="#cb61-23" aria-hidden="true" tabindex="-1"></a>    <span class="at">title =</span> <span class="st">"Drug amounts and concentrations over time"</span>,</span>
-<span id="cb61-24"><a href="#cb61-24" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> <span class="st">"Time (hours)"</span>,</span>
-<span id="cb61-25"><a href="#cb61-25" aria-hidden="true" tabindex="-1"></a>    <span class="at">y =</span> <span class="cn">NULL</span></span>
-<span id="cb61-26"><a href="#cb61-26" aria-hidden="true" tabindex="-1"></a>  )</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb56"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb56-1"><a href="#cb56-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(ggplot2)</span>
+<span id="cb56-2"><a href="#cb56-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb56-3"><a href="#cb56-3" aria-hidden="true" tabindex="-1"></a>out <span class="sc">|&gt;</span></span>
+<span id="cb56-4"><a href="#cb56-4" aria-hidden="true" tabindex="-1"></a>  tibble<span class="sc">::</span><span class="fu">as_tibble</span>() <span class="sc">|&gt;</span></span>
+<span id="cb56-5"><a href="#cb56-5" aria-hidden="true" tabindex="-1"></a>  tidyr<span class="sc">::</span><span class="fu">pivot_longer</span>(</span>
+<span id="cb56-6"><a href="#cb56-6" aria-hidden="true" tabindex="-1"></a>    <span class="at">cols =</span> <span class="fu">c</span>(EV, CENT, CP), </span>
+<span id="cb56-7"><a href="#cb56-7" aria-hidden="true" tabindex="-1"></a>    <span class="at">names_to =</span> <span class="st">"variable"</span>, </span>
+<span id="cb56-8"><a href="#cb56-8" aria-hidden="true" tabindex="-1"></a>    <span class="at">values_to =</span> <span class="st">"value"</span></span>
+<span id="cb56-9"><a href="#cb56-9" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">|&gt;</span> </span>
+<span id="cb56-10"><a href="#cb56-10" aria-hidden="true" tabindex="-1"></a>  dplyr<span class="sc">::</span><span class="fu">mutate</span>(</span>
+<span id="cb56-11"><a href="#cb56-11" aria-hidden="true" tabindex="-1"></a>    <span class="at">variable =</span> dplyr<span class="sc">::</span><span class="fu">case_when</span>(</span>
+<span id="cb56-12"><a href="#cb56-12" aria-hidden="true" tabindex="-1"></a>      variable <span class="sc">==</span> <span class="st">"EV"</span> <span class="sc">~</span> <span class="st">"Gut amount"</span>,</span>
+<span id="cb56-13"><a href="#cb56-13" aria-hidden="true" tabindex="-1"></a>      variable <span class="sc">==</span> <span class="st">"CENT"</span> <span class="sc">~</span> <span class="st">"Central amount"</span>,</span>
+<span id="cb56-14"><a href="#cb56-14" aria-hidden="true" tabindex="-1"></a>      variable <span class="sc">==</span> <span class="st">"CP"</span> <span class="sc">~</span> <span class="st">"Central concentration"</span></span>
+<span id="cb56-15"><a href="#cb56-15" aria-hidden="true" tabindex="-1"></a>    )</span>
+<span id="cb56-16"><a href="#cb56-16" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">|&gt;</span></span>
+<span id="cb56-17"><a href="#cb56-17" aria-hidden="true" tabindex="-1"></a>  <span class="fu">ggplot</span>(<span class="fu">aes</span>(time, value)) <span class="sc">+</span> </span>
+<span id="cb56-18"><a href="#cb56-18" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_line</span>() <span class="sc">+</span></span>
+<span id="cb56-19"><a href="#cb56-19" aria-hidden="true" tabindex="-1"></a>  <span class="fu">facet_wrap</span>(<span class="sc">~</span> variable, <span class="at">scales =</span> <span class="st">"free_y"</span>) <span class="sc">+</span> </span>
+<span id="cb56-20"><a href="#cb56-20" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_bw</span>() <span class="sc">+</span></span>
+<span id="cb56-21"><a href="#cb56-21" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme</span>(<span class="at">strip.background =</span> <span class="fu">element_rect</span>(<span class="at">fill =</span> <span class="st">"white"</span>)) <span class="sc">+</span> </span>
+<span id="cb56-22"><a href="#cb56-22" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(</span>
+<span id="cb56-23"><a href="#cb56-23" aria-hidden="true" tabindex="-1"></a>    <span class="at">title =</span> <span class="st">"Drug amounts and concentrations over time"</span>,</span>
+<span id="cb56-24"><a href="#cb56-24" aria-hidden="true" tabindex="-1"></a>    <span class="at">x =</span> <span class="st">"Time (hours)"</span>,</span>
+<span id="cb56-25"><a href="#cb56-25" aria-hidden="true" tabindex="-1"></a>    <span class="at">y =</span> <span class="cn">NULL</span></span>
+<span id="cb56-26"><a href="#cb56-26" aria-hidden="true" tabindex="-1"></a>  )</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output-display">
-<p><img src="index_files/figure-html/unnamed-chunk-33-1.png" class="img-fluid" width="672"></p>
+<p><img src="index_files/figure-html/unnamed-chunk-31-1.png" class="img-fluid" width="672"></p>
 </div>
 </div>
 </section>
 </section>
 <section id="model-specification" class="level2">
 <h2 class="anchored" data-anchor-id="model-specification">Model specification</h2>
-<p>Relevant chapters in the user guide</p>
+<p>Up till now I’ve been relying entirely on prespecified pharmacokinetic models included in the mrgsolve model library. That was a useful thing to do earlier in this post while discussing the mechanics of <code>mrgsim()</code>, <code>ev()</code>, <code>mread()</code>, <code>tgrid()</code> and so on, but in practice you really need to understand how models are specified. I’m not going to attempt a comprehensive discussion of this topic, but if you want more detail, the chapters in the user guide I found most relevant are:</p>
 <ul>
 <li>The <a href="https://mrgsolve.org/user-guide/specification.html">model specification chapter</a></li>
 <li>The <a href="https://mrgsolve.org/user-guide/topics.html">topics chapter</a></li>
 </ul>
 <section id="example-1" class="level3">
 <h3 class="anchored" data-anchor-id="example-1">Example 1</h3>
+<p>There are two ways to construct a model specification in mrgsolve: you can pass a string to <code>mread_code()</code>, or you can read it from a model specification file using <code>mread_file()</code>. I’ll be using the latter method here. By convention, model specification files use a “.cpp” file extension, but it’s important to recognise that despite that, a model specification file is not C++ code. A model specification consists of a set of code blocks, and only some of those code blocks contain C++ code.<a href="#fn18" class="footnote-ref" id="fnref18" role="doc-noteref"><sup>18</sup></a></p>
+<p>To get a sense of what a model specification looks like, here’s an example:</p>
 <div class="cell" data-file="example1.cpp">
 <div class="code-with-filename">
 <div class="code-with-filename-file">
 <pre><strong>example1.cpp</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb62"><pre class="sourceCode numberSource cpp number-lines code-with-copy"><code class="sourceCode cpp"><span id="cb62-1"><a href="#cb62-1"></a><span class="op">[</span>PROB<span class="op">]</span></span>
-<span id="cb62-2"><a href="#cb62-2"></a></span>
-<span id="cb62-3"><a href="#cb62-3"></a>This is a minor variation of the <span class="st">"pk2cmt"</span> model that is distributed as</span>
-<span id="cb62-4"><a href="#cb62-4"></a>part of the mrgsolve internal model library<span class="op">.</span> It has a single extravascular</span>
-<span id="cb62-5"><a href="#cb62-5"></a>dosing compartment <span class="op">(</span>the GUT<span class="op">),</span> a central compartment <span class="op">(</span>CENT<span class="op">),</span> <span class="kw">and</span> a</span>
-<span id="cb62-6"><a href="#cb62-6"></a>peripheral compartment <span class="op">(</span>PERIPH<span class="op">).</span> Absorption from GUT is first order<span class="op">,</span></span>
-<span id="cb62-7"><a href="#cb62-7"></a>whereas elimination from CENT follows Michaelis<span class="op">-</span>Menten kinetics<span class="op">.</span></span>
-<span id="cb62-8"><a href="#cb62-8"></a></span>
-<span id="cb62-9"><a href="#cb62-9"></a><span class="op">[</span>PARAM<span class="op">]</span> <span class="er">@</span>annotated</span>
-<span id="cb62-10"><a href="#cb62-10"></a></span>
-<span id="cb62-11"><a href="#cb62-11"></a>CL   <span class="op">:</span>   <span class="dv">0</span>  <span class="op">:</span> Clearance <span class="op">(</span>volume<span class="op">/</span>time<span class="op">)</span></span>
-<span id="cb62-12"><a href="#cb62-12"></a>VC   <span class="op">:</span>  <span class="dv">20</span>  <span class="op">:</span> Central volume <span class="op">(</span>volume<span class="op">)</span></span>
-<span id="cb62-13"><a href="#cb62-13"></a>Q    <span class="op">:</span>   <span class="dv">2</span>  <span class="op">:</span> Inter<span class="op">-</span>compartmental clearance <span class="op">(</span>volume<span class="op">/</span>time<span class="op">)</span></span>
-<span id="cb62-14"><a href="#cb62-14"></a>VP   <span class="op">:</span>  <span class="dv">10</span>  <span class="op">:</span> Peripheral volume of distribution <span class="op">(</span>volume<span class="op">)</span></span>
-<span id="cb62-15"><a href="#cb62-15"></a>KA   <span class="op">:</span> <span class="fl">0.5</span>  <span class="op">:</span> Absorption rate constant <span class="op">(</span><span class="dv">1</span><span class="op">/</span>time<span class="op">)</span></span>
-<span id="cb62-16"><a href="#cb62-16"></a>VMAX <span class="op">:</span>   <span class="dv">1</span>  <span class="op">:</span> Maximum velocity of elimination <span class="op">(</span>mass<span class="op">/</span>time<span class="op">)</span></span>
-<span id="cb62-17"><a href="#cb62-17"></a>KM   <span class="op">:</span>   <span class="dv">2</span>  <span class="op">:</span> Michaelis constant <span class="cf">for</span> elimination <span class="op">(</span>mass<span class="op">/</span>volume<span class="op">)</span></span>
-<span id="cb62-18"><a href="#cb62-18"></a></span>
-<span id="cb62-19"><a href="#cb62-19"></a><span class="op">[</span>CMT<span class="op">]</span> <span class="er">@</span>annotated</span>
-<span id="cb62-20"><a href="#cb62-20"></a></span>
-<span id="cb62-21"><a href="#cb62-21"></a>GUT    <span class="op">:</span> Drug amount in gut <span class="op">(</span>mass<span class="op">)</span></span>
-<span id="cb62-22"><a href="#cb62-22"></a>CENT   <span class="op">:</span> Drug amount in central compartment <span class="op">(</span>mass<span class="op">)</span></span>
-<span id="cb62-23"><a href="#cb62-23"></a>PERIPH <span class="op">:</span> Drug amount in peripherhal compartment <span class="op">(</span>mass<span class="op">)</span></span>
-<span id="cb62-24"><a href="#cb62-24"></a></span>
-<span id="cb62-25"><a href="#cb62-25"></a><span class="op">[</span>GLOBAL<span class="op">]</span></span>
-<span id="cb62-26"><a href="#cb62-26"></a></span>
-<span id="cb62-27"><a href="#cb62-27"></a><span class="pp">#define CP </span><span class="op">(</span>CENT<span class="pp"> </span><span class="op">/</span><span class="pp"> </span>VC<span class="op">)</span><span class="pp">          </span><span class="co">// concentration in central compartment</span></span>
-<span id="cb62-28"><a href="#cb62-28"></a><span class="pp">#define CT </span><span class="op">(</span>PERIPH<span class="pp"> </span><span class="op">/</span><span class="pp"> </span>VP<span class="op">)</span><span class="pp">        </span><span class="co">// concentration in peripheral compartment</span></span>
-<span id="cb62-29"><a href="#cb62-29"></a><span class="pp">#define CLNL </span><span class="op">(</span>VMAX<span class="pp"> </span><span class="op">/</span><span class="pp"> </span><span class="op">(</span>KM<span class="pp"> </span><span class="op">+</span><span class="pp"> </span>CP<span class="op">))</span><span class="pp"> </span><span class="co">// non-linear clearance, per MM kinetics</span></span>
-<span id="cb62-30"><a href="#cb62-30"></a></span>
-<span id="cb62-31"><a href="#cb62-31"></a><span class="op">[</span>ODE<span class="op">]</span></span>
-<span id="cb62-32"><a href="#cb62-32"></a></span>
-<span id="cb62-33"><a href="#cb62-33"></a>dxdt_GUT <span class="op">=</span> <span class="op">-</span>KA <span class="op">*</span> GUT<span class="op">;</span></span>
-<span id="cb62-34"><a href="#cb62-34"></a>dxdt_CENT <span class="op">=</span> KA <span class="op">*</span> GUT <span class="op">-</span> <span class="op">(</span>CL <span class="op">+</span> CLNL <span class="op">+</span> Q<span class="op">)</span> <span class="op">*</span> CP  <span class="op">+</span> Q <span class="op">*</span> CT<span class="op">;</span></span>
-<span id="cb62-35"><a href="#cb62-35"></a>dxdt_PERIPH <span class="op">=</span> <span class="op">(</span>Q <span class="op">*</span> CP<span class="op">)</span> <span class="op">-</span> <span class="op">(</span>Q <span class="op">*</span> CT<span class="op">);</span></span>
-<span id="cb62-36"><a href="#cb62-36"></a></span>
-<span id="cb62-37"><a href="#cb62-37"></a><span class="op">[</span>CAPTURE<span class="op">]</span> <span class="er">@</span>annotated</span>
-<span id="cb62-38"><a href="#cb62-38"></a></span>
-<span id="cb62-39"><a href="#cb62-39"></a>CP <span class="op">:</span> Plasma concentration <span class="op">(</span>mass<span class="op">/</span>time<span class="op">)</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb57"><pre class="sourceCode numberSource cpp number-lines code-with-copy"><code class="sourceCode cpp"><span id="cb57-1"><a href="#cb57-1"></a><span class="op">[</span>PROB<span class="op">]</span></span>
+<span id="cb57-2"><a href="#cb57-2"></a></span>
+<span id="cb57-3"><a href="#cb57-3"></a>This is a minor variation of the <span class="st">"pk2cmt"</span> model that is distributed as</span>
+<span id="cb57-4"><a href="#cb57-4"></a>part of the mrgsolve internal model library<span class="op">.</span> It has a single extravascular</span>
+<span id="cb57-5"><a href="#cb57-5"></a>dosing compartment <span class="op">(</span>the GUT<span class="op">),</span> a central compartment <span class="op">(</span>CENT<span class="op">),</span> <span class="kw">and</span> a</span>
+<span id="cb57-6"><a href="#cb57-6"></a>peripheral compartment <span class="op">(</span>PERIPH<span class="op">).</span> Absorption from GUT is first order<span class="op">,</span></span>
+<span id="cb57-7"><a href="#cb57-7"></a>whereas elimination from CENT follows Michaelis<span class="op">-</span>Menten kinetics<span class="op">.</span></span>
+<span id="cb57-8"><a href="#cb57-8"></a></span>
+<span id="cb57-9"><a href="#cb57-9"></a><span class="op">[</span>PARAM<span class="op">]</span> <span class="er">@</span>annotated</span>
+<span id="cb57-10"><a href="#cb57-10"></a></span>
+<span id="cb57-11"><a href="#cb57-11"></a>VC   <span class="op">:</span>  <span class="dv">20</span>  <span class="op">:</span> Central volume <span class="op">(</span>volume<span class="op">)</span></span>
+<span id="cb57-12"><a href="#cb57-12"></a>Q    <span class="op">:</span>   <span class="dv">2</span>  <span class="op">:</span> Inter<span class="op">-</span>compartmental clearance <span class="op">(</span>volume<span class="op">/</span>time<span class="op">)</span></span>
+<span id="cb57-13"><a href="#cb57-13"></a>VP   <span class="op">:</span>  <span class="dv">10</span>  <span class="op">:</span> Peripheral volume of distribution <span class="op">(</span>volume<span class="op">)</span></span>
+<span id="cb57-14"><a href="#cb57-14"></a>KA   <span class="op">:</span> <span class="fl">0.5</span>  <span class="op">:</span> Absorption rate constant <span class="op">(</span><span class="dv">1</span><span class="op">/</span>time<span class="op">)</span></span>
+<span id="cb57-15"><a href="#cb57-15"></a>VMAX <span class="op">:</span>   <span class="dv">1</span>  <span class="op">:</span> Maximum velocity of elimination <span class="op">(</span>mass<span class="op">/</span>time<span class="op">)</span></span>
+<span id="cb57-16"><a href="#cb57-16"></a>KM   <span class="op">:</span>   <span class="dv">2</span>  <span class="op">:</span> Michaelis constant <span class="cf">for</span> elimination <span class="op">(</span>mass<span class="op">/</span>volume<span class="op">)</span></span>
+<span id="cb57-17"><a href="#cb57-17"></a></span>
+<span id="cb57-18"><a href="#cb57-18"></a><span class="op">[</span>CMT<span class="op">]</span> <span class="er">@</span>annotated</span>
+<span id="cb57-19"><a href="#cb57-19"></a></span>
+<span id="cb57-20"><a href="#cb57-20"></a>GUT    <span class="op">:</span> Drug amount in gut <span class="op">(</span>mass<span class="op">)</span></span>
+<span id="cb57-21"><a href="#cb57-21"></a>CENT   <span class="op">:</span> Drug amount in central compartment <span class="op">(</span>mass<span class="op">)</span></span>
+<span id="cb57-22"><a href="#cb57-22"></a>PERIPH <span class="op">:</span> Drug amount in peripherhal compartment <span class="op">(</span>mass<span class="op">)</span></span>
+<span id="cb57-23"><a href="#cb57-23"></a></span>
+<span id="cb57-24"><a href="#cb57-24"></a><span class="op">[</span>GLOBAL<span class="op">]</span></span>
+<span id="cb57-25"><a href="#cb57-25"></a></span>
+<span id="cb57-26"><a href="#cb57-26"></a><span class="pp">#define CP </span><span class="op">(</span>CENT<span class="pp"> </span><span class="op">/</span><span class="pp"> </span>VC<span class="op">)</span><span class="pp">          </span><span class="co">// concentration in central compartment</span></span>
+<span id="cb57-27"><a href="#cb57-27"></a><span class="pp">#define CT </span><span class="op">(</span>PERIPH<span class="pp"> </span><span class="op">/</span><span class="pp"> </span>VP<span class="op">)</span><span class="pp">        </span><span class="co">// concentration in peripheral compartment</span></span>
+<span id="cb57-28"><a href="#cb57-28"></a><span class="pp">#define CLNL </span><span class="op">(</span>VMAX<span class="pp"> </span><span class="op">/</span><span class="pp"> </span><span class="op">(</span>KM<span class="pp"> </span><span class="op">+</span><span class="pp"> </span>CP<span class="op">))</span><span class="pp"> </span><span class="co">// non-linear clearance, per MM kinetics</span></span>
+<span id="cb57-29"><a href="#cb57-29"></a></span>
+<span id="cb57-30"><a href="#cb57-30"></a><span class="op">[</span>ODE<span class="op">]</span></span>
+<span id="cb57-31"><a href="#cb57-31"></a></span>
+<span id="cb57-32"><a href="#cb57-32"></a>dxdt_GUT <span class="op">=</span> <span class="op">-</span>KA <span class="op">*</span> GUT<span class="op">;</span></span>
+<span id="cb57-33"><a href="#cb57-33"></a>dxdt_CENT <span class="op">=</span> KA <span class="op">*</span> GUT <span class="op">-</span> <span class="op">(</span>CLNL <span class="op">+</span> Q<span class="op">)</span> <span class="op">*</span> CP  <span class="op">+</span> Q <span class="op">*</span> CT<span class="op">;</span></span>
+<span id="cb57-34"><a href="#cb57-34"></a>dxdt_PERIPH <span class="op">=</span> <span class="op">(</span>Q <span class="op">*</span> CP<span class="op">)</span> <span class="op">-</span> <span class="op">(</span>Q <span class="op">*</span> CT<span class="op">);</span></span>
+<span id="cb57-35"><a href="#cb57-35"></a></span>
+<span id="cb57-36"><a href="#cb57-36"></a><span class="op">[</span>CAPTURE<span class="op">]</span> <span class="er">@</span>annotated</span>
+<span id="cb57-37"><a href="#cb57-37"></a></span>
+<span id="cb57-38"><a href="#cb57-38"></a>CP <span class="op">:</span> Plasma concentration <span class="op">(</span>mass<span class="op">/</span>time<span class="op">)</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 </div>
+<p>There are six code blocks in this file. I’ve specified them using square brackets (e.g., <code>[BLOCKNAME]</code>) because it reminds me of <a href="https://toml.io/en/">TOML</a>, but it’s also valid to use the dollar sign (e.g., <code>$BLOCKNAME</code>).<a href="#fn19" class="footnote-ref" id="fnref19" role="doc-noteref"><sup>19</sup></a> Block names are case insensitive: mrgsolve treats <code>[BLOCKNAME]</code> and <code>[blockname]</code> identically. The order in which you specify blocks doesn’t matter, but the order of statements within a block often does matter because some blocks are interpreted as C++ or R code.</p>
+<p>The interpretation of these blocks is as follows:</p>
+<ul>
+<li><p>The <a href="https://mrgsolve.org/user-guide/specification.html#sec-block-prob"><code>[PROB]</code></a> block is purely used to specify comments or notes on the model. It has no functional effect. You’ll very often see this block written in markdown format.</p></li>
+<li><p>The <a href="https://mrgsolve.org/user-guide/specification.html#sec-block-param"><code>[PARAM]</code></a> block is used to pass a list of parameter values to be used in the model. When parsing this code block, mrgsolve interprets the values as R expressions (evaluated at build time), so if you were to define the central compartment volume <code>VC</code> to be <code>sqrt(400)</code>, the resulting model would store <code>VC</code> as the numeric value <code>20</code> within the internal parameter list. Normally, parameters would be defined as a comma separated list of name-value pairs (e.g., <code>VC = 20, Q = 2, ...</code>), but when you use the <code>@annotated</code> option as I have done here, you can write <code>VC : 20 : Central volume (volume)</code>. This version of the syntax allows you to provide comments on how each parameter is interpreted. Many of the code blocks support the <code>@annotated</code> option, and in most cases I find myself strongly preferring the annotated syntax.</p></li>
+<li><p>The <a href="https://mrgsolve.org/user-guide/specification.html#cmt-and-init"><code>[CMT]</code></a> block is used to specify compartment names, and much like the <code>[PARAM]</code> block it supports the <code>@annotated</code> keyword. By default, all compartments are presumed to be initialised with value 0. If you need to set different initial values for the drug amounts in each compartment, use an <code>[INIT]</code> block instead of a <code>[CMT]</code> block.</p></li>
+<li><p>The <a href="https://mrgsolve.org/user-guide/specification.html#global"><code>[GLOBAL]</code></a> block is used to specify global variables and <a href="https://cplusplus.com/doc/tutorial/preprocessor/">preprocessor directives</a> in the C++ code that mrgsolve constructs from the model specification file. This block is, not surprisingly, interpreted as literal C++ code. In this example I’ve used the <code>#define</code> directive to indicate that the plasma concentration <code>CP</code> is simply an alias for <code>(CENT / VP)</code>, and similarly the tissue<a href="#fn20" class="footnote-ref" id="fnref20" role="doc-noteref"><sup>20</sup></a> concentration <code>CT</code> is an alias for <code>(PERIPH / VP)</code>, and so on.</p></li>
+<li><p>The <a href="https://mrgsolve.org/user-guide/specification.html#sec-block-ode"><code>[ODE]</code></a> block is used to specify the differential equations that define the model. For every compartment in your model there is a corresponding <code>dxdt_</code> variable: for instance, if <code>CENT</code> denotes the drug amount in the central compartment, then there is automatically a variable <code>dxdt_CENT</code> that denotes its first derivative with respect to time, and you must specify the value for <em>all</em> compartment derivatives even if they are zero. The <code>[ODE]</code> block is interpreted as literal C++ code, and you can declare and initialise new variables within the <code>[ODE]</code> block if you want to. Note that you may sometimes see a <code>[DES]</code> code block instead of an <code>[ODE]</code> block. They’re the same thing: <code>[DES]</code> is an alias for <code>[ODE]</code>.</p></li>
+<li><p>The <a href="https://mrgsolve.org/user-guide/specification.html#sec-block-capture"><code>[CAPTURE]</code></a> block is used to indicate variables that should be “captured” in the simulation and returned to the user in R when <code>mrgsim()</code> is called. The user guide doesn’t say so explicitly, but from what I can tell the compartment amount variables are always captured, and you don’t need to list those here. The only things you need to specify here are the <em>other</em> quantities that you want the simulation to return. It supports the <code>@annotated</code> keyword, and I’ve used that here because honestly my sanity dissolves very quickly when trying to read model specification files that don’t use the annotations.</p></li>
+</ul>
+<p>Okay, now that I’ve saved my model specification file as <code>example1.cpp</code>, let’s pivot back to my R session and use it to run a simulation:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb63"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb63-1"><a href="#cb63-1" aria-hidden="true" tabindex="-1"></a>mod <span class="ot">&lt;-</span> <span class="fu">mread_file</span>(<span class="st">"example1.cpp"</span>, <span class="at">quiet =</span> <span class="cn">TRUE</span>)</span>
-<span id="cb63-2"><a href="#cb63-2" aria-hidden="true" tabindex="-1"></a>events <span class="ot">&lt;-</span> <span class="fu">ev</span>(<span class="at">amt =</span> <span class="dv">10</span>, <span class="at">ii =</span> <span class="dv">24</span>, <span class="at">addl =</span> <span class="dv">19</span>)</span>
-<span id="cb63-3"><a href="#cb63-3" aria-hidden="true" tabindex="-1"></a>times <span class="ot">&lt;-</span> <span class="fu">tgrid</span>(<span class="at">start =</span> <span class="dv">0</span>, <span class="at">end =</span> <span class="dv">960</span>, <span class="at">delta =</span> .<span class="dv">2</span>)</span>
-<span id="cb63-4"><a href="#cb63-4" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb63-5"><a href="#cb63-5" aria-hidden="true" tabindex="-1"></a>out <span class="ot">&lt;-</span> <span class="fu">mrgsim_e</span>(mod, <span class="at">events =</span> events, <span class="at">tgrid =</span> times)</span>
-<span id="cb63-6"><a href="#cb63-6" aria-hidden="true" tabindex="-1"></a><span class="fu">plot</span>(out)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb58"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb58-1"><a href="#cb58-1" aria-hidden="true" tabindex="-1"></a>mod <span class="ot">&lt;-</span> <span class="fu">mread_file</span>(<span class="st">"example1.cpp"</span>, <span class="at">quiet =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb58-2"><a href="#cb58-2" aria-hidden="true" tabindex="-1"></a>events <span class="ot">&lt;-</span> <span class="fu">ev</span>(<span class="at">amt =</span> <span class="dv">10</span>, <span class="at">ii =</span> <span class="dv">24</span>, <span class="at">addl =</span> <span class="dv">19</span>)</span>
+<span id="cb58-3"><a href="#cb58-3" aria-hidden="true" tabindex="-1"></a>times <span class="ot">&lt;-</span> <span class="fu">tgrid</span>(<span class="at">start =</span> <span class="dv">0</span>, <span class="at">end =</span> <span class="dv">960</span>, <span class="at">delta =</span> .<span class="dv">2</span>)</span>
+<span id="cb58-4"><a href="#cb58-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb58-5"><a href="#cb58-5" aria-hidden="true" tabindex="-1"></a>out <span class="ot">&lt;-</span> <span class="fu">mrgsim_e</span>(mod, <span class="at">events =</span> events, <span class="at">tgrid =</span> times)</span>
+<span id="cb58-6"><a href="#cb58-6" aria-hidden="true" tabindex="-1"></a><span class="fu">plot</span>(out)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output-display">
-<p><img src="index_files/figure-html/unnamed-chunk-35-1.png" class="img-fluid" width="672"></p>
+<p><img src="index_files/figure-html/unnamed-chunk-33-1.png" class="img-fluid" width="672"></p>
 </div>
 </div>
+<p>Yes, that all seems to work nicely. No, I did not have any solid justification for choosing these parameters. It’s just a toy.</p>
 </section>
 <section id="example-2" class="level3">
 <h3 class="anchored" data-anchor-id="example-2">Example 2</h3>
@@ -788,65 +789,65 @@ ID:     1
 <div class="code-with-filename-file">
 <pre><strong>example2.cpp</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb64"><pre class="sourceCode numberSource cpp number-lines code-with-copy"><code class="sourceCode cpp"><span id="cb64-1"><a href="#cb64-1"></a><span class="op">[</span>PROB<span class="op">]</span></span>
-<span id="cb64-2"><a href="#cb64-2"></a></span>
-<span id="cb64-3"><a href="#cb64-3"></a>This is a population<span class="op">-</span>PK two<span class="op">-</span>compartment model<span class="op">.</span></span>
-<span id="cb64-4"><a href="#cb64-4"></a></span>
-<span id="cb64-5"><a href="#cb64-5"></a><span class="op">[</span>PARAM<span class="op">]</span> <span class="er">@</span>annotated</span>
-<span id="cb64-6"><a href="#cb64-6"></a></span>
-<span id="cb64-7"><a href="#cb64-7"></a>TVVC   <span class="op">:</span> <span class="dv">20</span>  <span class="op">:</span> Typical value <span class="cf">for</span> VC <span class="op">(</span>volume<span class="op">)</span></span>
-<span id="cb64-8"><a href="#cb64-8"></a>TVVP   <span class="op">:</span> <span class="dv">10</span>  <span class="op">:</span> Typical value <span class="cf">for</span> VP <span class="op">(</span>volume<span class="op">)</span></span>
-<span id="cb64-9"><a href="#cb64-9"></a>TVKA   <span class="op">:</span>  <span class="dv">1</span>  <span class="op">:</span> Typical value <span class="cf">for</span> KA <span class="op">(</span><span class="dv">1</span><span class="op">/</span>time<span class="op">)</span></span>
-<span id="cb64-10"><a href="#cb64-10"></a>TVCL   <span class="op">:</span>  <span class="dv">1</span>  <span class="op">:</span> Typical value <span class="cf">for</span> CL <span class="op">(</span>volume<span class="op">/</span>time<span class="op">)</span></span>
-<span id="cb64-11"><a href="#cb64-11"></a>TVQ    <span class="op">:</span>  <span class="dv">2</span>  <span class="op">:</span> Typical value <span class="cf">for</span> Q <span class="op">(</span>volume<span class="op">/</span>time<span class="op">)</span></span>
-<span id="cb64-12"><a href="#cb64-12"></a></span>
-<span id="cb64-13"><a href="#cb64-13"></a><span class="op">[</span>OMEGA<span class="op">]</span> <span class="er">@</span>annotated</span>
-<span id="cb64-14"><a href="#cb64-14"></a></span>
-<span id="cb64-15"><a href="#cb64-15"></a>EVC   <span class="op">:</span>   <span class="dv">2</span> <span class="op">:</span> Variance of random effect on VC</span>
-<span id="cb64-16"><a href="#cb64-16"></a>EVP   <span class="op">:</span>   <span class="dv">1</span> <span class="op">:</span> Variance of random effect on VP</span>
-<span id="cb64-17"><a href="#cb64-17"></a>EKA   <span class="op">:</span> <span class="fl">0.1</span> <span class="op">:</span> Variance of random effect on KA</span>
-<span id="cb64-18"><a href="#cb64-18"></a>ECL   <span class="op">:</span> <span class="fl">0.1</span> <span class="op">:</span> Variance of random effect on CL</span>
-<span id="cb64-19"><a href="#cb64-19"></a>EQ    <span class="op">:</span> <span class="fl">0.1</span> <span class="op">:</span> Variance of random effect on Q</span>
-<span id="cb64-20"><a href="#cb64-20"></a></span>
-<span id="cb64-21"><a href="#cb64-21"></a><span class="op">[</span>MAIN<span class="op">]</span></span>
-<span id="cb64-22"><a href="#cb64-22"></a></span>
-<span id="cb64-23"><a href="#cb64-23"></a><span class="dt">double</span> VC <span class="op">=</span> TVVC <span class="op">*</span> exp<span class="op">(</span>EVC<span class="op">);</span> <span class="co">// central compartment volume</span></span>
-<span id="cb64-24"><a href="#cb64-24"></a><span class="dt">double</span> VP <span class="op">=</span> TVVP <span class="op">*</span> exp<span class="op">(</span>EVP<span class="op">);</span> <span class="co">// peripheral compartment volume</span></span>
-<span id="cb64-25"><a href="#cb64-25"></a><span class="dt">double</span> KA <span class="op">=</span> TVKA <span class="op">*</span> exp<span class="op">(</span>EKA<span class="op">);</span> <span class="co">// absorption rate constant</span></span>
-<span id="cb64-26"><a href="#cb64-26"></a><span class="dt">double</span> CL <span class="op">=</span> TVCL <span class="op">*</span> exp<span class="op">(</span>ECL<span class="op">);</span> <span class="co">// clearance</span></span>
-<span id="cb64-27"><a href="#cb64-27"></a><span class="dt">double</span> Q  <span class="op">=</span> TVQ  <span class="op">*</span> exp<span class="op">(</span>EQ<span class="op">);</span>  <span class="co">// intercompartmental clearance</span></span>
-<span id="cb64-28"><a href="#cb64-28"></a></span>
-<span id="cb64-29"><a href="#cb64-29"></a><span class="op">[</span>CMT<span class="op">]</span> <span class="er">@</span>annotated</span>
-<span id="cb64-30"><a href="#cb64-30"></a></span>
-<span id="cb64-31"><a href="#cb64-31"></a>GUT    <span class="op">:</span> Drug amount in gut <span class="op">(</span>mass<span class="op">)</span></span>
-<span id="cb64-32"><a href="#cb64-32"></a>CENT   <span class="op">:</span> Drug amount in central compartment <span class="op">(</span>mass<span class="op">)</span></span>
-<span id="cb64-33"><a href="#cb64-33"></a>PERIPH <span class="op">:</span> Drug amount in peripherhal compartment <span class="op">(</span>mass<span class="op">)</span></span>
-<span id="cb64-34"><a href="#cb64-34"></a></span>
-<span id="cb64-35"><a href="#cb64-35"></a><span class="op">[</span>GLOBAL<span class="op">]</span></span>
-<span id="cb64-36"><a href="#cb64-36"></a></span>
-<span id="cb64-37"><a href="#cb64-37"></a><span class="pp">#define CP </span><span class="op">(</span>CENT<span class="pp"> </span><span class="op">/</span><span class="pp"> </span>VC<span class="op">)</span><span class="pp">   </span><span class="co">// concentration in central compartment</span></span>
-<span id="cb64-38"><a href="#cb64-38"></a><span class="pp">#define CT </span><span class="op">(</span>PERIPH<span class="pp"> </span><span class="op">/</span><span class="pp"> </span>VP<span class="op">)</span><span class="pp"> </span><span class="co">// concentration in peripheral compartment</span></span>
-<span id="cb64-39"><a href="#cb64-39"></a></span>
-<span id="cb64-40"><a href="#cb64-40"></a><span class="op">[</span>ODE<span class="op">]</span></span>
-<span id="cb64-41"><a href="#cb64-41"></a></span>
-<span id="cb64-42"><a href="#cb64-42"></a>dxdt_GUT    <span class="op">=</span> <span class="op">-(</span>KA <span class="op">*</span> GUT<span class="op">);</span></span>
-<span id="cb64-43"><a href="#cb64-43"></a>dxdt_CENT   <span class="op">=</span>  <span class="op">(</span>KA <span class="op">*</span> GUT<span class="op">)</span> <span class="op">-</span> <span class="op">(</span>CL <span class="op">+</span> Q<span class="op">)</span> <span class="op">*</span> CP <span class="op">+</span> <span class="op">(</span>Q <span class="op">*</span> CT<span class="op">);</span></span>
-<span id="cb64-44"><a href="#cb64-44"></a>dxdt_PERIPH <span class="op">=</span>  <span class="op">(</span>Q <span class="op">*</span> CP<span class="op">)</span> <span class="op">-</span> <span class="op">(</span>Q <span class="op">*</span> CT<span class="op">);</span></span>
-<span id="cb64-45"><a href="#cb64-45"></a></span>
-<span id="cb64-46"><a href="#cb64-46"></a><span class="op">[</span>CAPTURE<span class="op">]</span> <span class="er">@</span>annotated</span>
-<span id="cb64-47"><a href="#cb64-47"></a></span>
-<span id="cb64-48"><a href="#cb64-48"></a>CP <span class="op">:</span> Plasma concentration <span class="op">(</span>mass<span class="op">/</span>time<span class="op">)</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb59"><pre class="sourceCode numberSource cpp number-lines code-with-copy"><code class="sourceCode cpp"><span id="cb59-1"><a href="#cb59-1"></a><span class="op">[</span>PROB<span class="op">]</span></span>
+<span id="cb59-2"><a href="#cb59-2"></a></span>
+<span id="cb59-3"><a href="#cb59-3"></a>This is a population<span class="op">-</span>PK two<span class="op">-</span>compartment model<span class="op">.</span></span>
+<span id="cb59-4"><a href="#cb59-4"></a></span>
+<span id="cb59-5"><a href="#cb59-5"></a><span class="op">[</span>PARAM<span class="op">]</span> <span class="er">@</span>annotated</span>
+<span id="cb59-6"><a href="#cb59-6"></a></span>
+<span id="cb59-7"><a href="#cb59-7"></a>TVVC   <span class="op">:</span> <span class="dv">20</span>  <span class="op">:</span> Typical value <span class="cf">for</span> VC <span class="op">(</span>volume<span class="op">)</span></span>
+<span id="cb59-8"><a href="#cb59-8"></a>TVVP   <span class="op">:</span> <span class="dv">10</span>  <span class="op">:</span> Typical value <span class="cf">for</span> VP <span class="op">(</span>volume<span class="op">)</span></span>
+<span id="cb59-9"><a href="#cb59-9"></a>TVKA   <span class="op">:</span>  <span class="dv">1</span>  <span class="op">:</span> Typical value <span class="cf">for</span> KA <span class="op">(</span><span class="dv">1</span><span class="op">/</span>time<span class="op">)</span></span>
+<span id="cb59-10"><a href="#cb59-10"></a>TVCL   <span class="op">:</span>  <span class="dv">1</span>  <span class="op">:</span> Typical value <span class="cf">for</span> CL <span class="op">(</span>volume<span class="op">/</span>time<span class="op">)</span></span>
+<span id="cb59-11"><a href="#cb59-11"></a>TVQ    <span class="op">:</span>  <span class="dv">2</span>  <span class="op">:</span> Typical value <span class="cf">for</span> Q <span class="op">(</span>volume<span class="op">/</span>time<span class="op">)</span></span>
+<span id="cb59-12"><a href="#cb59-12"></a></span>
+<span id="cb59-13"><a href="#cb59-13"></a><span class="op">[</span>OMEGA<span class="op">]</span> <span class="er">@</span>annotated</span>
+<span id="cb59-14"><a href="#cb59-14"></a></span>
+<span id="cb59-15"><a href="#cb59-15"></a>EVC   <span class="op">:</span>   <span class="dv">2</span> <span class="op">:</span> Variance of random effect on VC</span>
+<span id="cb59-16"><a href="#cb59-16"></a>EVP   <span class="op">:</span>   <span class="dv">1</span> <span class="op">:</span> Variance of random effect on VP</span>
+<span id="cb59-17"><a href="#cb59-17"></a>EKA   <span class="op">:</span> <span class="fl">0.1</span> <span class="op">:</span> Variance of random effect on KA</span>
+<span id="cb59-18"><a href="#cb59-18"></a>ECL   <span class="op">:</span> <span class="fl">0.1</span> <span class="op">:</span> Variance of random effect on CL</span>
+<span id="cb59-19"><a href="#cb59-19"></a>EQ    <span class="op">:</span> <span class="fl">0.1</span> <span class="op">:</span> Variance of random effect on Q</span>
+<span id="cb59-20"><a href="#cb59-20"></a></span>
+<span id="cb59-21"><a href="#cb59-21"></a><span class="op">[</span>MAIN<span class="op">]</span></span>
+<span id="cb59-22"><a href="#cb59-22"></a></span>
+<span id="cb59-23"><a href="#cb59-23"></a><span class="dt">double</span> VC <span class="op">=</span> TVVC <span class="op">*</span> exp<span class="op">(</span>EVC<span class="op">);</span> <span class="co">// central compartment volume</span></span>
+<span id="cb59-24"><a href="#cb59-24"></a><span class="dt">double</span> VP <span class="op">=</span> TVVP <span class="op">*</span> exp<span class="op">(</span>EVP<span class="op">);</span> <span class="co">// peripheral compartment volume</span></span>
+<span id="cb59-25"><a href="#cb59-25"></a><span class="dt">double</span> KA <span class="op">=</span> TVKA <span class="op">*</span> exp<span class="op">(</span>EKA<span class="op">);</span> <span class="co">// absorption rate constant</span></span>
+<span id="cb59-26"><a href="#cb59-26"></a><span class="dt">double</span> CL <span class="op">=</span> TVCL <span class="op">*</span> exp<span class="op">(</span>ECL<span class="op">);</span> <span class="co">// clearance</span></span>
+<span id="cb59-27"><a href="#cb59-27"></a><span class="dt">double</span> Q  <span class="op">=</span> TVQ  <span class="op">*</span> exp<span class="op">(</span>EQ<span class="op">);</span>  <span class="co">// intercompartmental clearance</span></span>
+<span id="cb59-28"><a href="#cb59-28"></a></span>
+<span id="cb59-29"><a href="#cb59-29"></a><span class="op">[</span>CMT<span class="op">]</span> <span class="er">@</span>annotated</span>
+<span id="cb59-30"><a href="#cb59-30"></a></span>
+<span id="cb59-31"><a href="#cb59-31"></a>GUT    <span class="op">:</span> Drug amount in gut <span class="op">(</span>mass<span class="op">)</span></span>
+<span id="cb59-32"><a href="#cb59-32"></a>CENT   <span class="op">:</span> Drug amount in central compartment <span class="op">(</span>mass<span class="op">)</span></span>
+<span id="cb59-33"><a href="#cb59-33"></a>PERIPH <span class="op">:</span> Drug amount in peripherhal compartment <span class="op">(</span>mass<span class="op">)</span></span>
+<span id="cb59-34"><a href="#cb59-34"></a></span>
+<span id="cb59-35"><a href="#cb59-35"></a><span class="op">[</span>GLOBAL<span class="op">]</span></span>
+<span id="cb59-36"><a href="#cb59-36"></a></span>
+<span id="cb59-37"><a href="#cb59-37"></a><span class="pp">#define CP </span><span class="op">(</span>CENT<span class="pp"> </span><span class="op">/</span><span class="pp"> </span>VC<span class="op">)</span><span class="pp">   </span><span class="co">// concentration in central compartment</span></span>
+<span id="cb59-38"><a href="#cb59-38"></a><span class="pp">#define CT </span><span class="op">(</span>PERIPH<span class="pp"> </span><span class="op">/</span><span class="pp"> </span>VP<span class="op">)</span><span class="pp"> </span><span class="co">// concentration in peripheral compartment</span></span>
+<span id="cb59-39"><a href="#cb59-39"></a></span>
+<span id="cb59-40"><a href="#cb59-40"></a><span class="op">[</span>ODE<span class="op">]</span></span>
+<span id="cb59-41"><a href="#cb59-41"></a></span>
+<span id="cb59-42"><a href="#cb59-42"></a>dxdt_GUT    <span class="op">=</span> <span class="op">-(</span>KA <span class="op">*</span> GUT<span class="op">);</span></span>
+<span id="cb59-43"><a href="#cb59-43"></a>dxdt_CENT   <span class="op">=</span>  <span class="op">(</span>KA <span class="op">*</span> GUT<span class="op">)</span> <span class="op">-</span> <span class="op">(</span>CL <span class="op">+</span> Q<span class="op">)</span> <span class="op">*</span> CP <span class="op">+</span> <span class="op">(</span>Q <span class="op">*</span> CT<span class="op">);</span></span>
+<span id="cb59-44"><a href="#cb59-44"></a>dxdt_PERIPH <span class="op">=</span>  <span class="op">(</span>Q <span class="op">*</span> CP<span class="op">)</span> <span class="op">-</span> <span class="op">(</span>Q <span class="op">*</span> CT<span class="op">);</span></span>
+<span id="cb59-45"><a href="#cb59-45"></a></span>
+<span id="cb59-46"><a href="#cb59-46"></a><span class="op">[</span>CAPTURE<span class="op">]</span> <span class="er">@</span>annotated</span>
+<span id="cb59-47"><a href="#cb59-47"></a></span>
+<span id="cb59-48"><a href="#cb59-48"></a>CP <span class="op">:</span> Plasma concentration <span class="op">(</span>mass<span class="op">/</span>time<span class="op">)</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 </div>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb65"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb65-1"><a href="#cb65-1" aria-hidden="true" tabindex="-1"></a>mod <span class="ot">&lt;-</span> <span class="fu">mread_file</span>(<span class="st">"example2.cpp"</span>, <span class="at">quiet =</span> <span class="cn">TRUE</span>)</span>
-<span id="cb65-2"><a href="#cb65-2" aria-hidden="true" tabindex="-1"></a>data <span class="ot">&lt;-</span> <span class="fu">expand.ev</span>(<span class="at">amt =</span> <span class="dv">10</span>, <span class="at">ii =</span> <span class="dv">24</span>, <span class="at">addl =</span> <span class="dv">11</span>, <span class="at">ID =</span> <span class="dv">1</span><span class="sc">:</span><span class="dv">6</span>)</span>
-<span id="cb65-3"><a href="#cb65-3" aria-hidden="true" tabindex="-1"></a>times <span class="ot">&lt;-</span> <span class="fu">tgrid</span>(<span class="at">start =</span> <span class="dv">0</span>, <span class="at">end =</span> <span class="dv">480</span>, <span class="at">delta =</span> .<span class="dv">1</span>)</span>
-<span id="cb65-4"><a href="#cb65-4" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb65-5"><a href="#cb65-5" aria-hidden="true" tabindex="-1"></a>out <span class="ot">&lt;-</span> <span class="fu">mrgsim_d</span>(mod, <span class="at">data =</span> data, <span class="at">tgrid =</span> times)</span>
-<span id="cb65-6"><a href="#cb65-6" aria-hidden="true" tabindex="-1"></a><span class="fu">plot</span>(out)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb60"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb60-1"><a href="#cb60-1" aria-hidden="true" tabindex="-1"></a>mod <span class="ot">&lt;-</span> <span class="fu">mread_file</span>(<span class="st">"example2.cpp"</span>, <span class="at">quiet =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb60-2"><a href="#cb60-2" aria-hidden="true" tabindex="-1"></a>data <span class="ot">&lt;-</span> <span class="fu">expand.ev</span>(<span class="at">amt =</span> <span class="dv">10</span>, <span class="at">ii =</span> <span class="dv">24</span>, <span class="at">addl =</span> <span class="dv">11</span>, <span class="at">ID =</span> <span class="dv">1</span><span class="sc">:</span><span class="dv">6</span>)</span>
+<span id="cb60-3"><a href="#cb60-3" aria-hidden="true" tabindex="-1"></a>times <span class="ot">&lt;-</span> <span class="fu">tgrid</span>(<span class="at">start =</span> <span class="dv">0</span>, <span class="at">end =</span> <span class="dv">480</span>, <span class="at">delta =</span> .<span class="dv">1</span>)</span>
+<span id="cb60-4"><a href="#cb60-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb60-5"><a href="#cb60-5" aria-hidden="true" tabindex="-1"></a>out <span class="ot">&lt;-</span> <span class="fu">mrgsim_d</span>(mod, <span class="at">data =</span> data, <span class="at">tgrid =</span> times)</span>
+<span id="cb60-6"><a href="#cb60-6" aria-hidden="true" tabindex="-1"></a><span class="fu">plot</span>(out)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output-display">
-<p><img src="index_files/figure-html/unnamed-chunk-37-1.png" class="img-fluid" width="672"></p>
+<p><img src="index_files/figure-html/unnamed-chunk-35-1.png" class="img-fluid" width="672"></p>
 </div>
 </div>
 </section>
@@ -873,18 +874,21 @@ ID:     1
 <li id="fn3"><p>There are a <em>lot</em> of tools in this space: NONMEM is the oldest and most-widely used, but in addition there’s Stan/Torsten, Monolix, nlmixr, Phoenix NLME, and probably many others I don’t know about yet…<a href="#fnref3" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
 <li id="fn4"><p>I’m can’t tell if the original package is still under active development or if it’s been deprecated. The <a href="https://nlmixrdevelopment.github.io/RxODE/">RxODE</a> package still appears on the nlmixr website and on GitHub, but the package is (at present?) archived on CRAN.<a href="#fnref4" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
 <li id="fn5"><p>Specifically, it wraps the public domain Fortran library <a href="https://computing.llnl.gov/projects/odepack">ODEPACK</a><a href="#fnref5" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
-<li id="fn6"><p>As far as I can tell, the mrgsolve package builds on a per-session basis, so if I were to repeat the same command in the R session that knits this blog post, I’d see a different message informing me that mrgsolve is using the cached version of the compiled model.<a href="#fnref6" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
-<li id="fn7"><p>I should say, for the record, that I’m not being critical here. Software developers who don’t work in statistics have a tendency to get very angry at R (and R developers) for writing hyper-flexible functions that produce wildly different output types depending on the input. While I do understand that annoyance, I also think it’s often misplaced. R is fundamentally a <em>statistical programming language</em>. It’s not trying to be Python, and it’s even less interested in being Rust. You wouldn’t think it from browsing the “rstats” hashtag on social media (which is massively biased towards developers), but the typical R user is someone working interactively at the console, constructing a script iteratively as they explore and work with the data set they’ve been tasked to analyse. In that context, the hyper-flexibility of a lot of R functions is designed for the convenience of the <em>analyst</em>. It’s not there for your convenience as a developer. Of course, I also think that package developers should always ensure that there are type-stable versions of their functions that other R developers can call in package code, but… for example, mrgsolve does in fact support this. If you’re a developer calling <code>mrgsolve::modlib()</code> from within a package then IMO you don’t get to whine about mrgsolve doing it wrong. In that scenario you get what you deserve for writing <em>your</em> package the wrong way.<a href="#fnref7" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
-<li id="fn8"><p>Developers reading this are probably wondering where the model shared object ends up when compilation happens. By default <code>mread()</code> puts the compiled model in the R temp folder, but you can override this in a persistent way by setting the <code>"mrgsolve.soloc"</code> option, or overriding it in the call to <code>mread()</code> via the <code>soloc</code> argument. You can also suppress compilation if you want bt setting <code>compile = FALSE</code>. But probably any devs reading this would likely discover that within 5 minutes of reading the documentation anyway so there’s no real need for me to mention it.<a href="#fnref8" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
-<li id="fn9"><p>I mean… of the <em>widely-used</em> OOP systems, it’s the one I’m least comfortable with. The wild abandon with which R spawns new object oriented programming systems is… a lot to keep up with. Honestly it’s exhausting.<a href="#fnref9" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
-<li id="fn10"><p>Why yes, this blog post is <em>also</em> an exercise in “Danielle reminds herself how S4 works and no she bloody well is not going to talk about multiple inheritance and multiple dispatch in S4 here she’s not that much of a masochist”.<a href="#fnref10" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
-<li id="fn11"><p>As an aside, <code>param(mod)</code> returns an S4 object of class “parameter_list” which in turn has a <code>show()</code> method that provides that prettified looking table pf parameters, but from a practical perspective you might just want to coerce it to a regular list using <code>as.list(param(mod))</code>.<a href="#fnref11" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
-<li id="fn12"><p>I really need to <em>learn</em> NONMEM. It’s becoming a bit absurd that I’m learning everything else before NONMEM. Oh well, I was never someone to do things in the proper order.<a href="#fnref12" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
-<li id="fn13"><p>There is also an <code>as.ev()</code> function that allows conversion in the other direction.<a href="#fnref13" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
-<li id="fn14"><p>To be precise, <code>ev()</code> is an S4 generic function that does method dispatch on the <code>x</code> argument. If <code>x</code> is missing, the relevant <code>ev()</code> method returns an “ev” object. However, if <code>x</code> has class “mrgmod”, the relevant method returns another “mrgmod” object. I’ll confess this makes me a little uneasy.<a href="#fnref14" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
-<li id="fn15"><p>Oh look, that apparently-irrelevant excursion she did talking about the mrgmod object slots turns out to be relevant! It’s almost as if she’s written things before!<a href="#fnref15" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
-<li id="fn16"><p>There are several other variants on <code>mrgsim()</code> that enforce different constraints. I haven’t talked about <code>data_set()</code> and related functions in this post, for instance, but there’s a <code>mrgsim_d()</code> variant that requires the user to pass a data set object.<a href="#fnref16" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
-<li id="fn17"><p>A trick that would work perfectly well if the user wanted to add a column labelled <code>y</code>, I might add…<a href="#fnref17" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn6"><p>In this example it’s not very interesting because CP is just the ratio of CENT and V, and since V doesn’t change over time, the curves for CP and CENT look identical. That isn’t true for simulations with multiple sujects, however, since V can and does vary across individuals.<a href="#fnref6" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn7"><p>Yes, fellow developer type, that does mean that <code>param()</code> is not output type stable. It’s not the worst kind of type instability because you can look at the arguments and guess the output type, but if that kind of thing distresses you please be warned that you’ll see quite a bit more of it in this post.<a href="#fnref7" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn8"><p>I should say, for the record, that I’m not being critical here. Software developers who don’t work in statistics have a tendency to get very angry at R (and R developers) for writing hyper-flexible functions that produce wildly different output types depending on the input. While I do understand that annoyance, I also think it’s often misplaced. R is fundamentally a <em>statistical programming language</em>. It’s not trying to be Python, and it’s even less interested in being Rust. You wouldn’t think it from browsing the “rstats” hashtag on social media (which is massively biased towards developers), but the typical R user is someone working interactively at the console, constructing a script iteratively as they explore and work with the data set they’ve been tasked to analyse. In that context, the hyper-flexibility of a lot of R functions is designed for the convenience of the <em>analyst</em>. It’s not there for your convenience as a developer. Of course, I also think that package developers should always ensure that there are type-stable versions of their functions that other R developers can call in package code, but… for example, mrgsolve does in fact support this. If you’re a developer calling <code>mrgsolve::modlib()</code> from within a package then IMO you don’t get to whine about mrgsolve doing it wrong. In that scenario you get what you deserve for writing <em>your</em> package the wrong way.<a href="#fnref8" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn9"><p>Developers reading this are probably wondering where the model shared object ends up when compilation happens. By default <code>mread()</code> puts the compiled model in the R temp folder, but you can override this in a persistent way by setting the <code>"mrgsolve.soloc"</code> option, or overriding it in the call to <code>mread()</code> via the <code>soloc</code> argument. You can also suppress compilation if you want bt setting <code>compile = FALSE</code>. But probably any devs reading this would likely discover that within 5 minutes of reading the documentation anyway so there’s no real need for me to mention it.<a href="#fnref9" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn10"><p>I mean… of the <em>widely-used</em> OOP systems, it’s the one I’m least comfortable with. The wild abandon with which R spawns new object oriented programming systems is… a lot to keep up with. Honestly it’s exhausting.<a href="#fnref10" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn11"><p>Why yes, this blog post is <em>also</em> an exercise in “Danielle reminds herself how S4 works and no she bloody well is not going to talk about multiple inheritance and multiple dispatch in S4 here she’s not that much of a masochist”.<a href="#fnref11" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn12"><p>As an aside, <code>param(mod)</code> returns an S4 object of class “parameter_list” which in turn has a <code>show()</code> method that provides that prettified looking table pf parameters, but from a practical perspective you might just want to coerce it to a regular list using <code>as.list(param(mod))</code>.<a href="#fnref12" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn13"><p>I really need to <em>learn</em> NONMEM. It’s becoming a bit absurd that I’m learning everything else before NONMEM. Oh well, I was never someone to do things in the proper order.<a href="#fnref13" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn14"><p>There is also an <code>as.ev()</code> function that allows conversion in the other direction.<a href="#fnref14" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn15"><p>To be precise, <code>ev()</code> is an S4 generic function that does method dispatch on the <code>x</code> argument. If <code>x</code> is missing, the relevant <code>ev()</code> method returns an “ev” object. However, if <code>x</code> has class “mrgmod”, the relevant method returns another “mrgmod” object. I’ll confess this makes me a little uneasy.<a href="#fnref15" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn16"><p>Oh look, that apparently-irrelevant excursion she did talking about the mrgmod object slots turns out to be relevant! It’s almost as if she’s written things before!<a href="#fnref16" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn17"><p>There are several other variants on <code>mrgsim()</code> that enforce different constraints. I haven’t talked about <code>data_set()</code> and related functions in this post, for instance, but there’s a <code>mrgsim_d()</code> variant that requires the user to pass a data set object.<a href="#fnref17" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn18"><p>I’m guessing that the logic here is that, even though some code blocks use R syntax, and others aren’t interpreted as code at all, the model build process is such that eventually it all becomes C++, and a C++ compiler constructs the binary. There’s logic to it, but it does feel a bit disorienting seeing “.cpp” files that aren’t actually C++ source.<a href="#fnref18" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn19"><p>I suspect that the <code>$BLOCKNAME</code> format is actually canonical because that’s the version you see when model code is printed when calling <code>see()</code>, but I’m going to use <code>[BLOCKNAME]</code> throughout this post because I personally find it easier to read. <a href="https://dictionary.cambridge.org/dictionary/english/ymmv">YMMV</a>.<a href="#fnref19" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn20"><p>Confession: I’m not 100% certain that the “T” in “CT” stands for tissue, since I copied this line from one of the models in the mrgsolve model library, but I think it’s the right interpretation given that the central compartment amount is usually intended to refer to “amount of drug the blood, sort of” and the peripheral compartment is “amount of drug in body tissues, sort of”. The “sort of” is important though: pharamacokinetic compartments are abstractions, and are they only loosely related to the corresponding physiology.<a href="#fnref20" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
 </ol>
 </section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div id="quarto-reuse" class="quarto-appendix-contents"><div><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2023,
   author = {Navarro, Danielle},
