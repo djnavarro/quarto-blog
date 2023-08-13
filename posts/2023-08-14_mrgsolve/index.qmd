@@ -1,6 +1,6 @@
 ---
 title: "Pharmacometric simulation with mrgsolve"
-description: "This is a subtitle"
+description: "Yet another post in the ever-expanding series where Danielle teaches herself pharmacometric modelling, which I'm certain is thrilling to everyone"
 date: "2023-08-14"
 image: "danilo-alvesd-a7OdG45prSM-unsplash.jpg"
 image-alt: "Pink and blue pill against a blue background"
@@ -33,7 +33,7 @@ As I'm rapidly coming to realise, the world of pharmacometric modelling is an in
 
 With that as the structure of the ecosystem, what you tend to find are packages that carve out a specific niche by building on top of some other tool. For this post, the niche we're talking about is **model-based simulation**. In this context, it's assumed that the analyst has a specific pharmacometric model in mind (e.g., one-compartment PK model,^[The acronym PK is universally used as shorthand for "pharmacokinetics", and a PK model is one where the primary variable you're interested in modelling is the plasma concentration over time for some drug. If you're totally new to this space, the post I wrote on [non-compartmental analysis](/posts/2023-04-26_non-compartmental-analysis/) was written from a total-newbie perspective and spells out a lot the basic terminology used in PK modelling.] two-compartment PK model, etc etc). We are not attempting to estimate parameters from data, nor are we runing a model testing exercise. The model is presumed to exist already, usually because the analyst has already done the model fitting exercise using their tool of choice.^[There are a *lot* of tools in this space: NONMEM is the oldest and most-widely used, but in addition there's Stan/Torsten, Monolix, nlmixr, Phoenix NLME, and probably many others I don't know about yet...]
 
-Within the specific "model simulation" niche there are a number of R packages that people seem to use frequently. There's the RxODE package^[I can't tell if the original package is still under active development or if it's been deprecated. The [RxODE](https://nlmixrdevelopment.github.io/RxODE/) package still appears on the nlmixr website and on GitHub, but the package is (at present?) archived on CRAN.] and its successor [rxode2](https://nlmixr2.github.io/rxode2/), for example, and mrgsolve falls within the same general niche. 
+Within the specific "model simulation" niche there are a number of R packages that people seem to use frequently. There's the RxODE package^[I can't tell if the original package is still under active development or if it's been deprecated. The [RxODE](https://nlmixrdevelopment.github.io/RxODE/) package still appears on the nlmixr website and on GitHub, but the package is (at present?) archived on CRAN.] and its successor [rxode2](https://nlmixr2.github.io/rxode2/), for example, and mrgsolve falls within the same general niche. I didn't have any specific reason for deciding to learn mrgsolve first: I had to start somewhere and this seems as good a place as any.
 
 ```{r}
 #| label: package-load
@@ -74,7 +74,7 @@ param(mod)
 
 We see that our model assumes a clearance (CL) of 1, an aborption rate constant (KA) of 1, and a volume of distribution equal to 20. The mrgsolve package doesn't keep track of units: it's up to the user to make sure all the units are on the appropriate scale. 
 
-Also note that the `param()` function is both the "getter" and the "setter" for model parameters: `param(mod)` returns a parameter list object containing the parameters of `mod`, whereas `param(mod, CL = 2, KA = 2)` returns a modified model object with updated parameters.^[Yes, fellow developer type, that does mean that `param()` is not output type stable. It's not the worst kind of type instability because you can look at the arguments and guess the output type, but if that kind of thing distresses you please be warned that you'll see quite a bit more of it in this post. At its core, mrgsolve is not meant to be a developer-facing package, and it's not intended to support automated data processing pipelines either. It's analyst-facing, and as such the flexibility exists to support analysts. What I've found, though, is that if you look carefully at the package API, you'll find that it provides tools that would work very nicely in an automated pipeline and would be perfectly safe to use in package code.] ^[Yes, I have some lingering frustrations from spending years trying to explain to Python developers that **R usually prioritises the needs of the analyst over the needs of the developer**, and now that I'm working in an R shop rather than a C++/Python shop I find myself more willing to defend that aspect to R publicly.] 
+Note that the `param()` function is both the "getter" and the "setter" for model parameters: `param(mod)` returns a parameter list object containing the parameters of `mod`, whereas `param(mod, CL = 2, KA = 2)` returns a modified model object with updated parameters. Later in the post I'll use `param()` to modify model parameters in this way.
 
 Okay so now we have a model object `mod` that specifies all our pharmacokinetic assumptions. In order to run a simulation, we also need to provide an **event schedule** that provides dosing information, and we'll also need to say something about the time points at which we want to simulate the various pharmacokinetic quantities of interest. You can do this in a few different ways but for the purposes of the initial example I'll do it the same way that the "get started" vignette does, and use a pipe-friendly workflow: 
 
@@ -117,7 +117,7 @@ Very nice.
 
 ## Simulation workflow
 
-Now things get a little messier. Under the hood the mrgsolve package is doing quite a lot of magic to make it all work, and there are some design choices here that you need to be aware of if you're planning to call mrgsolve functions programmatically. In particular, some of the functions -- by design -- do not produce [type stable output](https://design.tidyverse.org/out-type-stability.html), so some care is involved if you're going to write automations around them or call mrgsolve from another package.^[I should say, for the record, that I'm not being critical here. Software developers who don't work in statistics have a tendency to get very angry at R (and R developers) for writing hyper-flexible functions that produce wildly different output types depending on the input. While I do understand that annoyance, I also think it's often misplaced. R is fundamentally a *statistical programming language*. It's not trying to be Python, and it's even less interested in being Rust. You wouldn't think it from browsing the "rstats" hashtag on social media (which is massively biased towards developers), but the typical R user is someone working interactively at the console, constructing a script iteratively as they explore and work with the data set they've been tasked to analyse. In that context, the hyper-flexibility of a lot of R functions is designed for the convenience of the *analyst*. It's not there for your convenience as a developer. Of course, I also think that package developers should always ensure that there are type-stable versions of their functions that other R developers can call in package code, but... for example, mrgsolve does in fact support this. If you're a developer calling `mrgsolve::modlib()` from within a package then IMO you don't get to whine about mrgsolve doing it wrong. In that scenario you get what you deserve for writing *your* package the wrong way.] 
+Now things get a little messier. The mrgsolve package is designed to support several different kinds of workflow, which is of course a good thing, but very often the price of analytic flexibility is function complexity. It takes some effort to understand all the moving parts to the package, and the different ways in which mrgsolve functions can be called.^[As an aside, one thing I've noticed in the software development world is that developers who don't work in statistics have a tendency to get very worked up about R having all these hyper-flexible functions that can behave in wildly different ways in different contexts. While I do understand that annoyance, I also think it's often misplaced. R is fundamentally a *statistical programming language* and the primary goal is to support analysts. It's not trying to be Python, and it's even less interested in being Rust. You wouldn't think so from social media discussions -- which are massively skewed towards developers -- but the typical R user is someone working interactively at the console, constructing a script iteratively as they explore and work with the data set they've been tasked to analyse. In that context, the hyper-flexibility of a lot of R functions is designed for the convenience of the analyst, not the convenience as a developer.] 
 
 ### The model library
 
@@ -241,13 +241,13 @@ If you're expecting `ev()` to return an "ev" object -- as indeed it would if I c
 
 I cried briefly. Then I read the [documentation](https://mrgsolve.org/docs/reference/ev.html) properly. Then I cried some more. 
 
-After reading the documentation carefully, I now understand what's going on here, but an explanation is required because if you don't look closely it looks like magic.^[As a rule I don't dislike "magic" code. I mean... it would be weird to be an R user and not appreciate its virtues. Lazy evaluation and non-standard evaluation in R are powerful tools, and are the basis of a lot of "magic" in R. They make life a lot easier for the analyst but it comes at the price of making life harder for the developer. Because of that I've ended up with a habit of trying to dig into the details every time I find R code that feels magical.] Recall from earlier in the post I mentioned that `modlib()` is not type stable: you get qualitatively different results depending on what kind of input you pass it. The `ev()` function has the same property. When passed a model object as the first argument, it doesn't in fact return an events schedule. It returns... a model object?^[To be precise, `ev()` is an S4 generic function that does method dispatch on the `x` argument. If `x` is missing, the relevant `ev()` method returns an "ev" object. However, if `x` has class "mrgmod", the relevant method returns another "mrgmod" object. I'll confess this makes me a little uneasy.]
+After reading the documentation carefully, I now understand what's going on here, but an explanation is required because if you don't look closely it looks like magic.^[As a rule I don't dislike "magic" code. I mean... it would be weird to be an R user and not appreciate its virtues. Lazy evaluation and non-standard evaluation in R are powerful tools, and are the basis of a lot of "magic" in R. They make life a lot easier for the analyst but it comes at the price of making life harder for the developer. Because of that I've ended up with a habit of trying to dig into the details every time I find R code that feels magical.] When the first argument to `ev()` is a model object, it doesn't return an event schedule. Instead, it returns another model object.^[To be precise, `ev()` is an S4 generic with dispatch on the `x` argument. If `x` is missing, the relevant `ev()` method returns an "ev" object. However, if `x` has class "mrgmod", the relevant method returns another "mrgmod" object. I'll confess this makes me a little uneasy.]
 
 ```{r}
 ev(mod, amt = 100, ii = 24, addl = 9)
 ```
 
-Looking at the printed output, you might think that the output here is identical to the original model object `mod`, but in this case looks are deceving. The new model stores the event schedule internally: it's tucked away in the `@args` slot.^[Oh look, that apparently-irrelevant excursion she did talking about the mrgmod object slots turns out to be relevant! It's almost as if she's written things before!] To illustrate, let's assign the output to a variable:
+Looking at the printed output, you might think that the output here is identical to the original model object `mod`, but in this case looks are deceiving. The new model stores the event schedule internally: it's tucked away in the `@args` slot.^[Oh look, that apparently-irrelevant excursion she did talking about the mrgmod object slots turns out to be relevant! It's almost as if she's written things before!] To illustrate, let's assign the output to a variable:
 
 ```{r}
 mod_with_ev <- ev(mod, amt = 100, ii = 24, addl = 9)
@@ -269,7 +269,7 @@ modlib("pk1", quiet = TRUE) |>
   mrgsim(end = 480, delta = 0.1)
 ```
 
-It's a clever trick, and I imagine it's something that a lot of data analysts find super handy. That said, it's probably not something I would use myself. I'm a simple girl who likes her coffee black and her functions bland, so if I were inclined to use `ev()` in my workflow at all, I'd probably be more keen on code that looks like this:
+It's a clever trick, and I imagine it's something that a lot of data analysts find super handy. That said, it's probably not something I would use myself. I'm a simple girl who likes her coffee black and her data pipelines transparent, so I'd probably avoid this particular workflow and instead write code that looks more like this:
 
 ```{r}
 # set up the simulation
@@ -281,11 +281,11 @@ events <- ev(amt = 100, ii = 24, addl = 9)
 out <- mrgsim_e(mod, events = events, end = 480, delta = 0.1)
 ```
 
-Notice that I called `mrgsim_e()` here rather than `mrgsim()`. Because mrgsolve recognises that sometimes developers might want to call simulation functions programmatically, it provides several restricted versions of `mrgsim()` that require input in a specific format. The sneaky "event-schedule-inside-the-model-object" piping trick I showed at the start of the post does not work with `mrgsim_e()`, which makes it a safer choice when running simulations programmatically. Later in this post you'll see me pivot to using `mrgsim_d()`, for much the same reason. 
+Notice that I called `mrgsim_e()` here rather than `mrgsim()`. Because mrgsolve recognises that sometimes developers might want to call simulation functions programmatically, it provides several restricted versions of `mrgsim()` that require input in a specific format. The sneaky "event-schedule-inside-the-model-object" piping trick I showed at the start of the post does not work with `mrgsim_e()`, which -- at least to my mind -- makes it a safer choice when running simulations programmatically. Later in this post you'll see me pivot to using `mrgsim_d()`, for much the same reason. 
 
 ### Data frames as event schedules
 
-In the last section I kind of wrapped myself up in knots trying to get a handle on what `ev()` does under the hood, and as you can probably tell I have some mixed feelings about the `ev()` function itself. Fortunately, you don't have to use it at all if you don't want to: the `mrgsim_d()` function takes regular data frame as the `data` argument, and which plays the same role as the `events` argument in `mrgsim_e()`. You can generate event schedules in data frame format using the `ev_expand()` function:
+In the last section I kind of wrapped myself up in knots trying to get a handle on what `ev()` does under the hood, and as you can probably tell I have some mixed feelings about it. Fortunately, you don't have to use it at all if you don't want to: the `mrgsim_d()` function takes regular data frame as the `data` argument, and which plays the same role as the `events` argument in `mrgsim_e()`. You can generate event schedules in data frame format using the `ev_expand()` function:
 
 ```{r}
 ev_expand(amt = 100, ii = 24, addl = 9)
@@ -303,7 +303,7 @@ events <- ev_expand(amt = 100, ii = 24, addl = 9)
 out <- mrgsim_d(mod, data = events, end = 480, delta = 0.1)
 ```
 
-As an aside, you might be wondering why this function is named `ev_expand()`. It's not obvious from the example I showed above, but the main way you'd use this function in practice would be to generate event schedules using `expand.grid()`:
+As an aside, you might be wondering why this function is named `ev_expand()`. It's not obvious from the example I showed above, but the `ev_expand()` function is essentially a convenience function that calls to `expand.grid()` to combine the levels of all variables input, with some extra syntactic sugar that auto-populates certain columns that are required for event schedule data sets. As an example, you might generate an event schedule defined for multiple subjects using a command like this:
 
 ```{r}
 ev_expand(amt = 100, ii = 24, addl = 9, ID = 1:6)
@@ -333,9 +333,7 @@ out <- mrgsim_d(x = mod, data = events, tgrid = times)
 ```
 
 
-For the simple example, calling `tgrid()` explicitly doesn't by us much, but if you dive into the documentation a little you discover that there are tools for working with tgrid objects that allow you to define the simulation times in much richer ways than a simple grid.
-
-But -- again -- I digress. 
+For the simple example, calling `tgrid()` explicitly doesn't by us much, but if you dive into the documentation a little you discover that there are tools for working with tgrid objects that allow you to define the simulation times in much richer ways than a simple grid. But I digress. 
 
 ### Simulation code
 
@@ -366,7 +364,7 @@ out <- mrgsim_d(x = mod, data = events, tgrid = times)
 
 ### Simulation output
 
-All that remains is to have a look at the output we've created:
+At this point the simulation is complete, so we can turn our attention to the output we've created. Here's an example of the output returned by `mrgsim()` and its friends:
 
 ```{r}
 out
@@ -380,7 +378,7 @@ The mrgsolve package supplies a plot method for mrgsims objects that generates n
 plot(out)
 ```
 
-If additional customisation is needed, however, it's pretty easy to convert the output to a tibble and then using ggplot2 to create the specific visualisation you want:
+The plot method allows you to [customise the plot](https://mrgsolve.org/docs/reference/plot_mrgsims.html) in a fairly flexible way, but there are some limits to what you can do with this approach. It's not a big drawback though. If additional customisation is needed it's pretty easy to convert the output to a tibble and then using ggplot2 to create the specific visualisation you want:
 
 ```{r}
 library(ggplot2)
@@ -420,9 +418,9 @@ Up till now I've been relying entirely on prespecified pharmacokinetic models in
 
 ### Example 1: Two compartment PK model
 
-There are two ways to construct a model specification in mrgsolve: you can pass a string to `mread_code()`, or you can read it from a model specification file using `mread_file()`. I'll be using the latter method here. By convention, model specification files use a ".cpp" file extension, but it's important to recognise that despite that, a model specification file is not C++ code. A model specification consists of a set of code blocks, and only some of those code blocks contain C++ code.^[I'm guessing that the logic here is that, even though some code blocks use R syntax, and others aren't interpreted as code at all, the model build process is such that eventually it all becomes C++, and a C++ compiler constructs the binary. There's logic to it, but it does feel a bit disorienting seeing ".cpp" files that aren't actually C++ source.] 
+There are two ways to specify a model in mrgsolve: you can pass a string to `mread_code()`, or you can read it from a model specification file using `mread_file()`. I'll be using the latter method here. By convention, model specification files use a ".cpp" file extension, but it's important to recognise that despite that, a model specification file is not, strictly speaking, C++ code. A model specification consists of a set of code blocks, and only some of those code blocks contain C++ code. Some blocks use R syntax, and others are plain text.^[I'm guessing that the logic here is that, even though some code blocks use R syntax, and others aren't interpreted as code at all, the model build process is such that eventually it all becomes C++, and a C++ compiler constructs the binary. There's logic to it, but it does feel a bit disorienting seeing ".cpp" files that aren't actually C++ source.]
 
-To get a sense of what a model specification looks like, here's an example:
+In any case, the first model specification I wrote is contained in the [example1.cpp](example1.cpp) file bundled with this post, and is a very modest tweak to one of the models distributed with the mrgsolve package. Here's what the file looks like:
 
 ```{cpp}
 #| filename: "example1.cpp"
@@ -447,7 +445,7 @@ The interpretation of these blocks is as follows:
 
 - The [`[CAPTURE]`](https://mrgsolve.org/user-guide/specification.html#sec-block-capture) block is used to indicate variables that should be "captured" in the simulation and returned to the user in R when `mrgsim()` is called. The user guide doesn't say so explicitly, but from what I can tell the compartment amount variables are always captured, and you don't need to list those here. The only things you need to specify here are the *other* quantities that you want the simulation to return. It supports the `@annotated` keyword, and I've used that here because honestly my sanity dissolves very quickly when trying to read model specification files that don't use the annotations.
 
-Okay, now that I've saved my model specification file as `example1.cpp`, let's pivot back to my R session and use it to run a simulation:
+Okay, now that I've written my model specification file let's pivot back to my R session and use it to run a simulation:
 
 ```{r}
 # define model, events, and times
@@ -579,6 +577,8 @@ plot(out, ~ CP + DV)
 
 ## Resources
 
+Before wrapping up, some quick links to some resources:
+
 - The [mrgsolve user guide](https://mrgsolve.org/user-guide/) is probably not the place you want to start, because it very quickly dives in deep and talks about the domain specific language used to specify models, but once you've wrapped your head around the basics that's the place to look for details.
 
 - The [mrgsolve vignettes](https://mrgsolve.org/vignettes/) provide a nice place to start, but one thing you need to keep in mind is that the vignettes posted at [mrgsolve.org/vignettes](https://mrgsolve.org/vignettes/) are not identical to the vignettes that appear on the pkgdown website (i.e., [mrgsolve.org/docs/articles](https://mrgsolve.org/docs/articles/)), so it's worth being careful to check which one you're looking at!
@@ -589,4 +589,6 @@ plot(out, ~ CP + DV)
 
 - Finally, there's a [blog](https://mrgsolve.org/blog/) associated with the package that has a variety of tips, tricks, updates and news. 
 
+## Epilogue
 
+As with so many of my posts, I find that I've gotten to the end and I have no idea what else to say. I don't write a post like this one to advocate for a package or a workflow, and I definitely don't write these things to express opinions or whatever. I write because I enjoy writing and because the act of writing deepens my own understanding of a topic. Viewed from that perspective, writing this post has served its purpose so... mission accomplished?
