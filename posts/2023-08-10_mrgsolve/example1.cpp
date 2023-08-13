@@ -8,7 +8,6 @@ whereas elimination from CENT follows Michaelis-Menten kinetics.
 
 [PARAM] @annotated
 
-CL   :   0  : Clearance (volume/time)
 VC   :  20  : Central volume (volume)
 Q    :   2  : Inter-compartmental clearance (volume/time)
 VP   :  10  : Peripheral volume of distribution (volume)
@@ -31,7 +30,7 @@ PERIPH : Drug amount in peripherhal compartment (mass)
 [ODE]
 
 dxdt_GUT = -KA * GUT;
-dxdt_CENT = KA * GUT - (CL + CLNL + Q) * CP  + Q * CT;
+dxdt_CENT = KA * GUT - (CLNL + Q) * CP  + Q * CT;
 dxdt_PERIPH = (Q * CP) - (Q * CT);
 
 [CAPTURE] @annotated
