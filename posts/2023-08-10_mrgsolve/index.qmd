@@ -36,24 +36,36 @@ library(mrgsolve)
 
 ## A simple example
 
-Okay, let's get started. When I started looking into mrgsolve, the place I started was with the vignettes on the package website, so I'll start this post by using a simple modelling example taken from the [get started](https://mrgsolve.org/vignettes/01-get-started.html) page. 
-
-The way mrgsolve is designed allows you to write your own custom models, and later in the post I'll talk about how this is done, but it also comes with a collection of predefined models that you can access using the `modlib()` function. So I'll start there: 
+Okay, let's get started. The mrgsolve package is build on top of an open source ODE solver,^[Specifically, it wraps the public domain Fortran library [ODEPACK](https://computing.llnl.gov/projects/odepack)] but the user doesn't need to call it directly. Instead, a model is constructed using a **model specification file** (more on that later) that is then compiled to C++. This compiled model is used to run simulations, and it's this compiled model that calls the ODE solvers. As a example, let's use this code taken from the [get started](https://mrgsolve.org/vignettes/01-get-started.html) page, which uses `modlib()` to use one of the predefined model specifications that come bundled with mrgsolve:
 
 ```{r}
 #| label: build-pk1-model
 mod <- modlib("pk1")
 ```
 
-In this code, `"pk1"` refers to the name of one of the model that comes bundled with mrgsolve... and there will be exactly zero pharmacometricians in this world that are surprised to discover that this is a one-compartment PK model with first-order absorption into the central compartment, and first-order elimination from the central compartment. To see what parameters are used in this version of the model we can call `param()`...
+In this code, `"pk1"` refers to the name of one of the model that comes bundled with mrgsolve... and there will be exactly zero pharmacometricians in this world that are surprised to discover that this is a one-compartment PK model with first-order absorption into the central compartment, and first-order elimination from the central compartment. If we print out the model object, we get a nice little summary:
+
+```{r}
+mod
+```
+
+A few months ago very little of this would have made sense to me, but I've -- apparently -- become familiar enough with conventions in pharamacometrics that this now looks very easy to read. For this initial example, the bits that matter most are these:
+
+- We have a list of compartments: CENT refers to the central compartment, and EV refers to an extravascular dosing compartment through which the drug is administered. Note that although there are two listed compartments, this is really a one-compartment model: the extravascular dosing compartments are a necessary part of the model formalism, but no more than that.
+
+- We have a list of parameters: clearance (CL) is a measure representing the volume of blood that can be fully cleared of the drug per unit time, volume of distribution (V) measures the size of the central compartment, and KA is the absorption rate constant governing how quickly the drug is absorbed from the extravascular compartment into the central compartment. 
+
+- When running a simulation, the drug amounts in the compartments CENT and EV will be returned as part of the output. However, we can also specify other "captured" quantities, which in this case adds CP, the drug concentration in the central compartment.^[In this example it's not very interesting because CP is just the ratio of CENT and V, and since V doesn't change over time, the curves for CP and CENT look identical. That isn't true for simulations with multiple sujects, however, since V can and does vary across individuals.]
+
+The parameter values (i.e. CL, V, KA) are part of the model specification, and you can see the values assigned to those parameters by calling `param()`:
 
 ```{r}
 param(mod)
 ```
 
-...and we see that out model assumes a clearance (CL) of 1, an aborption rate constant (KA) of 1, and a volume of distribution equal to 20. The mrgsolve package doesn't keep track of units: it's up to the user to make sure all the units are on the appropriate scale. 
+We see that our model assumes a clearance (CL) of 1, an aborption rate constant (KA) of 1, and a volume of distribution equal to 20. The mrgsolve package doesn't keep track of units: it's up to the user to make sure all the units are on the appropriate scale. 
 
-The message printed to the console is probably equally unsurprising, but I'll be good and explain it. The mrgsolve package is build on top of an open source ODE solver,^[Specifically, it wraps the public domain Fortran library [ODEPACK](https://computing.llnl.gov/projects/odepack)] but the user doesn't need to call it directly. Instead, a model is constructed using a model specification file (more on that later) that is then compiled to C++. This compiled model is used to run simulations, and it's this compiled model that calls the ODE solvers. So when I called `modlib("pk1")`, it reads the model specification file and builds the compiled model.^[As far as I can tell, the mrgsolve package builds on a per-session basis, so if I were to repeat the same command in the R session that knits this blog post, I'd see a different message informing me that mrgsolve is using the cached version of the compiled model.]
+Also note that `param()` function is both the "getter" and the "setter" for model parameters: `param(mod)` returns a parameter list object containing the parameters of `mod`, whereas `param(mod, CL = 2, KA = 2)` returns a modified model object with updated parameters.^[Yes, fellow developer type, that does mean that `param()` is not output type stable. It's not the worst kind of type instability because you can look at the arguments and guess the output type, but if that kind of thing distresses you please be warned that you'll see quite a bit more of it in this post.]
 
 Okay so now we have a model object `mod` that specifies all our pharmacokinetic assumptions. In order to run a simulation, we also need to provide an **event schedule** that provides dosing information, and we'll also need to say something about the time points at which we want to simulate the various pharmacokinetic quantities of interest. You can do this in a few different ways (which I'll get to momentarily) but for the purposes of the initial example I'll do it the same way that the "get started" vignette does, use a pipe-friendly workflow: 
 
@@ -121,29 +133,20 @@ Finally, if you want to build and use one of these model you can call `modlib()`
 mod <- modlib(model = "pk1")
 ```
 
-If you're working interactively or with a script that isn't going to be repeatedly reused with different inputs, the `modlib()` function is pretty handy. On the other hand if you're a developer calling mrgsolve programmatically it's probably better to rely on a different workflow. For instance, if you want to access the mrgsolve package folder that contains the models, you'd do something like this:
+It's probably stating the obvious, but while the `modlib()` function works nicely as a tool to support analysts interactively, you probably wouldn't call it as a developer. For instance, if you want to access the mrgsolve package folder that contains the models, you'd write code that makes very clear that you're looking for a path (not trying to build a model). Something like this would work better:
 
 ```{r}
 fs::path_package("mrgsolve", "models")
 ```
 
-If you want to construct file paths to the various model specification files contained within the package, you probably want to find paths to all the `.cpp` files in the model folder:
-
-```{r}
-modlib_dir <- fs::path_package("mrgsolve", "models")
-modlib_cpp <- fs::dir_ls(modlib_dir, regexp = "\\.cpp$")
-modlib_cpp
-```
-
-Easy done. 
-
+Similarly, if you want to find the models in the model library folder, that's easy enough to do with `fs::dir_ls()` and a simple regular expression. Easy done. 
 
 ### Building models from file
 
-Building one of the bundled models using `modlib()` is a perfectly sensible thing to do when you're working interactively or when you're just starting out with mrgsolve, but after a while you might want to pivot to a different workflow. To that end, there's an `mread()` function -- and related functions `mread_file()` and `mread_cache()` -- that reads a model specification file and returns the model object linked to the compiled code. As an example, here's how I'd build the one-compartment model in the previous section, except using `mread()` this time:
+Along the same lines, building one of the bundled models using `modlib()` is a perfectly sensible thing to do when you're just starting out and don't want to write your own model specification files, but after a while you might want to pivot to a different workflow. To that end, there's an `mread()` function -- and related functions `mread_file()` and `mread_cache()` -- that reads a model specification file and returns the model object linked to the compiled code. As an example, here's how I'd build the one-compartment model in the previous section, except using `mread()` this time:
 
 ```{r}
-mod <- mread(model = "pk1", project = modlib_dir)
+mod <- mread(model = "pk1", project = fs::path_package("mrgsolve", "models"))
 ```
 
 Optionally you can provide a file name for the model specification file that sits within the `project` folder, but in this case we don't need to: if the `file` argument is unspecified `mread()` assumes that the file name is the same as the `model` name with file extension `.cpp`.^[Developers reading this are probably wondering where the model shared object ends up when compilation happens. By default `mread()` puts the compiled model in the R temp folder, but you can override this in a persistent way by setting the `"mrgsolve.soloc"` option, or overriding it in the call to `mread()` via the `soloc` argument. You can also suppress compilation if you want bt setting `compile = FALSE`. But probably any devs reading this would likely discover that within 5 minutes of reading the documentation anyway so there's no real need for me to mention it.]
@@ -254,41 +257,27 @@ modlib("pk1", quiet = TRUE) |>
   mrgsim(end = 480, delta = 0.1)
 ```
 
-It's a very clever trick, and I imagine it's something that a lot of data analysts find super handy. That said, it's not something I would want to use myself. I'm a simple girl who likes her coffee black and her functions type stable, so I'm more keen on code that looks like this:
+It's a very clever trick, and I imagine it's something that a lot of data analysts find super handy. That said, it's not something I would want to use myself. I'm a simple girl who likes her coffee black and her functions boring, so I'm more keen on code that looks like this:
 
 ```{r}
+mod <- mread_file(
+  file = "pk1.cpp", 
+  project = fs::path_package("mrgsolve", "models"), 
+  quiet = TRUE
+)
+
+events <- ev(amt = 100, ii = 24, addl = 9)
+
 out <- mrgsim_e(
-  x = mread_file(file = "pk1.cpp", project = modlib_dir, quiet = TRUE),
-  events = ev(amt = 100, ii = 24, addl = 9),
+  x = mod,
+  events = events,
   end = 480,
   delta = 0.1
 )
 ```
 
 Notice that: I called `mrgsim_e()` here rather than `mrgsim()`. Because mrgsolve recognises that sometimes developers might want to call it programmatically, this version of the function requires the user to pass an event object. The sneaky "event-schedule-inside-the-model-object" piping trick I showed at the start of the post does not work with `mrgsim_e()`, which makes it a safer choice when running simulations programmatically.^[There are several other variants on `mrgsim()` that enforce different constraints. I haven't talked about `data_set()` and related functions in this post, for instance, but there's a `mrgsim_d()` variant that requires the user to pass a data set object.] 
-
-Theoretically, I suppose, there's still a risk in my code because I'm calling `ev()` and might one day forget that it has this special case, but after a bit of thought it seems pretty outlandish. I mean, yes, let's suppose I wrote a very silly function like this one:
-
-```{r}
-foolish_simulation <- function(...) {
-  mrgsim_e(
-    x = mread_file(file = "pk1.cpp", project = modlib_dir, quiet = TRUE),
-    events = ev(...),
-    end = 480,
-    delta = 0.1
-  )
-}
-```
-
-This code is unwise, because the user could really mess with things depending on what gets pass to `ev()` via the dots. In the most absurd case, if the user tried to pass `x = 100` here thinking that it would add a column labelled `x` to  the event schedule^[A trick that would work perfectly well if the user wanted to add a column labelled `y`, I might add...] it would actually trigger method dispatch on the `x` object, and since `ev()` doesn't have a method for numeric-valued `x` argument, the user would receive a weird error. But this seems like a bizarre edge case -- whyyyyy would I ever write this function in the first place????? -- and *even* if the user somehow passed an mrgmod object to `ev()` in this fashion, the result is still an error: 
-
-```{r}
-#| error: true
-foolish_simulation(amt = 100, ii = 24, addl = 9, x = 100)
-foolish_simulation(amt = 100, ii = 24, addl = 9, x = mod)
-```
-
-So perhaps there's no need to worry about this outlandish scenario. Danielle wrapped herself up in knots trying to get a handle on method dispatch in `ev()`. That's not very exciting, so let's move along shall we?
+Anyway, I feel like this is all a bit off topic. Danielle wrapped herself up in knots trying to get a handle on method dispatch in `ev()`. That's not very exciting, so let's move along shall we?
 
 ### Running simulations
 
@@ -306,7 +295,11 @@ The real point of mentioning it here is that -- at least in my mind -- a simulat
 
 ```{r}
 # define model, events, and times
-mod <- mread_file(file = "pk1.cpp", project = modlib_dir, quiet = TRUE)
+mod <- mread_file(
+  file = "pk1.cpp", 
+  project = fs::path_package("mrgsolve", "models"), 
+  quiet = TRUE
+)
 events <- ev(amt = 100, ii = 24, addl = 9)
 times <- tgrid(start = 0, end = 480, delta = 0.1)
 
@@ -361,12 +354,16 @@ out |>
 
 ## Model specification
 
-Relevant chapters in the user guide
+Up till now I've been relying entirely on prespecified pharmacokinetic models included in the mrgsolve model library. That was a useful thing to do earlier in this post while discussing the mechanics of `mrgsim()`, `ev()`, `mread()`, `tgrid()` and so on, but in practice you really need to understand how models are specified. I'm not going to attempt a comprehensive discussion of this topic, but if you want more detail, the chapters in the user guide I found most relevant are:
 
 - The [model specification chapter](https://mrgsolve.org/user-guide/specification.html)
 - The [topics chapter](https://mrgsolve.org/user-guide/topics.html)
 
 ### Example 1
+
+There are two ways to construct a model specification in mrgsolve: you can pass a string to `mread_code()`, or you can read it from a model specification file using `mread_file()`. I'll be using the latter method here. By convention, model specification files use a ".cpp" file extension, but it's important to recognise that despite that, a model specification file is not C++ code. A model specification consists of a set of code blocks, and only some of those code blocks contain C++ code.^[I'm guessing that the logic here is that, even though some code blocks use R syntax, and others aren't interpreted as code at all, the model build process is such that eventually it all becomes C++, and a C++ compiler constructs the binary. There's logic to it, but it does feel a bit disorienting seeing ".cpp" files that aren't actually C++ source.] 
+
+To get a sense of what a model specification looks like, here's an example:
 
 ```{cpp}
 #| filename: "example1.cpp"
@@ -374,6 +371,24 @@ Relevant chapters in the user guide
 #| eval: false
 #| code-line-numbers: true
 ```
+
+There are six code blocks in this file. I've specified them using square brackets (e.g., `[BLOCKNAME]`) because it reminds me of [TOML](https://toml.io/en/), but it's also valid to use the dollar sign (e.g., `$BLOCKNAME`).^[I suspect that the `$BLOCKNAME` format is actually canonical because that's the version you see when model code is printed when calling `see()`, but I'm going to use `[BLOCKNAME]` throughout this post because I personally find it easier to read. [YMMV](https://dictionary.cambridge.org/dictionary/english/ymmv).] Block names are case insensitive: mrgsolve treats `[BLOCKNAME]` and `[blockname]` identically. The order in which you specify blocks doesn't matter, but the order of statements within a block often does matter because some blocks are interpreted as C++ or R code.
+
+The interpretation of these blocks is as follows:
+
+- The [`[PROB]`](https://mrgsolve.org/user-guide/specification.html#sec-block-prob) block is purely used to specify comments or notes on the model. It has no functional effect. You'll very often see this block written in markdown format. 
+
+- The [`[PARAM]`](https://mrgsolve.org/user-guide/specification.html#sec-block-param) block is used to pass a list of parameter values to be used in the model. When parsing this code block, mrgsolve interprets the values as R expressions (evaluated at build time), so if you were to define the central compartment volume `VC` to be `sqrt(400)`, the resulting model would store `VC` as the numeric value `20` within the internal parameter list. Normally, parameters would be defined as a comma separated list of name-value pairs (e.g., `VC = 20, Q = 2, ...`), but when you use the `@annotated` option as I have done here, you can write `VC : 20 : Central volume (volume)`. This version of the syntax allows you to provide comments on how each parameter is interpreted. Many of the code blocks support the `@annotated` option, and in most cases I find myself strongly preferring the annotated syntax.
+
+- The [`[CMT]`](https://mrgsolve.org/user-guide/specification.html#cmt-and-init) block is used to specify compartment names, and much like the `[PARAM]` block it supports the `@annotated` keyword. By default, all compartments are presumed to be initialised with value 0. If you need to set different initial values for the drug amounts in each compartment, use an `[INIT]` block instead of a `[CMT]` block.
+
+- The [`[GLOBAL]`](https://mrgsolve.org/user-guide/specification.html#global) block is used to specify global variables and [preprocessor directives](https://cplusplus.com/doc/tutorial/preprocessor/) in the C++ code that mrgsolve constructs from the model specification file. This block is, not surprisingly, interpreted as literal C++ code. In this example I've used the `#define` directive to indicate that the plasma concentration `CP` is simply an alias for `(CENT / VP)`, and similarly the tissue^[Confession: I'm not 100% certain that the "T" in "CT" stands for tissue, since I copied this line from one of the models in the mrgsolve model library, but I think it's the right interpretation given that the central compartment amount is usually intended to refer to "amount of drug the blood, sort of" and the peripheral compartment is "amount of drug in body tissues, sort of". The "sort of" is important though: pharamacokinetic compartments are abstractions, and are they only loosely related to the corresponding physiology.] concentration `CT` is an alias for `(PERIPH / VP)`, and so on.
+
+- The [`[ODE]`](https://mrgsolve.org/user-guide/specification.html#sec-block-ode) block is used to specify the differential equations that define the model. For every compartment in your model there is a corresponding `dxdt_` variable: for instance, if `CENT` denotes the drug amount in the central compartment, then there is automatically a variable `dxdt_CENT` that denotes its first derivative with respect to time, and you must specify the value for *all* compartment derivatives even if they are zero. The `[ODE]` block is interpreted as literal C++ code, and you can declare and initialise new variables within the `[ODE]` block if you want to. Note that you may sometimes see a `[DES]` code block instead of an `[ODE]` block. They're the same thing: `[DES]` is an alias for `[ODE]`.
+
+- The [`[CAPTURE]`](https://mrgsolve.org/user-guide/specification.html#sec-block-capture) block is used to indicate variables that should be "captured" in the simulation and returned to the user in R when `mrgsim()` is called. The user guide doesn't say so explicitly, but from what I can tell the compartment amount variables are always captured, and you don't need to list those here. The only things you need to specify here are the *other* quantities that you want the simulation to return. It supports the `@annotated` keyword, and I've used that here because honestly my sanity dissolves very quickly when trying to read model specification files that don't use the annotations.
+
+Okay, now that I've saved my model specification file as `example1.cpp`, let's pivot back to my R session and use it to run a simulation:
 
 ```{r}
 mod <- mread_file("example1.cpp", quiet = TRUE)
@@ -384,6 +399,7 @@ out <- mrgsim_e(mod, events = events, tgrid = times)
 plot(out)
 ```
 
+Yes, that all seems to work nicely. No, I did not have any solid justification for choosing these parameters. It's just a toy.
 
 ### Example 2
 
