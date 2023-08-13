@@ -257,7 +257,7 @@ modlib("pk1", quiet = TRUE) |>
   mrgsim(end = 480, delta = 0.1)
 ```
 
-It's a very clever trick, and I imagine it's something that a lot of data analysts find super handy. That said, it's not something I would want to use myself. I'm a simple girl who likes her coffee black and her functions boring, so I'm more keen on code that looks like this:
+It's a clever trick, and I imagine it's something that a lot of data analysts find super handy. That said, it's probably not something I would use myself. I'm a simple girl who likes her coffee black and her functions boring, so if I were inclined to use `ev()` in my workflow at all, I'd be more keen on code that looks like this:
 
 ```{r}
 mod <- mread_file(
@@ -277,11 +277,37 @@ out <- mrgsim_e(
 ```
 
 Notice that: I called `mrgsim_e()` here rather than `mrgsim()`. Because mrgsolve recognises that sometimes developers might want to call it programmatically, this version of the function requires the user to pass an event object. The sneaky "event-schedule-inside-the-model-object" piping trick I showed at the start of the post does not work with `mrgsim_e()`, which makes it a safer choice when running simulations programmatically.^[There are several other variants on `mrgsim()` that enforce different constraints. I haven't talked about `data_set()` and related functions in this post, for instance, but there's a `mrgsim_d()` variant that requires the user to pass a data set object.] 
-Anyway, I feel like this is all a bit off topic. Danielle wrapped herself up in knots trying to get a handle on method dispatch in `ev()`. That's not very exciting, so let's move along shall we?
 
-### Running simulations
+### Data frames as event schedules
 
-We're almost done unpacking the simple example, but I want to rewrite the code one last time. Previously, when I called `mrgsim_e()` I passed arguments `end` and `delta` as a way to override the default assumptions about what time points we would use when running our simulations. Internally, these arguments are used to construct a "tgrid" object. We can construct this object explicitly by calling `tgrid()`:
+In the last section I kind of wrapped myself up in knots trying to get a handle on what `ev()` does under the hood, and as you can probably tell I have some mixed feelings about the `ev()` function itself. Fortunately, you don't have to use it at all if you don't want to: the `mrgsim_d()` function takes regular data frame as the `data` argument, and which plays the same role as the `events` argument in `mrgsim_e()`. You can generate event schedules in data frame format using the `ev_expand()` function:
+
+```{r}
+ev_expand(amt = 100, ii = 24, addl = 9)
+```
+
+The output here looks the same, but this time the output is a regular data frame, and the command to run a simulation that *requires* a data frame as input might look like this:
+
+```{r}
+mrgsim_d(
+  x = mod,
+  data = ev_expand(amt = 100, ii = 24, addl = 9),
+  end = 480,
+  delta = 0.1
+)
+```
+
+As an aside, you might be wondering why this function is named `ev_expand()`. It's not obvious from the example I showed above, but the main way you'd use this function in practice would be to generate event schedules using `expand.grid()`:
+
+```{r}
+ev_expand(amt = 100, ii = 24, addl = 9, ID = 1:6)
+```
+
+Later in this post I'll use `ev_expand()` in exactly this way.
+
+### Simulation times
+
+We're almost done unpacking the simple example, but I want to rewrite the code one last time. Previously, when I called `mrgsim_d()` I passed arguments `end` and `delta` as a way to override the default assumptions about what time points we would use when running our simulations. Internally, these arguments are used to construct a "tgrid" object. We can construct this object explicitly by calling `tgrid()`:
 
 ```{r}
 tgrid(start = 0, end = 480, delta = 0.1)
@@ -291,21 +317,34 @@ For the simple example, calling `tgrid()` explicitly doesn't by us much, but if 
 
 But -- again -- I digress. 
 
-The real point of mentioning it here is that -- at least in my mind -- a simulation has three main components (model, events, and time points), and we now have separate functions that handle each component: we can use `mread()` to define a model, `ev()` to define an event schedule, and `tgrid()` to define the simulation times. So now, after considerable refactoring, we end up with code that looks like this:
+### Simulation code
+
+Taking a step back, it's worth thinking a little about how we want to write our simulation code. The piped code I started with probably works nicely for some people, but it's not my preferred way to do this. The way I think of these things, a simulation has *three* main inputs (model object, event schedule, simulation times), and I find the code easier to read when these three inputs are passed as three separate arguments. After a little refactoring, this...
 
 ```{r}
+out <- modlib("pk1", quiet = TRUE) |> 
+  ev(amt = 100, ii = 24, addl = 9) |>
+  mrgsim(end = 480, delta = 0.1)
+```
+
+becomes this...
+
+```{r}
+# this would normally be the project folder
+dir <- fs::path_package("mrgsolve", "models")
+
 # define model, events, and times
-mod <- mread_file(
-  file = "pk1.cpp", 
-  project = fs::path_package("mrgsolve", "models"), 
-  quiet = TRUE
-)
-events <- ev(amt = 100, ii = 24, addl = 9)
-times <- tgrid(start = 0, end = 480, delta = 0.1)
+mod    <- mread_file(file = "pk1.cpp", project = dir, quiet = TRUE)
+events <- ev_expand(amt = 100, ii = 24, addl = 9)
+times  <- tgrid(start = 0, end = 480, delta = 0.1)
 
 # run simulation
-out <- mrgsim_e(x = mod, events = events, tgrid = times)
+out <- mrgsim_d(x = mod, data = events, tgrid = times)
 ```
+
+It's quite a bit more verbose than the original code, but -- speaking personally here -- the second version makes more sense to me.  
+
+### Simulation output
 
 All that remains is to have a look at the output we've created:
 
@@ -391,11 +430,13 @@ The interpretation of these blocks is as follows:
 Okay, now that I've saved my model specification file as `example1.cpp`, let's pivot back to my R session and use it to run a simulation:
 
 ```{r}
-mod <- mread_file("example1.cpp", quiet = TRUE)
-events <- ev(amt = 10, ii = 24, addl = 19)
-times <- tgrid(start = 0, end = 960, delta = .2)
+# define model, events, and times
+mod    <- mread_file(file = "example1.cpp", quiet = TRUE)
+events <- ev_expand(amt = 10, ii = 24, addl = 19)
+times  <- tgrid(start = 0, end = 960, delta = 0.2)
 
-out <- mrgsim_e(mod, events = events, tgrid = times)
+# run simulation and plot results
+out <- mrgsim_d(mod, data = events, tgrid = times)
 plot(out)
 ```
 
@@ -434,11 +475,13 @@ Things to notice here:
 Now that we've talked through the code, let's go back to R and run a simulation using this model. In the extract below I've run a small simulation with six individuals. They all have the same dosing schedule, but we end up with different data in each case because the model samples the random effect terms separately for each person:
  
 ```{r}
-mod <- mread_file("example2.cpp", quiet = TRUE)
-data <- expand.ev(amt = 10, ii = 24, addl = 11, ID = 1:6)
-times <- tgrid(start = 0, end = 480, delta = .1)
+# define model, events, and times
+mod    <- mread_file(file = "example2.cpp", quiet = TRUE)
+events <- ev_expand(amt = 10, ii = 24, addl = 11, ID = 1:6)
+times  <- tgrid(start = 0, end = 480, delta = 0.1)
 
-out <- mrgsim_d(mod, data = data, tgrid = times)
+# run simulation and plot results
+out <- mrgsim_d(mod, data = events, tgrid = times)
 plot(out)
 ```
 
