@@ -42,3 +42,57 @@ That worked for me.^[I haven't extensively checked the dependencies on other ope
 
 The rxode2 package uses a domain-specific language for specifying pharmacometric models.
 
+```{r}
+library(rxode2)
+library(tibble)
+library(ggplot2)
+
+mod <- rxode2({
+  # initial values
+  depot(0) = 0;
+  cent(0) = 0;
+  peri(0) = 0;
+  AUC(0) = 0;
+  
+  # drug concentrations
+  CP = cent / VC; # central
+  PP = peri / VP; # peripheral
+  
+  # differential equations for compartmental drug amounts
+  d/dt(depot) = -(KA * depot);
+  d/dt(cent)  =  (KA * depot) - (Q * CP) + (Q * PP) - (CL * CP);
+  d/dt(peri)  =  (Q * CP) - (Q * PP);
+  
+  # differential equation for a fake compartment is a 
+  # convenient way to integrate the AUC statistic
+  d/dt(AUC) = CP;
+})
+
+# specify parameters as a data frame
+dat <- tibble(
+  ID = 1,
+  KA = 0.294,
+  CL = 18.6,
+  VC = 40.2,
+  VP = 297,
+  Q = 10.5
+)
+
+# specify event schedule: dosing
+events <- et(amountUnits = "mg", timeUnits = "hours") |>
+  et(amt = 10000, addl = 9, ii = 12, cmt = "depot") |>
+  et(time = 120, amt = 2000, addl = 4, ii = 14, cmt = "depot")
+
+events
+
+# add observation times
+events <- events |> et(time = 0:240)
+events 
+
+# run the simulation
+out <- solve(mod, dat, events)
+out
+
+# plot
+ggplot(out, aes(time, CP)) + geom_line()
+```
