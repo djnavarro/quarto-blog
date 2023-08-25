@@ -15,6 +15,13 @@ narrow <- 76
 options(width = narrow)
 cache_images <- TRUE
 set.seed(1)
+
+# enable ansi-to-html colouring
+options(crayon.enabled = TRUE)
+old_hook <- fansi::set_knit_hooks(
+  knitr::knit_hooks, 
+  which = c("output", "warning", "error", "message")
+)
 ```
 
 <!--------------- post begins here ----------------->
@@ -38,35 +45,67 @@ sudo apt install gfortran libblas-dev liblapack-dev liblapack-doc
 
 That worked for me.^[I haven't extensively checked the dependencies on other operating systems, but from what I can tell a Windows install requires [RTools](https://cran.r-project.org/bin/windows/Rtools/).]
 
-## The rxode2 mini-language
-
-The rxode2 package uses a domain-specific language for specifying pharmacometric models.
-
 ```{r}
 library(rxode2)
-library(tibble)
-library(ggplot2)
+```
 
+## The rxode2 mini-language
+
+The rxode2 package uses a [domain-specific language](https://nlmixr2.github.io/rxode2/articles/rxode2-syntax.html) for specifying pharmacometric models. You can define an rxode2 model in a separate file or you can do it inline by enclosing the model specification within an R code block (i.e., enclosed in curly braces `{}`). Here's an example where I define a pretty standard two-compartment model using the latter method:
+
+```{r}
 mod <- rxode2({
-  # initial values
+  # initial values for all four "compartments"
   depot(0) = 0;
-  cent(0) = 0;
-  peri(0) = 0;
-  AUC(0) = 0;
+  central(0) = 0;
+  peripheral(0) = 0;
+  auc(0) = 0;
   
   # drug concentrations
-  CP = cent / VC; # central
-  PP = peri / VP; # peripheral
+  CP = central / VC;    # central compartment concentration
+  PP = peripheral / VP; # peripheral compartment concentration
   
-  # differential equations for compartmental drug amounts
-  d/dt(depot) = -(KA * depot);
-  d/dt(cent)  =  (KA * depot) - (Q * CP) + (Q * PP) - (CL * CP);
-  d/dt(peri)  =  (Q * CP) - (Q * PP);
-  
-  # differential equation for a fake compartment is a 
-  # convenient way to integrate the AUC statistic
-  d/dt(AUC) = CP;
+  # differential equations
+  d/dt(depot)       = -(KA * depot);
+  d/dt(central)     =  (KA * depot) - (Q * CP) + (Q * PP) - (CL * CP);
+  d/dt(peripheral)  =  (Q * CP) - (Q * PP);
+  d/dt(auc)         = CP;
 })
+```
+
+As usual, there's a few things that we need to unpack here. 
+
+Firstly, note the message printed to the console. When an rxode2 model is built, this model specification is translated to C code and compiled: this message lets you know what C compiler rxode2 is using for that purpose.
+
+Secondly, notice that although this is a two-compartment model in pharmacometric terms, from the perspective of rxode2 there are four "compartments". In addition to the usual two compartments (`central` and `peripheral`), there is an extravascular `depot` compartment used to model drug intake. For instance, for an orally-administered drug the `depot` compartment would be the gut.^[In this post I'm assuming the drug has bioavailability of $F = 1$, but that's not true generally, so you'd have to model this explicitly by scaling the drug amount that passes from the gut to the central compartment in the ODE equations.] The `depot` compartment is "real" in the sense that it is loosely intended to correspond to something in the physical system that we're modelling. By convention we don't consider it to be one of the pharmacokinetic compartments, but it's still a real thing. In contrast, the `auc` "compartment" has no physical analog at all. It's included so that the model keeps track of the accumulated drug exposure.^[In essence, the value of `auc` that accrues is a numerical estimate of the time-integral of drug concentration. This "area under the curve" measure is one of several different measures used to assess drug exposure. I talked a lot about the AUC measure in my post on [non-compartmental analysis](/posts/2023-04-26_non-compartmental-analysis/).] As I'm quickly coming to learn, this is a very handy trick when running pharmacometric simulations.
+
+Finally, notice that the syntax within the rxode2 model specification is "R-like" rather than actual R syntax. Thanks to the magic of non-standard evaluation in R, the `rxode2()` function can capture the unevaluated expression I passed within the curly braces, and then parse the statements according to the rxode2 mini-language. The mini-language is very similar to R in some ways:
+
+- Assignment statements can use `=` or `<-` as the assignment operator.^[The rxode2 mini-language also allows you to use `~` for this purpose, but I'm not going to do that here. For this post, I've chose to use `=` as a way of reminding myself that my model specification isn't "normal" R code.]
+- Comments are specified using the hash (`#`) character
+- Semi-colon characters (`;`) are optional, and specify the end of a line
+
+There are some other specialised statements that don't exist in regular R code. There are two kinds of special statements I've used in this code:
+
+- Time-derivative statements (i.e., the ones that have something like `d/dt(central)` on the left hand side) are used to specify the differential equations in the ODE system.
+- Initial-condition statements (i.e., the ones where I set something like `central(0)` on the left hand side) are used to specify the initial state of the ODE system. 
+
+You can check the [rxode2 syntax](https://nlmixr2.github.io/rxode2/articles/rxode2-syntax.html) page to see what other kinds of special statements exist.
+
+## The rxode2 model object
+
+In the previous section I used the `rxode2()` function to specify a pretty standard two-compartment pharmacokinetic model, and assigned the resulting model object to a boringly-named variable called `mod`.^[Model objects in rxode2 have S3 class "rxode2".] Let's take a look at it:
+
+```{r}
+mod
+```
+
+
+## Running a simulation
+
+```{r}
+library(tibble)
+library(ggplot2)
 
 # specify parameters as a data frame
 dat <- tibble(
