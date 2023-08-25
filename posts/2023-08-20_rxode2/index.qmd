@@ -51,7 +51,7 @@ library(rxode2)
 
 ## The rxode2 mini-language
 
-The rxode2 package uses a [domain-specific language](https://nlmixr2.github.io/rxode2/articles/rxode2-syntax.html) for specifying pharmacometric models. You can define an rxode2 model in a separate file or you can do it inline by enclosing the model specification within an R code block (i.e., enclosed in curly braces `{}`). Here's an example where I define a pretty standard two-compartment model using the latter method:
+The rxode2 package uses a [domain-specific language](https://nlmixr2.github.io/rxode2/articles/rxode2-syntax.html) for specifying pharmacometric models. You can define an rxode2 model in a separate file or you can do it inline by passing a string, or enclosing the model specification within an R code block (i.e., enclosed in curly braces `{}`). I have to admit that most of the time when an R package does this, I have a strong preference to write a separate model specification file. That's what I do when building [Stan](https://mc-stan.org/) models, and it's what I did with mrgsolve in the previous post. But this time around I'll use the curly braces method:
 
 ```{r}
 mod <- rxode2({
@@ -69,7 +69,7 @@ mod <- rxode2({
   d/dt(depot)       = -(KA * depot);
   d/dt(central)     =  (KA * depot) - (Q * CP) + (Q * PP) - (CL * CP);
   d/dt(peripheral)  =  (Q * CP) - (Q * PP);
-  d/dt(auc)         = CP;
+  d/dt(auc)         =  CP;
 })
 ```
 
@@ -100,38 +100,121 @@ In the previous section I used the `rxode2()` function to specify a pretty stand
 mod
 ```
 
+Again, a few things to unpack: 
 
-## Running a simulation
+- The first line of the output has some technical information about the model. It tells us what version of rxode2 was used to build the model, gives us the name of the built model (see below), and tells us that it's ready to use.^[You can customise this name if you care deeply about such things. As noted in the [`roxde2()` documentation](https://nlmixr2.github.io/rxode2/reference/rxode2.html), there is a `modName` argument that you can use for this purpose. Because this name is used throughout the C compilation process, it must start with a letter and contain only alphanumeric ASCII characters.]
+- The second line tells us about `mod$state`, which in this case are the four "compartment" variables that comprise the state vector for the underlying ODE system.
+- The third line tells us about `mod$params`, the list of parameters that need to be passed to the model as input to the simulation
+- The fourth line tells us about `mod$lhs`, the list of additional defined variables that are created by the model and whose value will be recorded in the output.
+
+Like many R packages that generate compiled code, rxode2 manages the compiled object for you. The long unintelligible "name" assigned to our model gives us the hint we need to find the compiled objects. Within the R session temp directory, the rxode2 package has created an "rxode2" subfolder.^[Yes, you can customise this too, by specifying the `wd` argument to `rxode2()`.] And indeed, if I take a peek at the contents of this folder, I find something with an identical name:
+
+```{r}
+fs::dir_ls(fs::path(tempdir(), "rxode2"))
+```
+
+Okay, makes sense. 
+
+## Event tables
+
+Event tables (also called event schedules) in the rxode2 package are specified with the `et()` function, and you can use the pipe operator to build up complex event schedules. I'll take my example from the rxode2 documentation, and walk through it slowly. One nice thing about the event schedules in rxode2 is that you can specify units, so we'll start with an event table that doesn't contain any actual *events*, but specifies the units in which those events will be expressed: 
+
+```{r}
+events <- et(amountUnits = "mg", timeUnits = "hours")
+events
+```
+
+The output here isn't super exciting, since there are no actual events encoded here. But it does let me mention one nice little feature of rxode2: the print methods are generally quite informative, and have nice little "nudges" like the ones you can see above that can help new (or even experienced) users work out what they might need to do next. 
+
+Anyway, let's add some dosing events, shall we? Let's assume an initial dose of `amt = 10000` (in milligrams) is administered at `time = 0`, and repeated for an additional 9 times at 12 hour intervals (i.e., `addl = 9`, `ii = 12`). In the interests of being explicit, I'll set `cmt = "depot"` to be clear about which compartment the dose is administered to. 
+
+```{r}
+events <- events |> 
+  et(time = 0, amt = 10000, addl = 9, ii = 12, cmt = "depot")
+
+events
+```
+
+This format for an event table -- where `time`, `amt`, `addl`, and `ii` are used to specify a sequence of regularly spaced dosing events in a single row -- will seem quite familiar to anyone in the field, and since I've talked about this notation in previous posts, I'll not bore people by explaining it yet again. 
+
+Moving along, let's also assume that after 120 hours has passed (`time = 120`) the dosing schedule changes: the dose drops to `amt = 2000` milligrams, the interdose interval is increased slightly to `ii = 14` hours, and this dosing regime is maintained for `addl = 4` additional doses (i.e., 5 in total). So now we have this:
+
+```{r}
+events <- events |> 
+  et(time = 120, amt = 2000, addl = 4, ii = 14, cmt = "depot")
+
+events
+```
+
+Now that we have specified all the dosing events, we need to add the "observation" events. In a real study, observation times would be the times at which we take a real-world measurement of some kind, but in the context of the simulation it's just a set of times at which the state of the system is computed. Let's compute the state of the system for the first 300 hours:
+
+```{r}
+events <- events |> et(time = 0:300)
+events 
+```
+
+And now we're done. We have a complete events table that can be used in our simulation. Admittedly, I went through that awfully slowly. The whole thing could have been bundled into a single pipeline like this:
+
+```{r}
+events <- et(amountUnits = "mg", timeUnits = "hours") |>
+  et(time = 0, amt = 10000, addl = 9, ii = 12, cmt = "depot") |>
+  et(time = 120, amt = 2000, addl = 4, ii = 14, cmt = "depot") |>
+  et(time = 0:300)
+```
+
+## Running a small simulation
 
 ```{r}
 library(tibble)
 library(ggplot2)
+```
 
-# specify parameters as a data frame
-dat <- tibble(
-  ID = 1,
+We're now almost at a point where we can run a simple simulation using the model specified via the `mod` object, and the events table in `events`. The only thing we haven't done yet is specify input parameters. The model specification I wrote at the start of the post relies on pharmacokinetic parameters. If we look at the model spec we can see that requires all of the following to be given as input:
+
+- elimination clearance (`CL`)
+- absorption rate constant (`KA`)
+- intercompartmental clearance (`Q`)
+- volume of distribution for the central compartment (`VC`)
+- volume of distribution for the peripheral compartment (`VP`)
+
+Indeed, if we take a look at `mod$params` we see the same listing:
+
+```{r}
+mod$params
+```
+
+Okay, so let's put together a one-row data frame `params` containing all these parameters for a single simulated subject:
+
+```{r}
+params <- tibble(
   KA = 0.294,
   CL = 18.6,
   VC = 40.2,
   VP = 297,
   Q = 10.5
 )
-
-# specify event schedule: dosing
-events <- et(amountUnits = "mg", timeUnits = "hours") |>
-  et(amt = 10000, addl = 9, ii = 12, cmt = "depot") |>
-  et(time = 120, amt = 2000, addl = 4, ii = 14, cmt = "depot")
-
-events
-
-# add observation times
-events <- events |> et(time = 0:240)
-events 
-
-# run the simulation
-out <- solve(mod, dat, events)
-out
-
-# plot
-ggplot(out, aes(time, CP)) + geom_line()
+params
 ```
+
+Now that we have our parameters, we're ready to go. There are several ways you can call the solver and run the simulation ([documentation here](https://nlmixr2.github.io/rxode2/reference/rxSolve.html)), but I'm currently quite partial to calling `solve()`,^[Experienced R users would not be surprised to discover that `solve()` is an S3 generic defined in the base package, and equally unsurprised to note that rxode2 defines a method for "rxode2" objects such as `mod`. It somehow makes me happy to see `solve()` used this way.] like so:
+
+```{r}
+out <- solve(mod, params, events)
+```
+
+When we print `out`, we get a fairly detailed description of the simulation that includes information about the parameters and the initial state: 
+
+```{r}
+out
+```
+
+Extremely pretty print method notwithstanding, under the hood it's nothing fancy. It's a regular data frame with a few extra classes and some metadata, which means we can pass it straight to ggplot without any coercion, and draw a pretty picture:
+
+```{r}
+ggplot(out, aes(time, CP)) + 
+  geom_line(linewidth = 1) + 
+  ylab("concentration") +
+  theme_bw()
+```
+
+
