@@ -30,7 +30,7 @@
 <p>This post is about the <a href="https://nlmixr2.github.io/rxode2/">rxode2</a> package, the successor to <a href="https://nlmixrdevelopment.github.io/RxODE/">RxODE</a>. Although the original RxODE package is now archived on CRAN, the syntax for rxode2 is very similar, and as far as I can tell it’s fully backward-comparible with the older package. When getting started, I found it a little easier to look at the <a href="https://nlmixr2.github.io/rxode2-manual/">rxode2 user manual</a> than to work from the pkgdown site.</p>
 <section id="installation" class="level2">
 <h2 class="anchored" data-anchor-id="installation">Installation</h2>
-<p>As with other packages for pharmacometric simulation such as <a href="https://mrgsolve.org/">mrgsolve</a> – which I wrote about in my <a href="../../posts/2023-08-14_mrgsolve/">last blog post</a> – models defined with rxode2 need to be compiled before they are run, and so when you install the package you need the appropriate build tools. There are some implications to this. The package is on CRAN, so you can install it with:</p>
+<p>As with other packages for pharmacometric simulation such as <a href="https://mrgsolve.org/">mrgsolve</a>, models defined with rxode2 need to be compiled before they are run, and so when you install the package you need the appropriate build tools. There are some implications to this. The package is on CRAN, so you can install it with:</p>
 <div class="sourceCode" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">install.packages</span>(<span class="st" style="color: #20794D;
@@ -40,15 +40,20 @@ font-style: inherit;">"rxode2"</span>)</span></code></pre></div>
 <div class="sourceCode" id="cb2" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb2-1"><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">sudo</span> apt install gfortran libblas-dev liblapack-dev liblapack-doc</span></code></pre></div>
-<p>That worked for me.<sup>2</sup></p>
+<p>That worked for me, but I make no promises that it will work for you. Caveat emptor and all that.<sup>2</sup> But let’s not stand on installation formalities when there are simulations to run. It is time to load some packages and dive once more into the abyss…</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb3" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1"><span class="fu" style="color: #4758AB;
 background-color: null;
-font-style: inherit;">library</span>(rxode2)</span></code></pre></div>
-<div class="cell-output cell-output-stderr">
-<pre><code>rxode2 2.0.13 using 4 threads (see ?getRxThreads)
-  no cache: create with `rxCreateCache()`</code></pre>
-</div>
+font-style: inherit;">library</span>(rxode2)</span>
+<span id="cb3-2"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">library</span>(tibble)</span>
+<span id="cb3-3"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">library</span>(ggplot2)</span>
+<span id="cb3-4"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">library</span>(microbenchmark)</span></code></pre></div>
 </div>
 </section>
 <section id="the-rxode2-mini-language" class="level2 page-columns page-full">
@@ -59,17 +64,18 @@ font-style: inherit;">library</span>(rxode2)</span></code></pre></div>
 
 <div class="no-row-height column-margin column-container"><div class="">
 <p><img src="https://blog.djnavarro.net/posts/2023-08-20_rxode2/mind-games.jpg" class="img-fluid"></p>
-</div></div><p>The rxode2 package uses a <a href="https://nlmixr2.github.io/rxode2/articles/rxode2-syntax.html">domain-specific language</a> for specifying pharmacometric models. You can define an rxode2 model in a separate file or you can do it inline by passing a string, or enclosing the model specification within an R code block (i.e., enclosed in curly braces <code>{}</code>). I have to admit that most of the time when an R package does this, I have a strong preference to write a separate model specification file. That’s what I do when building <a href="https://mc-stan.org/">Stan</a> models, and it’s what I did with mrgsolve in the previous post. But this time around I’ll use the curly braces method:</p>
+</div></div><p>The story begins with a little commentary on the slippery nature of R as a programming language. It’s not exactly news to many people at this point, but R is famous<sup>3</sup> for the extremely widespread use of <a href="https://en.wikipedia.org/wiki/Metaprogramming">metaprogramming</a> as a tool for implementing domain-specific languages within R itself.<sup>4</sup> As a consequence of this, the same code can have different meaning when called in different contexts. It’s both a curse and a blessing: one the one hand it makes R very flexible in a way that is convenient for analysts, but on the other hand it can be a bit confusing to people from a more conventional programming background who don’t expect R to work this way.</p>
+<p>The use of domain-specific languages in pharmacometric modelling is not uncommon: for instance, in my previous <a href="../../posts/2023-08-14_mrgsolve/">post about mrgsolve</a>, I talked about the mini-language used to specify models in that package. Not surprisingly, rxode2 has its own mini-language with it’s own <a href="https://nlmixr2.github.io/rxode2/articles/rxode2-syntax.html">custom syntax</a>. In mrgsolve, you can specify a model by writing the code for it in a separate file, or passing it as a string within R. You can do that with rxode2 too, but rxode2 also allows you to pass the model specification as a code block: a collection of statements enclosed in curly braces and treated as a single expression. Here’s an example of how that works:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb5" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1">mod <span class="ot" style="color: #003B4F;
+<div class="sourceCode cell-code" id="cb4" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1">mod <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">rxode2</span>({</span>
-<span id="cb5-2">  <span class="co" style="color: #5E5E5E;
+<span id="cb4-2">  <span class="co" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;"># initial values for all four "compartments"</span></span>
-<span id="cb5-3">  <span class="fu" style="color: #4758AB;
+<span id="cb4-3">  <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">depot</span>(<span class="dv" style="color: #AD0000;
 background-color: null;
@@ -78,7 +84,7 @@ background-color: null;
 font-style: inherit;">=</span> <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">0</span>;</span>
-<span id="cb5-4">  <span class="fu" style="color: #4758AB;
+<span id="cb4-4">  <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">central</span>(<span class="dv" style="color: #AD0000;
 background-color: null;
@@ -87,7 +93,7 @@ background-color: null;
 font-style: inherit;">=</span> <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">0</span>;</span>
-<span id="cb5-5">  <span class="fu" style="color: #4758AB;
+<span id="cb4-5">  <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">peripheral</span>(<span class="dv" style="color: #AD0000;
 background-color: null;
@@ -96,7 +102,7 @@ background-color: null;
 font-style: inherit;">=</span> <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">0</span>;</span>
-<span id="cb5-6">  <span class="fu" style="color: #4758AB;
+<span id="cb4-6">  <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">auc</span>(<span class="dv" style="color: #AD0000;
 background-color: null;
@@ -105,29 +111,29 @@ background-color: null;
 font-style: inherit;">=</span> <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">0</span>;</span>
-<span id="cb5-7">  </span>
-<span id="cb5-8">  <span class="co" style="color: #5E5E5E;
+<span id="cb4-7">  </span>
+<span id="cb4-8">  <span class="co" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;"># drug concentrations</span></span>
-<span id="cb5-9">  CP <span class="ot" style="color: #003B4F;
+<span id="cb4-9">  CP <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">=</span> central <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">/</span> VC;    <span class="co" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;"># central compartment concentration</span></span>
-<span id="cb5-10">  PP <span class="ot" style="color: #003B4F;
+<span id="cb4-10">  PP <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">=</span> peripheral <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">/</span> VP; <span class="co" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;"># peripheral compartment concentration</span></span>
-<span id="cb5-11">  </span>
-<span id="cb5-12">  <span class="co" style="color: #5E5E5E;
+<span id="cb4-11">  </span>
+<span id="cb4-12">  <span class="co" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;"># differential equations</span></span>
-<span id="cb5-13">  d<span class="sc" style="color: #5E5E5E;
+<span id="cb4-13">  d<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">/</span><span class="fu" style="color: #4758AB;
 background-color: null;
@@ -138,7 +144,7 @@ background-color: null;
 font-style: inherit;">-</span>(KA <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">*</span> depot);</span>
-<span id="cb5-14">  d<span class="sc" style="color: #5E5E5E;
+<span id="cb4-14">  d<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">/</span><span class="fu" style="color: #4758AB;
 background-color: null;
@@ -159,7 +165,7 @@ background-color: null;
 font-style: inherit;">-</span> (CL <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">*</span> CP);</span>
-<span id="cb5-15">  d<span class="sc" style="color: #5E5E5E;
+<span id="cb4-15">  d<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">/</span><span class="fu" style="color: #4758AB;
 background-color: null;
@@ -172,39 +178,35 @@ background-color: null;
 font-style: inherit;">-</span> (Q <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">*</span> PP);</span>
-<span id="cb5-16">  d<span class="sc" style="color: #5E5E5E;
+<span id="cb4-16">  d<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">/</span><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">dt</span>(auc)         <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">=</span>  CP;</span>
-<span id="cb5-17">})</span></code></pre></div>
-<div class="cell-output cell-output-stderr">
-<pre><code>using C compiler: ‘gcc (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0’</code></pre>
+<span id="cb4-17">})</span></code></pre></div>
 </div>
-</div>
-<p>As usual, there’s a few things that we need to unpack here.</p>
-<p>Firstly, note the message printed to the console. When an rxode2 model is built, this model specification is translated to C code and compiled: this message lets you know what C compiler rxode2 is using for that purpose.</p>
-<p>Secondly, notice that although this is a two-compartment model in pharmacometric terms, from the perspective of rxode2 there are four “compartments”. In addition to the usual two compartments (<code>central</code> and <code>peripheral</code>), there is an extravascular <code>depot</code> compartment used to model drug intake. For instance, for an orally-administered drug the <code>depot</code> compartment would be the gut.<sup>3</sup> The <code>depot</code> compartment is “real” in the sense that it is loosely intended to correspond to something in the physical system that we’re modelling. By convention we don’t consider it to be one of the pharmacokinetic compartments, but it’s still a real thing. In contrast, the <code>auc</code> “compartment” has no physical analog at all. It’s included so that the model keeps track of the accumulated drug exposure.<sup>4</sup> As I’m quickly coming to learn, this is a very handy trick when running pharmacometric simulations.</p>
-<p>Finally, notice that the syntax within the rxode2 model specification is “R-like” rather than actual R syntax. Thanks to the magic of non-standard evaluation in R, the <code>rxode2()</code> function can capture the unevaluated expression I passed within the curly braces, and then parse the statements according to the rxode2 mini-language. The mini-language is very similar to R in some ways:</p>
+<p>If you don’t look at it too closely you might think this is regular R code, but… it isn’t. The code contained within the braces is captured by the <code>rxode2()</code> function, and then interpreted according to the rules of the mini-language. We’ll need to take a moment to unpack the mini-language itself, but that can wait.</p>
+<p>Let’s start by looking at this as a pharmacometrician might. Notice that although this is a two-compartment model in pharmacometric terms, from the perspective of rxode2 there are four “compartments” that define the state of the system. In addition to the usual two compartments (<code>central</code> and <code>peripheral</code>), there is an extravascular <code>depot</code> compartment used to model drug intake. For instance, for an orally-administered drug the <code>depot</code> compartment would be the gut.<sup>5</sup> The <code>depot</code> compartment is “real” in the sense that it is loosely intended to correspond to something in the physical system that we’re modelling. By convention we don’t consider it to be one of the pharmacokinetic compartments, but it’s still a real thing. In contrast, the <code>auc</code> “compartment” has no physical analog at all. It’s included so that the model keeps track of the accumulated drug exposure.<sup>6</sup> As I’m quickly coming to learn, this is a very handy trick when running pharmacometric simulations.</p>
+<p>Now that we’ve looked at it as an analyst, let’s look at it as a programmer. The syntax within the rxode2 model specification is not “real” R code. The statements enclosed within the curly braces look vaguely R-like, but if you tried to evaluate these expressions outside the context of the <code>rxode2()</code> function, you’d get errors. Thanks to the magic of non-standard evaluation in R, the <code>rxode2()</code> function is able capture the code before it is evaluated, and prevents R from evaluating it the way it normally would. Instead of following the regular rules of R, it follows the syntax provided by the rxode2 mini-language. This mini-language is similar to R in some ways:</p>
 <ul>
-<li>Assignment statements can use <code>=</code> or <code>&lt;-</code> as the assignment operator.<sup>5</sup></li>
+<li>Assignment statements can use <code>=</code> or <code>&lt;-</code> as the assignment operator.<sup>7</sup></li>
 <li>Comments are specified using the hash (<code>#</code>) character</li>
 <li>Semi-colon characters (<code>;</code>) are optional, and specify the end of a line</li>
 </ul>
-<p>There are some other specialised statements that don’t exist in regular R code. There are two kinds of special statements I’ve used in this code:</p>
+<p>However, there are specialised statements used in the mini-language that don’t exist in regular R code. For example, there are two kinds of special statements I’ve used in this code:</p>
 <ul>
 <li>Time-derivative statements (i.e., the ones that have something like <code>d/dt(central)</code> on the left hand side) are used to specify the differential equations in the ODE system.</li>
 <li>Initial-condition statements (i.e., the ones where I set something like <code>central(0)</code> on the left hand side) are used to specify the initial state of the ODE system.</li>
 </ul>
-<p>You can check the <a href="https://nlmixr2.github.io/rxode2/articles/rxode2-syntax.html">rxode2 syntax</a> page to see what other kinds of special statements exist.</p>
+<p>You can check the <a href="https://nlmixr2.github.io/rxode2/articles/rxode2-syntax.html">rxode2 syntax</a> page for more information about the mini-language and what other kinds of special statements exist.</p>
 </section>
 <section id="the-rxode2-model-object" class="level2">
 <h2 class="anchored" data-anchor-id="the-rxode2-model-object">The rxode2 model object</h2>
-<p>In the previous section I used the <code>rxode2()</code> function to specify a pretty standard two-compartment pharmacokinetic model, and assigned the resulting model object to a boringly-named variable called <code>mod</code>.<sup>6</sup> Let’s take a look at it:</p>
+<p>In the previous section I used the <code>rxode2()</code> function to specify a pretty standard two-compartment pharmacokinetic model, and assigned the resulting model object to a boringly-named variable called <code>mod</code>.<sup>8</sup> Let’s take a look at it:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb7" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1">mod</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb5" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1">mod</span></code></pre></div>
 <pre class="fansi fansi-output"><code><span style="font-weight: bold;">rxode2 </span>2.0.13 model named <span style="color: #BBBB00; font-weight: bold;">rx_7b738a16dd646d432336a380787bd163</span> model (<span style="color: #00BB00;">✔</span> <span style="color: #00BB00; font-weight: bold;">ready</span>). 
 <span style="color: #BBBB00;">x</span><span style="color: #0000BB; font-weight: bold;">$state</span>: depot, central, peripheral, auc
 <span style="color: #BBBB00;">x</span><span style="color: #0000BB; font-weight: bold;">$params</span>: VC, VP, KA, Q, CL
@@ -213,14 +215,14 @@ font-style: inherit;">=</span>  CP;</span>
 </div>
 <p>Again, a few things to unpack:</p>
 <ul>
-<li>The first line of the output has some technical information about the model. It tells us what version of rxode2 was used to build the model, gives us the name of the built model (see below), and tells us that it’s ready to use.<sup>7</sup></li>
+<li>The first line of the output has some technical information about the model. It tells us what version of rxode2 was used to build the model, gives us the name of the built model (see below), and tells us that it’s ready to use.<sup>9</sup></li>
 <li>The second line tells us about <code>mod$state</code>, which in this case are the four “compartment” variables that comprise the state vector for the underlying ODE system.</li>
 <li>The third line tells us about <code>mod$params</code>, the list of parameters that need to be passed to the model as input to the simulation</li>
 <li>The fourth line tells us about <code>mod$lhs</code>, the list of additional defined variables that are created by the model and whose value will be recorded in the output.</li>
 </ul>
-<p>Like many R packages that generate compiled code, rxode2 manages the compiled object for you. The long unintelligible “name” assigned to our model gives us the hint we need to find the compiled objects. Within the R session temp directory, the rxode2 package has created an “rxode2” subfolder.<sup>8</sup> And indeed, if I take a peek at the contents of this folder, I find something with an identical name:</p>
+<p>Like many R packages that generate compiled code, rxode2 manages the compiled object for you. The long unintelligible “name” assigned to our model gives us the hint we need to find the compiled objects. Within the R session temp directory, the rxode2 package has created an “rxode2” subfolder.<sup>10</sup> And indeed, if I take a peek at the contents of this folder, I find something with an identical name:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb8" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1">fs<span class="sc" style="color: #5E5E5E;
+<div class="sourceCode cell-code" id="cb6" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1">fs<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
 background-color: null;
@@ -233,8 +235,8 @@ background-color: null;
 font-style: inherit;">tempdir</span>(), <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"rxode2"</span>))</span></code></pre></div>
-<pre class="fansi fansi-output"><code>/tmp/RtmpPsrdd5/rxode2/018374b1ca9115fbc3be9f765f32e47f.md5
-<span style="color: #0000BB; font-weight: bold;">/tmp/RtmpPsrdd5/rxode2/rx_7b738a16dd646d432336a380787bd163__.rxd</span>
+<pre class="fansi fansi-output"><code>/tmp/Rtmpepftm2/rxode2/018374b1ca9115fbc3be9f765f32e47f.md5
+<span style="color: #0000BB; font-weight: bold;">/tmp/Rtmpepftm2/rxode2/rx_7b738a16dd646d432336a380787bd163__.rxd</span>
 </code></pre>
 </div>
 <p>Okay, makes sense.</p>
@@ -243,7 +245,7 @@ font-style: inherit;">"rxode2"</span>))</span></code></pre></div>
 <h2 class="anchored" data-anchor-id="event-tables">Event tables</h2>
 <p>Event tables (also called event schedules) in the rxode2 package are specified with the <code>et()</code> function, and you can use the pipe operator to build up complex event schedules. I’ll take my example from the rxode2 documentation, and walk through it slowly. One nice thing about the event schedules in rxode2 is that you can specify units, so we’ll start with an event table that doesn’t contain any actual <em>events</em>, but specifies the units in which those events will be expressed:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb9" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1">events <span class="ot" style="color: #003B4F;
+<div class="sourceCode cell-code" id="cb7" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1">events <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
 background-color: null;
@@ -256,7 +258,7 @@ background-color: null;
 font-style: inherit;">timeUnits =</span> <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"hours"</span>)</span>
-<span id="cb9-2">events</span></code></pre></div>
+<span id="cb7-2">events</span></code></pre></div>
 
 <pre class="fansi fansi-output"><code><span style="font-weight: bold;">── EventTable with 0 records ──</span>
 0 dosing records (see <span style="color: #BBBB00;">x</span>$<span style="color: #0000BB;">get.dosing</span>(); add with <span style="color: #0000BB;">add.dosing</span> or <span style="color: #0000BB;">et</span>)
@@ -266,12 +268,12 @@ font-style: inherit;">"hours"</span>)</span>
 <p>The output here isn’t super exciting, since there are no actual events encoded here. But it does let me mention one nice little feature of rxode2: the print methods are generally quite informative, and have nice little “nudges” like the ones you can see above that can help new (or even experienced) users work out what they might need to do next.</p>
 <p>Anyway, let’s add some dosing events, shall we? Let’s assume an initial dose of <code>amt = 10000</code> (in milligrams) is administered at <code>time = 0</code>, and repeated for an additional 9 times at 12 hour intervals (i.e., <code>addl = 9</code>, <code>ii = 12</code>). In the interests of being explicit, I’ll set <code>cmt = "depot"</code> to be clear about which compartment the dose is administered to.</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb10" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1">events <span class="ot" style="color: #003B4F;
+<div class="sourceCode cell-code" id="cb8" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1">events <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> events <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">|&gt;</span> </span>
-<span id="cb10-2">  <span class="fu" style="color: #4758AB;
+<span id="cb8-2">  <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">et</span>(<span class="at" style="color: #657422;
 background-color: null;
@@ -294,8 +296,8 @@ background-color: null;
 font-style: inherit;">cmt =</span> <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"depot"</span>)</span>
-<span id="cb10-3"></span>
-<span id="cb10-4">events</span></code></pre></div>
+<span id="cb8-3"></span>
+<span id="cb8-4">events</span></code></pre></div>
 
 <pre class="fansi fansi-output"><code><span style="font-weight: bold;">── EventTable with 1 records ──</span>
 1 dosing records (see <span style="color: #BBBB00;">x</span>$<span style="color: #0000BB;">get.dosing</span>(); add with <span style="color: #0000BB;">add.dosing</span> or <span style="color: #0000BB;">et</span>)
@@ -311,12 +313,12 @@ multiple doses in `addl` columns, expand with <span style="color: #BBBB00;">x</s
 <p>This format for an event table – where <code>time</code>, <code>amt</code>, <code>addl</code>, and <code>ii</code> are used to specify a sequence of regularly spaced dosing events in a single row – will seem quite familiar to anyone in the field, and since I’ve talked about this notation in previous posts, I’ll not bore people by explaining it yet again.</p>
 <p>Moving along, let’s also assume that after 120 hours has passed (<code>time = 120</code>) the dosing schedule changes: the dose drops to <code>amt = 2000</code> milligrams, the interdose interval is increased slightly to <code>ii = 14</code> hours, and this dosing regime is maintained for <code>addl = 4</code> additional doses (i.e., 5 in total). So now we have this:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb11" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb11-1">events <span class="ot" style="color: #003B4F;
+<div class="sourceCode cell-code" id="cb9" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1">events <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> events <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">|&gt;</span> </span>
-<span id="cb11-2">  <span class="fu" style="color: #4758AB;
+<span id="cb9-2">  <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">et</span>(<span class="at" style="color: #657422;
 background-color: null;
@@ -339,8 +341,8 @@ background-color: null;
 font-style: inherit;">cmt =</span> <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"depot"</span>)</span>
-<span id="cb11-3"></span>
-<span id="cb11-4">events</span></code></pre></div>
+<span id="cb9-3"></span>
+<span id="cb9-4">events</span></code></pre></div>
 
 <pre class="fansi fansi-output"><code><span style="font-weight: bold;">── EventTable with 2 records ──</span>
 2 dosing records (see <span style="color: #BBBB00;">x</span>$<span style="color: #0000BB;">get.dosing</span>(); add with <span style="color: #0000BB;">add.dosing</span> or <span style="color: #0000BB;">et</span>)
@@ -356,7 +358,7 @@ multiple doses in `addl` columns, expand with <span style="color: #BBBB00;">x</s
 </div>
 <p>Now that we have specified all the dosing events, we need to add the “observation” events. In a real study, observation times would be the times at which we take a real-world measurement of some kind, but in the context of the simulation it’s just a set of times at which the state of the system is computed. Let’s compute the state of the system for the first 300 hours:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb12" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb12-1">events <span class="ot" style="color: #003B4F;
+<div class="sourceCode cell-code" id="cb10" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1">events <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> events <span class="sc" style="color: #5E5E5E;
 background-color: null;
@@ -371,7 +373,7 @@ background-color: null;
 font-style: inherit;">:</span><span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">300</span>)</span>
-<span id="cb12-2">events </span></code></pre></div>
+<span id="cb10-2">events </span></code></pre></div>
 
 <pre class="fansi fansi-output"><code><span style="font-weight: bold;">── EventTable with 303 records ──</span>
 2 dosing records (see <span style="color: #BBBB00;">x</span>$<span style="color: #0000BB;">get.dosing</span>(); add with <span style="color: #0000BB;">add.dosing</span> or <span style="color: #0000BB;">et</span>)
@@ -396,7 +398,7 @@ multiple doses in `addl` columns, expand with <span style="color: #BBBB00;">x</s
 </div>
 <p>And now we’re done. We have a complete events table that can be used in our simulation. Admittedly, I went through that awfully slowly. The whole thing could have been bundled into a single pipeline like this:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb13" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1">events <span class="ot" style="color: #003B4F;
+<div class="sourceCode cell-code" id="cb11" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb11-1">events <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
 background-color: null;
@@ -411,7 +413,7 @@ background-color: null;
 font-style: inherit;">"hours"</span>) <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">|&gt;</span></span>
-<span id="cb13-2">  <span class="fu" style="color: #4758AB;
+<span id="cb11-2">  <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">et</span>(<span class="at" style="color: #657422;
 background-color: null;
@@ -436,7 +438,7 @@ background-color: null;
 font-style: inherit;">"depot"</span>) <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">|&gt;</span></span>
-<span id="cb13-3">  <span class="fu" style="color: #4758AB;
+<span id="cb11-3">  <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">et</span>(<span class="at" style="color: #657422;
 background-color: null;
@@ -461,7 +463,7 @@ background-color: null;
 font-style: inherit;">"depot"</span>) <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">|&gt;</span></span>
-<span id="cb13-4">  <span class="fu" style="color: #4758AB;
+<span id="cb11-4">  <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">et</span>(<span class="at" style="color: #657422;
 background-color: null;
@@ -485,16 +487,8 @@ font-style: inherit;">300</span>)</span></code></pre></div>
 Trying my best not to forget<br>
 What happened to us<br>
 What happened to me<br>
-&nbsp;&nbsp; – <a href="https://www.youtube.com/watch?v=WO9ewCO7TYI">Placebo</a><sup>9</sup></p>
+&nbsp;&nbsp; – <a href="https://www.youtube.com/watch?v=WO9ewCO7TYI">Placebo</a><sup>11</sup></p>
 </blockquote>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb14" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb14-1"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">library</span>(tibble)</span>
-<span id="cb14-2"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">library</span>(ggplot2)</span></code></pre></div>
-</div>
 <p>We’re now almost at a point where we can run a simple simulation using the model specified via the <code>mod</code> object, and the events table in <code>events</code>. The only thing we haven’t done yet is specify input parameters. The model specification I wrote at the start of the post relies on pharmacokinetic parameters. If we look at the model spec we can see that requires all of the following to be given as input:</p>
 <ul>
 <li>elimination clearance (<code>CL</code>)</li>
@@ -505,7 +499,7 @@ font-style: inherit;">library</span>(ggplot2)</span></code></pre></div>
 </ul>
 <p>Indeed, if we take a look at <code>mod$params</code> we see the same listing:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb15" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb15-1">mod<span class="sc" style="color: #5E5E5E;
+<div class="sourceCode cell-code" id="cb12" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb12-1">mod<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">$</span>params</span></code></pre></div>
 <div class="cell-output cell-output-stdout">
@@ -514,47 +508,47 @@ font-style: inherit;">$</span>params</span></code></pre></div>
 </div>
 <p>Okay, so let’s put together a one-row data frame <code>params</code> containing all these parameters for a single simulated subject:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb17" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb17-1">params <span class="ot" style="color: #003B4F;
+<div class="sourceCode cell-code" id="cb14" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb14-1">params <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">tibble</span>(</span>
-<span id="cb17-2">  <span class="at" style="color: #657422;
+<span id="cb14-2">  <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">KA =</span> <span class="fl" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">0.294</span>,</span>
-<span id="cb17-3">  <span class="at" style="color: #657422;
+<span id="cb14-3">  <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">CL =</span> <span class="fl" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">18.6</span>,</span>
-<span id="cb17-4">  <span class="at" style="color: #657422;
+<span id="cb14-4">  <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">VC =</span> <span class="fl" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">40.2</span>,</span>
-<span id="cb17-5">  <span class="at" style="color: #657422;
+<span id="cb14-5">  <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">VP =</span> <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">297</span>,</span>
-<span id="cb17-6">  <span class="at" style="color: #657422;
+<span id="cb14-6">  <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">Q =</span> <span class="fl" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">10.5</span></span>
-<span id="cb17-7">)</span>
-<span id="cb17-8">params</span></code></pre></div>
+<span id="cb14-7">)</span>
+<span id="cb14-8">params</span></code></pre></div>
 <pre class="fansi fansi-output"><code><span style="color: #555555;"># A tibble: 1 × 5</span>
      KA    CL    VC    VP     Q
   <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span>
 <span style="color: #555555;">1</span> 0.294  18.6  40.2   297  10.5
 </code></pre>
 </div>
-<p>Now that we have our parameters, we’re ready to go. There are several ways you can call the solver and run the simulation (<a href="https://nlmixr2.github.io/rxode2/reference/rxSolve.html">documentation here</a>), but I’m currently quite partial to calling <code>solve()</code>,<sup>10</sup> like so:</p>
+<p>Now that we have our parameters, we’re ready to go. There are several ways you can call the solver and run the simulation (<a href="https://nlmixr2.github.io/rxode2/reference/rxSolve.html">documentation here</a>), but I’m currently quite partial to calling <code>solve()</code>,<sup>12</sup> like so:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb18" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1">out <span class="ot" style="color: #003B4F;
+<div class="sourceCode cell-code" id="cb15" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb15-1">out <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
 background-color: null;
@@ -562,7 +556,7 @@ font-style: inherit;">solve</span>(mod, params, events)</span></code></pre></div
 </div>
 <p>When we print <code>out</code>, we get a fairly detailed description of the simulation that includes information about the parameters and the initial state:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb19" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb19-1">out</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb16" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb16-1">out</span></code></pre></div>
 <pre class="fansi fansi-output"><code><span style="font-weight: bold;">── Solved rxode2 object ──</span>
 <span style="font-weight: bold;">── Parameters (</span><span style="color: #BBBB00; font-weight: bold;">x</span><span style="color: #0000BB; font-weight: bold;">$params</span><span style="font-weight: bold;">): ──</span>
      VC      VP      KA       Q      CL 
@@ -585,14 +579,14 @@ font-style: inherit;">solve</span>(mod, params, events)</span></code></pre></div
 </div>
 <p>Extremely pretty print method notwithstanding, under the hood it’s nothing fancy. It’s a regular data frame with a few extra classes and some metadata, which means we can pass it straight to ggplot without any coercion, and draw a pretty picture:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb20" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb20-1"><span class="fu" style="color: #4758AB;
+<div class="sourceCode cell-code" id="cb17" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb17-1"><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">ggplot</span>(out, <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">aes</span>(time, CP)) <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">+</span> </span>
-<span id="cb20-2">  <span class="fu" style="color: #4758AB;
+<span id="cb17-2">  <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">geom_area</span>(<span class="at" style="color: #657422;
 background-color: null;
@@ -601,18 +595,18 @@ background-color: null;
 font-style: inherit;">1</span>) <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">+</span> </span>
-<span id="cb20-3">  <span class="fu" style="color: #4758AB;
+<span id="cb17-3">  <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">ylab</span>(<span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"concentration"</span>) <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">+</span></span>
-<span id="cb20-4">  <span class="fu" style="color: #4758AB;
+<span id="cb17-4">  <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">theme_bw</span>()</span></code></pre></div>
 <div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2023-08-20_rxode2/index_files/figure-html/unnamed-chunk-16-1.png" class="img-fluid" width="672"></p>
+<p><img src="https://blog.djnavarro.net/posts/2023-08-20_rxode2/index_files/figure-html/unnamed-chunk-14-1.png" class="img-fluid" width="672"></p>
 </div>
 </div>
 <p><br></p>
@@ -634,12 +628,12 @@ Go and slay, boys, you my fave boys<br>
 &nbsp; &nbsp; –<a href="https://www.youtube.com/watch?v=HQliEKPg1Qk">Lizzo</a></p>
 </blockquote>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb21" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb21-1">params <span class="ot" style="color: #003B4F;
+<div class="sourceCode cell-code" id="cb18" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1">params <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">tibble</span>(</span>
-<span id="cb21-2">  <span class="at" style="color: #657422;
+<span id="cb18-2">  <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">KA =</span> <span class="fu" style="color: #4758AB;
 background-color: null;
@@ -654,7 +648,7 @@ background-color: null;
 font-style: inherit;">sd =</span> <span class="fl" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">0.03</span>),</span>
-<span id="cb21-3">  <span class="at" style="color: #657422;
+<span id="cb18-3">  <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">CL =</span> <span class="fu" style="color: #4758AB;
 background-color: null;
@@ -669,7 +663,7 @@ background-color: null;
 font-style: inherit;">sd =</span> <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">2</span>),</span>
-<span id="cb21-4">  <span class="at" style="color: #657422;
+<span id="cb18-4">  <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">VC =</span> <span class="fu" style="color: #4758AB;
 background-color: null;
@@ -684,7 +678,7 @@ background-color: null;
 font-style: inherit;">sd =</span> <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">2</span>),</span>
-<span id="cb21-5">  <span class="at" style="color: #657422;
+<span id="cb18-5">  <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">VP =</span> <span class="fu" style="color: #4758AB;
 background-color: null;
@@ -699,7 +693,7 @@ background-color: null;
 font-style: inherit;">sd =</span> <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">10</span>),</span>
-<span id="cb21-6">  <span class="at" style="color: #657422;
+<span id="cb18-6">  <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">Q =</span> <span class="fu" style="color: #4758AB;
 background-color: null;
@@ -714,9 +708,9 @@ background-color: null;
 font-style: inherit;">sd =</span> <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">1</span>)</span>
-<span id="cb21-7">)</span>
-<span id="cb21-8"></span>
-<span id="cb21-9">out <span class="ot" style="color: #003B4F;
+<span id="cb18-7">)</span>
+<span id="cb18-8"></span>
+<span id="cb18-9">out <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
 background-color: null;
@@ -724,10 +718,10 @@ font-style: inherit;">solve</span>(mod, params, events)</span></code></pre></div
 </div>
 <p>I’ll show you the <code>out</code> object in a moment, but it’s probably easier to understand it if we start with a plot:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb22" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb22-1">out <span class="sc" style="color: #5E5E5E;
+<div class="sourceCode cell-code" id="cb19" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb19-1">out <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">|&gt;</span></span>
-<span id="cb22-2">  dplyr<span class="sc" style="color: #5E5E5E;
+<span id="cb19-2">  dplyr<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
 background-color: null;
@@ -740,7 +734,7 @@ background-color: null;
 font-style: inherit;">"Subject"</span>, sim.id)) <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">|&gt;</span></span>
-<span id="cb22-3">  <span class="fu" style="color: #4758AB;
+<span id="cb19-3">  <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">ggplot</span>(<span class="fu" style="color: #4758AB;
 background-color: null;
@@ -749,7 +743,7 @@ background-color: null;
 font-style: inherit;">fill =</span> sim.id)) <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">+</span> </span>
-<span id="cb22-4">  <span class="fu" style="color: #4758AB;
+<span id="cb19-4">  <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">geom_area</span>(<span class="at" style="color: #657422;
 background-color: null;
@@ -762,7 +756,7 @@ background-color: null;
 font-style: inherit;">FALSE</span>) <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">+</span> </span>
-<span id="cb22-5">  <span class="fu" style="color: #4758AB;
+<span id="cb19-5">  <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">facet_wrap</span>(<span class="sc" style="color: #5E5E5E;
 background-color: null;
@@ -773,7 +767,7 @@ background-color: null;
 font-style: inherit;">5</span>) <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">+</span> </span>
-<span id="cb22-6">  <span class="fu" style="color: #4758AB;
+<span id="cb19-6">  <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">labs</span>(<span class="at" style="color: #657422;
 background-color: null;
@@ -786,17 +780,17 @@ background-color: null;
 font-style: inherit;">"Concentration"</span>) <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">+</span></span>
-<span id="cb22-7">  <span class="fu" style="color: #4758AB;
+<span id="cb19-7">  <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">theme_bw</span>()</span></code></pre></div>
 <div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2023-08-20_rxode2/index_files/figure-html/unnamed-chunk-18-1.png" class="img-fluid" width="672"></p>
+<p><img src="https://blog.djnavarro.net/posts/2023-08-20_rxode2/index_files/figure-html/unnamed-chunk-16-1.png" class="img-fluid" width="672"></p>
 </div>
 </div>
-<p>As you can see, all 20 subjects have qualitatively similar profiles, but there are noticeable differences in the details. Not surprisingly really. I didn’t build in very much variability into the simulation, and I didn’t even <em>try</em> to incorporate an appropriate covariance structure among the parameters (that’s a topic for another post).<sup>11</sup> The main thing that matters here is that we can see that the variation <em>exists</em>.</p>
+<p>As you can see, all 20 subjects have qualitatively similar profiles, but there are noticeable differences in the details. Not surprisingly really. I didn’t build in very much variability into the simulation, and I didn’t even <em>try</em> to incorporate an appropriate covariance structure among the parameters (that’s a topic for another post).<sup>13</sup> The main thing that matters here is that we can see that the variation <em>exists</em>.</p>
 <p>Anyway, let’s have a look at the table of results <code>out</code> produced by our simulation. As you probably guessed from the ggplot2 code, there’s a column called <code>sim.id</code> that stores the subject identifier, and there are 20 times as many rows as last time, but it’s essentially the same:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb23" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb23-1">out</span></code></pre></div>
+<div class="sourceCode cell-code" id="cb20" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb20-1">out</span></code></pre></div>
 <pre class="fansi fansi-output"><code><span style="font-weight: bold;">── Solved rxode2 object ──</span>
 <span style="font-weight: bold;">── Parameters (</span><span style="color: #BBBB00; font-weight: bold;">x</span><span style="color: #0000BB; font-weight: bold;">$params</span><span style="font-weight: bold;">): ──</span>
 <span style="color: #555555;"># A tibble: 20 × 6</span>
@@ -855,20 +849,15 @@ Simulation <span style="font-weight: bold;">without uncertainty</span> in parame
 Ain’t you baby?<br>
 &nbsp;&nbsp; – <a href="https://www.youtube.com/watch?v=EbaEVA259IE">Miranda Lambert</a></p>
 </blockquote>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb24" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb24-1"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">library</span>(microbenchmark)</span></code></pre></div>
-</div>
 <p>For small simulations like the ones I’m running in this post, you really don’t need to care much about performance. However, when you start running larger simulations it starts to matter a lot. To that end there’s a nice <a href="https://nlmixr2.github.io/rxode2/articles/rxode2-speed.html">article on speeding up rxode2</a> in the package documentation which I’ve already found extremely useful at work when doing a little bit of code profiling on analysis code. Since this does matter a fair bit in practice, I’ll walk through the same ideas here.</p>
 <p>Let’s define a few functions that run the simulations in different ways. First, I’ll start with a <code>solve_loop()</code> function that deliberately strips out any form of multi-threading. Each row in <code>params</code> is passed as a separate call to <code>solve()</code>, nested inside a <code>for</code> loop:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb25" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb25-1">solve_loop <span class="ot" style="color: #003B4F;
+<div class="sourceCode cell-code" id="cb21" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb21-1">solve_loop <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> <span class="cf" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">function</span>() {</span>
-<span id="cb25-2">  <span class="cf" style="color: #003B4F;
+<span id="cb21-2">  <span class="cf" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">for</span>(i <span class="cf" style="color: #003B4F;
 background-color: null;
@@ -881,11 +870,11 @@ background-color: null;
 font-style: inherit;">nrow</span>(params)) <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">solve</span>(mod, params[i, ], events)</span>
-<span id="cb25-3">}</span></code></pre></div>
+<span id="cb21-3">}</span></code></pre></div>
 </div>
-<p>This is our baseline case. It’s designed to make life as difficult as possible for rxode2 by enforcing single threaded execution within R. We can improve on this considerably by passing the entire <code>params</code> data frame, allowing rxode2 to run the simulations in parallel. I haven’t looked under the hood to work out exactly how rxode2 manages the parallelism<sup>12</sup> Here are three functions that explicitly request 1, 2 or 4 cores/threads:</p>
+<p>This is our baseline case. It’s designed to make life as difficult as possible for rxode2 by enforcing single threaded execution within R. We can improve on this considerably by passing the entire <code>params</code> data frame, allowing rxode2 to run the simulations in parallel. I haven’t looked under the hood to work out exactly how rxode2 manages the parallelism<sup>14</sup> Here are three functions that explicitly request 1, 2 or 4 cores/threads:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb26" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb26-1">solve_thread_1 <span class="ot" style="color: #003B4F;
+<div class="sourceCode cell-code" id="cb22" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb22-1">solve_thread_1 <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> <span class="cf" style="color: #003B4F;
 background-color: null;
@@ -896,7 +885,7 @@ background-color: null;
 font-style: inherit;">cores =</span> <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">1</span>)</span>
-<span id="cb26-2">solve_thread_2 <span class="ot" style="color: #003B4F;
+<span id="cb22-2">solve_thread_2 <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> <span class="cf" style="color: #003B4F;
 background-color: null;
@@ -907,7 +896,7 @@ background-color: null;
 font-style: inherit;">cores =</span> <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">2</span>)</span>
-<span id="cb26-3">solve_thread_4 <span class="ot" style="color: #003B4F;
+<span id="cb22-3">solve_thread_4 <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> <span class="cf" style="color: #003B4F;
 background-color: null;
@@ -921,25 +910,25 @@ font-style: inherit;">4</span>)</span></code></pre></div>
 </div>
 <p>From experience, I’ve learned that there’s almost never anything to be gained by trying to execute more than four resource-hogging threads simultaneously on my laptop, so I’ll be sensible and won’t try anything more than that. Let’s take a look at the difference in performance for each of these functions:</p>
 <div class="cell" data-hash="index_cache/html/benchmarks_15a64dfc7a69447ec3b1a389376a8a52">
-<div class="sourceCode cell-code" id="cb27" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb27-1">bench <span class="ot" style="color: #003B4F;
+<div class="sourceCode cell-code" id="cb23" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb23-1">bench <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">microbenchmark</span>(</span>
-<span id="cb27-2">  <span class="fu" style="color: #4758AB;
+<span id="cb23-2">  <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">solve_loop</span>(),</span>
-<span id="cb27-3">  <span class="fu" style="color: #4758AB;
+<span id="cb23-3">  <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">solve_thread_1</span>(),</span>
-<span id="cb27-4">  <span class="fu" style="color: #4758AB;
+<span id="cb23-4">  <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">solve_thread_2</span>(),</span>
-<span id="cb27-5">  <span class="fu" style="color: #4758AB;
+<span id="cb23-5">  <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">solve_thread_4</span>()</span>
-<span id="cb27-6">)</span>
-<span id="cb27-7">bench</span></code></pre></div>
+<span id="cb23-6">)</span>
+<span id="cb23-7">bench</span></code></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>Unit: milliseconds
              expr       min        lq      mean    median       uq       max neval
@@ -951,7 +940,7 @@ font-style: inherit;">solve_thread_4</span>()</span>
 </div>
 <p>You can see from looking at the table that there’s a big drop in performance when we force rxode2 to simulate each subject one at a time within a loop: <code>solve_loop()</code> is much, much slower than any of the others. Increasing the number of threads from one to four helps a fair bit too, but not to the same dramatic extent. This is even more apparent when we visualise the results:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb29" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb29-1"><span class="fu" style="color: #4758AB;
+<div class="sourceCode cell-code" id="cb25" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb25-1"><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">autoplot</span>(bench)</span></code></pre></div>
 <div class="cell-output-display">
@@ -969,16 +958,18 @@ font-style: inherit;">autoplot</span>(bench)</span></code></pre></div>
 <ol>
 <li id="fn1"><p>Does that term even make sense for a linux machine? It’s not like the thing shipped with linux in the first place. Whatever.↩︎</p></li>
 <li id="fn2"><p>I haven’t extensively checked the dependencies on other operating systems, but from what I can tell a Windows install requires <a href="https://cran.r-project.org/bin/windows/Rtools/">RTools</a>.↩︎</p></li>
-<li id="fn3"><p>In this post I’m assuming the drug has bioavailability of <img src="https://latex.codecogs.com/png.latex?F%20=%201">, but that’s not true generally, so you’d have to model this explicitly by scaling the drug amount that passes from the gut to the central compartment in the ODE equations.↩︎</p></li>
-<li id="fn4"><p>In essence, the value of <code>auc</code> that accrues is a numerical estimate of the time-integral of drug concentration. This “area under the curve” measure is one of several different measures used to assess drug exposure. I talked a lot about the AUC measure in my post on <a href="../../posts/2023-04-26_non-compartmental-analysis/">non-compartmental analysis</a>.↩︎</p></li>
-<li id="fn5"><p>The rxode2 mini-language also allows you to use <code>~</code> for this purpose, but I’m not going to do that here. For this post, I’ve chose to use <code>=</code> as a way of reminding myself that my model specification isn’t “normal” R code.↩︎</p></li>
-<li id="fn6"><p>Model objects in rxode2 have S3 class “rxode2”.↩︎</p></li>
-<li id="fn7"><p>You can customise this name if you care deeply about such things. As noted in the <a href="https://nlmixr2.github.io/rxode2/reference/rxode2.html"><code>roxde2()</code> documentation</a>, there is a <code>modName</code> argument that you can use for this purpose. Because this name is used throughout the C compilation process, it must start with a letter and contain only alphanumeric ASCII characters.↩︎</p></li>
-<li id="fn8"><p>Yes, you can customise this too, by specifying the <code>wd</code> argument to <code>rxode2()</code>.↩︎</p></li>
-<li id="fn9"><p>I actually feel bad about referencing “Meds” in this post, because let’s face it <em>“The sex, and the drugs, and the complications”</em> would be a fucking magnificent title for a blog post about PKPD models with covariates. Oh who am I kidding? I’m absolutely going to write a post with that title.↩︎</p></li>
-<li id="fn10"><p>Experienced R users would not be surprised to discover that <code>solve()</code> is an S3 generic defined in the base package, and equally unsurprised to note that rxode2 defines a method for “rxode2” objects such as <code>mod</code>. It somehow makes me happy to see <code>solve()</code> used this way.↩︎</p></li>
-<li id="fn11"><p>Note to future-Danielle: there is a nice discussion of this in the rxode2 context specifically, in the article on <a href="https://nlmixr2.github.io/rxode2/articles/rxode2-sim-var.html">population simulation</a>.↩︎</p></li>
-<li id="fn12"><p>Is it purely <a href="https://en.wikipedia.org/wiki/Multithreading">multi-threading</a> we’re talking about? Do we care deeply about the <a href="https://stackoverflow.com/questions/11835046/multithreading-and-multicore-differences">multi-thread/multi-core</a> distinction? Does <a href="https://en.wikipedia.org/wiki/Single_instruction,_multiple_data">SIMD</a> come into play? Most importantly, does the author really want to be bothered writing a deep dive on these topics when the audience consists almost entirely of people who (a) already understand these topics or (b) do not care about these topics? The answer to that last one is no. No she does not.↩︎</p></li>
+<li id="fn3"><p>Or notorious, depending on your perspective↩︎</p></li>
+<li id="fn4"><p>Metaprogramming in R relies on the fact that R adopts a <a href="https://en.wikipedia.org/wiki/Lazy_evaluation">lazy evaluation</a> model for code execution. This allows the programmer to capture user code passed to a function <em>before</em> it is evaluated, modify the code as desired, and indeed prevent it being evaluated at all. R is hardly the only language to adopt this approach, but it does put it in contrast to languages like Python that adopt an <a href="https://en.wikipedia.org/wiki/Evaluation_strategy#Eager_evaluation">eager evaluation</a> approach.↩︎</p></li>
+<li id="fn5"><p>In this post I’m assuming the drug has bioavailability of <img src="https://latex.codecogs.com/png.latex?F%20=%201">, but that’s not true generally, so you’d have to model this explicitly by scaling the drug amount that passes from the gut to the central compartment in the ODE equations.↩︎</p></li>
+<li id="fn6"><p>In essence, the value of <code>auc</code> that accrues is a numerical estimate of the time-integral of drug concentration. This “area under the curve” measure is one of several different measures used to assess drug exposure. I talked a lot about the AUC measure in my post on <a href="../../posts/2023-04-26_non-compartmental-analysis/">non-compartmental analysis</a>.↩︎</p></li>
+<li id="fn7"><p>The rxode2 mini-language also allows you to use <code>~</code> for this purpose, but I’m not going to do that here. For this post, I’ve chose to use <code>=</code> as a way of reminding myself that my model specification isn’t “normal” R code.↩︎</p></li>
+<li id="fn8"><p>Model objects in rxode2 have S3 class “rxode2”.↩︎</p></li>
+<li id="fn9"><p>You can customise this name if you care deeply about such things. As noted in the <a href="https://nlmixr2.github.io/rxode2/reference/rxode2.html"><code>roxde2()</code> documentation</a>, there is a <code>modName</code> argument that you can use for this purpose. Because this name is used throughout the C compilation process, it must start with a letter and contain only alphanumeric ASCII characters.↩︎</p></li>
+<li id="fn10"><p>Yes, you can customise this too, by specifying the <code>wd</code> argument to <code>rxode2()</code>.↩︎</p></li>
+<li id="fn11"><p>I actually feel bad about referencing “Meds” in this post, because let’s face it <em>“The sex, and the drugs, and the complications”</em> would be a fucking magnificent title for a blog post about PKPD models with covariates. Oh who am I kidding? I’m absolutely going to write a post with that title.↩︎</p></li>
+<li id="fn12"><p>Experienced R users would not be surprised to discover that <code>solve()</code> is an S3 generic defined in the base package, and equally unsurprised to note that rxode2 defines a method for “rxode2” objects such as <code>mod</code>. It somehow makes me happy to see <code>solve()</code> used this way.↩︎</p></li>
+<li id="fn13"><p>Note to future-Danielle: there is a nice discussion of this in the rxode2 context specifically, in the article on <a href="https://nlmixr2.github.io/rxode2/articles/rxode2-sim-var.html">population simulation</a>.↩︎</p></li>
+<li id="fn14"><p>Is it purely <a href="https://en.wikipedia.org/wiki/Multithreading">multi-threading</a> we’re talking about? Do we care deeply about the <a href="https://stackoverflow.com/questions/11835046/multithreading-and-multicore-differences">multi-thread/multi-core</a> distinction? Does <a href="https://en.wikipedia.org/wiki/Single_instruction,_multiple_data">SIMD</a> come into play? Most importantly, does the author really want to be bothered writing a deep dive on these topics when the audience consists almost entirely of people who (a) already understand these topics or (b) do not care about these topics? The answer to that last one is no. No she does not.↩︎</p></li>
 </ol>
 </section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div id="quarto-reuse" class="quarto-appendix-contents"><div><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2023,
   author = {Navarro, Danielle},
