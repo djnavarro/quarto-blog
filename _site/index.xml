@@ -15,7 +15,1009 @@
 <link>https://blog.djnavarro.net/index.html</link>
 </image>
 <generator>quarto-1.3.353</generator>
-<lastBuildDate>Sun, 13 Aug 2023 14:00:00 GMT</lastBuildDate>
+<lastBuildDate>Sun, 27 Aug 2023 14:00:00 GMT</lastBuildDate>
+<item>
+  <title>Pharmacometric simulation with rxode2</title>
+  <dc:creator>Danielle Navarro</dc:creator>
+  <link>https://blog.djnavarro.net/posts/2023-08-28_rxode2/index.html</link>
+  <description><![CDATA[ 
+
+
+
+
+<!--------------- my typical setup ----------------->
+<!--------------- post begins here ----------------->
+<p>Hello, yes, this is another <a href="../../category/pharmacometrics">pharmacometrics</a> post. There have been quite a few of these lately as I try to bring myself up to speed on a new discipline. This one is about the <a href="https://nlmixr2.github.io/rxode2/">rxode2</a> package, a pharmacometric simulation tool and the successor to the widely-used <a href="https://nlmixrdevelopment.github.io/RxODE/">RxODE</a> package.<sup>1</sup> Although the original RxODE package is now archived on CRAN, the syntax for rxode2 is very similar, and as far as I can tell it’s fairly (fully?) backward-compatible with the older package.</p>
+<section id="installation" class="level2">
+<h2 class="anchored" data-anchor-id="installation">Installation</h2>
+<p>As with other packages for pharmacometric simulation such as <a href="https://mrgsolve.org/">mrgsolve</a>, models defined with rxode2 need to be compiled before they are run, and so when you install the package you need the appropriate build tools. There are some implications to this. The package is on CRAN, so you can install it with:</p>
+<div class="sourceCode" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">install.packages</span>(<span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"rxode2"</span>)</span></code></pre></div>
+<p>However, like most R packages that allow you to compile C/C++/Fortran/Rust/Your-Favourite-Language-Here code, it relies heavily on system dependencies that you may or may not have, and managing the build tools is an OS-specific thing. I’m running Ubuntu 22.04, and (for reasons that don’t bear mentioning) I recently did a “factory reset”<sup>2</sup> and did a fresh install of Ubuntu. So, yeah, I didn’t have everything I needed. Yes, I did have the <code>gcc</code> compiler installed, but that’s not the only system dependency you have to care about. In my case, I was missing <code>gfortran</code>, <code>libblas</code>, and <code>liblapack</code>. As a consequence, when I tried to run the example code on the package website, all I got was a long stream of error messages. In order to get started, I had to do this:</p>
+<div class="sourceCode" id="cb2" style="background: #f1f3f5;"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb2-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">sudo</span> apt install gfortran libblas-dev liblapack-dev liblapack-doc</span></code></pre></div>
+<p>That worked for me, but I make no promises that it will work for you. Caveat emptor and all that.<sup>3</sup> But let’s not stand on installation formalities when there are simulations to run. It is time to load some packages and dive once more into the abyss…</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb3" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">library</span>(rxode2)</span>
+<span id="cb3-2"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">library</span>(tibble)</span>
+<span id="cb3-3"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">library</span>(ggplot2)</span>
+<span id="cb3-4"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">library</span>(microbenchmark)</span></code></pre></div>
+</div>
+</section>
+<section id="the-rxode2-mini-language" class="level2 page-columns page-full">
+<h2 class="anchored" data-anchor-id="the-rxode2-mini-language">The rxode2 mini-language</h2>
+<blockquote class="blockquote">
+<p>I don’t understand <br> You claiming I’m a handful when you show up all empty-handed <br> The way you say you love me like you’ve just been reprimanded <br> ’Cause I know you like mind games <br> &nbsp; &nbsp; – <a href="https://www.youtube.com/watch?v=ZyKu6noOxR8">BANKS</a></p>
+</blockquote>
+
+<div class="no-row-height column-margin column-container"><div class="">
+<p><img src="https://blog.djnavarro.net/posts/2023-08-28_rxode2/mind-games.jpg" class="img-fluid"></p>
+</div></div><p>The story begins with a little commentary on the slippery nature of R as a programming language. It’s not exactly news to many people at this point, but R is famous<sup>4</sup> for the extremely widespread use of <a href="https://en.wikipedia.org/wiki/Metaprogramming">metaprogramming</a> as a tool for implementing domain-specific languages within R itself.<sup>5</sup> As a consequence of this, the same code can have different meaning when called in different contexts. It’s both a curse and a blessing: one the one hand it makes R very flexible in a way that is convenient for analysts, but on the other hand it can be a bit confusing to people from a more conventional programming background who don’t expect R to work this way.</p>
+<p>The use of domain-specific languages in pharmacometric modelling is not uncommon: for instance, in my previous <a href="../../posts/2023-08-14_mrgsolve/">post about mrgsolve</a>, I talked about the mini-language used to specify models in that package. Not surprisingly, rxode2 has its own mini-language with it’s own <a href="https://nlmixr2.github.io/rxode2/articles/rxode2-syntax.html">custom syntax</a>. In mrgsolve, you can specify a model by writing the code for it in a separate file, or passing it as a string within R. You can do that with rxode2 too, but rxode2 also allows you to pass the model specification as a code block: a collection of statements enclosed in curly braces and treated as a single expression. Here’s an example of how that works:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb4" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1">mod <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">rxode2</span>({</span>
+<span id="cb4-2">  <span class="co" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;"># initial values for all four "compartments"</span></span>
+<span id="cb4-3">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">depot</span>(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">0</span>) <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">=</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">0</span>;</span>
+<span id="cb4-4">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">central</span>(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">0</span>) <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">=</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">0</span>;</span>
+<span id="cb4-5">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">peripheral</span>(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">0</span>) <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">=</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">0</span>;</span>
+<span id="cb4-6">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">auc</span>(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">0</span>) <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">=</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">0</span>;</span>
+<span id="cb4-7">  </span>
+<span id="cb4-8">  <span class="co" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;"># drug concentrations</span></span>
+<span id="cb4-9">  CP <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">=</span> central <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">/</span> VC;    <span class="co" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;"># central compartment concentration</span></span>
+<span id="cb4-10">  PP <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">=</span> peripheral <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">/</span> VP; <span class="co" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;"># peripheral compartment concentration</span></span>
+<span id="cb4-11">  </span>
+<span id="cb4-12">  <span class="co" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;"># differential equations</span></span>
+<span id="cb4-13">  d<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">/</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">dt</span>(depot)       <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">=</span> <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">-</span>(KA <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">*</span> depot);</span>
+<span id="cb4-14">  d<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">/</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">dt</span>(central)     <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">=</span>  (KA <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">*</span> depot) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">-</span> (Q <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">*</span> CP) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">+</span> (Q <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">*</span> PP) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">-</span> (CL <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">*</span> CP);</span>
+<span id="cb4-15">  d<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">/</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">dt</span>(peripheral)  <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">=</span>  (Q <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">*</span> CP) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">-</span> (Q <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">*</span> PP);</span>
+<span id="cb4-16">  d<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">/</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">dt</span>(auc)         <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">=</span>  CP;</span>
+<span id="cb4-17">})</span></code></pre></div>
+</div>
+<p>If you don’t look at it too closely you might think this is regular R code, but… it isn’t. The code contained within the braces is captured by the <code>rxode2()</code> function, and then interpreted according to the rules of the mini-language. We’ll need to take a moment to unpack the mini-language itself, but that can wait.</p>
+<p>Let’s start by looking at this as a pharmacometrician might. Notice that although this is a two-compartment model in pharmacometric terms, from the perspective of rxode2 there are four “compartments” that define the state of the system. In addition to the usual two compartments (<code>central</code> and <code>peripheral</code>), there is an extravascular <code>depot</code> compartment used to model drug intake. For instance, for an orally-administered drug the <code>depot</code> compartment would be the gut.<sup>6</sup> The <code>depot</code> compartment is “real” in the sense that it is loosely intended to correspond to something in the physical system that we’re modelling. By convention we don’t consider it to be one of the pharmacokinetic compartments, but it’s still a real thing. In contrast, the <code>auc</code> “compartment” has no physical analog at all. It’s included so that the model keeps track of the accumulated drug exposure.<sup>7</sup> As I’m quickly coming to learn, this is a very handy trick when running pharmacometric simulations.</p>
+<p>Now that we’ve looked at it as an analyst, let’s look at it as a programmer. The syntax within the rxode2 model specification is not “real” R code. The statements enclosed within the curly braces look vaguely R-like, but if you tried to evaluate these expressions outside the context of the <code>rxode2()</code> function, you’d get errors. Thanks to the magic of non-standard evaluation in R, the <code>rxode2()</code> function is able capture the code before it is evaluated, and prevents R from evaluating it the way it normally would. Instead of following the regular rules of R, it follows the syntax provided by the rxode2 mini-language. This mini-language is similar to R in some ways:</p>
+<ul>
+<li>Assignment statements can use <code>=</code> or <code>&lt;-</code> as the assignment operator.<sup>8</sup></li>
+<li>Comments are specified using the hash (<code>#</code>) character</li>
+<li>Semi-colon characters (<code>;</code>) are optional, and specify the end of a line</li>
+</ul>
+<p>However, there are specialised statements used in the mini-language that don’t exist in regular R code. For example, there are two kinds of special statements I’ve used in this code:</p>
+<ul>
+<li>Time-derivative statements (i.e., the ones that have something like <code>d/dt(central)</code> on the left hand side) are used to specify the differential equations in the ODE system.</li>
+<li>Initial-condition statements (i.e., the ones where I set something like <code>central(0)</code> on the left hand side) are used to specify the initial state of the ODE system.</li>
+</ul>
+<p>You can check the <a href="https://nlmixr2.github.io/rxode2/articles/rxode2-syntax.html">rxode2 syntax</a> page for more information about the mini-language and what other kinds of special statements exist.</p>
+</section>
+<section id="the-rxode2-model-object" class="level2">
+<h2 class="anchored" data-anchor-id="the-rxode2-model-object">The rxode2 model object</h2>
+<p>In the previous section I used the <code>rxode2()</code> function to specify a pretty standard two-compartment pharmacokinetic model, and assigned the resulting model object to a boringly-named variable called <code>mod</code>.<sup>9</sup> The model object is the primary vehicle for interfacing with the compiled code from R, so it’s helpful to take a look at it:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb5" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1">mod</span></code></pre></div>
+<pre class="fansi fansi-output"><code><span style="font-weight: bold;">rxode2 </span>2.0.13 model named <span style="color: #BBBB00; font-weight: bold;">rx_7b738a16dd646d432336a380787bd163</span> model (<span style="color: #00BB00;">✔</span> <span style="color: #00BB00; font-weight: bold;">ready</span>). 
+<span style="color: #BBBB00;">x</span><span style="color: #0000BB; font-weight: bold;">$state</span>: depot, central, peripheral, auc
+<span style="color: #BBBB00;">x</span><span style="color: #0000BB; font-weight: bold;">$params</span>: VC, VP, KA, Q, CL
+<span style="color: #BBBB00;">x</span><span style="color: #0000BB; font-weight: bold;">$lhs</span>: CP, PP
+</code></pre>
+</div>
+<p>Again, there are a few things to unpack in this output:</p>
+<ul>
+<li>The first line of the output has some technical information about the model. It tells us what version of rxode2 was used to build the model, gives us the name of the built model (see below), and tells us that it’s ready to use.<sup>10</sup></li>
+<li>The second line tells us about <code>mod$state</code>, which in this case are the four “compartment” variables that comprise the state vector for the underlying ODE system.</li>
+<li>The third line tells us about <code>mod$params</code>, the list of parameters that need to be passed to the model as input to the simulation</li>
+<li>The fourth line tells us about <code>mod$lhs</code>, the list of additional defined variables that are created by the model and whose value will be recorded in the output.</li>
+</ul>
+<p>Like many R packages that generate compiled code, rxode2 manages the compiled object for you. The long unintelligible “name” assigned to our model gives us the hint we need to find the compiled objects. Within the R session temp directory, the rxode2 package has created an “rxode2” subfolder.<sup>11</sup> And indeed, if I take a peek at the contents of this folder, I find something with an identical name:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb6" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1">fs<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">dir_ls</span>(fs<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">path</span>(<span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">tempdir</span>(), <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"rxode2"</span>))</span></code></pre></div>
+<pre class="fansi fansi-output"><code>/tmp/RtmpC0i8oK/rxode2/018374b1ca9115fbc3be9f765f32e47f.md5
+<span style="color: #0000BB; font-weight: bold;">/tmp/RtmpC0i8oK/rxode2/rx_7b738a16dd646d432336a380787bd163__.rxd</span>
+</code></pre>
+</div>
+<p>Okay, makes sense.</p>
+</section>
+<section id="event-tables" class="level2 page-columns page-full">
+<h2 class="anchored" data-anchor-id="event-tables">Event tables</h2>
+<p>Event tables (also called event schedules) are the primary way the user specifies things that happen in the simulation. These mostly consist of two kinds of event: dosing events, where the drug is administered, and observation events, where the state of the system is measured. In the rxode2 package these are specified with the <code>et()</code> function, and you can use the pipe operator to build up complex event schedules. I’ll take my example from the rxode2 documentation, and walk through it slowly. One nice thing about the event schedules in rxode2 is that you can specify units, so we’ll start with an event table that doesn’t contain any actual <em>events</em>, but specifies the units in which those events will be expressed:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb7" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1">events <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">et</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">amountUnits =</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"mg"</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">timeUnits =</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"hours"</span>)</span>
+<span id="cb7-2">events</span></code></pre></div>
+
+<pre class="fansi fansi-output"><code><span style="font-weight: bold;">── EventTable with 0 records ──</span>
+0 dosing records (see <span style="color: #BBBB00;">x</span>$<span style="color: #0000BB;">get.dosing</span>(); add with <span style="color: #0000BB;">add.dosing</span> or <span style="color: #0000BB;">et</span>)
+0 observation times (see <span style="color: #BBBB00;">x</span>$<span style="color: #0000BB;">get.sampling</span>(); add with <span style="color: #0000BB;">add.sampling</span> or <span style="color: #0000BB;">et</span>)
+</code></pre>
+</div>
+<p>The output here isn’t super exciting, since there are no actual events encoded here. But it does let me mention one nice little feature of rxode2: the print methods are generally quite informative, and have nice little “nudges” like the ones you can see above that can help new (or even experienced) users work out what they might need to do next.</p>
+<p>Anyway, let’s add some dosing events, shall we? Let’s assume an initial dose of <code>amt = 10000</code> (in milligrams) is administered at <code>time = 0</code>, and repeated for an additional 9 times at 12 hour intervals (i.e., <code>addl = 9</code>, <code>ii = 12</code>). In the interests of being explicit, I’ll set <code>cmt = "depot"</code> to be clear about which compartment the dose is administered to.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb8" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1">events <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> events <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span> </span>
+<span id="cb8-2">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">et</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">time =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">0</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">amt =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">10000</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">addl =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">9</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">ii =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">12</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">cmt =</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"depot"</span>)</span>
+<span id="cb8-3"></span>
+<span id="cb8-4">events</span></code></pre></div>
+
+<pre class="fansi fansi-output"><code><span style="font-weight: bold;">── EventTable with 1 records ──</span>
+1 dosing records (see <span style="color: #BBBB00;">x</span>$<span style="color: #0000BB;">get.dosing</span>(); add with <span style="color: #0000BB;">add.dosing</span> or <span style="color: #0000BB;">et</span>)
+0 observation times (see <span style="color: #BBBB00;">x</span>$<span style="color: #0000BB;">get.sampling</span>(); add with <span style="color: #0000BB;">add.sampling</span> or <span style="color: #0000BB;">et</span>)
+multiple doses in `addl` columns, expand with <span style="color: #BBBB00;">x</span>$<span style="color: #0000BB;">expand</span>(); or <span style="color: #0000BB;">etExpand</span>(<span style="color: #BBBB00;">x</span>)
+<span style="font-weight: bold;">── First part of </span><span style="color: #BBBB00; font-weight: bold;">x</span><span style="font-weight: bold;">: ──</span>
+<span style="color: #555555;"># A tibble: 1 × 6</span>
+   time cmt     amt    ii  addl evid        
+  <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #555555; font-style: italic;">&lt;chr&gt;</span> <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #555555; font-style: italic;">&lt;int&gt;</span> <span style="color: #555555; font-style: italic;">&lt;evid&gt;</span>      
+<span style="color: #555555;">1</span>     0 depot <span style="text-decoration: underline;">10</span>000    12     9 <span style="color: #0000BB; font-weight: bold;">1</span>:<span style="color: #BBBB00;">Dose (Add)</span>
+</code></pre>
+</div>
+<p>This format for an event table – where <code>time</code>, <code>amt</code>, <code>addl</code>, and <code>ii</code> are used to specify a sequence of regularly spaced dosing events in a single row – will seem quite familiar to anyone in the field, and since I’ve talked about this notation in previous posts, I’ll not bore people by explaining it yet again.</p>
+<p>Moving along, let’s also assume that after 120 hours has passed (<code>time = 120</code>) the dosing schedule changes: the dose drops to <code>amt = 2000</code> milligrams, the interdose interval is increased slightly to <code>ii = 14</code> hours, and this dosing regime is maintained for <code>addl = 4</code> additional doses (i.e., 5 in total). So now we have this:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb9" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1">events <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> events <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span> </span>
+<span id="cb9-2">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">et</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">time =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">120</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">amt =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">2000</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">addl =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">4</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">ii =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">14</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">cmt =</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"depot"</span>)</span>
+<span id="cb9-3"></span>
+<span id="cb9-4">events</span></code></pre></div>
+
+<pre class="fansi fansi-output"><code><span style="font-weight: bold;">── EventTable with 2 records ──</span>
+2 dosing records (see <span style="color: #BBBB00;">x</span>$<span style="color: #0000BB;">get.dosing</span>(); add with <span style="color: #0000BB;">add.dosing</span> or <span style="color: #0000BB;">et</span>)
+0 observation times (see <span style="color: #BBBB00;">x</span>$<span style="color: #0000BB;">get.sampling</span>(); add with <span style="color: #0000BB;">add.sampling</span> or <span style="color: #0000BB;">et</span>)
+multiple doses in `addl` columns, expand with <span style="color: #BBBB00;">x</span>$<span style="color: #0000BB;">expand</span>(); or <span style="color: #0000BB;">etExpand</span>(<span style="color: #BBBB00;">x</span>)
+<span style="font-weight: bold;">── First part of </span><span style="color: #BBBB00; font-weight: bold;">x</span><span style="font-weight: bold;">: ──</span>
+<span style="color: #555555;"># A tibble: 2 × 6</span>
+   time cmt     amt    ii  addl evid        
+  <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #555555; font-style: italic;">&lt;chr&gt;</span> <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #555555; font-style: italic;">&lt;int&gt;</span> <span style="color: #555555; font-style: italic;">&lt;evid&gt;</span>      
+<span style="color: #555555;">1</span>     0 depot <span style="text-decoration: underline;">10</span>000    12     9 <span style="color: #0000BB; font-weight: bold;">1</span>:<span style="color: #BBBB00;">Dose (Add)</span>
+<span style="color: #555555;">2</span>   120 depot  <span style="text-decoration: underline;">2</span>000    14     4 <span style="color: #0000BB; font-weight: bold;">1</span>:<span style="color: #BBBB00;">Dose (Add)</span>
+</code></pre>
+</div>
+<p>Now that we have specified all the dosing events, we need to add the “observation” events. In a real study, observation times would be the times at which we take a real-world measurement of some kind, but in the context of the simulation it’s just a set of times at which the state of the system is computed. Let’s compute the state of the system for the first 300 hours:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb10" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1">events <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> events <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">et</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">time =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">0</span><span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">:</span><span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">300</span>)</span>
+<span id="cb10-2">events </span></code></pre></div>
+
+<pre class="fansi fansi-output"><code><span style="font-weight: bold;">── EventTable with 303 records ──</span>
+2 dosing records (see <span style="color: #BBBB00;">x</span>$<span style="color: #0000BB;">get.dosing</span>(); add with <span style="color: #0000BB;">add.dosing</span> or <span style="color: #0000BB;">et</span>)
+301 observation times (see <span style="color: #BBBB00;">x</span>$<span style="color: #0000BB;">get.sampling</span>(); add with <span style="color: #0000BB;">add.sampling</span> or <span style="color: #0000BB;">et</span>)
+multiple doses in `addl` columns, expand with <span style="color: #BBBB00;">x</span>$<span style="color: #0000BB;">expand</span>(); or <span style="color: #0000BB;">etExpand</span>(<span style="color: #BBBB00;">x</span>)
+<span style="font-weight: bold;">── First part of </span><span style="color: #BBBB00; font-weight: bold;">x</span><span style="font-weight: bold;">: ──</span>
+<span style="color: #555555;"># A tibble: 303 × 6</span>
+    time cmt     amt    ii  addl evid         
+   <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #555555; font-style: italic;">&lt;chr&gt;</span> <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #555555; font-style: italic;">&lt;int&gt;</span> <span style="color: #555555; font-style: italic;">&lt;evid&gt;</span>       
+<span style="color: #555555;"> 1</span>     0 (obs)    <span style="color: #BB0000;">NA</span>    <span style="color: #BB0000;">NA</span>    <span style="color: #BB0000;">NA</span> <span style="color: #0000BB; font-weight: bold;">0</span>:<span style="color: #BBBBBB;">Observation</span>
+<span style="color: #555555;"> 2</span>     0 depot <span style="text-decoration: underline;">10</span>000    12     9 <span style="color: #0000BB; font-weight: bold;">1</span>:<span style="color: #BBBB00;">Dose (Add)</span> 
+<span style="color: #555555;"> 3</span>     1 (obs)    <span style="color: #BB0000;">NA</span>    <span style="color: #BB0000;">NA</span>    <span style="color: #BB0000;">NA</span> <span style="color: #0000BB; font-weight: bold;">0</span>:<span style="color: #BBBBBB;">Observation</span>
+<span style="color: #555555;"> 4</span>     2 (obs)    <span style="color: #BB0000;">NA</span>    <span style="color: #BB0000;">NA</span>    <span style="color: #BB0000;">NA</span> <span style="color: #0000BB; font-weight: bold;">0</span>:<span style="color: #BBBBBB;">Observation</span>
+<span style="color: #555555;"> 5</span>     3 (obs)    <span style="color: #BB0000;">NA</span>    <span style="color: #BB0000;">NA</span>    <span style="color: #BB0000;">NA</span> <span style="color: #0000BB; font-weight: bold;">0</span>:<span style="color: #BBBBBB;">Observation</span>
+<span style="color: #555555;"> 6</span>     4 (obs)    <span style="color: #BB0000;">NA</span>    <span style="color: #BB0000;">NA</span>    <span style="color: #BB0000;">NA</span> <span style="color: #0000BB; font-weight: bold;">0</span>:<span style="color: #BBBBBB;">Observation</span>
+<span style="color: #555555;"> 7</span>     5 (obs)    <span style="color: #BB0000;">NA</span>    <span style="color: #BB0000;">NA</span>    <span style="color: #BB0000;">NA</span> <span style="color: #0000BB; font-weight: bold;">0</span>:<span style="color: #BBBBBB;">Observation</span>
+<span style="color: #555555;"> 8</span>     6 (obs)    <span style="color: #BB0000;">NA</span>    <span style="color: #BB0000;">NA</span>    <span style="color: #BB0000;">NA</span> <span style="color: #0000BB; font-weight: bold;">0</span>:<span style="color: #BBBBBB;">Observation</span>
+<span style="color: #555555;"> 9</span>     7 (obs)    <span style="color: #BB0000;">NA</span>    <span style="color: #BB0000;">NA</span>    <span style="color: #BB0000;">NA</span> <span style="color: #0000BB; font-weight: bold;">0</span>:<span style="color: #BBBBBB;">Observation</span>
+<span style="color: #555555;">10</span>     8 (obs)    <span style="color: #BB0000;">NA</span>    <span style="color: #BB0000;">NA</span>    <span style="color: #BB0000;">NA</span> <span style="color: #0000BB; font-weight: bold;">0</span>:<span style="color: #BBBBBB;">Observation</span>
+<span style="color: #555555;"># ℹ 293 more rows</span>
+</code></pre>
+</div>
+<p>And now we’re done. We have a complete events table that can be used in our simulation. Admittedly, I went through that awfully slowly. The whole thing could have been bundled into a single pipeline like this:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb11" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb11-1">events <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">et</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">amountUnits =</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"mg"</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">timeUnits =</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"hours"</span>) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span></span>
+<span id="cb11-2">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">et</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">time =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">0</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">amt =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">10000</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">addl =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">9</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">ii =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">12</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">cmt =</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"depot"</span>) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span></span>
+<span id="cb11-3">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">et</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">time =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">120</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">amt =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">2000</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">addl =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">4</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">ii =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">14</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">cmt =</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"depot"</span>) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span></span>
+<span id="cb11-4">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">et</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">time =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">0</span><span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">:</span><span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">300</span>)</span></code></pre></div>
+</div>
+<p><br></p>
+<div class="column-page">
+<p><img src="https://blog.djnavarro.net/posts/2023-08-28_rxode2/meds.png" class="img-fluid"></p>
+</div>
+</section>
+<section id="simulating-one-subject" class="level2 page-columns page-full">
+<h2 class="anchored" data-anchor-id="simulating-one-subject">Simulating one subject</h2>
+<blockquote class="blockquote">
+<p>I was alone, falling free<br>
+Trying my best not to forget<br>
+What happened to us<br>
+What happened to me<br>
+&nbsp;&nbsp; – <a href="https://www.youtube.com/watch?v=WO9ewCO7TYI">Placebo</a><sup>12</sup></p>
+</blockquote>
+<p>We’re now almost at a point where we can run a simple simulation using the model specified via the <code>mod</code> object, and the events table in <code>events</code>. The only thing we haven’t done yet is specify pharmacokinetic parameters that need to be passed to the model as input. To keep things simple, I’ll simulate only a single subject, and so the input parameters will be passed as a table with one row corresponding to our lone subject, and one column per parameter that needs to be specified. If we look at the model spec we can see that requires all of the following to be given:</p>
+<ul>
+<li>elimination clearance (<code>CL</code>)</li>
+<li>absorption rate constant (<code>KA</code>)</li>
+<li>intercompartmental clearance (<code>Q</code>)</li>
+<li>volume of distribution for the central compartment (<code>VC</code>)</li>
+<li>volume of distribution for the peripheral compartment (<code>VP</code>)</li>
+</ul>
+<p>Indeed, if we take a look at <code>mod$params</code> we see the same listing:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb12" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb12-1">mod<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span>params</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] "VC" "VP" "KA" "Q"  "CL"</code></pre>
+</div>
+</div>
+<p>Okay, so let’s put together a one-row data frame <code>params</code> containing all these parameters for a single simulated subject:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb14" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb14-1">params <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">tibble</span>(</span>
+<span id="cb14-2">  <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">KA =</span> <span class="fl" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">0.294</span>,</span>
+<span id="cb14-3">  <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">CL =</span> <span class="fl" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">18.6</span>,</span>
+<span id="cb14-4">  <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">VC =</span> <span class="fl" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">40.2</span>,</span>
+<span id="cb14-5">  <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">VP =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">297</span>,</span>
+<span id="cb14-6">  <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">Q =</span> <span class="fl" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">10.5</span></span>
+<span id="cb14-7">)</span>
+<span id="cb14-8">params</span></code></pre></div>
+<pre class="fansi fansi-output"><code><span style="color: #555555;"># A tibble: 1 × 5</span>
+     KA    CL    VC    VP     Q
+  <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span>
+<span style="color: #555555;">1</span> 0.294  18.6  40.2   297  10.5
+</code></pre>
+</div>
+<p>Now that we have our parameters, we’re ready to go. There are several ways you can call the solver and run the simulation (<a href="https://nlmixr2.github.io/rxode2/reference/rxSolve.html">documentation here</a>), but I’m currently quite partial to calling <code>solve()</code>,<sup>13</sup> like so:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb15" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb15-1">out <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">solve</span>(mod, params, events)</span></code></pre></div>
+</div>
+<p>When we print <code>out</code>, we get a fairly detailed description of the simulation that includes information about the parameters and the initial state:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb16" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb16-1">out</span></code></pre></div>
+<pre class="fansi fansi-output"><code><span style="font-weight: bold;">── Solved rxode2 object ──</span>
+<span style="font-weight: bold;">── Parameters (</span><span style="color: #BBBB00; font-weight: bold;">x</span><span style="color: #0000BB; font-weight: bold;">$params</span><span style="font-weight: bold;">): ──</span>
+     VC      VP      KA       Q      CL 
+ 40.200 297.000   0.294  10.500  18.600 
+<span style="font-weight: bold;">── Initial Conditions (</span><span style="color: #BBBB00; font-weight: bold;">x</span><span style="color: #0000BB; font-weight: bold;">$inits</span><span style="font-weight: bold;">): ──</span>
+     depot    central peripheral        auc 
+         0          0          0          0 
+<span style="font-weight: bold;">── First part of data (object): ──</span>
+<span style="color: #555555;"># A tibble: 301 × 7</span>
+   time    CP    PP  depot central peripheral   auc
+  <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span>  <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span>   <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span>      <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span>
+<span style="color: #555555;">1</span>     0   0   0     <span style="text-decoration: underline;">10</span>000       0          0    0  
+<span style="color: #555555;">2</span>     1  44.4 0.920  <span style="text-decoration: underline;">7</span>453.   <span style="text-decoration: underline;">1</span>784.       273.  26.4
+<span style="color: #555555;">3</span>     2  54.9 2.67   <span style="text-decoration: underline;">5</span>554.   <span style="text-decoration: underline;">2</span>206.       794.  77.7
+<span style="color: #555555;">4</span>     3  51.9 4.46   <span style="text-decoration: underline;">4</span>140.   <span style="text-decoration: underline;">2</span>087.      <span style="text-decoration: underline;">1</span>324. 132. 
+<span style="color: #555555;">5</span>     4  44.5 5.98   <span style="text-decoration: underline;">3</span>085.   <span style="text-decoration: underline;">1</span>789.      <span style="text-decoration: underline;">1</span>776. 180. 
+<span style="color: #555555;">6</span>     5  36.5 7.18   <span style="text-decoration: underline;">2</span>299.   <span style="text-decoration: underline;">1</span>467.      <span style="text-decoration: underline;">2</span>132. 221. 
+<span style="color: #555555;"># ℹ 295 more rows</span>
+</code></pre>
+</div>
+<p>Extremely pretty print method notwithstanding, under the hood it’s nothing fancy. It’s a regular data frame with a few extra classes and some metadata, which means we can pass it straight to ggplot without any coercion, and draw a pretty picture:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb17" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb17-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">ggplot</span>(out, <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">aes</span>(time, CP)) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">+</span> </span>
+<span id="cb17-2">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">geom_area</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">linewidth =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">1</span>) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">+</span> </span>
+<span id="cb17-3">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">ylab</span>(<span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"concentration"</span>) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">+</span></span>
+<span id="cb17-4">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">theme_bw</span>()</span></code></pre></div>
+<div class="cell-output-display">
+<p><img src="https://blog.djnavarro.net/posts/2023-08-28_rxode2/index_files/figure-html/unnamed-chunk-14-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>Yep, that looks about right.</p>
+<p><br></p>
+<div class="column-page">
+<p><img src="https://blog.djnavarro.net/posts/2023-08-28_rxode2/boys.png" class="img-fluid"></p>
+</div>
+</section>
+<section id="simulating-multiple-subjects" class="level2 page-columns page-full">
+<h2 class="anchored" data-anchor-id="simulating-multiple-subjects">Simulating multiple subjects</h2>
+<blockquote class="blockquote">
+<p>I like big boys, itty bitty boys<br>
+Mississippi boys, inner city boys<br>
+I like the pretty boys with the bow tie<br>
+Get your nails did, let it blow dry<br>
+I like a big beard, I like a clean face<br>
+I don’t discriminate, come and get a taste<br>
+From the playboys to the gay boys<br>
+Go and slay, boys, you my fave boys<br>
+&nbsp; &nbsp; –<a href="https://www.youtube.com/watch?v=HQliEKPg1Qk">Lizzo</a></p>
+</blockquote>
+<p>The previous example shows how to simulate a single subject. However, the world is full of lots of different people with different characteristics, so in a more realistic simulation scenario we would want to simulate many people with different parameter values. In order to accommodate this, the parameter table now has multiple rows:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb18" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1">params <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">tibble</span>(</span>
+<span id="cb18-2">  <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">KA =</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">rnorm</span>(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">20</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">mean =</span> <span class="fl" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">0.294</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">sd =</span> <span class="fl" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">0.03</span>),</span>
+<span id="cb18-3">  <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">CL =</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">rnorm</span>(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">20</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">mean =</span> <span class="fl" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">18.6</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">sd =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">2</span>),</span>
+<span id="cb18-4">  <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">VC =</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">rnorm</span>(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">20</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">mean =</span> <span class="fl" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">40.2</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">sd =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">2</span>),</span>
+<span id="cb18-5">  <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">VP =</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">rnorm</span>(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">20</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">mean =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">297</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">sd =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">10</span>),</span>
+<span id="cb18-6">  <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">Q =</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">rnorm</span>(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">20</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">mean =</span> <span class="fl" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">10.5</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">sd =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">1</span>)</span>
+<span id="cb18-7">)</span>
+<span id="cb18-8">params</span></code></pre></div>
+<pre class="fansi fansi-output"><code><span style="color: #555555;"># A tibble: 20 × 5</span>
+      KA    CL    VC    VP     Q
+   <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span>
+<span style="color: #555555;"> 1</span> 0.275  20.4  39.9  321.  9.93
+<span style="color: #555555;"> 2</span> 0.300  20.2  39.7  297. 10.4 
+<span style="color: #555555;"> 3</span> 0.269  18.7  41.6  304. 11.7 
+<span style="color: #555555;"> 4</span> 0.342  14.6  41.3  297.  8.98
+<span style="color: #555555;"> 5</span> 0.304  19.8  38.8  290. 11.1 
+<span style="color: #555555;"> 6</span> 0.269  18.5  38.8  299. 10.8 
+<span style="color: #555555;"> 7</span> 0.309  18.3  40.9  279. 11.6 
+<span style="color: #555555;"> 8</span> 0.316  15.7  41.7  312. 10.2 
+<span style="color: #555555;"> 9</span> 0.311  17.6  40.0  299. 10.9 
+<span style="color: #555555;">10</span> 0.285  19.4  42.0  319. 10.8 
+<span style="color: #555555;">11</span> 0.339  21.3  41.0  302.  9.96
+<span style="color: #555555;">12</span> 0.306  18.4  39.0  290. 11.7 
+<span style="color: #555555;">13</span> 0.275  19.4  40.9  303. 11.7 
+<span style="color: #555555;">14</span> 0.228  18.5  37.9  288. 11.2 
+<span style="color: #555555;">15</span> 0.328  15.8  43.1  284. 12.1 
+<span style="color: #555555;">16</span> 0.293  17.8  44.2  300. 11.1 
+<span style="color: #555555;">17</span> 0.294  17.8  39.5  293.  9.22
+<span style="color: #555555;">18</span> 0.322  18.5  38.1  297.  9.93
+<span style="color: #555555;">19</span> 0.319  20.8  41.3  298.  9.28
+<span style="color: #555555;">20</span> 0.312  20.1  39.9  291. 10.0 
+</code></pre>
+</div>
+<p>The command to run the simulation remains unchanged:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb19" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb19-1">out <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">solve</span>(mod, params, events)</span></code></pre></div>
+</div>
+<p>I’ll show you the <code>out</code> object in a moment, but it’s probably easier to understand it if we start with a plot:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb20" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb20-1">out <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span></span>
+<span id="cb20-2">  dplyr<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">mutate</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">sim.id =</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">paste</span>(<span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"Subject"</span>, sim.id)) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span></span>
+<span id="cb20-3">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">ggplot</span>(<span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">aes</span>(time, CP, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">fill =</span> sim.id)) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">+</span> </span>
+<span id="cb20-4">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">geom_area</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">linewidth =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">1</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">show.legend =</span> <span class="cn" style="color: #8f5902;
+background-color: null;
+font-style: inherit;">FALSE</span>) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">+</span> </span>
+<span id="cb20-5">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">facet_wrap</span>(<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">~</span> sim.id, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">nrow =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">5</span>) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">+</span> </span>
+<span id="cb20-6">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">labs</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">x =</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"Time"</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">y =</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"Concentration"</span>) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">+</span></span>
+<span id="cb20-7">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">theme_bw</span>()</span></code></pre></div>
+<div class="cell-output-display">
+<p><img src="https://blog.djnavarro.net/posts/2023-08-28_rxode2/index_files/figure-html/unnamed-chunk-17-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>As you can see, all 20 subjects have qualitatively similar profiles, but there are noticeable differences in the details. Not surprisingly really. I didn’t build in very much variability into the simulation, and I didn’t even <em>try</em> to incorporate an appropriate covariance structure among the parameters (that’s a topic for another post).<sup>14</sup> The main thing that matters here is that we can see that the variation <em>exists</em>.</p>
+<p>Anyway, let’s have a look at the table of results <code>out</code> produced by our simulation. As you probably guessed from the ggplot2 code, there’s a column called <code>sim.id</code> that stores the subject identifier, and there are 20 times as many rows as last time, but it’s essentially the same:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb21" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb21-1">out</span></code></pre></div>
+<pre class="fansi fansi-output"><code><span style="font-weight: bold;">── Solved rxode2 object ──</span>
+<span style="font-weight: bold;">── Parameters (</span><span style="color: #BBBB00; font-weight: bold;">x</span><span style="color: #0000BB; font-weight: bold;">$params</span><span style="font-weight: bold;">): ──</span>
+<span style="color: #555555;"># A tibble: 20 × 6</span>
+   sim.id    VC    VP    KA     Q    CL
+    <span style="color: #555555; font-style: italic;">&lt;int&gt;</span> <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span>
+<span style="color: #555555;"> 1</span>      1  39.9  321. 0.275  9.93  20.4
+<span style="color: #555555;"> 2</span>      2  39.7  297. 0.300 10.4   20.2
+<span style="color: #555555;"> 3</span>      3  41.6  304. 0.269 11.7   18.7
+<span style="color: #555555;"> 4</span>      4  41.3  297. 0.342  8.98  14.6
+<span style="color: #555555;"> 5</span>      5  38.8  290. 0.304 11.1   19.8
+<span style="color: #555555;"> 6</span>      6  38.8  299. 0.269 10.8   18.5
+<span style="color: #555555;"> 7</span>      7  40.9  279. 0.309 11.6   18.3
+<span style="color: #555555;"> 8</span>      8  41.7  312. 0.316 10.2   15.7
+<span style="color: #555555;"> 9</span>      9  40.0  299. 0.311 10.9   17.6
+<span style="color: #555555;">10</span>     10  42.0  319. 0.285 10.8   19.4
+<span style="color: #555555;">11</span>     11  41.0  302. 0.339  9.96  21.3
+<span style="color: #555555;">12</span>     12  39.0  290. 0.306 11.7   18.4
+<span style="color: #555555;">13</span>     13  40.9  303. 0.275 11.7   19.4
+<span style="color: #555555;">14</span>     14  37.9  288. 0.228 11.2   18.5
+<span style="color: #555555;">15</span>     15  43.1  284. 0.328 12.1   15.8
+<span style="color: #555555;">16</span>     16  44.2  300. 0.293 11.1   17.8
+<span style="color: #555555;">17</span>     17  39.5  293. 0.294  9.22  17.8
+<span style="color: #555555;">18</span>     18  38.1  297. 0.322  9.93  18.5
+<span style="color: #555555;">19</span>     19  41.3  298. 0.319  9.28  20.8
+<span style="color: #555555;">20</span>     20  39.9  291. 0.312 10.0   20.1
+<span style="font-weight: bold;">── Initial Conditions (</span><span style="color: #BBBB00; font-weight: bold;">x</span><span style="color: #0000BB; font-weight: bold;">$inits</span><span style="font-weight: bold;">): ──</span>
+     depot    central peripheral        auc 
+         0          0          0          0 
+
+Simulation <span style="font-weight: bold;">without uncertainty</span> in parameters, omega, or sigma matricies
+
+<span style="font-weight: bold;">── First part of data (object): ──</span>
+<span style="color: #555555;"># A tibble: 6,020 × 8</span>
+  sim.id  time    CP    PP  depot central peripheral   auc
+   <span style="color: #555555; font-style: italic;">&lt;int&gt;</span> <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span>  <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span>   <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span>      <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #555555; font-style: italic;">&lt;dbl&gt;</span>
+<span style="color: #555555;">1</span>      1     0   0   0     <span style="text-decoration: underline;">10</span>000       0          0    0  
+<span style="color: #555555;">2</span>      1     1  41.6 0.757  <span style="text-decoration: underline;">7</span>594.   <span style="text-decoration: underline;">1</span>657.       243.  24.7
+<span style="color: #555555;">3</span>      1     2  51.2 2.20   <span style="text-decoration: underline;">5</span>767.   <span style="text-decoration: underline;">2</span>041.       705.  72.7
+<span style="color: #555555;">4</span>      1     3  48.4 3.66   <span style="text-decoration: underline;">4</span>380.   <span style="text-decoration: underline;">1</span>928.      <span style="text-decoration: underline;">1</span>176. 123. 
+<span style="color: #555555;">5</span>      1     4  41.5 4.93   <span style="text-decoration: underline;">3</span>326.   <span style="text-decoration: underline;">1</span>656.      <span style="text-decoration: underline;">1</span>581. 168. 
+<span style="color: #555555;">6</span>      1     5  34.2 5.93   <span style="text-decoration: underline;">2</span>526.   <span style="text-decoration: underline;">1</span>362.      <span style="text-decoration: underline;">1</span>902. 206. 
+<span style="color: #555555;"># ℹ 6,014 more rows</span>
+</code></pre>
+</div>
+<p>As we’ve seen throughout the post, the print method has lots of nice touches. It shows the simulation parameters as well as the simulation results, and has a very gentle message reminding me I haven’t incorporated measurement error, random effects, or parameter uncertainty. Which… I mean, I intentionally left those things out, but actually I do appreciate the clear statement of what <em>wasn’t</em> done here.</p>
+<p><br></p>
+<div class="column-page">
+<p><img src="https://blog.djnavarro.net/posts/2023-08-28_rxode2/fastest-girl-in-town.png" class="img-fluid"></p>
+</div>
+</section>
+<section id="performance-considerations" class="level2">
+<h2 class="anchored" data-anchor-id="performance-considerations">Performance considerations</h2>
+<blockquote class="blockquote">
+<p>Ain’t no use in trying to slow me down<br>
+’Cause you’re running with the fastest girl in town<br>
+Ain’t you baby?<br>
+&nbsp;&nbsp; – <a href="https://www.youtube.com/watch?v=EbaEVA259IE">Miranda Lambert</a></p>
+</blockquote>
+<p>For small simulations like the ones I’m running in this post, you really don’t need to care much about performance. However, when you start running larger simulations it starts to matter a lot. To that end there’s a nice <a href="https://nlmixr2.github.io/rxode2/articles/rxode2-speed.html">article on speeding up rxode2</a> in the package documentation which I’ve already found extremely useful at work when doing a little bit of code profiling on analysis code. Since this does matter a fair bit in practice, I’ll walk through the same ideas here.</p>
+<p>Let’s define a few functions that run the simulations in different ways. First, I’ll start with a <code>solve_loop()</code> function that deliberately strips out any form of multi-threading. Each row in <code>params</code> is passed as a separate call to <code>solve()</code>, nested inside a <code>for</code> loop:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb22" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb22-1">solve_loop <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="cf" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">function</span>() {</span>
+<span id="cb22-2">  <span class="cf" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">for</span>(i <span class="cf" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">in</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">1</span><span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">:</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">nrow</span>(params)) <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">solve</span>(mod, params[i, ], events)</span>
+<span id="cb22-3">}</span></code></pre></div>
+</div>
+<p>This is our baseline case. It’s designed to make life as difficult as possible for rxode2 by enforcing single threaded execution within R. We can improve on this considerably by passing the entire <code>params</code> data frame, allowing rxode2 to run the simulations in parallel. I haven’t looked under the hood to work out exactly how rxode2 manages the parallelism<sup>15</sup> Here are three functions that explicitly request 1, 2 or 4 cores/threads:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb23" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb23-1">solve_thread_1 <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="cf" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">function</span>() <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">solve</span>(mod, params, events, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">cores =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">1</span>)</span>
+<span id="cb23-2">solve_thread_2 <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="cf" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">function</span>() <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">solve</span>(mod, params, events, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">cores =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">2</span>)</span>
+<span id="cb23-3">solve_thread_4 <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="cf" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">function</span>() <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">solve</span>(mod, params, events, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">cores =</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">4</span>)</span></code></pre></div>
+</div>
+<p>From experience, I’ve learned that there’s almost never anything to be gained by trying to execute more than four resource-hogging threads simultaneously on my laptop, so I’ll be sensible and won’t try anything more than that. Let’s take a look at the difference in performance for each of these functions:</p>
+<div class="cell" data-hash="index_cache/html/benchmarks_15a64dfc7a69447ec3b1a389376a8a52">
+<div class="sourceCode cell-code" id="cb24" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb24-1">bench <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">microbenchmark</span>(</span>
+<span id="cb24-2">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">solve_loop</span>(),</span>
+<span id="cb24-3">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">solve_thread_1</span>(),</span>
+<span id="cb24-4">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">solve_thread_2</span>(),</span>
+<span id="cb24-5">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">solve_thread_4</span>()</span>
+<span id="cb24-6">)</span>
+<span id="cb24-7">bench</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Unit: milliseconds
+             expr       min        lq      mean    median       uq       max neval
+     solve_loop() 58.630598 62.227245 68.912034 64.780701 68.78793 168.11848   100
+ solve_thread_1()  8.515051  8.867159  9.635308  9.126248  9.45503  26.11143   100
+ solve_thread_2()  7.497051  7.720607  8.476758  7.968412  8.44852  15.94618   100
+ solve_thread_4()  6.538996  7.063265  7.761950  7.160678  7.54286  17.27997   100</code></pre>
+</div>
+</div>
+<p>You can see from looking at the table that there’s a big drop in performance when we force rxode2 to simulate each subject one at a time within a loop: <code>solve_loop()</code> is much, much slower than any of the others. Increasing the number of threads from one to four helps a fair bit too, but not to the same dramatic extent. This is even more apparent when we visualise the results:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb26" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb26-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">autoplot</span>(bench)</span></code></pre></div>
+<div class="cell-output-display">
+<p><img src="https://blog.djnavarro.net/posts/2023-08-28_rxode2/index_files/figure-html/benchmark-plot-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>Admittedly, the time scale here is such that it doesn’t really matter much, but for more realistic examples I’ve played with the speed-up seems to be pretty similar and it can make a big difference to the performance of analysis code.</p>
+
+
+</section>
+
+
+<div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
+
+<ol>
+<li id="fn1"><p>As an aside: when getting started, I found it a little easier to look at the <a href="https://nlmixr2.github.io/rxode2-manual/">rxode2 user manual</a> than to work from the pkgdown site. As far as I can tell it’s essentially the same material, but the manual organises it in a linear fashion that makes it a little clearer to new users because you get a better sense of the order in which to read things.↩︎</p></li>
+<li id="fn2"><p>Does that term even make sense for a linux machine? It’s not like the thing shipped with linux in the first place. Whatever.↩︎</p></li>
+<li id="fn3"><p>I haven’t extensively checked the dependencies on other operating systems, but from what I can tell a Windows install requires <a href="https://cran.r-project.org/bin/windows/Rtools/">RTools</a>.↩︎</p></li>
+<li id="fn4"><p>Or notorious, depending on your perspective↩︎</p></li>
+<li id="fn5"><p>Metaprogramming in R relies on the fact that R adopts a <a href="https://en.wikipedia.org/wiki/Lazy_evaluation">lazy evaluation</a> model for code execution. This allows the programmer to capture user code passed to a function <em>before</em> it is evaluated, modify the code as desired, and indeed prevent it being evaluated at all. R is hardly the only language to adopt this approach, but it does put it in contrast to languages like Python that adopt an <a href="https://en.wikipedia.org/wiki/Evaluation_strategy#Eager_evaluation">eager evaluation</a> approach.↩︎</p></li>
+<li id="fn6"><p>In this post I’m assuming the drug has bioavailability of <img src="https://latex.codecogs.com/png.latex?F%20=%201">, but that’s not true generally, so you’d have to model this explicitly by scaling the drug amount that passes from the gut to the central compartment in the ODE equations.↩︎</p></li>
+<li id="fn7"><p>In essence, the value of <code>auc</code> that accrues is a numerical estimate of the time-integral of drug concentration. This “area under the curve” measure is one of several different measures used to assess drug exposure. I talked a lot about the AUC measure in my post on <a href="../../posts/2023-04-26_non-compartmental-analysis/">non-compartmental analysis</a>.↩︎</p></li>
+<li id="fn8"><p>The rxode2 mini-language also allows you to use <code>~</code> for this purpose, but I’m not going to do that here. For this post, I’ve chose to use <code>=</code> as a way of reminding myself that my model specification isn’t “normal” R code.↩︎</p></li>
+<li id="fn9"><p>Model objects in rxode2 have S3 class “rxode2”.↩︎</p></li>
+<li id="fn10"><p>You can customise this name if you care deeply about such things. As noted in the <a href="https://nlmixr2.github.io/rxode2/reference/rxode2.html"><code>roxde2()</code> documentation</a>, there is a <code>modName</code> argument that you can use for this purpose. Because this name is used throughout the C compilation process, it must start with a letter and contain only alphanumeric ASCII characters.↩︎</p></li>
+<li id="fn11"><p>Yes, you can customise this too, by specifying the <code>wd</code> argument to <code>rxode2()</code>.↩︎</p></li>
+<li id="fn12"><p>I actually feel bad about referencing “Meds” in this post, because let’s face it <em>“The sex, and the drugs, and the complications”</em> would be a fucking magnificent title for a blog post about PKPD models with covariates. Oh who am I kidding? I’m absolutely going to write a post with that title.↩︎</p></li>
+<li id="fn13"><p>Experienced R users would not be surprised to discover that <code>solve()</code> is an S3 generic defined in the base package, and equally unsurprised to note that rxode2 defines a method for “rxode2” objects such as <code>mod</code>. It somehow makes me happy to see <code>solve()</code> used this way.↩︎</p></li>
+<li id="fn14"><p>Note to future-Danielle: there is a nice discussion of this in the rxode2 context specifically, in the article on <a href="https://nlmixr2.github.io/rxode2/articles/rxode2-sim-var.html">population simulation</a>.↩︎</p></li>
+<li id="fn15"><p>Is it purely <a href="https://en.wikipedia.org/wiki/Multithreading">multi-threading</a> we’re talking about? Do we care deeply about the <a href="https://stackoverflow.com/questions/11835046/multithreading-and-multicore-differences">multi-thread/multi-core</a> distinction? Does <a href="https://en.wikipedia.org/wiki/Single_instruction,_multiple_data">SIMD</a> come into play? Most importantly, does the author really want to be bothered writing a deep dive on these topics when the audience consists almost entirely of people who (a) already understand these topics or (b) do not care about these topics? The answer to that last one is no. No she does not.↩︎</p></li>
+</ol>
+</section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div id="quarto-reuse" class="quarto-appendix-contents"><div><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2023,
+  author = {Navarro, Danielle},
+  title = {Pharmacometric Simulation with Rxode2},
+  date = {2023-08-28},
+  url = {https://blog.djnavarro.net/posts/2023-08-28_rxode2},
+  langid = {en}
+}
+</code></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2023" class="csl-entry quarto-appendix-citeas">
+Navarro, Danielle. 2023. <span>“Pharmacometric Simulation with
+Rxode2.”</span> August 28, 2023. <a href="https://blog.djnavarro.net/posts/2023-08-28_rxode2">https://blog.djnavarro.net/posts/2023-08-28_rxode2</a>.
+</div></div></section></div> ]]></description>
+  <category>R</category>
+  <category>Pharmacometrics</category>
+  <guid>https://blog.djnavarro.net/posts/2023-08-28_rxode2/index.html</guid>
+  <pubDate>Sun, 27 Aug 2023 14:00:00 GMT</pubDate>
+  <media:content url="https://blog.djnavarro.net/posts/2023-08-28_rxode2/boys.png" medium="image" type="image/png" height="82" width="144"/>
+</item>
 <item>
   <title>Pharmacometric simulation with mrgsolve</title>
   <dc:creator>Danielle Navarro</dc:creator>
@@ -23403,1738 +24405,6 @@ Navarro, Danielle. 2023. <span>“Shattered Landscapes.”</span> March 13,
   <guid>https://blog.djnavarro.net/posts/2023-03-13_shattered-landscapes/index.html</guid>
   <pubDate>Sun, 12 Mar 2023 13:00:00 GMT</pubDate>
   <media:content url="https://blog.djnavarro.net/posts/2023-03-13_shattered-landscapes/cover.png" medium="image" type="image/png" height="144" width="144"/>
-</item>
-<item>
-  <title>Fun and games with p5.js and observable.js in quarto</title>
-  <dc:creator>Danielle Navarro</dc:creator>
-  <link>https://blog.djnavarro.net/posts/2023-01-14_p5js/index.html</link>
-  <description><![CDATA[ 
-
-
-
-
-<!--------------- my typical setup ----------------->
-<!--------------- post begins here ----------------->
-<blockquote class="blockquote">
-<p>Be sweet to me, baby <br> I wanna believe in you <br> I wanna believe <br> Be sweet <br> Be sweet to me, baby <br> I wanna believe in you <br> I wanna believe in something <br> &nbsp; – Japanese Breakfast</p>
-</blockquote>
-<p>Okay, so… I write this blog using <a href="https://quarto.org/">quarto</a>, and quarto has native support for <a href="https://observablehq.com">observable.js</a> … and observable.js supports third-party javascript libraries such as <a href="https://p5js.org/">p5.js</a> executing in code cells… so, like… I can use p5.js to create generative art, inside the browser, inside a blog post? Right?</p>
-<p>Apparently the answer to that is yes.</p>
-<p>There is but one tiny problem. I don’t know anything about observable.js or p5.js. I supposed I’d best remedy that.</p>
-<section id="enabling-p5js" class="level2">
-<h2 class="anchored" data-anchor-id="enabling-p5js">Enabling p5js</h2>
-<p>The first step in the process is enabling p5.js, which is not one of the core libraries in observable, and is not immediately available. To use a third-party library that exists as an <a href="https://docs.npmjs.com/about-packages-and-modules">NPM modules</a> we can import it using <code>require()</code>.</p>
-<div class="cell" data-output="all">
-<div class="sourceCode cell-code" id="cb1" data-startfrom="43" data-source-offset="0" style="background: #f1f3f5;"><pre class="sourceCode js code-with-copy"><code class="sourceCode javascript" style="counter-reset: source-line 42;"><span id="cb1-43">P5 <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span> <span class="pp" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">require</span>(<span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"p5"</span>)</span></code></pre></div>
-<div class="cell-output cell-output-display">
-<div id="ojs-cell-1" data-nodetype="declaration">
-
-</div>
-</div>
-</div>
-<p>Just like that, thanks to the joy of the <a href="https://www.jsdelivr.com/">jsDelivr CDN</a>, p5.js is now available to me in this post.</p>
-<p>Well, sort of. As you can see from the output,<sup>1</sup> the <code>P5</code> object is a function that takes three inputs. To do anything useful with it, I’ll use a trick I learned from <a href="https://observablehq.com/@tmcw/p5">this fabulous notebook by Tom MacWright</a> to run p5.js in “instance mode”. Normally, p5.js works by defining a lot of global objects. That works fine if you’re only doing one “sketch” on a single page, but it’s not so clean if you want to write modular code where a single page (like this one) could contain multiple p5.js sketches.</p>
-<p>To run p5.js in instance mode, and in a way that plays nicely with observable.js and quarto, I’ll define <code>createSketch</code> as a <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/function*">generator function</a>:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb2" data-startfrom="53" data-source-offset="0" style="background: #f1f3f5;"><pre class="sourceCode js code-with-copy"><code class="sourceCode javascript" style="counter-reset: source-line 52;"><span id="cb2-53"><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">function</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">createSketch</span>(sketch) {</span>
-<span id="cb2-54">  <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">const</span> element <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span> DOM<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">element</span>(<span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">'div'</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb2-55">  <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">yield</span> element<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb2-56">  <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">const</span> instance <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span> <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">new</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">P5</span>(sketch<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> element<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">true</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb2-57">  <span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">try</span> {</span>
-<span id="cb2-58">    <span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">while</span> (<span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">true</span>) {</span>
-<span id="cb2-59">      <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">yield</span> element<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb2-60">    }</span>
-<span id="cb2-61">  } <span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">finally</span> {</span>
-<span id="cb2-62">    instance<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">remove</span>()<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb2-63">  }</span>
-<span id="cb2-64">}</span></code></pre></div>
-<div class="cell-output cell-output-display">
-<div id="ojs-cell-2" data-nodetype="declaration">
-
-</div>
-</div>
-</div>
-<p>Using this approach, each instantiation of <code>P5</code> is attached to a div element that created when <code>createSketch</code> is called. If you want to know more about how this approach works, it’s probably best to go to the original source that I adapted it from, because Tom has commented it and explained it nicely: <a href="https://observablehq.com/@tmcw/p5">observablehq.com/<span class="citation" data-cites="tmcw/p5">@tmcw/p5</span></a></p>
-</section>
-<section id="donut-1" class="level2">
-<h2 class="anchored" data-anchor-id="donut-1">Donut 1</h2>
-<p>In keeping with the tradition I’ve set up in the last few blog posts, all the examples are donut themed.<sup>2</sup> When calling <code>createSketch</code> I’ll pass an anonymous function that takes a single argument <code>s</code>, the document element to which all the p5 functions are attached. I’ll use the <a href="https://www.w3schools.com/js/js_arrow_function.asp">arrow notation</a>, so my code is going to look something like this:</p>
-<div class="cell" data-eval="false">
-<div class="sourceCode cell-code" id="cb3" data-startfrom="75" data-source-offset="0" style="background: #f1f3f5;"><pre class="sourceCode js code-with-copy"><code class="sourceCode javascript" style="counter-reset: source-line 74;"><span id="cb3-75"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">createSketch</span>(s <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">=&gt;</span> {</span>
-<span id="cb3-76">  <span class="co" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">// add some p5.js code </span></span>
-<span id="cb3-77">})</span></code></pre></div>
-<div class="cell-output cell-output-display">
-<div id="ojs-cell-3" data-nodetype="expression">
-
-</div>
-</div>
-</div>
-<p>The idea in p5.js is all the work is done by two functions. The <code>setup</code> function includes code that is called only once, and if you want to draw static images you can do everything at the setup stage. In contrast the <code>draw</code> function is called repeatedly, so you can use that to add dynamic elements.</p>
-<p>Here’s an example of a static sketch that draws a single donut shape using two circles:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb4" data-startfrom="85" data-source-offset="0" style="background: #f1f3f5;"><pre class="sourceCode js code-with-copy"><code class="sourceCode javascript" style="counter-reset: source-line 84;"><span id="cb4-85"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">createSketch</span>(s <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">=&gt;</span> {</span>
-<span id="cb4-86">    s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">setup</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span> <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">function</span>() {</span>
-<span id="cb4-87">      s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">createCanvas</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">500</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">500</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb4-88">      s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">background</span>(<span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"black"</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb4-89">      s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">fill</span>(<span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"red"</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">circle</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">250</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">250</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">100</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb4-90">      s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">fill</span>(<span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"black"</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">circle</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">250</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">250</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">30</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb4-91">    }<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb4-92">  }</span>
-<span id="cb4-93">)</span></code></pre></div>
-<div class="cell-output cell-output-display">
-<div id="ojs-cell-4" data-nodetype="expression">
-
-</div>
-</div>
-</div>
-<p>In this example:</p>
-<ul>
-<li><code>createCanvas</code> creates the drawing area in which the sketch will be rendered. Arguments are the width and height in pixels</li>
-<li><code>background</code> sets the background colour. The colour specification is flexible: it can be a recognised colour name, a hex string, or a numeric RGB specification</li>
-<li><code>fill</code> sets the fill colour</li>
-<li><code>circle</code> draws a circle: the first two arguments specify the origin of the circle, and the third argument specifies the diameter</li>
-</ul>
-<p>I’ve used <a href="https://dev.to/isiakaabd/method-chaining-in-javascript-154a">method chaining</a> here to remind me that the first <code>fill</code> and the first <code>circle</code> go together: writing <code>s.fill("red").circle(250, 250, 100)</code> on a single line helps me group code together conceptually. It’s mostly for my own convenience though.</p>
-</section>
-<section id="donut-2" class="level2">
-<h2 class="anchored" data-anchor-id="donut-2">Donut 2</h2>
-<p>Okay Danielle, that’s nice but it’s not <em>that</em> nice. Can we do something a little more interesting? Maybe with some dynamics? Well okay, Other Danielle, since you asked so sweetly, here’s an example with a moving circle that changes colour and traces out a donut shape:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb5" data-startfrom="110" data-source-offset="0" style="background: #f1f3f5;"><pre class="sourceCode js code-with-copy"><code class="sourceCode javascript" style="counter-reset: source-line 109;"><span id="cb5-110"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">createSketch</span>(s <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">=&gt;</span> {</span>
-<span id="cb5-111">  </span>
-<span id="cb5-112">    s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">setup</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span> <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">function</span>() {</span>
-<span id="cb5-113">      s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">createCanvas</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">500</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">500</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb5-114">      s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">background</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">0</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb5-115">      s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">noStroke</span>()<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb5-116">    }<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb5-117">    </span>
-<span id="cb5-118">    s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">draw</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span> <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">function</span>() {</span>
-<span id="cb5-119">      s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">translate</span>(</span>
-<span id="cb5-120">        <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">100</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span> s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">cos</span>(s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">millis</span>() <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="bn" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">001</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span> s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">PI</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span></span>
-<span id="cb5-121">        <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">100</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span> s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">sin</span>(s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">millis</span>() <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="bn" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">001</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span> s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">PI</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span></span>
-<span id="cb5-122">      )<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb5-123">      <span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">if</span> (s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">random</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">0</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span>) <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">&lt;</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span>) {</span>
-<span id="cb5-124">        s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">fill</span>(s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">random</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">0</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">255</span>))<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb5-125">      }</span>
-<span id="cb5-126">      s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">circle</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">250</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">250</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">100</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb5-127">    }<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb5-128">    </span>
-<span id="cb5-129">  }</span>
-<span id="cb5-130">)</span></code></pre></div>
-<div class="cell-output cell-output-display">
-<div id="ojs-cell-5" data-nodetype="expression">
-
-</div>
-</div>
-</div>
-<p>This example makes use of some geometry functions included in p5.j (<code>sin</code>, <code>cos</code>, <code>translate</code>), a random number generator (<code>random</code>), and timer that returns the number of milliseconds since the sketch started (<code>millis</code>). These are all documented in the <a href="https://p5js.org/reference/">p5.js reference</a>.</p>
-</section>
-<section id="donut-3" class="level2">
-<h2 class="anchored" data-anchor-id="donut-3">Donut 3</h2>
-<p>For the third example we’ll introduce some fonts, adapting an example from <a href="https://observablehq.com/@tmcw/p5">observablehq.com/<span class="citation" data-cites="tmcw/p5">@tmcw/p5</span></a>. First, I’ll add some CSS to import the Courgette font:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb6" style="background: #f1f3f5;"><pre class="sourceCode css code-with-copy"><code class="sourceCode css"><span id="cb6-1"><span class="im" style="color: #00769E;
-background-color: null;
-font-style: inherit;">@import</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">url(</span><span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">https://fonts.googleapis.com/css?family=Courgette</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">)</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span></code></pre></div>
-<style type="text/css">
-@import url(https://fonts.googleapis.com/css?family=Courgette);
-</style>
-</div>
-<p>Now we can use that font in a p5.js scrolling window:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb7" data-startfrom="147" data-source-offset="0" style="background: #f1f3f5;"><pre class="sourceCode js code-with-copy"><code class="sourceCode javascript" style="counter-reset: source-line 146;"><span id="cb7-147"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">createSketch</span>(s <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">=&gt;</span> {</span>
-<span id="cb7-148">  </span>
-<span id="cb7-149">    s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">setup</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span> <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">function</span>() {</span>
-<span id="cb7-150">      s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">createCanvas</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">746</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">300</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb7-151">      s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">textFont</span>(<span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">'Courgette'</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb7-152">      s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">textStyle</span>(s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">BOLD</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb7-153">      s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">textAlign</span>(s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">CENTER</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">CENTER</span>)</span>
-<span id="cb7-154">    }<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb7-155">    </span>
-<span id="cb7-156">    s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">draw</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span> <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">function</span>() {</span>
-<span id="cb7-157">      s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">translate</span>(</span>
-<span id="cb7-158">        s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">millis</span>() <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span> (<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span><span class="fl" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">0.1</span>) <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">%</span> (s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">width</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1000</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> </span>
-<span id="cb7-159">        s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">height</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">/</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span></span>
-<span id="cb7-160">      )<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb7-161">      s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">background</span>(<span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">'#222222'</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb7-162">      s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">fill</span>(<span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">'#DC3F74'</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">textSize</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">100</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb7-163">      s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">text</span>(<span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">'Donuts: A Hole World'</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">width</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">500</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">0</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb7-164">    }<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb7-165">    </span>
-<span id="cb7-166">  }</span>
-<span id="cb7-167">)</span></code></pre></div>
-<div class="cell-output cell-output-display">
-<div id="ojs-cell-6" data-nodetype="expression">
-
-</div>
-</div>
-</div>
-<p>Could life be any more thrilling than this?</p>
-</section>
-<section id="donut-4" class="level2">
-<h2 class="anchored" data-anchor-id="donut-4">Donut 4</h2>
-<p>Well, maybe it can. We could make it a little more interesting by using webGL to move our donut plots into the… THIRD DIMENSION! (Gasp!)</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb8" data-startfrom="179" data-source-offset="0" style="background: #f1f3f5;"><pre class="sourceCode js code-with-copy"><code class="sourceCode javascript" style="counter-reset: source-line 178;"><span id="cb8-179"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">createSketch</span>(s <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">=&gt;</span> {</span>
-<span id="cb8-180"></span>
-<span id="cb8-181">  s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">setup</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span> <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">function</span>() {</span>
-<span id="cb8-182">    s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">createCanvas</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">746</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">746</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">WEBGL</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb8-183">    s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">noStroke</span>()<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb8-184">  }</span>
-<span id="cb8-185"></span>
-<span id="cb8-186">  s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">draw</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span> <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">function</span>() {</span>
-<span id="cb8-187"></span>
-<span id="cb8-188">    s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">background</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">0</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb8-189"></span>
-<span id="cb8-190">    <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">let</span> locX <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span> s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">mouseX</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span> s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">height</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">/</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb8-191">    <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">let</span> locY <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span> s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">mouseY</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span> s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">width</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">/</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span>  </span>
-<span id="cb8-192">    </span>
-<span id="cb8-193">    s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">ambientLight</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">60</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">60</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">60</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb8-194">    s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">pointLight</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">190</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">80</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">190</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> locX<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> locY<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">100</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb8-195">    s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">pointLight</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">80</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">80</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">190</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">0</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">0</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">100</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb8-196">  </span>
-<span id="cb8-197">    s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">specularMaterial</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">255</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb8-198">    s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">rotateX</span>(s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">frameCount</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span> <span class="fl" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">0.01</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb8-199">    s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">rotateY</span>(s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">frameCount</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span> <span class="fl" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">0.01</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb8-200">    s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">torus</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">150</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">80</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">64</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">64</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb8-201">  }</span>
-<span id="cb8-202"></span>
-<span id="cb8-203">})</span></code></pre></div>
-<div class="cell-output cell-output-display">
-<div id="ojs-cell-7" data-nodetype="expression">
-
-</div>
-</div>
-</div>
-<p>If you move the mouse over the donut<sup>3</sup> you’ll see that the light source moves with it.</p>
-</section>
-<section id="donut-5" class="level2">
-<h2 class="anchored" data-anchor-id="donut-5">Donut 5</h2>
-<p>For the final example, I’ll do a tiny bit of object-oriented programming. Inspired by a generative art course by Bernat Ferragut (<a href="https://ga-course.surge.sh/">ga-course.surge.sh</a>) that I was skimming yesterday, I’ll define a <code>Dot</code> class that creates a particle that moves around on the canvas and has the ability to bounce off circular boundaries:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb9" data-startfrom="215" data-source-offset="0" style="background: #f1f3f5;"><pre class="sourceCode js code-with-copy"><code class="sourceCode javascript" style="counter-reset: source-line 214;"><span id="cb9-215"><span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">class</span> Dot {</span>
-<span id="cb9-216">  <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">constructor</span>(sketch<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> x<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> y<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> colour<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> size) {</span>
-<span id="cb9-217">    <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">this</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">s</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span> sketch<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb9-218">    <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">this</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">x</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span> x <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">0</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb9-219">    <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">this</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">y</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span> y <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">|</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">0</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb9-220">    <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">this</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">colour</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span> colour<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb9-221">    <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">this</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">size</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span> size<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb9-222">    <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">this</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">velX</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span> <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">this</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">s</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">random</span>(<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb9-223">    <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">this</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">velY</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span> <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">this</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">s</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">random</span>(<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb9-224">  }</span>
-<span id="cb9-225"></span>
-<span id="cb9-226">  <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">on</span>() {</span>
-<span id="cb9-227">    <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">this</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">s</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">noStroke</span>()<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb9-228">    <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">this</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">s</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">fill</span>(<span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">this</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">colour</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb9-229">    <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">this</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">s</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">circle</span>(<span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">this</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">x</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">this</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">y</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">this</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">size</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb9-230">  }</span>
-<span id="cb9-231"></span>
-<span id="cb9-232">  <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">move</span>() {</span>
-<span id="cb9-233">    <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">this</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">x</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+=</span> <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">this</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">velX</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb9-234">    <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">this</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">y</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+=</span> <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">this</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">velY</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb9-235">  }</span>
-<span id="cb9-236">  </span>
-<span id="cb9-237">  <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">bounce</span>(radius<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> inside) {</span>
-<span id="cb9-238">    <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">let</span> x <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span> <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">this</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">x</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span> <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">this</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">s</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">width</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">/</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb9-239">    <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">let</span> y <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span> <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">this</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">y</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span> <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">this</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">s</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">height</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">/</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb9-240">    <span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">if</span> (</span>
-<span id="cb9-241">      inside <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">&amp;&amp;</span> x<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span>x <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+</span> y<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span>y <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">&gt;</span> radius <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span> radius <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">||</span></span>
-<span id="cb9-242">      <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">!</span>inside <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">&amp;&amp;</span> x<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span>x <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+</span> y<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span>y <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">&lt;</span> radius <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span> radius</span>
-<span id="cb9-243">    ) {</span>
-<span id="cb9-244">    </span>
-<span id="cb9-245">      <span class="co" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">// https://math.stackexchange.com/a/611836</span></span>
-<span id="cb9-246">      <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">let</span> nx <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span> x <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">/</span> <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">this</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">s</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">sqrt</span>(x<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span>x <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+</span> y<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span>y)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb9-247">      <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">let</span> ny <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span> y <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">/</span> <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">this</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">s</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">sqrt</span>(x<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span>x <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+</span> y<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span>y)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb9-248">      <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">let</span> vx <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span> <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">this</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">velX</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb9-249">      <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">let</span> vy <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span> <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">this</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">velY</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb9-250">      <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">this</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">velX</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span> (ny<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span>ny <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span> nx<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span>nx)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span>vx <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span>nx<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span>ny<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span>vy<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb9-251">      <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">this</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">velY</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span> (nx<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span>nx <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span> ny<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span>ny)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span>vy <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span>nx<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span>ny<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span>vx<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb9-252">    </span>
-<span id="cb9-253">    }</span>
-<span id="cb9-254">  }</span>
-<span id="cb9-255">  </span>
-<span id="cb9-256">}</span></code></pre></div>
-<div class="cell-output cell-output-display">
-<div id="ojs-cell-8" data-nodetype="declaration">
-
-</div>
-</div>
-</div>
-<p>Naturally, I will use this to draw a donut:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb10" data-startfrom="263" data-source-offset="0" style="background: #f1f3f5;"><pre class="sourceCode js code-with-copy"><code class="sourceCode javascript" style="counter-reset: source-line 262;"><span id="cb10-263"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">createSketch</span>(s <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">=&gt;</span> {</span>
-<span id="cb10-264"></span>
-<span id="cb10-265">  <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">let</span> n <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">100</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb10-266">  <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">let</span> dot<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb10-267">  <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">let</span> dotList <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span> []<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb10-268">  <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">let</span> palette <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span> [</span>
-<span id="cb10-269">    s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">color</span>(<span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"#6B1B00"</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span></span>
-<span id="cb10-270">    s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">color</span>(<span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"#AE8B70"</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span></span>
-<span id="cb10-271">    s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">color</span>(<span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"#F9FEFB"</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span></span>
-<span id="cb10-272">    s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">color</span>(<span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"#56382D"</span>) </span>
-<span id="cb10-273">  ]<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb10-274"></span>
-<span id="cb10-275">  s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">setup</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span> <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">function</span>() {</span>
-<span id="cb10-276">    s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">createCanvas</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">746</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">746</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb10-277">    <span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">for</span>(<span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">let</span> i <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">0</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span> i <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">&lt;</span> n<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span> i<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">++</span>) {</span>
-<span id="cb10-278">      <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">let</span> angle <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span> s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">random</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">0</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">TWO_PI</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb10-279">      <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">let</span> radius <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span> s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">width</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span> s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">random</span>(<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">12</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">33</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb10-280">      dotList<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">push</span>(dot <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span> <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">new</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">Dot</span>(</span>
-<span id="cb10-281">        s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span></span>
-<span id="cb10-282">        s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">width</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">/</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+</span> s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">cos</span>(angle) <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span> radius<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span></span>
-<span id="cb10-283">        s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">height</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">/</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+</span> s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">sin</span>(angle) <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span> radius<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span></span>
-<span id="cb10-284">        s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">random</span>(palette)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span></span>
-<span id="cb10-285">        s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">random</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">5</span>)</span>
-<span id="cb10-286">      ))<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb10-287">    }</span>
-<span id="cb10-288">  }<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb10-289">    </span>
-<span id="cb10-290">  s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">draw</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">=</span> <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">function</span>() {</span>
-<span id="cb10-291">    dotList<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">map</span>(dot <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">=&gt;</span> {</span>
-<span id="cb10-292">      dot<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">on</span>()<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb10-293">      dot<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">move</span>()<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb10-294">      dot<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">bounce</span>(s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">width</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">35</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">true</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb10-295">      dot<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">bounce</span>(s<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">width</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span> <span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">.</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span><span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">,</span> <span class="kw" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">false</span>)<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb10-296">    })<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb10-297">  }<span class="op" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">;</span></span>
-<span id="cb10-298">})</span></code></pre></div>
-<div class="cell-output cell-output-display">
-<div id="ojs-cell-9" data-nodetype="expression">
-
-</div>
-</div>
-</div>
-<p>Mmmm…. donuts.</p>
-<!--------------- appendices go here ----------------->
-
-
-</section>
-
-
-<div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
-
-<ol>
-<li id="fn1"><p>An assignment like this would not normally produce any visible output for an observable.js code cell within in a quarto document, but I’ve set <code>output: all</code> for expository purposes.↩︎</p></li>
-<li id="fn2"><p>A tradition that, like most things, will last only until I get bored with it.↩︎</p></li>
-<li id="fn3"><p>I can’t make up my mind if the colour scheme implies this is a bisexual donut or a trans donut. Oh wait, it’s probably both.↩︎</p></li>
-</ol>
-</section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div id="quarto-reuse" class="quarto-appendix-contents"><div><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2023,
-  author = {Navarro, Danielle},
-  title = {Fun and Games with P5.js and Observable.js in Quarto},
-  date = {2023-01-14},
-  url = {https://blog.djnavarro.net/posts/2023-01-14_p5js},
-  langid = {en}
-}
-</code></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2023" class="csl-entry quarto-appendix-citeas">
-Navarro, Danielle. 2023. <span>“Fun and Games with P5.js and
-Observable.js in Quarto.”</span> January 14, 2023. <a href="https://blog.djnavarro.net/posts/2023-01-14_p5js">https://blog.djnavarro.net/posts/2023-01-14_p5js</a>.
-</div></div></section></div> ]]></description>
-  <category>Art</category>
-  <category>P5</category>
-  <category>Observable</category>
-  <category>Javascript</category>
-  <category>Quarto</category>
-  <guid>https://blog.djnavarro.net/posts/2023-01-14_p5js/index.html</guid>
-  <pubDate>Fri, 13 Jan 2023 13:00:00 GMT</pubDate>
-  <media:content url="https://blog.djnavarro.net/posts/2023-01-14_p5js/donut.jpg" medium="image" type="image/jpeg"/>
 </item>
 </channel>
 </rss>
