@@ -1,0 +1,158 @@
+---
+title: "The blood witch problem: Bespoke faceting and axis scaling in ggplot2 with patchwork"
+description: "Managing axis scale limits in ggplot2 with patchwork, using fake data that is so obviously a thinly-veiled metaphor for pediatric dosing simulations in pharmacometric modelling"
+date: "2023-09-30"
+--- 
+
+<!--------------- my typical setup ----------------->
+
+```{r}
+#| label: setup
+#| include: false
+knitr::opts_chunk$set(
+  fig.width = 15,
+  fig.height = 6,
+  fig.align = "center"
+)
+very_wide <- 500
+wide <- 136
+narrow <- 76
+options(width = narrow)
+cache_images <- TRUE
+set.seed(1)
+```
+
+<!--------------- post begins here ----------------->
+
+
+```{r}
+#| echo: false
+groups <- tidyr::expand_grid(
+  species = c("hobbit", "elf"),
+  stage = c("novice", "initiate", "graduate"),
+  group = "student",
+) |>
+  dplyr::mutate(
+    potion = dplyr::case_when(
+      stage == "novice" ~ "weak",
+      stage == "initiate" ~ "normal",
+      stage == "graduate" ~ "strong"
+    )
+  ) |>
+  tibble::add_row(
+    species = "elf", 
+    stage = "mage", 
+    group = "mage", 
+    potion = c("weak", "normal", "strong")
+  ) |>
+  tibble::add_row(
+    species = "elf",
+    stage = "mage",
+    group = "blood witch",
+    potion = "unhinged"
+  ) |> 
+  dplyr::mutate(
+    species = factor(species) |> 
+      forcats::fct_relevel("hobbit", "elf"),
+    stage = factor(stage) |> 
+      forcats::fct_relevel("novice", "initiate", "graduate", "mage"),
+    group = factor(group) |> 
+      forcats::fct_relevel("student", "mage", "blood witch"),
+    potion = factor(potion) |> 
+      forcats::fct_relevel("weak", "normal", "strong", "unhinged")
+  )
+
+mana <- groups |>  
+  dplyr::rowwise() |>
+  dplyr::reframe(
+    species = species,
+    stage = stage,
+    group = group,
+    potion = potion,
+    exposure = rnorm(
+      n = 250,
+      mean = 30 - as.numeric(stage) * 2 + as.numeric(potion) * 3 + 
+        as.numeric(species) + 60 * (potion == "unhinged"),
+      sd = .5 + as.numeric(potion) * .5 + 20 * (potion == "unhinged")
+    )
+  ) |> 
+  dplyr::mutate(
+    exposure = exposure + (potion == "unhinged") * 20,
+    id = dplyr::row_number()
+  )
+```
+
+```{r}
+#| message: false
+library(ggplot2)
+library(dplyr)
+```
+
+The basic idea is we want some violin plots, where the potion strength is the x-axis variable, the mana exposure is the y-axis variable, and we want to stratify this by species and training stage variables. As a first thought, we might use `facet_wrap()` to stratify:
+
+```{r}
+#| column: screen-inset
+ggplot(mana, aes(potion, exposure)) + 
+  geom_violin() + 
+  facet_wrap(~ stage + species, nrow = 1)
+```
+
+Okay, bad idea. Perhaps a cleaner approach is to use `facet_wrap()` to stratify by species, and use the fill aesthetic to colour the violins by training stage:
+
+```{r}
+#| column: screen-inset
+ggplot(mana, aes(potion, exposure, fill = species)) + 
+  geom_violin() + 
+  facet_wrap(~ stage, nrow = 1)
+```
+
+A little better, but we still have a lot of blank spaces because this is not a factorial design: the nature of the data precludes that. No problem, we can fix this by setting `scales = "free_x"` when we facet the plot. That way, a particular potion strength will only appear on the x-axis for a particular facet if there is actually data for the corresponding stage:
+
+```{r}
+#| column: screen-inset
+ggplot(mana, aes(potion, exposure, fill = species)) + 
+  geom_violin() + 
+  facet_wrap(~ stage, nrow = 1, scales = "free_x") 
+```
+
+Hm. Better, but there's still a spacing problem. Three of the panels have two violins, and one of them has four, so the widths of violins aren't scaled identically on the x-axis across facets, making it hard to compare. Okay, maybe `facet_grid()` can solve this for us?
+
+```{r}
+#| column: screen-inset
+ggplot(mana, aes(potion, exposure, fill = species)) + 
+  geom_violin() + 
+  facet_grid(~ stage, space = "free_x", scales = "free_x") 
+```
+
+It's better, but it's not quite right: because there are no hobbits among the mages, the scaling of the violins in the fourth panel are still double the width of those in the other three panels. 
+
+Okay, so maybe we go back to our original strategy of facetting by `stage` and `species` rather than having the fill do the work, but instead of using `facet_wrap()` we can use `facet_grid()`:
+
+```{r}
+#| column: screen-inset
+ggplot(mana, aes(potion, exposure)) + 
+  geom_violin() + 
+  facet_grid(~ stage + species, space = "free_x", scales = "free_x") 
+```
+
+Getting closer. 
+
+The panel labels are a little unpleasant though. Facetting by two variables doesn't always produce the nicest strip labels. Okay, no problem. Some data wrangling to the rescue:
+
+```{r}
+#| column: screen-inset
+mana <- mana |> 
+  mutate(
+    species_stage = factor(
+      paste(species, stage),
+      levels = c(
+        "hobbit novice", "hobbit initiate", "hobbit graduate",
+        "elf novice", "elf initiate", "elf graduate", "elf mage"
+      )
+    )
+  )
+  
+ggplot(mana, aes(potion, exposure)) + 
+  geom_violin() + 
+  facet_grid(~ species_stage, space = "free_x", scales = "free_x")
+```
