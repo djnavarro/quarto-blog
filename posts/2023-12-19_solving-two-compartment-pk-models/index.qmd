@@ -425,3 +425,120 @@ x_{1t}
 $$
 
 And just like that we have a solution.
+
+## Does it work?
+
+I'm not so arrogant as to simply assume I got it right. It's reassuring that all the expressions that came out along the way bear a striking resemblance to those I've seen in the textbooks, but I still want to compare to a numerical method that I trust. 
+
+```{r}
+numeric_solution <- function(k01, k12, k21, k10, time) {
+  
+  mod <- rxode2::rxode({
+    d/dt(A0) = -k01 * A0;
+    d/dt(A1) = k01 * A0 - (k12 + k10) * A1 + k21 * A2;
+    d/dt(A2) = k12 * A1 - k21 * A2;
+  })
+  inits <- c(A0 = 1, A1 = 0, A2 = 0)
+  
+  ev <- rxode2::eventTable()
+  ev$add.sampling(time = time)
+  pars <- data.frame(k01 = k01, k12 = k12, k21 = k21, k10 = k10)
+  dat <- mod$solve(pars, ev, inits)
+  dat <- as.data.frame(dat)
+  
+  out <- data.frame(
+    time = dat$time, 
+    amount = dat$A1, 
+    solution = "numeric"
+  )
+  return(out)
+}
+```
+
+Now the analytic solution:
+
+```{r}
+analytic_solution <- function(k01, k12, k21, k10, time) {
+  
+  ks <- k10 + k12 + k21
+  alpha <- (ks + sqrt(ks^2 - (4 * k10 * k21))) / 2
+  beta  <- (ks - sqrt(ks^2 - (4 * k10 * k21))) / 2
+  
+  A <- (alpha - k21) / (alpha - beta)
+  B <- -(beta - k21) / (alpha - beta) 
+  
+  A_term <- A * exp(-alpha * time) * (exp(time * (alpha - k01)) - 1) 
+  B_term <- B * exp(-beta  * time) * (exp(time * (beta  - k01)) - 1) 
+
+  A_term <- A_term * k01 / (alpha - k01)  
+  B_term <- B_term * k01 / (beta  - k01)
+  
+  out <- data.frame(
+    time = time, 
+    amount = A_term + B_term, 
+    solution = "analytic"
+  )
+  return(out)
+}
+```
+
+Now let's compare:
+
+```{r}
+k01 <- .3
+k12 <- .2
+k21 <- .1
+k10 <- .3
+time <- seq(0, 24, .1)
+
+dat_numb <- numeric_solution(k01, k12, k21, k10, time)
+dat_anal <- analytic_solution(k01, k12, k21, k10, time)
+dat <- rbind(dat_numb, dat_anal)
+
+library(ggplot2)
+ggplot(dat, aes(time, amount, colour = solution)) +
+  geom_line(show.legend = FALSE) +
+  facet_wrap(~solution) +
+  theme_bw()
+```
+
+Looks good. The differences between the two are small enough that we can attribute them to simulation precision etc...
+
+```{r}
+max(abs(dat_numb$amount - dat_anal$amount))
+```
+
+...and you get similar answers for other parameter values.
+
+
+## Was it worth it?
+
+Probably not: the analytic solution is already incorporated into NONMEM, Torsten, and other software specialised for pharmacometrics. But it is a good thing that someone went to the effort:
+
+```{r}
+#| echo: false
+options(width = wide)
+```
+
+```{r}
+#| column: page-right
+microbenchmark::microbenchmark(
+  numeric_solution(k01, k12, k21, k10, time),
+  analytic_solution(k01, k12, k21, k10, time)
+)
+```
+
+Both versions are fast enough that I don't usually care when running a small simulation, but a speedup of a factor of 2-3 orders of magnitude makes a big difference in the context of model fitting. Moreover, the speed up would be faster still if I could be bothered optimising the implemnentation of the analytic solution and writing it in a compiled language like C++ or Rust or whatever. But I have no need to do that because that's already been done in software. All I really care about for this post is deriving the solution and verifying that it works. 
+
+## Resources
+
+Open access resources:
+
+- Alex Best has an open textbook *Introducing Mathematical Biology*, and chapter 20 derives the [solution for the two-compartment bolus IV model](https://sheffield.pressbooks.pub/introducingmathematicalbiology/chapter/a-two-compartment-bolus-model/). It doesn't go into quite as much detail as I do in this post (it spares the reader from the pain of matrix exponentials, for example) but I found it very helpful.
+- Jiří Lebl and Trefor Bazett have an open resouce *Introduction to Differential Equations* whose section on [matrix exponentials](https://web.uvic.ca/~tbazett/diffyqs/sec_matexp.html) I found useful when trying to "refresh my memory" (i.e., learn something that I kind of ignored 30 years ago when it came up in my undergrad maths classes). Relatedly, the list of properties for matrix exponentials is mostly sourced from the wikipedia page on [matrix exponentials](https://en.wikipedia.org/wiki/Matrix_exponential).
+
+Other resources: 
+
+
+- It's not open access, and it doesn't dive into the derivations, but one of the books I've been reading at work is [Pharmacokinetic and Pharmacodynamic Data Analysis (2nd ed)](https://www.routledge.com/Pharmacokinetic-and-Pharmacodynamic-Data-Analysis-Concepts-and-Applications/Gabrielsson-Weiner/p/book/9789198299106) by Johan Gabrielsson and Daniel Weiner: chapter 2 presents the bi-exponential model using the "macro" parameters ($A$, $B$, $\alpha$, $\beta$) and the formulas for converting to the "micro" parameters (the fractional rate constants $k_{01}$, $k_{10}$, $k_{21}$, $k_{12}$), along with the more general scientific considerations around the model.
+- The other book I'm reading at work is [Introduction to Population Pharmacokinetic / Pharmacodynamic Analysis with Nonlinear Mixed Effects Models](https://onlinelibrary.wiley.com/doi/book/10.1002/9781118784860) by Joel S. Owen and Jill Fiedler-Kelly. It provides a good coverage of this model (and many others!) in the context of the NONMEM software package. It's somewhat relevant insofar as the different parameterisations (i.e., TRANS subroutines) for the ADVAN3 and ADVAN4 subroutines appear in this post (and make more sense to me now that I've derived the solutions).
