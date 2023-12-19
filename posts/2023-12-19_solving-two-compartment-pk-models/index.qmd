@@ -1,0 +1,427 @@
+---
+title: "Closed form solutions for a two-compartment pharmacokinetic model"
+description: "This is a subtitle"
+date: "2023-12-19"
+--- 
+
+<!--------------- my typical setup ----------------->
+
+```{r}
+#| label: setup
+#| include: false
+very_wide <- 500
+wide <- 136
+narrow <- 76
+options(width = narrow)
+cache_images <- TRUE
+set.seed(1)
+```
+
+<!--------------- post begins here ----------------->
+
+## A two compartment pharmacokinetic model
+
+Start with notation:
+
+$$
+\mathbf{x}(t) = \mathbf{x}_t = (x_{0t}, x_{1t}, x_{2t})
+$$
+
+where $x_{0t}$ is the drug amount in the depot compartment (generally the gut) at time $t$ units post-dose, $x_{1t}$ is the amount in the central compartment, and $x_{2t}$ is the amount in the peripheral compartment. Formally this is a function of time $\mathbf{x}(t)$ of $t$ with value is the vector $\mathbf{x}_t \in \mathbb{R}^3_{\geq 0}$. 
+
+For oral dosing with first-order absorption and first-order elimination, the system of ODEs we're working with looks like this:^[For simplicity I'm not going to consider either bioavailability (i.e., I'm effectively treating it as 1 here) or lag time, though those are comparatively easy extensions to handle.]
+
+$$
+\begin{array}{rcl}
+\frac{d}{dt} x_{0t} & = & -k_{01} x_{0t} \\
+\frac{d}{dt} x_{1t} & = & k_{01} x_{0t} - (k_{12} + k_{10}) x_{1t} + k_{21} x_{2t} \\
+\frac{d}{dt} x_{2t} & = & k_{12} x_{1t} - k_{21} x_{2t}
+\end{array}
+$$
+  
+In matrix form we can express this as:
+
+$$
+\frac{d}{dt} \mathbf{x}_t = \mathbf{K} \mathbf{x}_t
+$$
+
+where
+
+$$
+\mathbf{K} = \left[ 
+\begin{array}{ccc}
+-k_{01} &                0  &       0 \\
+ k_{01} & -k_{12} - k_{10}  &  k_{21} \\
+      0 &           k_{12}  & -k_{21} \\
+\end{array}
+\right]
+$$
+
+and our initial conditions for a dose administered orally at time $t=0$ are:
+
+$$
+\mathbf{x}_{0} = (\mbox{dose}, 0, 0)
+$$
+
+
+## Solving linear time-homogeneous ODE systems
+
+So we have a linear homogeneous ODE system that we want to solve. Annoyingly this means we need to work with matrix exponentials, and it's been a while...
+
+The matrix exponential $e^{\mathbf{K}}$ of a matrix $\mathbf{K}$ is analogous to the scalar equivalent $e^k$ for scalar value $k$, and has similar (but not identical) properties. In the same way that we can define a scalar exponential $e^k$ using a series expansion, the matrix exponential $e^{\mathbf{K}}$ is defined as:
+
+$$
+\begin{array}{rcl}
+e^{\mathbf{K}} &=& \mathbf{I} + \mathbf{K} + \frac{1}{2} \mathbf{K}^2 + \frac{1}{6} \mathbf{K}^3 + \ldots + \frac{1}{j!} \mathbf{K}^j + \ldots \\
+&=& \sum_{j = 0}^\infty \frac{1}{j!} \mathbf{K}^j
+\end{array}
+$$
+
+Some handy properties for matrix exponentials, expressed using reference to variables relevant to the pharmacokinetic problem at hand:
+
+- If $\mathbf{K}$ is a matrix of zeros, $e^{\mathbf{K}} = 1$
+- If $\mathbf{K}$ is the identity $\mathbf{I}$, $e^{\mathbf{K}} = e^{\mathbf{I}} = \mathbf{I}$
+- If $t$ is a scalar, $e^{t\mathbf{K}} = e^t e^\mathbf{K}$
+- If $m$ and $n$ are scalars, $e^{m\mathbf{K}} e^{n \mathbf{K}} = e^{(m + n)\mathbf{K}}$
+- If $\mathbf{D}$ is a diagonal matrix $e^\mathbf{D}$ is a diagonal matrix with diagonal elements equal to $e^{d_{ii}}$ 
+- The derivative is analogous to the scalar case, $\frac{d}{dt} e^{t \mathbf{K}} = \mathbf{K} e^{t \mathbf{K}}$
+- For nonsingular matrix $\mathbf{H}$ such that $\mathbf{K} = \mathbf{HMH^{-1}}$, $e^{t\mathbf{K}} = \mathbf{H} e^{t \mathbf{M}} \mathbf{H^{-1}}$
+
+
+Given these properties, it's not hard to see that the solution to our ODE is going to be of the following form:
+
+$$
+\mathbf{x}_t = e^{t \mathbf{K}} \mathbf{x}_0
+$$
+
+The hard part, of course is solving for the matrix exponential $e^{t\mathbf{K}}$.
+
+Fortunately the properties of matrix exponentials suggest a general strategy:
+
+1. find the eigenvalues $\lambda_1, \lambda_2, \ldots$,  for the matrix $\mathbf{K}$
+2. find the corresponding eigenvectors $\mathbf{u}_1, \mathbf{u}_2, \ldots$ 
+3. construct the matrix $\mathbf{U} = [\mathbf{u}_1, \mathbf{u}_2, \ldots]$ with the eigenvectors as columns, and diagonal matrix $\mathbf{\Lambda}$ whose diagonals correspond to eigenvalues, and invert it to obtain $\mathbf{U}^{-1}$
+4. noting that we have the eigendecomposition $K = \mathbf{U \Lambda U^{-1}}$, rewrite $e^{t\mathbf{K}} = \mathbf{U} e^{t\mathbf{\Lambda}} \mathbf{U^{-1}}$
+5. since $\mathbf{\Lambda}$ is diagonal, $e^{t\mathbf{\Lambda}}$ is straightforward, and we can calculate $e^{t\mathbf{K}}$ by matrix multiplication
+
+## Zero-order absorption
+
+In most cases I've come across in my pharmacometric work so far, the drug we're modelling is orally administered, and the model with first-order absorption into the central compartment described above (or some variation thereof) is the one we want. However, it's convenient to start with a simpler case where the drug is administered by a bolus IV dose. In this scenario there is no depot compartment, and entire dose appears in the central compartment at $t = 0$ (i.e., zero-order absorption). Again assuming first-order elimination, $\mathbf{K}$ is now a simpler 2x2 matrix. (Formally I suppose I'd use subscripts to distinguish the 3x3 oral-dosing matrix $\mathbf{K}_{o}$ from the 2x2 bolus IV dosing matrix $\mathbf{K}_{iv}$, but I'll refrain from doing so in this post unless it's needed to disambiguate). In this situation our state vector consists only of the central and peripheral compartments:
+
+$$
+\mathbf{x}(t) = \mathbf{x}_t = (x_{1t}, x_{2t})
+$$
+
+Our state transition matrix is now this:
+
+$$
+\mathbf{K} = \left[ 
+\begin{array}{cc}
+-k_{12} - k_{10}  &  k_{21} \\
+          k_{12}  & -k_{21} \\
+\end{array}
+\right]
+$$
+
+and our initial state at time $t=0$ is:
+
+$$
+\mathbf{x}_{0} = (\mbox{dose}, 0)
+$$
+
+As before, our solution will be of the form 
+
+$$
+\mathbf{x}_t = e^{t \mathbf{K}} \mathbf{x}_0
+$$
+
+
+First off, we need to find eigenvalues $\lambda$ that satisfy $\det(\mathbf{K} - \lambda \mathbf{I}) = 0$
+
+$$
+\begin{array}{rcl}
+\det(\mathbf{K} - \lambda \mathbf{I})
+&=& \det \left[ 
+\begin{array}{cc}
+-k_{12} - k_{10} - \lambda  &  k_{21} \\
+          k_{12}  & -k_{21} - \lambda \\
+\end{array}
+\right] \\
+&=& (-k_{12} - k_{10} - \lambda)(-k_{21} - \lambda) - k_{12} k_{21} \\
+&=& \lambda^2 + (k_{10} + k_{12} + k_{21}) \lambda + k_{10} k_{21}
+\end{array}
+$$
+The final expression doesn't factorise into anything very pretty, so it's conventional to simply define new variables $\alpha$ and $\beta$ such that:
+
+$$
+\begin{array}{rcl}
+\alpha \beta & = & k_{10} k_{21} \\
+\alpha + \beta & = & k_{10} + k_{12} + k_{21}
+\end{array}
+$$
+
+when written in these new variables, which were constructed specifically to make the characteristic equation look pretty, the left hand side of our characteristic equation turns out to be shockingly simple:
+
+$$
+\det(\mathbf{K} - \lambda \mathbf{I}) = \lambda^2 + (\alpha + \beta) \lambda + \alpha \beta = (\lambda + \alpha)(\lambda + \beta)
+$$
+
+and therefore our two eigenvalues are $\lambda = -\alpha$ and $\lambda = -\beta$. Of course, this isn't super helpful unless we go through tedious business of applying the quadratic formula to express $\alpha$ and $\beta$ in terms of $k_{01}$, $k_{10}$, $k_{12}$, and $k_{21}$. So here it is:
+
+$$
+\begin{array}{rcl}
+\alpha, \beta 
+&=& \frac{(\alpha + \beta) \pm \sqrt{(\alpha + \beta)^2 - 4\alpha \beta}}{2} \\
+&=& \frac{(k_{10} + k_{12} + k_{21}) \pm \sqrt{(k_{10} + k_{12} + k_{21})^2 - 4k_{10} k_{21}}}{2}
+\end{array}
+$$
+
+Now that we have the eigenvalues, we proceed to the eigenvectors. For each eigenvalue $\lambda$ there is a corresponding eigenvector $\mathbf{u}$ such that $(\mathbf{K} - \lambda \mathbf{I}) \mathbf{u} = \mathbf{0}$. In our case:
+
+$$
+\left[ 
+\begin{array}{cc}
+-k_{12} - k_{10} - \lambda  &  k_{21} \\
+          k_{12}  & -k_{21} - \lambda \\
+\end{array}
+\right]
+\left[
+\begin{array}{c}
+u_1 \\
+u_2
+\end{array}
+\right]
+= 
+\left[
+\begin{array}{c}
+0 \\
+0
+\end{array}
+\right]
+$$
+
+If this were a bigger matrix we'd probably use Gauss-Jordan elimination to construct the row-reduced echelon form (RREF) and then read off the solutions using the RREF. That's kind of overkill in this case because you can look at the bottom row and guess that the solution is going to have the form $u_1 = k_{21} + \lambda$, $u_2 = k_{12}$. For the bottom row we can substitute these values and confirm:
+
+$$
+\begin{array}{rcl}
+k_{12} u_1 + (-k_{21} - \lambda) u_2
+&=& k_{12} (k_{21} + \lambda) + (-k_{21} - \lambda) k_{12} \\
+&=& 0
+\end{array}
+$$
+For our proposed solution to be valid, though, we need to check the top row too:
+
+$$
+\begin{array}{rcl}
+(-k_{12} - k_{10} - \lambda) u_1 + k_{21} u_2
+&=& (-k_{12} - k_{10} - \lambda) (k_{21} + \lambda) + k_{21} k_{12} \\
+&=& -k_{12} k_{21} - k_{10} k_{21} - \lambda k_{21} - k_{12} \lambda - k_{10} \lambda - \lambda^2 + k_{21} k_{12} \\
+&=& - k_{10} k_{21} - \lambda k_{21} - k_{12} \lambda - k_{10} \lambda - \lambda^2 \\
+&=& - k_{10} k_{21} - (k_{21} + k_{12} + k_{10}) \lambda - \lambda^2 \\
+&=& - \alpha \beta - (\alpha + \beta) \lambda - \lambda^2 \\
+&=& - (\lambda + \alpha) (\lambda + \beta) \\
+\end{array}
+$$
+
+Noting that either $\lambda = -\alpha$ or $\lambda = -\beta$, we see that the top row is always zero, and we have our eigenvectors.
+
+We can now construct the matrices $\mathbf{U}$ and $\mathbf{\Lambda}$ that will give us the eigendecomposition  $\mathbf{K} = \mathbf{U \Lambda U}^{-1}$:
+
+$$
+\begin{array}{rcl}
+\mathbf{\Lambda} &=& 
+\left[ 
+\begin{array}{cc}
+-\alpha & 0 \\
+0 & -\beta
+\end{array}
+\right]
+\\
+\mathbf{U} &=& 
+\left[ 
+\begin{array}{cc}
+k_{21} -\alpha & k_{21} - \beta \\
+k_{12} & k_{12}
+\end{array}
+\right]
+\end{array}
+$$
+
+The inverse matrix $\mathbf{U}^{-1}$ is fairly easy to compute. Noting that determinant $\det \mathbf{U}$ is
+
+$$
+\det \mathbf{U} = (k_{21} - \alpha) k_{12} - k_{12} (k_{21} - \beta) = k_{12} (\beta - \alpha)
+$$
+
+the inverse is:
+
+$$
+\mathbf{U}^{-1} =
+\frac{1}{k_{12}(\beta - \alpha)}
+\left[ 
+\begin{array}{cc}
+k_{12} & \beta - k_{21} \\
+-k_{12} & k_{21} -\alpha
+\end{array}
+\right]
+$$
+
+For the sake of my sanity, I'll define two new constants $a$ and $b$:
+
+$$
+\begin{array}{rcl}
+a & = & (k_{21} - \alpha) / k_{12} \\
+b & = & (k_{21} - \beta) / k_{12} 
+\end{array}
+$$
+
+Using these, the expressions for $\mathbf{U}$ and $\mathbf{U}^{-1}$ are:
+
+$$
+\begin{array}{rcl}
+\mathbf{U} &=& 
+k_{12} \left[ 
+\begin{array}{cc}
+a & b \\
+1 & 1
+\end{array}
+\right] 
+\\
+\mathbf{U}^{-1} &=& 
+\displaystyle\frac{1}{\beta - \alpha} \left[ 
+\begin{array}{cc}
+1 & -b \\
+-1 & a
+\end{array}
+\right] 
+\end{array}
+$$
+
+Now that we have the eigendecomposition $\mathbf{K} = \mathbf{U \Lambda U}^{-1}$ we can reexpress the matrix exponential $e^{t \mathbf{K}}$ as the much more tractable product $\mathbf{U} e^{t \mathbf{\Lambda}} \mathbf{U}^{-1}$:
+
+$$
+\begin{array}{rcl}
+e^{t \mathbf{K}} & = &
+\mathbf{U} e^{t \mathbf{\Lambda}} \mathbf{U}^{-1} \\
+& = &
+\displaystyle\frac{k_{12}}{\beta - \alpha} 
+\left[ 
+\begin{array}{cc}
+a & b \\
+1 & 1
+\end{array}
+\right]
+\left[ 
+\begin{array}{cc}
+e^{-\alpha t} & 0 \\
+0 & e^{-\beta t}
+\end{array}
+\right]
+\left[ 
+\begin{array}{cc}
+1 & -b \\
+-1 & a
+\end{array}
+\right]
+\\
+& = &
+\displaystyle\frac{k_{12}}{\beta - \alpha} 
+\left[ 
+\begin{array}{cc}
+a e^{-\alpha t} & b e^{-\beta t} \\
+e^{-\alpha t} & e^{-\beta t}
+\end{array}
+\right]
+\left[ 
+\begin{array}{cc}
+1 & -b \\
+-1 & a
+\end{array}
+\right] \\
+&=&
+\displaystyle\frac{k_{12}}{\beta - \alpha} 
+\left[ 
+\begin{array}{cc}
+(a e^{-\alpha t} - b e^{-\beta t}) & -ab (e^{-\alpha t} - e^{-\beta t}) \\
+-(e^{-\alpha t} - e^{-\beta t}) & (-b e^{-\alpha t} + a e^{-\beta t})
+\end{array}
+\right]
+\end{array}
+
+$$
+
+So now we can turn to our solution: 
+
+$$
+\begin{array}{rcl}
+\mathbf{x}_t & = & e^{t \mathbf{K}} \ \mathbf{x}_0 \\
+& = & 
+\displaystyle\frac{k_{12}}{\beta - \alpha} 
+\left[ 
+\begin{array}{cc}
+(a e^{-\alpha t} - b e^{-\beta t}) & -ab (e^{-\alpha t} - e^{-\beta t}) \\
+-(e^{-\alpha t} - e^{-\beta t}) & (-b e^{-\alpha t} + a e^{-\beta t})
+\end{array}
+\right]
+\left[
+\begin{array}{cc}
+\mbox{dose} \\
+0
+\end{array}
+\right] \\
+& = &
+\mbox{dose} \times \displaystyle\frac{k_{12}}{\beta - \alpha} \left[
+\begin{array}{cc}
+a e^{-\alpha t} - b e^{-\beta t} \\
+e^{-\alpha t} - e^{-\beta t}
+\end{array}
+\right] 
+\end{array} 
+$$
+Recalling that the central compartment corresponds to the first element of the state vector (top row), we can focus on this and compute the drug amount (not concentration) in the central compartment at time $t$:
+
+$$
+\begin{array}{rcl}
+x_{1t} 
+&=&
+\mbox{dose} \times \displaystyle\frac{k_{12}}{\beta - \alpha} \times \left(  a e^{-\alpha t} - b e^{-\beta t} \right) \\
+&=&
+\mbox{dose} \times \displaystyle\frac{k_{12}}{\beta - \alpha} \times \left( \left(\frac{k_{21} - \alpha}{k_{12}} \right)  e^{-\alpha t} - \left(\frac{k_{21} - \beta}{k_{12}} \right) e^{-\beta t} \right) \\
+&=&
+\mbox{dose} \times \left( \left(\displaystyle\frac{\alpha - k_{21}}{\alpha - \beta} \right) e^{-\alpha t} - \left(\displaystyle\frac{\beta - k_{21}}{\alpha - \beta} \right) e^{-\beta t} \right) \\
+&=&
+\mbox{dose} \times \left(A e^{-\alpha t} +  B e^{-\beta t} \right)
+\end{array}
+$$
+
+and thus we have the bi-exponential model that appears in the textbook, with:
+
+$$
+\begin{array}{rcl}
+A & = & \displaystyle\frac{\alpha - k_{21}}{\alpha - \beta} \\ \\
+B & = & \displaystyle\frac{\beta - k_{21}}{\alpha - \beta} 
+\end{array}
+$$
+(Technically what I've derived is slightly different insofar as this is an expression for the drug amount in the central compartment not the drug concentration, and unlike the book I haven't folded either the dose or the volume of the central compartment into the expressions for $A$ and $B$, but all that means is that the $A$ and $B$ values will be scaled by a constant factor. It's the same model)
+
+## First order absorption
+
+Now that we have a closed form solution for a two-compartment model with zero-order absorption into the central compartment (i.e., bolus IV dosing), we can return to the oral dosing model (assuming first-order absorption) that we started with. It's a relatively straightforward solution at this point since we have a continuous influx from the gut, so we can convolve this time-dependent influx with the zero-order solution. Since I'm assuming bioavailability $F = 1$ for this post^[I mean, multiplying everything by $F$ is not exactly difficult right? If you can follow the rest of this solution you absolutely know how to generalise it to other values of $F$. But okay, if you care deeply about the niceties I will be like Bart and [say the line](https://knowyourmeme.com/memes/say-the-line-bart): without loss of generality, I set $F=1$ in this post. I'm sure that makes everyone happier.] I'll happily act as if the drug amount arriving in the central compartment from the gut at time $t$ is the same as the amount that left the gut at time $t$: 
+
+$$
+-\frac{d}{dt} x_{0t} = \mbox{dose} \times k_{01} \times e^{-k_{01} t}
+$$
+
+Thus the drug amount in the central compartment at time $t$ is given:
+
+$$
+\begin{array}{rcl}
+x_{1t} 
+&=& \mbox{dose} \times k_{01} \times \displaystyle\int_0^t e^{-k_{01} u} \left( A e^{-\alpha (t-u)} + B e^{-\beta (t-u)} \right) \ du \\
+&=& \mbox{dose} \times k_{01} \times \displaystyle\int_0^t A e^{-\alpha (t-u) -k_{01} u} + B e^{-\beta (t-u) -k_{01} u}  \ du \\
+&=& \mbox{dose} \times k_{01} \times \left( Ae^{-\alpha t} \left[ \frac{1}{\alpha - k_{01}} e^{(\alpha - k_{01})u} \right]_0^t + Be^{-\beta t} \left[ \frac{1}{\beta - k_{01}} e^{(\beta - k_{01})u} \right]_0^t   \right) \\
+&=& \mbox{dose} \times k_{01} \times \left( \displaystyle\frac{Ae^{-\alpha t} (e^{(\alpha - k_{01})t} - 1)}{\alpha - k_{01}} + \displaystyle\frac{Be^{-\beta t} (e^{(\beta - k_{01})t} - 1)}{\beta - k_{01}}   \right) \\
+\end{array}
+$$
+
+And just like that we have a solution.
