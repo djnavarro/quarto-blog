@@ -44,8 +44,8 @@
 </blockquote>
 <p>From a reproducible computing perspective, you’d better catch the RNG state and work carefully with it, or else it will be gone forever.</p>
 </section>
-<section id="how-do-different-languages-manage-rng-state-a-half-arsed-review-of-bad-solutions-to-a-hard-problem" class="level2">
-<h2 class="anchored" data-anchor-id="how-do-different-languages-manage-rng-state-a-half-arsed-review-of-bad-solutions-to-a-hard-problem">How do different languages manage RNG state? A half-arsed review of bad solutions to a hard problem</h2>
+<section id="how-do-different-languages-manage-rng-state" class="level2">
+<h2 class="anchored" data-anchor-id="how-do-different-languages-manage-rng-state">How do different languages manage RNG state?</h2>
 <p>How should we manage the RNG state in a programming language? It’s a difficult problem, and I am absolutely <em>not</em> the person to resolve the question. I’m basically an idiot, and I don’t even pretend to know what the right answer to this is. That being said, I think there’s essentially three categories of solution that exist in the wild:</p>
 <ul>
 <li><p><strong>The javascript style:</strong> The solution in vanilla javascript is basically a “fuck you” to the user. The core random number generator is <code>Math.random()</code> and it doesn’t let you specify the seed at all. If you want reproducible sequences of random numbers in javascript you can go fuck yourself.<sup>5</sup></p></li>
@@ -323,12 +323,23 @@ font-style: inherit;">10</span>)</span></code></pre></div>
 </section>
 <section id="creating-an-isolated-rng-seed" class="level2">
 <h2 class="anchored" data-anchor-id="creating-an-isolated-rng-seed">Creating an “isolated” RNG seed</h2>
-<p>The <a href="https://r6.r-lib.org/">R6</a> package is a goddamn delight:</p>
+<p>As you can probably guess, I am actually a huge fan of the R solution. Yes, it’s an unprincipled hack where the language “cheats” by creating a hidden global state variable, but it really does work for the vast majority of use cases and it doesn’t waste the analysts time by making them do all the dirty work managing the RNG themselves. From its inception R has <em>never</em> been a language that cares about ideological purity: as Hadley Wickham once noted,<sup>10</sup> R is first and foremost a language for “getting shit done”.</p>
+<p>That being said, sometimes I find myself wishing there was a way of creating an “isolated” RNG seed. The idea here is that as the data analyst, I know perfectly well which parts of my code are essential to my probabilistic simulations, and what I really want to do is “protect” those parts of the code by executing them with a dedicated RNG. All my incidental code can use the global RNG state, but nothing I do in the incidental state would affect the output of the protected simulation code.</p>
+<p>On the face of it, this seems hard to accomplish with R because the <code>.Random.seed</code> variable is aggressively unique. The documentation makes it very clear that the only place R will look for the RNG state is the <code>.Random.seed</code> variable in the user global environment, so you cannot solve this problem by creating a new <code>.Random.seed</code> variable in another environment. However, the documentation also makes clear that you are <em>absolutely</em> allowed to save the value of <code>.Random.seed</code> and restore it later.<sup>11</sup> In other words, you totally could do something like this:</p>
+<ol type="1">
+<li>Use <code>set.seed()</code> to create the “to-be-isolated” RNG, and then do something like <code>protected_state &lt;- .Random.seed</code> to store the state of that RNG</li>
+<li>Use <code>set.seed()</code> again to set the “global” RNG state</li>
+<li>Do some “incidental” random things (implicitly using the global RNG state)</li>
+<li>In preparation for the protected step, cache the global state in a temporary <code>global_state &lt;- .Random.seed</code></li>
+<li>Restore the protected RNG with <code>.Random.seed &lt;- protected_state</code></li>
+<li>Run your “protected” simulation code</li>
+<li>Capture the updated state <code>protected_state &lt;- .Random.seed</code></li>
+<li>Restore the global RNG with <code>.Random.seed &lt;- global_state</code></li>
+</ol>
+<p>This approach works perfectly well, actually. There is absolutely nothing stopping you from caching the state of a protected RNG separately from the global RNG, and occasionally restoring it when you specifically want to use the protected RNG. The only problem with the solution is that I am <em>absolutely</em> not willing to faff about write code that does this. It’s time-consuming and annoying, and I have deadlines to meet.</p>
+<p>Enter, stage left, the <a href="https://r6.r-lib.org/">R6</a> package. It is almost obnoxiously easy to design a stateful R6 class that solves this problem. Here’s how you do it:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb16" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb16-1"><span class="co" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;"># an R6 class that creates manages an isolated RNG seed</span></span>
-<span id="cb16-2">Seed <span class="ot" style="color: #003B4F;
+<div class="sourceCode cell-code" id="cb16" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb16-1">Seed <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> R6<span class="sc" style="color: #5E5E5E;
 background-color: null;
@@ -337,23 +348,23 @@ background-color: null;
 font-style: inherit;">R6Class</span>(<span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"Seed"</span>,</span>
-<span id="cb16-3">  <span class="at" style="color: #657422;
+<span id="cb16-2">  <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">public =</span> <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">list</span>(</span>
-<span id="cb16-4">    <span class="at" style="color: #657422;
+<span id="cb16-3">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">initialize =</span> <span class="cf" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">function</span>(...) {</span>
-<span id="cb16-5">      old <span class="ot" style="color: #003B4F;
+<span id="cb16-4">      old <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> .Random.seed</span>
-<span id="cb16-6">      <span class="fu" style="color: #4758AB;
+<span id="cb16-5">      <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">set.seed</span>(...)</span>
-<span id="cb16-7">      self<span class="sc" style="color: #5E5E5E;
+<span id="cb16-6">      self<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">$</span>state <span class="ot" style="color: #003B4F;
 background-color: null;
@@ -362,20 +373,20 @@ background-color: null;
 font-style: inherit;">eval</span>(.Random.seed, <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">envir =</span> .GlobalEnv)</span>
-<span id="cb16-8">      <span class="fu" style="color: #4758AB;
+<span id="cb16-7">      <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">assign</span>(<span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">".Random.seed"</span>, old, <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">envir =</span> .GlobalEnv)</span>
-<span id="cb16-9">    },</span>
-<span id="cb16-10">    <span class="at" style="color: #657422;
+<span id="cb16-8">    },</span>
+<span id="cb16-9">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">state =</span> <span class="cn" style="color: #8f5902;
 background-color: null;
 font-style: inherit;">NULL</span>,</span>
-<span id="cb16-11">    <span class="at" style="color: #657422;
+<span id="cb16-10">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">use =</span> <span class="cf" style="color: #003B4F;
 background-color: null;
@@ -384,10 +395,10 @@ background-color: null;
 font-style: inherit;">envir =</span> <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">parent.frame</span>()) {</span>
-<span id="cb16-12">      old <span class="ot" style="color: #003B4F;
+<span id="cb16-11">      old <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> .Random.seed</span>
-<span id="cb16-13">      <span class="fu" style="color: #4758AB;
+<span id="cb16-12">      <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">assign</span>(<span class="st" style="color: #20794D;
 background-color: null;
@@ -396,7 +407,7 @@ background-color: null;
 font-style: inherit;">$</span>state, <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">envir =</span> .GlobalEnv)</span>
-<span id="cb16-14">      x <span class="ot" style="color: #003B4F;
+<span id="cb16-13">      x <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
 background-color: null;
@@ -405,7 +416,7 @@ background-color: null;
 font-style: inherit;">substitute</span>(expr), <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">envir =</span> envir)</span>
-<span id="cb16-15">      self<span class="sc" style="color: #5E5E5E;
+<span id="cb16-14">      self<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">$</span>state <span class="ot" style="color: #003B4F;
 background-color: null;
@@ -414,34 +425,23 @@ background-color: null;
 font-style: inherit;">eval</span>(.Random.seed, <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">envir =</span> .GlobalEnv)</span>
-<span id="cb16-16">      <span class="fu" style="color: #4758AB;
+<span id="cb16-15">      <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">assign</span>(<span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">".Random.seed"</span>, old, <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">envir =</span> .GlobalEnv)</span>
-<span id="cb16-17">      <span class="fu" style="color: #4758AB;
+<span id="cb16-16">      <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">return</span>(x)</span>
-<span id="cb16-18">    }</span>
-<span id="cb16-19">  )</span>
-<span id="cb16-20">)</span>
-<span id="cb16-21"></span>
-<span id="cb16-22"><span class="co" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;"># constructor function</span></span>
-<span id="cb16-23">new_seed <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">function</span>(...) Seed<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">$</span><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">new</span>(...)</span></code></pre></div>
+<span id="cb16-17">    }</span>
+<span id="cb16-18">  )</span>
+<span id="cb16-19">)</span></code></pre></div>
 </div>
-<p>Let’s test it. First, I’ll set the “usual” RNG state using <code>set.seed()</code> with <code>seed = 123</code>. Then, I’ll use the constructor function <code>new_seed()</code> to create two new isolated RNG seeds, both of which use <code>seed = 1</code>:</p>
+<p>The <code>Seed</code> class is terribly simple. When you initialise a new <code>Seed</code> object, it temporarily caches the global <code>.Random.seed</code> state, then calls <code>set.seed()</code> to create the protected RNG state. This protected state is then cached within the <code>Seed</code> object itself as the <code>$state</code> field.<sup>12</sup> Finally, it restores the global <code>.Random.seed</code> variable to its original state.</p>
+<p>Using the protected seed is pretty straightforward: the <code>Seed</code> class has a <code>$use()</code> method to which you pass an R expression. All code in that expression is evaluated using the protected RNG state rather than the global state. The mechanism here is exatly the same: the <code>$use()</code> method caches the global RNG state, copies the <code>$state</code> field to the <code>.Random.seed</code>, then executes the R code. After the code has executed, the new value of <code>.Random.seed</code> is copied back to the <code>$state</code> field, and then the global state is restored.</p>
+<p>Let’s have a look at how it works. First, I’ll set the “usual” RNG state using <code>set.seed()</code> with <code>seed = 123</code>. Then, I’ll create two new isolated RNG seeds, both of which use <code>seed = 1</code>:</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb17" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb17-1"><span class="fu" style="color: #4758AB;
 background-color: null;
@@ -453,16 +453,20 @@ background-color: null;
 font-style: inherit;">&lt;-</span> .Random.seed</span>
 <span id="cb17-3">x <span class="ot" style="color: #003B4F;
 background-color: null;
-font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
+font-style: inherit;">&lt;-</span> Seed<span class="sc" style="color: #5E5E5E;
 background-color: null;
-font-style: inherit;">new_seed</span>(<span class="dv" style="color: #AD0000;
+font-style: inherit;">$</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">new</span>(<span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">1</span>)</span>
 <span id="cb17-4">y <span class="ot" style="color: #003B4F;
 background-color: null;
-font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
+font-style: inherit;">&lt;-</span> Seed<span class="sc" style="color: #5E5E5E;
 background-color: null;
-font-style: inherit;">new_seed</span>(<span class="dv" style="color: #AD0000;
+font-style: inherit;">$</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">new</span>(<span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">1</span>)</span></code></pre></div>
 </div>
@@ -525,7 +529,12 @@ font-style: inherit;">all.equal</span>(state, .Random.seed)</span></code></pre><
 <pre><code>[1] TRUE</code></pre>
 </div>
 </div>
-<p>Yup. It works.<sup>10</sup></p>
+<p>Yup. It works.<sup>13</sup></p>
+</section>
+<section id="wrapping-up" class="level2">
+<h2 class="anchored" data-anchor-id="wrapping-up">Wrapping up</h2>
+<p>It would be pretty easy to wrap something like this in a package I suppose, but (a) I’m too lazy to write it myself, and (b) I think the use case for it is pretty narrowly confined to situations when you are writing a very long script that performs an “essential” simulation and also contains incidental code isn’t supposed to affect the simulation itself. Plus, and perhaps most importantly, (c) remember how I said this was a spider-fucking post? I said it and I bloody well meant it. I’m not trying to Solve A Big Problem here. I’m just playing around with code and enjoying the act of writing about it.</p>
+<p>That being said, I have to admit I’ve encountered a few situations in my professional life where I really wished there were a package that implemented something like the <code>Seed</code> class. I had one experience a little while back where I’d inherited a long simulation script that did the right thing insofar as it called <code>set.seed()</code> at the top of the script, but it had lots of essential simulation code interleaved between other code that was used for non-essential purposes and incidentally modified the RNG state. It was a nightmare to try to refactor the code without breaking reproducibility. Eventually I just had to give up. The code absolutely did need to be refactored because of the future use that we had in mind, and – despite the original programmers laudable effort to do the right thing – it was absolutely impossible to do so without changing the results of the simulations. It would have been a lot easier to do this if the “essential” simulation code had been properly isolated from the incidental code. Situations like this are exactly the ones where you want something like the <code>Seed</code> class.</p>
 
 
 </section>
@@ -543,7 +552,10 @@ font-style: inherit;">all.equal</span>(state, .Random.seed)</span></code></pre><
 <li id="fn7"><p>Note that the <code>.Random.seed</code> vector doesn’t actually exist at start up: it is created explicitly when the user calls <code>set.seed()</code>, but it will also be created for you if you do something that requires the RNG without previously calling <code>set.seed()</code>, using the current time and the process ID as the input.↩︎</p></li>
 <li id="fn8"><p>Parenthetically, if you want to configure R so that you get notified every time <code>.Random.seed</code> changes, you can set up a callback handler to do this. Henrik Bengtsson has a <a href="https://www.jottr.org/2020/09/21/detect-when-the-random-number-generator-was-used/">nice post</a> showing you how to do this. I have something similar set up in my <code>.Rprofile</code>.↩︎</p></li>
 <li id="fn9"><p>More generally, though, if you want to be completely safe you’d probably need to use tools like <a href="https://www.docker.com/">Docker</a>, <a href="https://rstudio.github.io/renv/">renv</a>, and <a href="https://github.com/r-lib/rig">rig</a> to control the computational environment. But that’s beyond the scope.↩︎</p></li>
-<li id="fn10"><p>It should go without saying that this isn’t guaranteed to work properly if we’re doing a multi-threaded execution thing. But that’s true for normal random number generation anyway: you need special tools when doing random number generation in parallel.↩︎</p></li>
+<li id="fn10"><p>I’m too lazy to track down the original citation or the exact quote, but I think he said it during an rstudio::conf / posit::conf talk. The specifics don’t matter very much.↩︎</p></li>
+<li id="fn11"><p>The exact phrasing in the documentation says that <code>.Random.seed</code> “can be saved and restored, but should not be altered by the user”, i.e., it’s totally fine to copy the RNG state, just don’t try to modify the values stored in the vector yourself because you’ll almost certainly mess it up.↩︎</p></li>
+<li id="fn12"><p>I should probably have made this a private field rather than a public field, and then written a public accessor method like <code>$get_state()</code> or whatever. But this is a toy example, I’m not trying to be rigorous here.↩︎</p></li>
+<li id="fn13"><p>It should go without saying that this isn’t guaranteed to work properly if we’re doing a multi-threaded execution thing. But that’s true for normal random number generation anyway: you need special tools when doing random number generation in parallel. One of these days I want to do a deep dive on that topic, but it’s totally something for a future post.↩︎</p></li>
 </ol>
 </section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div id="quarto-reuse" class="quarto-appendix-contents"><div><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2023,
   author = {Navarro, Danielle},

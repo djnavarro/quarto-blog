@@ -203,7 +203,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
    
   <ul>
   <li><a href="#managing-computational-state-when-generating-pseudo-random-numbers" id="toc-managing-computational-state-when-generating-pseudo-random-numbers" class="nav-link active" data-scroll-target="#managing-computational-state-when-generating-pseudo-random-numbers">Managing computational state when generating pseudo-random numbers</a></li>
-  <li><a href="#how-do-different-languages-manage-rng-state-a-half-arsed-review-of-bad-solutions-to-a-hard-problem" id="toc-how-do-different-languages-manage-rng-state-a-half-arsed-review-of-bad-solutions-to-a-hard-problem" class="nav-link" data-scroll-target="#how-do-different-languages-manage-rng-state-a-half-arsed-review-of-bad-solutions-to-a-hard-problem">How do different languages manage RNG state? A half-arsed review of bad solutions to a hard problem</a></li>
+  <li><a href="#how-do-different-languages-manage-rng-state" id="toc-how-do-different-languages-manage-rng-state" class="nav-link" data-scroll-target="#how-do-different-languages-manage-rng-state">How do different languages manage RNG state?</a></li>
   <li><a href="#on-the-particulars-of-the-r-approach" id="toc-on-the-particulars-of-the-r-approach" class="nav-link" data-scroll-target="#on-the-particulars-of-the-r-approach">On the particulars of the R approach</a>
   <ul class="collapse">
   <li><a href="#whats-in-the-.random.seed-babe" id="toc-whats-in-the-.random.seed-babe" class="nav-link" data-scroll-target="#whats-in-the-.random.seed-babe">What’s in the <code>.Random.seed</code> babe?</a></li>
@@ -211,6 +211,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
   <li><a href="#strengths-and-weaknesses-of-the-r-approach" id="toc-strengths-and-weaknesses-of-the-r-approach" class="nav-link" data-scroll-target="#strengths-and-weaknesses-of-the-r-approach">Strengths and weaknesses of the R approach</a></li>
   </ul></li>
   <li><a href="#creating-an-isolated-rng-seed" id="toc-creating-an-isolated-rng-seed" class="nav-link" data-scroll-target="#creating-an-isolated-rng-seed">Creating an “isolated” RNG seed</a></li>
+  <li><a href="#wrapping-up" id="toc-wrapping-up" class="nav-link" data-scroll-target="#wrapping-up">Wrapping up</a></li>
   </ul>
 </nav>
 </nav>
@@ -243,8 +244,8 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </blockquote>
 <p>From a reproducible computing perspective, you’d better catch the RNG state and work carefully with it, or else it will be gone forever.</p>
 </section>
-<section id="how-do-different-languages-manage-rng-state-a-half-arsed-review-of-bad-solutions-to-a-hard-problem" class="level2">
-<h2 class="anchored" data-anchor-id="how-do-different-languages-manage-rng-state-a-half-arsed-review-of-bad-solutions-to-a-hard-problem">How do different languages manage RNG state? A half-arsed review of bad solutions to a hard problem</h2>
+<section id="how-do-different-languages-manage-rng-state" class="level2">
+<h2 class="anchored" data-anchor-id="how-do-different-languages-manage-rng-state">How do different languages manage RNG state?</h2>
 <p>How should we manage the RNG state in a programming language? It’s a difficult problem, and I am absolutely <em>not</em> the person to resolve the question. I’m basically an idiot, and I don’t even pretend to know what the right answer to this is. That being said, I think there’s essentially three categories of solution that exist in the wild:</p>
 <ul>
 <li><p><strong>The javascript style:</strong> The solution in vanilla javascript is basically a “fuck you” to the user. The core random number generator is <code>Math.random()</code> and it doesn’t let you specify the seed at all. If you want reproducible sequences of random numbers in javascript you can go fuck yourself.<a href="#fn5" class="footnote-ref" id="fnref5" role="doc-noteref"><sup>5</sup></a></p></li>
@@ -380,38 +381,50 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </section>
 <section id="creating-an-isolated-rng-seed" class="level2">
 <h2 class="anchored" data-anchor-id="creating-an-isolated-rng-seed">Creating an “isolated” RNG seed</h2>
-<p>The <a href="https://r6.r-lib.org/">R6</a> package is a goddamn delight:</p>
+<p>As you can probably guess, I am actually a huge fan of the R solution. Yes, it’s an unprincipled hack where the language “cheats” by creating a hidden global state variable, but it really does work for the vast majority of use cases and it doesn’t waste the analysts time by making them do all the dirty work managing the RNG themselves. From its inception R has <em>never</em> been a language that cares about ideological purity: as Hadley Wickham once noted,<a href="#fn10" class="footnote-ref" id="fnref10" role="doc-noteref"><sup>10</sup></a> R is first and foremost a language for “getting shit done”.</p>
+<p>That being said, sometimes I find myself wishing there was a way of creating an “isolated” RNG seed. The idea here is that as the data analyst, I know perfectly well which parts of my code are essential to my probabilistic simulations, and what I really want to do is “protect” those parts of the code by executing them with a dedicated RNG. All my incidental code can use the global RNG state, but nothing I do in the incidental state would affect the output of the protected simulation code.</p>
+<p>On the face of it, this seems hard to accomplish with R because the <code>.Random.seed</code> variable is aggressively unique. The documentation makes it very clear that the only place R will look for the RNG state is the <code>.Random.seed</code> variable in the user global environment, so you cannot solve this problem by creating a new <code>.Random.seed</code> variable in another environment. However, the documentation also makes clear that you are <em>absolutely</em> allowed to save the value of <code>.Random.seed</code> and restore it later.<a href="#fn11" class="footnote-ref" id="fnref11" role="doc-noteref"><sup>11</sup></a> In other words, you totally could do something like this:</p>
+<ol type="1">
+<li>Use <code>set.seed()</code> to create the “to-be-isolated” RNG, and then do something like <code>protected_state &lt;- .Random.seed</code> to store the state of that RNG</li>
+<li>Use <code>set.seed()</code> again to set the “global” RNG state</li>
+<li>Do some “incidental” random things (implicitly using the global RNG state)</li>
+<li>In preparation for the protected step, cache the global state in a temporary <code>global_state &lt;- .Random.seed</code></li>
+<li>Restore the protected RNG with <code>.Random.seed &lt;- protected_state</code></li>
+<li>Run your “protected” simulation code</li>
+<li>Capture the updated state <code>protected_state &lt;- .Random.seed</code></li>
+<li>Restore the global RNG with <code>.Random.seed &lt;- global_state</code></li>
+</ol>
+<p>This approach works perfectly well, actually. There is absolutely nothing stopping you from caching the state of a protected RNG separately from the global RNG, and occasionally restoring it when you specifically want to use the protected RNG. The only problem with the solution is that I am <em>absolutely</em> not willing to faff about write code that does this. It’s time-consuming and annoying, and I have deadlines to meet.</p>
+<p>Enter, stage left, the <a href="https://r6.r-lib.org/">R6</a> package. It is almost obnoxiously easy to design a stateful R6 class that solves this problem. Here’s how you do it:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb16"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="co"># an R6 class that creates manages an isolated RNG seed</span></span>
-<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a>Seed <span class="ot">&lt;-</span> R6<span class="sc">::</span><span class="fu">R6Class</span>(<span class="st">"Seed"</span>,</span>
-<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">public =</span> <span class="fu">list</span>(</span>
-<span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a>    <span class="at">initialize =</span> <span class="cf">function</span>(...) {</span>
-<span id="cb16-5"><a href="#cb16-5" aria-hidden="true" tabindex="-1"></a>      old <span class="ot">&lt;-</span> .Random.seed</span>
-<span id="cb16-6"><a href="#cb16-6" aria-hidden="true" tabindex="-1"></a>      <span class="fu">set.seed</span>(...)</span>
-<span id="cb16-7"><a href="#cb16-7" aria-hidden="true" tabindex="-1"></a>      self<span class="sc">$</span>state <span class="ot">&lt;-</span> <span class="fu">eval</span>(.Random.seed, <span class="at">envir =</span> .GlobalEnv)</span>
-<span id="cb16-8"><a href="#cb16-8" aria-hidden="true" tabindex="-1"></a>      <span class="fu">assign</span>(<span class="st">".Random.seed"</span>, old, <span class="at">envir =</span> .GlobalEnv)</span>
-<span id="cb16-9"><a href="#cb16-9" aria-hidden="true" tabindex="-1"></a>    },</span>
-<span id="cb16-10"><a href="#cb16-10" aria-hidden="true" tabindex="-1"></a>    <span class="at">state =</span> <span class="cn">NULL</span>,</span>
-<span id="cb16-11"><a href="#cb16-11" aria-hidden="true" tabindex="-1"></a>    <span class="at">use =</span> <span class="cf">function</span>(expr, <span class="at">envir =</span> <span class="fu">parent.frame</span>()) {</span>
-<span id="cb16-12"><a href="#cb16-12" aria-hidden="true" tabindex="-1"></a>      old <span class="ot">&lt;-</span> .Random.seed</span>
-<span id="cb16-13"><a href="#cb16-13" aria-hidden="true" tabindex="-1"></a>      <span class="fu">assign</span>(<span class="st">".Random.seed"</span>, self<span class="sc">$</span>state, <span class="at">envir =</span> .GlobalEnv)</span>
-<span id="cb16-14"><a href="#cb16-14" aria-hidden="true" tabindex="-1"></a>      x <span class="ot">&lt;-</span> <span class="fu">eval</span>(<span class="fu">substitute</span>(expr), <span class="at">envir =</span> envir)</span>
-<span id="cb16-15"><a href="#cb16-15" aria-hidden="true" tabindex="-1"></a>      self<span class="sc">$</span>state <span class="ot">&lt;-</span> <span class="fu">eval</span>(.Random.seed, <span class="at">envir =</span> .GlobalEnv)</span>
-<span id="cb16-16"><a href="#cb16-16" aria-hidden="true" tabindex="-1"></a>      <span class="fu">assign</span>(<span class="st">".Random.seed"</span>, old, <span class="at">envir =</span> .GlobalEnv)</span>
-<span id="cb16-17"><a href="#cb16-17" aria-hidden="true" tabindex="-1"></a>      <span class="fu">return</span>(x)</span>
-<span id="cb16-18"><a href="#cb16-18" aria-hidden="true" tabindex="-1"></a>    }</span>
-<span id="cb16-19"><a href="#cb16-19" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb16-20"><a href="#cb16-20" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb16-21"><a href="#cb16-21" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb16-22"><a href="#cb16-22" aria-hidden="true" tabindex="-1"></a><span class="co"># constructor function</span></span>
-<span id="cb16-23"><a href="#cb16-23" aria-hidden="true" tabindex="-1"></a>new_seed <span class="ot">&lt;-</span> <span class="cf">function</span>(...) Seed<span class="sc">$</span><span class="fu">new</span>(...)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb16"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a>Seed <span class="ot">&lt;-</span> R6<span class="sc">::</span><span class="fu">R6Class</span>(<span class="st">"Seed"</span>,</span>
+<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">public =</span> <span class="fu">list</span>(</span>
+<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a>    <span class="at">initialize =</span> <span class="cf">function</span>(...) {</span>
+<span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a>      old <span class="ot">&lt;-</span> .Random.seed</span>
+<span id="cb16-5"><a href="#cb16-5" aria-hidden="true" tabindex="-1"></a>      <span class="fu">set.seed</span>(...)</span>
+<span id="cb16-6"><a href="#cb16-6" aria-hidden="true" tabindex="-1"></a>      self<span class="sc">$</span>state <span class="ot">&lt;-</span> <span class="fu">eval</span>(.Random.seed, <span class="at">envir =</span> .GlobalEnv)</span>
+<span id="cb16-7"><a href="#cb16-7" aria-hidden="true" tabindex="-1"></a>      <span class="fu">assign</span>(<span class="st">".Random.seed"</span>, old, <span class="at">envir =</span> .GlobalEnv)</span>
+<span id="cb16-8"><a href="#cb16-8" aria-hidden="true" tabindex="-1"></a>    },</span>
+<span id="cb16-9"><a href="#cb16-9" aria-hidden="true" tabindex="-1"></a>    <span class="at">state =</span> <span class="cn">NULL</span>,</span>
+<span id="cb16-10"><a href="#cb16-10" aria-hidden="true" tabindex="-1"></a>    <span class="at">use =</span> <span class="cf">function</span>(expr, <span class="at">envir =</span> <span class="fu">parent.frame</span>()) {</span>
+<span id="cb16-11"><a href="#cb16-11" aria-hidden="true" tabindex="-1"></a>      old <span class="ot">&lt;-</span> .Random.seed</span>
+<span id="cb16-12"><a href="#cb16-12" aria-hidden="true" tabindex="-1"></a>      <span class="fu">assign</span>(<span class="st">".Random.seed"</span>, self<span class="sc">$</span>state, <span class="at">envir =</span> .GlobalEnv)</span>
+<span id="cb16-13"><a href="#cb16-13" aria-hidden="true" tabindex="-1"></a>      x <span class="ot">&lt;-</span> <span class="fu">eval</span>(<span class="fu">substitute</span>(expr), <span class="at">envir =</span> envir)</span>
+<span id="cb16-14"><a href="#cb16-14" aria-hidden="true" tabindex="-1"></a>      self<span class="sc">$</span>state <span class="ot">&lt;-</span> <span class="fu">eval</span>(.Random.seed, <span class="at">envir =</span> .GlobalEnv)</span>
+<span id="cb16-15"><a href="#cb16-15" aria-hidden="true" tabindex="-1"></a>      <span class="fu">assign</span>(<span class="st">".Random.seed"</span>, old, <span class="at">envir =</span> .GlobalEnv)</span>
+<span id="cb16-16"><a href="#cb16-16" aria-hidden="true" tabindex="-1"></a>      <span class="fu">return</span>(x)</span>
+<span id="cb16-17"><a href="#cb16-17" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="cb16-18"><a href="#cb16-18" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb16-19"><a href="#cb16-19" aria-hidden="true" tabindex="-1"></a>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
-<p>Let’s test it. First, I’ll set the “usual” RNG state using <code>set.seed()</code> with <code>seed = 123</code>. Then, I’ll use the constructor function <code>new_seed()</code> to create two new isolated RNG seeds, both of which use <code>seed = 1</code>:</p>
+<p>The <code>Seed</code> class is terribly simple. When you initialise a new <code>Seed</code> object, it temporarily caches the global <code>.Random.seed</code> state, then calls <code>set.seed()</code> to create the protected RNG state. This protected state is then cached within the <code>Seed</code> object itself as the <code>$state</code> field.<a href="#fn12" class="footnote-ref" id="fnref12" role="doc-noteref"><sup>12</sup></a> Finally, it restores the global <code>.Random.seed</code> variable to its original state.</p>
+<p>Using the protected seed is pretty straightforward: the <code>Seed</code> class has a <code>$use()</code> method to which you pass an R expression. All code in that expression is evaluated using the protected RNG state rather than the global state. The mechanism here is exatly the same: the <code>$use()</code> method caches the global RNG state, copies the <code>$state</code> field to the <code>.Random.seed</code>, then executes the R code. After the code has executed, the new value of <code>.Random.seed</code> is copied back to the <code>$state</code> field, and then the global state is restored.</p>
+<p>Let’s have a look at how it works. First, I’ll set the “usual” RNG state using <code>set.seed()</code> with <code>seed = 123</code>. Then, I’ll create two new isolated RNG seeds, both of which use <code>seed = 1</code>:</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb17"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">123</span>)</span>
 <span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a>state <span class="ot">&lt;-</span> .Random.seed</span>
-<span id="cb17-3"><a href="#cb17-3" aria-hidden="true" tabindex="-1"></a>x <span class="ot">&lt;-</span> <span class="fu">new_seed</span>(<span class="dv">1</span>)</span>
-<span id="cb17-4"><a href="#cb17-4" aria-hidden="true" tabindex="-1"></a>y <span class="ot">&lt;-</span> <span class="fu">new_seed</span>(<span class="dv">1</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<span id="cb17-3"><a href="#cb17-3" aria-hidden="true" tabindex="-1"></a>x <span class="ot">&lt;-</span> Seed<span class="sc">$</span><span class="fu">new</span>(<span class="dv">1</span>)</span>
+<span id="cb17-4"><a href="#cb17-4" aria-hidden="true" tabindex="-1"></a>y <span class="ot">&lt;-</span> Seed<span class="sc">$</span><span class="fu">new</span>(<span class="dv">1</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <p>Next, I’ll call <code>sample()</code> using these isolated seeds:</p>
 <div class="cell">
@@ -438,7 +451,12 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <pre><code>[1] TRUE</code></pre>
 </div>
 </div>
-<p>Yup. It works.<a href="#fn10" class="footnote-ref" id="fnref10" role="doc-noteref"><sup>10</sup></a></p>
+<p>Yup. It works.<a href="#fn13" class="footnote-ref" id="fnref13" role="doc-noteref"><sup>13</sup></a></p>
+</section>
+<section id="wrapping-up" class="level2">
+<h2 class="anchored" data-anchor-id="wrapping-up">Wrapping up</h2>
+<p>It would be pretty easy to wrap something like this in a package I suppose, but (a) I’m too lazy to write it myself, and (b) I think the use case for it is pretty narrowly confined to situations when you are writing a very long script that performs an “essential” simulation and also contains incidental code isn’t supposed to affect the simulation itself. Plus, and perhaps most importantly, (c) remember how I said this was a spider-fucking post? I said it and I bloody well meant it. I’m not trying to Solve A Big Problem here. I’m just playing around with code and enjoying the act of writing about it.</p>
+<p>That being said, I have to admit I’ve encountered a few situations in my professional life where I really wished there were a package that implemented something like the <code>Seed</code> class. I had one experience a little while back where I’d inherited a long simulation script that did the right thing insofar as it called <code>set.seed()</code> at the top of the script, but it had lots of essential simulation code interleaved between other code that was used for non-essential purposes and incidentally modified the RNG state. It was a nightmare to try to refactor the code without breaking reproducibility. Eventually I just had to give up. The code absolutely did need to be refactored because of the future use that we had in mind, and – despite the original programmers laudable effort to do the right thing – it was absolutely impossible to do so without changing the results of the simulations. It would have been a lot easier to do this if the “essential” simulation code had been properly isolated from the incidental code. Situations like this are exactly the ones where you want something like the <code>Seed</code> class.</p>
 
 
 </section>
@@ -456,7 +474,10 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <li id="fn7"><p>Note that the <code>.Random.seed</code> vector doesn’t actually exist at start up: it is created explicitly when the user calls <code>set.seed()</code>, but it will also be created for you if you do something that requires the RNG without previously calling <code>set.seed()</code>, using the current time and the process ID as the input.<a href="#fnref7" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
 <li id="fn8"><p>Parenthetically, if you want to configure R so that you get notified every time <code>.Random.seed</code> changes, you can set up a callback handler to do this. Henrik Bengtsson has a <a href="https://www.jottr.org/2020/09/21/detect-when-the-random-number-generator-was-used/">nice post</a> showing you how to do this. I have something similar set up in my <code>.Rprofile</code>.<a href="#fnref8" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
 <li id="fn9"><p>More generally, though, if you want to be completely safe you’d probably need to use tools like <a href="https://www.docker.com/">Docker</a>, <a href="https://rstudio.github.io/renv/">renv</a>, and <a href="https://github.com/r-lib/rig">rig</a> to control the computational environment. But that’s beyond the scope.<a href="#fnref9" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
-<li id="fn10"><p>It should go without saying that this isn’t guaranteed to work properly if we’re doing a multi-threaded execution thing. But that’s true for normal random number generation anyway: you need special tools when doing random number generation in parallel.<a href="#fnref10" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn10"><p>I’m too lazy to track down the original citation or the exact quote, but I think he said it during an rstudio::conf / posit::conf talk. The specifics don’t matter very much.<a href="#fnref10" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn11"><p>The exact phrasing in the documentation says that <code>.Random.seed</code> “can be saved and restored, but should not be altered by the user”, i.e., it’s totally fine to copy the RNG state, just don’t try to modify the values stored in the vector yourself because you’ll almost certainly mess it up.<a href="#fnref11" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn12"><p>I should probably have made this a private field rather than a public field, and then written a public accessor method like <code>$get_state()</code> or whatever. But this is a toy example, I’m not trying to be rigorous here.<a href="#fnref12" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn13"><p>It should go without saying that this isn’t guaranteed to work properly if we’re doing a multi-threaded execution thing. But that’s true for normal random number generation anyway: you need special tools when doing random number generation in parallel. One of these days I want to do a deep dive on that topic, but it’s totally something for a future post.<a href="#fnref13" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
 </ol>
 </section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div id="quarto-reuse" class="quarto-appendix-contents"><div><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2023,
   author = {Navarro, Danielle},
