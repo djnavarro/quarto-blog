@@ -15,7 +15,656 @@
 <link>https://blog.djnavarro.net/index.html</link>
 </image>
 <generator>quarto-1.3.433</generator>
-<lastBuildDate>Fri, 22 Dec 2023 13:00:00 GMT</lastBuildDate>
+<lastBuildDate>Tue, 26 Dec 2023 13:00:00 GMT</lastBuildDate>
+<item>
+  <title>Fine-grained control of RNG seeds in R</title>
+  <dc:creator>Danielle Navarro</dc:creator>
+  <link>https://blog.djnavarro.net/posts/2023-12-27_seedcatcher/index.html</link>
+  <description><![CDATA[ 
+
+
+
+
+<!--------------- my typical setup ----------------->
+<!--------------- post begins here ----------------->
+<p>Ah fuck it. So. Earlier this morning<sup>1</sup> I <a href="https://hachyderm.io/@djnavarro/111655059799138922">posted on mastodon</a> about the sense of sadness I have about the death of turn-of-the-century-yes-this-century blog culture:</p>
+<blockquote class="blockquote">
+<p>I was reading a thread about how the norms around blog posts have changed over the years, where “writing something up a blog post” now has a kind of formality to it that it didn’t have 20 years ago (yes, I did in fact have a blog in 2003), which in turn makes blogging feel more like work than joy. This seems like a genuine cultural loss.</p>
+</blockquote>
+<p>Once upon a much happier time, we had a blogging culture where writing a blog post didn’t have to be “A Very Serious Blog Post By A Very Serious Person”. The craft of blogging wasn’t built around the idea that blog posts are miniature journal articles. Back then it was understood that a blog post was an inherently ephemeral and rarely serious thing. You’d have an idle thought, spend a small amount of time developing the idea, write it up, and <strong>ET FUCKING VOILA BITCHES I HAVE A BLOG POST</strong>.</p>
+<p>I kind of loved that culture. It’s precisely in that spirit that I decided, in my last post, to cobble together an absolutely-cursed rethinking of the <a href="https://bookdown.org/yihui/blogdown/">blogdown</a> R package and write an unapologetically-unhinged <a href="https://knitr-11ty.djnavarro.net/posts/the-blogdown-of-theseus/">post</a> about it. The “eleventy plus knitr” system I built in an afternoon – following the <a href="https://www.youtube.com/watch?v=1i739SyCu9I">Bob Katter principle</a> in which “I ain’t spending any time on it, because in the meantime, every three months a person’s torn to pieces by a crocodile in North Queensland” – was a fun toy, and nothing more than that. This is <em>exactly</em> what blogs are for, and precisely the reason why the subtitle on that post is “Because you know what? I <em>am</em> here to <a href="https://www.urbandictionary.com/define.php?term=Not%20here%20to%20Fuck%20Spiders">fuck spiders</a>”. The entire purpose of blogging is to have some fun. It’s not a public relations exercise.<sup>2</sup> <sup>3</sup> <sup>4</sup></p>
+<p>So let’s fuck some spiders.</p>
+<section id="managing-computational-state-when-generating-pseudo-random-numbers" class="level2">
+<h2 class="anchored" data-anchor-id="managing-computational-state-when-generating-pseudo-random-numbers">Managing computational state when generating pseudo-random numbers</h2>
+<p>The spider I’m thinking about today relates to the problem of generating pseudo-random numbers in a reproducible way. Generating a sequence of numbers that satisfy formal definitions of randomness is an inherently tricky business and programming languages have a very, ummmmm, mixed track record in finding ways to do it sanely. The core of the problem lies in the fact that computers are Turing machines, and as such are deterministic systems. You can’t make a deterministic system behave “randomly” without doing quite a bit of mathematical work to (a) decide what “randomly” means in this context and, (b) constructing algorithms that produce behaviour that we are willing to describe as “random”. Fortunately for us, this part of the problem was solved a long time ago, and I have no desire whatsoever to use this post to discuss the <a href="https://en.wikipedia.org/wiki/Mersenne_Twister">Mersenne Twister</a> in relation to <a href="https://en.wikipedia.org/wiki/Algorithmically_random_sequence">Martin-Löf randomness</a>.<sup>5</sup> The algorithm is good enough for my purposes, it’s implemented as a random number generator (usually one of many) in various language, and that is <em>fine</em>.</p>
+<p>The tricky part, from a practical perspective, is that pseudo-random number generators are <a href="https://en.wikipedia.org/wiki/State_(computer_science)">stateful</a> entities that depend on a “random number generator seed”, and – by design! – they are spectacularly sensitive to the seed. If you do even the tiniest thing in your code that touches the RNG seed, <em>every</em> subsequent action that uses that RNG will be changed in fundamental ways. If you want to program carefully around random number generators, you need to be super careful with managing the RNG seed.</p>
+<p>Ah fuck it. <a href="https://www.youtube.com/watch?v=suAR1PYFNYA">Dua Lipa</a> already said it better:</p>
+<blockquote class="blockquote">
+<p>I come and I go <br> Tell me all the ways you need me <br> I’m not here for long <br> Catch me or I go Houdini <br> I come and I go <br> Prove you got the right to please me <br> Everybody knows <br> Catch me or I go Houdini</p>
+</blockquote>
+<p>From a reproducible computing perspective, you’d better catch the RNG state and work carefully with it, or else it will be gone forever.</p>
+<p><img src="https://blog.djnavarro.net/posts/2023-12-27_seedcatcher/houdini.png" class="img-fluid" alt="Screenshot from the video clip to 'Houdini'"></p>
+</section>
+<section id="how-do-different-languages-manage-rng-state" class="level2">
+<h2 class="anchored" data-anchor-id="how-do-different-languages-manage-rng-state">How do different languages manage RNG state?</h2>
+<p>How should we manage the RNG state in a programming language? It’s a difficult problem, and I am absolutely <em>not</em> the person to resolve the question. I’m basically an idiot, and I don’t even pretend to know what the right answer to this is. That being said, I think there’s essentially three categories of solution that exist in the wild:</p>
+<ul>
+<li><p><strong>The javascript style:</strong> The solution in vanilla javascript is basically a “fuck you” to the user. The core random number generator is <code>Math.random()</code> and it doesn’t let you specify the seed at all. If you want reproducible sequences of random numbers in javascript you can go fuck yourself.<sup>6</sup></p></li>
+<li><p><strong>The C++ style:</strong> The solution in C++ is to use the <code>random</code> library, in which the RNG state is itself an object that must be passed to a probabilistic function, creating an object that can then be used to generate random numbers using the RNG state. It’s somewhat rigorous, but it leads to code like this, which is so obnoxiously painful that I barely even have words:</p>
+<div class="sourceCode" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode cpp code-with-copy"><code class="sourceCode cpp"><span id="cb1-1"><span class="pp" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">#include </span><span class="im" style="color: #00769E;
+background-color: null;
+font-style: inherit;">&lt;iostream&gt;</span></span>
+<span id="cb1-2"><span class="pp" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">#include </span><span class="im" style="color: #00769E;
+background-color: null;
+font-style: inherit;">&lt;random&gt;</span></span>
+<span id="cb1-3"></span>
+<span id="cb1-4"><span class="dt" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">int</span> main<span class="op" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">()</span> <span class="op" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">{</span></span>
+<span id="cb1-5">    <span class="co" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">// set seed using time, define PRNG with Mersenne Twister</span></span>
+<span id="cb1-6">    <span class="dt" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">long</span> <span class="dt" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">unsigned</span> <span class="dt" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">int</span> seed <span class="op" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">=</span> <span class="kw" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">static_cast</span><span class="op" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">&lt;</span><span class="dt" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">long</span> <span class="dt" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">unsigned</span> <span class="dt" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">int</span><span class="op" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">&gt;(</span>time<span class="op" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">(</span><span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">0</span><span class="op" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">));</span></span>
+<span id="cb1-7">    <span class="bu" style="color: null;
+background-color: null;
+font-style: inherit;">std::</span>mt19937_64<span class="op" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;"> </span>mersenne <span class="op" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">{</span>seed<span class="op" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">};</span></span>
+<span id="cb1-8"></span>
+<span id="cb1-9">    <span class="co" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">// sample_poisson() draws from Poisson(4.1) and returns an integer.</span></span>
+<span id="cb1-10">    <span class="bu" style="color: null;
+background-color: null;
+font-style: inherit;">std::</span>poisson_distribution<span class="op" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">&lt;</span><span class="dt" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">int</span><span class="op" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">&gt;</span> sample_poisson<span class="op" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">(</span><span class="fl" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">4.1</span><span class="op" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">);</span></span>
+<span id="cb1-11"></span>
+<span id="cb1-12">    <span class="co" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">// draw poisson sample (passing the PRNG as argument) and write to stdout</span></span>
+<span id="cb1-13">    <span class="bu" style="color: null;
+background-color: null;
+font-style: inherit;">std::</span>cout<span class="op" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;"> &lt;&lt;</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"poisson sample: "</span> <span class="op" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">&lt;&lt;</span> sample_poisson<span class="op" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">(</span>mersenne<span class="op" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">)</span> <span class="op" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">&lt;&lt;</span> <span class="bu" style="color: null;
+background-color: null;
+font-style: inherit;">std::</span>endl<span class="op" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">;</span></span>
+<span id="cb1-14">    <span class="cf" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">return</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">0</span><span class="op" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">;</span></span>
+<span id="cb1-15"><span class="op" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">}</span></span></code></pre></div>
+<p>Honey I just wanted some Poisson variates I didn’t want your life story.</p></li>
+<li><p><strong>The R style:</strong> Okay what if we secretly placed the RNG state into a <code>.Random.seed</code> variable that exists in the global environment but made it invisible so a typical user will never see it or think about it, and then have a <code>set.seed()</code> function to control it in ways that 99% of users won’t ever think about?</p></li>
+</ul>
+<p>Um. There is, as the young people say, a lot to unpack here.</p>
+</section>
+<section id="on-the-particulars-of-the-r-approach" class="level2">
+<h2 class="anchored" data-anchor-id="on-the-particulars-of-the-r-approach">On the particulars of the R approach</h2>
+<p>Okay yes, that little summary is a bit of rhetorical largesse on my part. It should be obvious to anyone who knows me that the primary focus I have in writing about this topic is thinking about how R solves this. The whole purpose of talking about the “three styles” in the previous section is that I want to contrast the core approach in R with two other styles I’ve seen in other languages: compared to R, javascript is utterly lacking in rigour on this topic and as a consequence is utterly useless for analysts, whereas – by way of deliberately constructed contrast – C++ has rigour but is utterly lacking in practicality for everyday data analysis. The set of analysts who are going to put up with C++ bullshit when trying to simulate from a model is perilously close to measure zero. There is a <em>reason</em> why R adopts the peculiar solution it does.<sup>7</sup></p>
+<p>So let’s unpack it a tiny bit. We’ll start by looking at the <code>.Random.seed</code> object itself.</p>
+<section id="whats-in-the-.random.seed-babe" class="level3">
+<h3 class="anchored" data-anchor-id="whats-in-the-.random.seed-babe">What’s in the <code>.Random.seed</code> babe?</h3>
+<p>As I mentioned, what R does when you call <code>set.seed()</code> is create a hidden variable called <code>.Random.seed</code> that exists in the users global workspace, and is used to specify the state of the random number generator.<sup>8</sup> Here’s what it looks like when we call <code>set.seed()</code> with <code>seed = 1</code>:</p>
+<div class="cell" data-out.lines="4">
+<div class="sourceCode cell-code" id="cb2" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">set.seed</span>(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">1</span>)</span>
+<span id="cb2-2">state <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> .Random.seed</span>
+<span id="cb2-3">state</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>  [1]       10403         624  -169270483  -442010614  -603558397
+  [6]  -222347416  1489374793   865871222  1734802815    98005428
+ [11]   268448037    63650722 -1754793285 -2135275840  -779982911
+ [16]  -864886130  1880007095   463784588  1271615005  1390544442
+....</code></pre>
+</div>
+</div>
+<p>I’ve truncated the output because the actual <code>state</code> variable here is quite long and we don’t need all that clutter.<sup>9</sup> It’s noticeable, when you look at this thing, that the first two elements of the <code>.Random.seed</code> seem to be rather different from the others. Let’s test that by calling <code>set.seed()</code> with <code>seed = 2</code>:</p>
+<div class="cell" data-out.lines="4">
+<div class="sourceCode cell-code" id="cb4" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">set.seed</span>(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">2</span>)</span>
+<span id="cb4-2">state <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> .Random.seed</span>
+<span id="cb4-3">state</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>  [1]       10403         624 -1619336578  -714750745  -765106180
+  [6]   158863565 -1093870294   242367651 -1691232888 -1538791959
+ [11]   438890646  -141146593   721730004  1779208901   575310018
+ [16]  -949789349   329933024  -952437919  2079445422  1509473879
+....</code></pre>
+</div>
+</div>
+<p>Yeah okay, there’s something going on here. The first two values in this vector are clearly different in some sense from the rest of the numbers. Let’s start with the first element of our state vector, the <code>10403</code> value. This one is not part of the random number generator itself. Rather, it’s used to encode the <em>kind</em> of random number generator in use. The way to decode what means is to split it up into three numbers, like this <code>1 04 03</code>. From the help documentation:</p>
+<blockquote class="blockquote">
+<p>The lowest two decimal digits are in 0:(k-1) where k is the number of available RNGs. The hundreds represent the type of normal generator (starting at 0), and the ten thousands represent the type of discrete uniform sampler.</p>
+</blockquote>
+<p>To help make sense of this, it helps to realise that <code>set.seed()</code> has more arguments to it than just the <code>seed</code> value. There are in fact four arguments, as shown below:</p>
+<div class="sourceCode" id="cb6" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">set.seed</span>(seed, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">kind =</span> <span class="cn" style="color: #8f5902;
+background-color: null;
+font-style: inherit;">NULL</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">normal.kind =</span> <span class="cn" style="color: #8f5902;
+background-color: null;
+font-style: inherit;">NULL</span>, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">sample.kind =</span> <span class="cn" style="color: #8f5902;
+background-color: null;
+font-style: inherit;">NULL</span>)</span></code></pre></div>
+<p>The <code>kind</code> argument specifies which RNG algorithm should be used to generate uniform random numbers (e.g., Mersenne Twister, the default), which is usually the thing we’re interested in, at least to the extent that most probabilistic process require that we have a generator for uniform random numbers. This is what the <code>03</code> part of that <code>10403</code> number refers to. However. There are two special cases that come up so often that R allows you to customise them. The <code>normal.kind</code> argument to <code>set.seed()</code> specifies the algorithm to by used when generating normally distributed numbers (e.g., Box-Muller), and this is is what the <code>04</code> part of <code>10403</code> references. The <code>sample.kind</code> argument refers to the algorithm used when sampling from a discrete set (e.g., as in the <code>sample()</code> function), and the <code>1</code> part of <code>10403</code> refers to that.</p>
+<p>As to what the different options are, what defaults are used, and how those defaults have changed across different versions of R, I’ll just refer the interested reader to the help documentation, because honestly that’s not the point of this post. For now, it’s enough to recognise that the first element of <code>.Random.seed</code> specifies the kind of RNG, and that by default we’re using the Mersenne Twister any time we need uniform random numbers.</p>
+<p>Okay, what about that second element? Much like the <code>10403</code> value in the first position, the <code>624</code> number in the second position seems to be screaming out “hello I am not actually a part of the RNG state” too, and indeed that’s correct. It’s specific to the Mersenne Twister, and is used to indicate that the <em>actual</em> Mersenne Twister RNG state is an integer vector of length 624. And shockingly, if we take a look at how long our <code>state</code> variable is</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb7" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">length</span>(state)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] 626</code></pre>
+</div>
+</div>
+<p>we get an answer of 626: there are 624 integers used to specify the state of the Mersenne Twister, one integer used to indicate that yes the Mersenne Twister state has length 624, and one more integer used to indicate that (among other things) we’re using the Mersenne Twister.</p>
+<p>That checks out.</p>
+</section>
+<section id="lets-be-random" class="level3">
+<h3 class="anchored" data-anchor-id="lets-be-random">Let’s be random</h3>
+<p>Well that was tiresome. I seem to be pathologically incapable of writing a short blog post without going off on bizarre yak-shaving tangents. Sorry. Anyway, let’s get back on track and do something that relies on the state of the RNG, shall we? First, we’ll reset the value of <code>.Random.seed</code> and capture its initial value:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb9" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">set.seed</span>(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">1</span>)</span>
+<span id="cb9-2">state <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> .Random.seed</span></code></pre></div>
+</div>
+<p>Next, I’ll do something that requires the random number generator:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb10" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">sample</span>(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">10</span>)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code> [1]  9  4  7  1  2  5  3 10  6  8</code></pre>
+</div>
+</div>
+<p>When I do this, there are two things that happen. Most obviously, by calling <code>sample()</code> I now have a random permutation of the numbers between 1 to 10. But as a hidden side effect, the value of <code>.Random.seed</code> has changed.<sup>10</sup> Because the RNG state has changed, if I repeat the exercise I get a different random permutation:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb12" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb12-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">sample</span>(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">10</span>)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code> [1]  3  1  5  8  2  6 10  9  4  7</code></pre>
+</div>
+</div>
+<p>This is of course the desired behaviour, but the only reason it works is by relying on the <code>.Random.seed</code> vector. If I restore the original state of the RNG before calling <code>sample()</code>, I get the exact same result as the first time:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb14" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb14-1">.Random.seed <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> state</span>
+<span id="cb14-2"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">sample</span>(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">10</span>)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code> [1]  9  4  7  1  2  5  3 10  6  8</code></pre>
+</div>
+</div>
+<p>Again, this is expected and desired behaviour.</p>
+</section>
+<section id="strengths-and-weaknesses-of-the-r-approach" class="level3">
+<h3 class="anchored" data-anchor-id="strengths-and-weaknesses-of-the-r-approach">Strengths and weaknesses of the R approach</h3>
+<p>The approach used in R reflect as a specific philosophy that emerges from the core purpose of the language: <strong>R is a scripting language designed to support scientific data analysis</strong>. This core goal leads to two key features:</p>
+<ul>
+<li><p>Scientists care about computational reproducibility, so (unlike javascript) base R comes with the <code>set.seed()</code> function that allows you to initialise the state of the RNG in a reproducible way. In fact, R goes one step further and provides a <code>RNGversion()</code> function that supports backward-compatibility across R versions, because the low level details of how R implements random number generation have changed over the years.</p></li>
+<li><p>Data analysts need simple, practical solutions. The C++ style where you have to construct an RNG object and then explicitly pass it as an argument when you want to sample from a distribution is awkward and frustrating, and rarely helpful when doing everyday data analysis.</p></li>
+</ul>
+<p>These twin considerations lead to the R solution: there’s <em>one</em> RNG state variable in R, tucked away in a hidden variable in the user workspace, and you rarely have to think about it in any more detail than remembering to include <code>set.seed()</code> in your analysis script. In some ways it’s an inelegant solution, but it’s shockingly effective from a practical standpoint.</p>
+<p>However.</p>
+<p>There are edge cases when the R solution doesn’t quite work as well as you’d hope, and I’ve encountered them more than once. Because R relies on a single <code>.Random.seed</code> variable to manage state, there’s no easy way for the analyst to make a distinction between “things I’m doing that incidentally require some random numbers”, and “other probabilistic things I’m doing that are utterly essential to a simulation”. Everything you do in an R script relies on the <em>same</em> random number generator, and uses the <em>same</em> seed to manage that state. This can sometimes be fragile, because any line of code that “incidentally” touches the RNG will affect the results from any “essential” probabilistic code you write later in the script. That happens a lot with code that has this structure:</p>
+<ol type="1">
+<li>set the RNG seed</li>
+<li>do some essential probabilistic simulations</li>
+<li>do something that incidentally calls the RNG</li>
+<li>do some more essential probabilistic simulation</li>
+</ol>
+<p>When you write the code, what you sort of have in your head is that “I’m setting the RNG seed in part 1 in order to ensure that the simulations in part 2 and 4 are reproducible”, but you have a hidden dependence on the code in part 3. Often times, you don’t even realise that the code in part 3 is affecting the RNG state because there are lots of R functions that incidentally use the RNG without you realising it.</p>
+<p>Often what people do to address this, when they are aware of this issue, is to set the seed multiple times, at key points in the code:</p>
+<ol type="1">
+<li>set the RNG seed</li>
+<li>do some essential probabilistic simulations</li>
+<li>do something that incidentally calls the RNG</li>
+<li>set the RNG seed again</li>
+<li>do some more essential probabilistic simulation</li>
+</ol>
+<p>By setting the seed in multiple places, you have a solution that is more robust. If, for example, there are package updates that change the manner in which the code in part 3 touches the RNG, your simulation in part 5 won’t be affected. It’s a defensive coding trick to minimise your exposure to unexpected changes to RNG state, and it works pretty well.<sup>11</sup></p>
+<p><img src="https://blog.djnavarro.net/posts/2023-12-27_seedcatcher/dance-the-night.png" class="img-fluid" alt="Screenshot from the video clip to 'Dance The Night' by Dua Lipa"></p>
+</section>
+</section>
+<section id="creating-an-isolated-rng-seed" class="level2">
+<h2 class="anchored" data-anchor-id="creating-an-isolated-rng-seed">Creating an “isolated” RNG seed</h2>
+<p>As you can probably guess, I am actually a huge fan of the R solution. Yes, it’s an unprincipled hack where the language “cheats” by creating a hidden global state variable, but it really does work for the vast majority of use cases and it doesn’t waste the analysts time by making them do all the dirty work managing the RNG themselves. From its inception R has <em>never</em> been a language that cares about ideological purity: as Hadley Wickham once noted,<sup>12</sup> R is first and foremost a language for “getting shit done”.</p>
+<p>That being said, sometimes I find myself wishing there was a way of creating an “isolated” RNG seed. The idea here is that as the data analyst, I know perfectly well which parts of my code are essential to my probabilistic simulations, and what I really want to do is “protect” those parts of the code by executing them with a dedicated RNG. All my incidental code can use the global RNG state, but nothing I do in the incidental code would affect the output of the protected simulation code, <a href="https://www.youtube.com/watch?v=OiC1rgCPmUQ">not one hair out of place</a>.</p>
+<blockquote class="blockquote">
+<p>Watch me dance, dance the night away <br> My heart could be burnin’, but you won’t see it on my face <br> Watch me dance, dance the night away <br> I’ll still keep the party runnin’, not one hair out of place</p>
+</blockquote>
+<p>On the face of it, this seems hard to accomplish with R because the <code>.Random.seed</code> variable is aggressively unique. The documentation makes it very clear that the only place R will look for the RNG state is the <code>.Random.seed</code> variable in the user global environment, so you cannot solve this problem by creating a new <code>.Random.seed</code> variable in another environment. However, the documentation also makes clear that you are <em>absolutely</em> allowed to save the value of <code>.Random.seed</code> and restore it later.<sup>13</sup> In other words, you totally could do something like this:</p>
+<ol type="1">
+<li>Use <code>set.seed()</code> to create the “to-be-isolated” RNG, and then do something like <code>protected_state &lt;- .Random.seed</code> to store the state of that RNG</li>
+<li>Use <code>set.seed()</code> again to set the “global” RNG state</li>
+<li>Do some “incidental” random things (implicitly using the global RNG state)</li>
+<li>In preparation for the protected step, cache the global state in a temporary <code>global_state &lt;- .Random.seed</code></li>
+<li>Restore the protected RNG with <code>.Random.seed &lt;- protected_state</code></li>
+<li>Run your “protected” simulation code</li>
+<li>Capture the updated state <code>protected_state &lt;- .Random.seed</code></li>
+<li>Restore the global RNG with <code>.Random.seed &lt;- global_state</code></li>
+</ol>
+<p>This approach works perfectly well, actually. There is absolutely nothing stopping you from caching the state of a protected RNG separately from the global RNG, and occasionally restoring it when you specifically want to use the protected RNG. The only problem with the solution is that I am <em>absolutely</em> not willing to faff about writing code that does this in my everyday analysis work. It’s time-consuming and annoying, and I have deadlines to meet.</p>
+<p>Enter, stage left, the <a href="https://r6.r-lib.org/">R6</a> package. It is almost obnoxiously easy to design a stateful R6 class that solves this problem. Here’s how you do it:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb16" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb16-1">Seed <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> R6<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">R6Class</span>(<span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"Seed"</span>,</span>
+<span id="cb16-2">  <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">public =</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">list</span>(</span>
+<span id="cb16-3">    <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">initialize =</span> <span class="cf" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">function</span>(...) {</span>
+<span id="cb16-4">      old <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">eval</span>(.Random.seed, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">envir =</span> .GlobalEnv)</span>
+<span id="cb16-5">      <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">set.seed</span>(...)</span>
+<span id="cb16-6">      self<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span>state <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">eval</span>(.Random.seed, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">envir =</span> .GlobalEnv)</span>
+<span id="cb16-7">      <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">assign</span>(<span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">".Random.seed"</span>, old, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">envir =</span> .GlobalEnv)</span>
+<span id="cb16-8">    },</span>
+<span id="cb16-9">    <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">state =</span> <span class="cn" style="color: #8f5902;
+background-color: null;
+font-style: inherit;">NULL</span>,</span>
+<span id="cb16-10">    <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">use =</span> <span class="cf" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">function</span>(expr, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">envir =</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">parent.frame</span>()) {</span>
+<span id="cb16-11">      old <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">eval</span>(.Random.seed, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">envir =</span> .GlobalEnv)</span>
+<span id="cb16-12">      <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">assign</span>(<span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">".Random.seed"</span>, self<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span>state, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">envir =</span> .GlobalEnv)</span>
+<span id="cb16-13">      x <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">eval</span>(<span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">substitute</span>(expr), <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">envir =</span> envir)</span>
+<span id="cb16-14">      self<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span>state <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">eval</span>(.Random.seed, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">envir =</span> .GlobalEnv)</span>
+<span id="cb16-15">      <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">assign</span>(<span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">".Random.seed"</span>, old, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">envir =</span> .GlobalEnv)</span>
+<span id="cb16-16">      <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">return</span>(x)</span>
+<span id="cb16-17">    }</span>
+<span id="cb16-18">  )</span>
+<span id="cb16-19">)</span></code></pre></div>
+</div>
+<p>The <code>Seed</code> class is terribly simple. When you initialise a new <code>Seed</code> object, it temporarily caches the global <code>.Random.seed</code> state, then calls <code>set.seed()</code> to create the protected RNG state. This protected state is then cached within the <code>Seed</code> object itself as the <code>$state</code> field.<sup>14</sup> Finally, it restores the global <code>.Random.seed</code> variable to its original state.</p>
+<p>Using the protected seed is pretty straightforward: the <code>Seed</code> class has a <code>$use()</code> method to which you pass an R expression. All code in that expression is evaluated using the protected RNG state rather than the global state. The mechanism here is exatly the same: the <code>$use()</code> method caches the global RNG state, copies the <code>$state</code> field to the <code>.Random.seed</code>, then executes the R code. After the code has executed, the new value of <code>.Random.seed</code> is copied back to the <code>$state</code> field, and then the global state is restored.</p>
+<p>Let’s have a look at how it works. First, I’ll set the “usual” RNG state using <code>set.seed()</code> with <code>seed = 123</code>. Then, I’ll create two new isolated RNG seeds, both of which use <code>seed = 1</code>:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb17" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb17-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">set.seed</span>(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">123</span>)</span>
+<span id="cb17-2">state <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> .Random.seed</span>
+<span id="cb17-3">x <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> Seed<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">new</span>(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">1</span>)</span>
+<span id="cb17-4">y <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> Seed<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">new</span>(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">1</span>)</span></code></pre></div>
+</div>
+<p>Next, I’ll call <code>sample()</code> using these isolated seeds:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb18" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1">x<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">use</span>(<span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">sample</span>(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">10</span>))</span>
+<span id="cb18-2">y<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">use</span>(<span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">sample</span>(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">10</span>))</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code> [1]  9  4  7  1  2  5  3 10  6  8
+ [1]  9  4  7  1  2  5  3 10  6  8</code></pre>
+</div>
+</div>
+<p>Notice that both of these produce identical output (as they should, since they were both initialised using the same <code>seed</code> value), and the output is exactly the same as the results we saw earlier when I used <code>set.seed(1)</code>. So far, so good. Okay, now let’s use these isolated seeds a second time:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb20" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb20-1">x<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">use</span>(<span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">sample</span>(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">10</span>))</span>
+<span id="cb20-2">y<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">use</span>(<span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">sample</span>(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">10</span>))</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code> [1]  3  1  5  8  2  6 10  9  4  7
+ [1]  3  1  5  8  2  6 10  9  4  7</code></pre>
+</div>
+</div>
+<p>Again, the results are identical to each other, and they’re also identical to the results we saw earlier when I called <code>sample()</code> a second time after using <code>set.seed(1)</code>. Also what we’re expecting. Yay! Finally, let’s check that using these isolated RNG seeds has left the state of <code>.Random.seed</code> in the global workspace unchanged:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb22" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb22-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">all.equal</span>(state, .Random.seed)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] TRUE</code></pre>
+</div>
+</div>
+<p>Yup. It works.<sup>15</sup></p>
+<p>Importantly for the desired functionality, the protection runs the other way too. RNG-sensitive code executed using the global RNG doesn’t affect the behaviour of code executed using one of the protected generators. This is actually the key feature, so let’s take a look. As before, we’ll set up our global generator and two identical protected generators.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb24" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb24-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">set.seed</span>(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">123</span>)</span>
+<span id="cb24-2">state <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> .Random.seed</span>
+<span id="cb24-3">x <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> Seed<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">new</span>(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">1</span>)</span>
+<span id="cb24-4">y <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> Seed<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">new</span>(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">1</span>)</span></code></pre></div>
+</div>
+<p>Next, I’ll use the <code>x</code> generator to do something that we might imagine is part of an “essential” simulation exercise:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb25" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb25-1">x<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">use</span>(<span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">sample</span>(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">10</span>))</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code> [1]  9  4  7  1  2  5  3 10  6  8</code></pre>
+</div>
+</div>
+<p>Unsurprisingly, it produces the same output. Now here’s the key part. What would have happened if I ran some incidental code beforehand? Well, let’s do exactly that:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb27" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb27-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">runif</span>(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">1</span>)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] 0.2875775</code></pre>
+</div>
+</div>
+<p>In my hypothetical scenario, this would be something that happens during the incidental code (e.g., maybe a function I called on the side – in order to explore something that came up during the scientific reasoning process, because analysis code is <em>not</em> production code and it has an inherently different logic<sup>16</sup> – happened to generate a random number in order to break a tie or whatever). In the normal course of events, this would alter the state of the RNG for all subsequent code. But, if we now repeat the “essential” line of code using the <code>y</code> generator, we see that it still produces the exact same answer:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb29" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb29-1">y<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">use</span>(<span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">sample</span>(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">10</span>))</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code> [1]  9  4  7  1  2  5  3 10  6  8</code></pre>
+</div>
+</div>
+<p>Well that’s a relief. I mean, this is what we should expect because <code>x</code> and <code>y</code> were both created to be identical generators and they were both designed to be isolated from the global RNG state, so of course state changes in the global RNG are entirely irrelevant to the behaviour of code that uses one of the protected generators, but it’s nice to confirm.</p>
+<p>This is the behaviour I wish I had easy access to in R. There are times when I have “special” code that I really, really, really want to be executed with its very own RNG, completely isolated from the global RNG. It actually irritates me that the solution to the problem can be implemented in R6 with a mere 19 lines of code. Annoyed that I didn’t think of this years ago tbqh.</p>
+</section>
+<section id="wrapping-up" class="level2">
+<h2 class="anchored" data-anchor-id="wrapping-up">Wrapping up</h2>
+<p>So okay, I solved the problem I was idly thinking about when I decided to fuck this particular spider. What now?</p>
+<p>It would be pretty easy to wrap something like this in a package I suppose,<sup>17</sup> but (a) I’m too lazy to write it myself, and (b) I think the use case for it is pretty narrowly confined to situations when you are writing a very long script that performs an “essential” simulation and also contains incidental code isn’t supposed to affect the simulation itself. Plus, and perhaps most importantly, (c) remember how I said this was a spider-fucking post? I said it and I bloody well meant it. I’m not trying to Solve A Big Problem here. I’m just playing around with code and enjoying the act of writing about it.</p>
+<p>That being said, I have to admit I’ve encountered a few situations in my professional life where I really wished there were a package that implemented something like the <code>Seed</code> class. I had one experience a little while back where I’d inherited a long simulation script that did the right thing insofar as it called <code>set.seed()</code> at the top of the script, but it had lots of essential simulation code interleaved between other code that was used for non-essential purposes and incidentally modified the RNG state. It was a nightmare to try to refactor the code without breaking reproducibility. Eventually I just had to give up. The code absolutely did need to be refactored because of the future use that we had in mind, and – despite the original programmers laudable effort to do the right thing – it was absolutely impossible to do so without changing the results of the simulations. It would have been a lot easier to do this if the “essential” simulation code had been properly isolated from the incidental code. Situations like this are exactly the ones where you want something like the <code>Seed</code> class.</p>
+<p>Anyway. Whatever. This was supposed to be an exercise in fucking a spider not shaving a yak, and frankly there has been altogether too much <a href="https://en.wiktionary.org/wiki/yak_shaving">yak shaving</a> going on in this post. So let’s leave it there, yes?</p>
+
+
+</section>
+
+
+<div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
+
+<ol>
+<li id="fn1"><p>Okay fine it was yesterday morning, because instead of finishing this blog post last night as I’d intended I went out for cocktails. Sue me.↩︎</p></li>
+<li id="fn2"><p>One of the most cursed things that has happened to public tech culture is the idea of corporate-style “community”. Oh look at me, I’m a tHouGHt lEaDer iN tEcH blah blah blah. Honey, if I wanted to masturbate in public there are much easier ways to make men pay to watch me do it.↩︎</p></li>
+<li id="fn3"><p>Somewhat relatedly, I often think to myself that the reason why a lot of technical blog posts end up with very bland writing is that the author feels obligated to “act professionally” on their blog, for fear that their employer might see it and react negatively if they ever use the word “fuck”. I understand and share that sentiment but also… I’ve worked as an academic, I’ve worked in tech, and I now work in pharma. Anyone who knows me professionally knows that (especially as I’ve gotten older) I don’t ever talk like this at work. Professionalism is important, <em>in a professional context</em>. But my blog is not my job, and in much the same way that <a href="https://blog.djnavarro.net/posts/2023-12-16_another-year-ends/#art">trying to be a professional artist sucked all the joy out of making art for me</a>, trying to be professional in my blog posts sucks all the joy out of writing. In my professional life I have to be restrained, and things that are essential to my very character – my queerness, for instance – are inadmissable and unspeakable in a work context. I’m frankly unwilling to extend that level of self-imposed closeting to my personal life. This blog is part of my personal life, not my professional life. So I get to be me here. If that bothers people they are free to not read my blog.↩︎</p></li>
+<li id="fn4"><p>As Dan Simpson once remarked, it is <em>extremely</em> homophobic of quarto not to support nested footnotes. Like, what the hell are queers supposed to do when we can’t turn our blog posts into a tangled web of unhinged footnotes? This is our primary defence mechanism to ensure that the straights on linkedin won’t ever try to interact with us, damn it.↩︎</p></li>
+<li id="fn5"><p>No seriously. I spent a solid six months of my mid-20s life reading journal articles about algorithmic randomness and its relationships to Kolmogorov complexity and Bayesian inference, when instead I could have spent that time going full femboy and it was a terrible fucking decision.↩︎</p></li>
+<li id="fn6"><p>Yes I know about <a href="https://www.npmjs.com/package/seedrandom">seedrandom</a>, shut up.↩︎</p></li>
+<li id="fn7"><p>In defence of both C++ and javascript, you could probably argue the same for those languages: C++ is a systems language, and you’re not really supposed to use it for everyday data analysis. The tedious verbosity of C++ code in this context reflects the function of the language. Similarly, javascript was designed to support scripting for web pages, and while there are now libraries that support data analysis in javascript, it wasn’t originally designed for that purpose and so “vanilla” javascript doesn’t come with the same level of careful thought on this topic that you see in base R. My point in using those two as contrasts to R is not to call them bad languages, but to highlight the fact that different languages make different choices that reflect the primary function those languages were designed to support.↩︎</p></li>
+<li id="fn8"><p>Note that the <code>.Random.seed</code> vector doesn’t actually exist at start up: it is created explicitly when the user calls <code>set.seed()</code>, but it will also be created for you if you do something that requires the RNG without previously calling <code>set.seed()</code>, using the current time and the process ID as the input.↩︎</p></li>
+<li id="fn9"><p>I swear to the almighty femme top above, every single time I have to write a knitr hook I have to spend 20 minutes googling to find <a href="https://bookdown.org/yihui/rmarkdown-cookbook/hook-truncate.html">this page</a> again. I don’t know why this specific thing is so hard to search for, but I’m about <em>this</em> close to writing a pointless blog post on my own site that just copies the damn code line for line, just so that I don’t have to search for it again.↩︎</p></li>
+<li id="fn10"><p>Parenthetically, if you want to configure R so that you get notified every time <code>.Random.seed</code> changes, you can set up a callback handler to do this. Henrik Bengtsson has a <a href="https://www.jottr.org/2020/09/21/detect-when-the-random-number-generator-was-used/">nice post</a> showing you how to do this. I have something similar set up in my <code>.Rprofile</code>.↩︎</p></li>
+<li id="fn11"><p>More generally, though, if you want to be completely safe you’d probably need to use tools like <a href="https://www.docker.com/">Docker</a>, <a href="https://rstudio.github.io/renv/">renv</a>, and <a href="https://github.com/r-lib/rig">rig</a> to control the computational environment. But that’s beyond the scope.↩︎</p></li>
+<li id="fn12"><p>I’m too lazy to track down the original citation or the exact quote, but I think he said it during an rstudio::conf / posit::conf talk. The specifics don’t matter very much.↩︎</p></li>
+<li id="fn13"><p>The exact phrasing in the documentation says that <code>.Random.seed</code> “can be saved and restored, but should not be altered by the user”, i.e., it’s totally fine to copy the RNG state, just don’t try to modify the values stored in the vector yourself because you’ll almost certainly mess it up.↩︎</p></li>
+<li id="fn14"><p>I should probably have made this a private field rather than a public field, and then written a public accessor method like <code>$get_state()</code> or whatever. But this is a toy example, I’m not trying to be rigorous here.↩︎</p></li>
+<li id="fn15"><p>It should go without saying that this isn’t guaranteed to work properly if we’re doing a multi-threaded execution thing. But that’s true for normal random number generation anyway: you need special tools when doing random number generation in parallel. One of these days I want to do a deep dive on that topic, but it’s totally something for a future post.↩︎</p></li>
+<li id="fn16"><p>One of these days I want to write a post about what counts as “best practice” for writing analysis code that doesn’t go into prod but might be sent to a regulator, because seriously my babes that is a fucking different beast altogether. But that’s for another time.↩︎</p></li>
+<li id="fn17"><p>On the off chance anyone does go down this path, I propose the name “seedcatcher” so that all the stats gays can make “no loads refused” jokes about it. See also, “lubridate”.↩︎</p></li>
+</ol>
+</section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div id="quarto-reuse" class="quarto-appendix-contents"><div><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2023,
+  author = {Navarro, Danielle},
+  title = {Fine-Grained Control of {RNG} Seeds in {R}},
+  date = {2023-12-27},
+  url = {https://blog.djnavarro.net/posts/2023-12-27_seedcatcher},
+  langid = {en}
+}
+</code></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2023" class="csl-entry quarto-appendix-citeas">
+Navarro, Danielle. 2023. <span>“Fine-Grained Control of RNG Seeds in
+R.”</span> December 27, 2023. <a href="https://blog.djnavarro.net/posts/2023-12-27_seedcatcher">https://blog.djnavarro.net/posts/2023-12-27_seedcatcher</a>.
+</div></div></section></div> ]]></description>
+  <category>R</category>
+  <category>Randomness</category>
+  <guid>https://blog.djnavarro.net/posts/2023-12-27_seedcatcher/index.html</guid>
+  <pubDate>Tue, 26 Dec 2023 13:00:00 GMT</pubDate>
+  <media:content url="https://blog.djnavarro.net/posts/2023-12-27_seedcatcher/houdini.jpg" medium="image" type="image/jpeg"/>
+</item>
 <item>
   <title>The blogdown of theseus</title>
   <dc:creator>Danielle Navarro</dc:creator>
@@ -20322,1325 +20971,6 @@ Factors.”</span> April 12, 2023. <a href="https://blog.djnavarro.net/posts/202
   <guid>https://blog.djnavarro.net/posts/2023-04-12_bayes-factors/index.html</guid>
   <pubDate>Tue, 11 Apr 2023 14:00:00 GMT</pubDate>
   <media:content url="https://blog.djnavarro.net/posts/2023-04-12_bayes-factors/katy.jpg" medium="image" type="image/jpeg"/>
-</item>
-<item>
-  <title>The Metropolis-Hastings algorithm</title>
-  <dc:creator>Danielle Navarro</dc:creator>
-  <link>https://blog.djnavarro.net/posts/2023-04-12_metropolis-hastings/index.html</link>
-  <description><![CDATA[ 
-
-
-
-
-<!--------------- my typical setup ----------------->
-<!--------------- post begins here ----------------->
-<p>This morning I received an email from a stranger, writing to say thank you for a document I wrote almost 13 years ago. It’s a weird feeling every time I get one of those,<sup>1</sup> but a pleasant one. This time around, the document in question was a <a href="https://compcogsci-3016.djnavarro.net/technote_metropolishastings.pdf">note on the Metropolis-Hastings algorithm</a> that I threw together in a rush for a computer science class I taught back in 2010.<sup>2</sup> While drinking my second coffee of the morning and feeling the usual sense of dread I feel when I know that today I have to put some effort into looking for a job, yet again, I arrived at an excellent procrastination strategy…</p>
-<p>Why don’t I start rescuing some of the content that I wrote all those years ago and currently have hidden away in pdf files in the dark corners of the internet, and put them up on my blog? Okay sure it won’t get me a job, but it feels less demeaning than yet again trying to get tech company recruiters to believe that yes actually the middle aged lady with a psychology PhD does in fact know how something about statistics and does know how to code.</p>
-<p>Anyway. Without further self-pity, here’s a quick primer on the <a href="https://en.wikipedia.org/wiki/Metropolis%E2%80%93Hastings_algorithm">Metropolis-Hastings algorithm</a>. The target audience for this is someone who has a little bit of probability theory, can write code in R (or similar), but doesn’t have any background in Markov chain Monte Carlo methods. It doesn’t dive deep into the mathematics – i.e., you won’t find any discussions of <a href="https://en.wikipedia.org/wiki/Detailed_balance">detailed balance</a>, <a href="https://en.wikipedia.org/wiki/Ergodicity">ergodicity</a>, and other things a statistics class would cover – but it does try to go deep enough to give a beginner an understanding of what the algorithm is doing.</p>
-<p><br></p>
-<section id="the-problem" class="level2">
-<h2 class="anchored" data-anchor-id="the-problem">The problem</h2>
-<p>The Metropolis-Hastings algorithm is perhaps the most popular example of a <a href="https://en.wikipedia.org/wiki/Markov_chain_Monte_Carlo">Markov chain Monte Carlo</a> (MCMC) method in statistics. The basic problem that it solves is to provide a method for sampling from some arbitrary probability distribution, which I’ll denote <img src="https://latex.codecogs.com/png.latex?p(x)">.<sup>3</sup> The idea is that in many cases, you know how to write out the equation for the probability <img src="https://latex.codecogs.com/png.latex?p(x)">, but you don’t know how to generate a random number from this distribution, <img src="https://latex.codecogs.com/png.latex?x%20%5Csim%20p(x)">. This is the situation where MCMC is handy. For example, suppose I’ve become interested – for reasons known but to the gods – in the probability distribution shown below:</p>
-<div class="cell">
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2023-04-12_metropolis-hastings/index_files/figure-html/unnamed-chunk-1-1.png" class="img-fluid" width="672"></p>
-</div>
-</div>
-<p>The probability density function<sup>4</sup> <img src="https://latex.codecogs.com/png.latex?p(x)"> for this distribution is given by the following equation:</p>
-<p><img src="https://latex.codecogs.com/png.latex?%0Ap(x)%20=%20%5Cfrac%7B%5Cexp(-x%5E2)%20%5Cleft(2%20+%20%5Csin(5x)%20+%20%5Csin(2x)%5Cright)%7D%7B%5Cint_%7B-%5Cinfty%7D%5E%5Cinfty%20%5Cexp(-u%5E2)%20%5Cleft(2%20+%20%5Csin(5u)%20+%20%5Csin(2u)%5Cright)%20%5C%20du%7D%0A"></p>
-<p>My problem is that I either don’t know <em>how</em> to solve the integral in the denominator, or I’m simply too lazy to try.<sup>5</sup> So this means in truth, I only know the distribution “up to some unknown constant”. That is, all I really know how to calculate is the numerator. Given this, a more realistic way to express my knowledge about the target distribution is captured by this equation:</p>
-<p><img src="https://latex.codecogs.com/png.latex?%0Ap(x)%20%5Cpropto%20%5Cexp(-x%5E2)%20%5Cleft(2%20+%20%5Csin(5x)%20+%20%5Csin(2x)%5Cright)%0A"> How can I generate samples from this distribution?</p>
-<p><br></p>
-</section>
-<section id="the-metropolis-hastings-algorithm" class="level2">
-<h2 class="anchored" data-anchor-id="the-metropolis-hastings-algorithm">The Metropolis-Hastings algorithm</h2>
-<p>The basic idea behind MCMC is very simple. The idea is to define a <a href="https://en.wikipedia.org/wiki/Markov_chain">Markov chain</a><sup>6</sup> over possible <img src="https://latex.codecogs.com/png.latex?x"> values, in such a way that the stationary distribution of the Markov chain is in fact <img src="https://latex.codecogs.com/png.latex?p(x)">. That is, what we’re going to do is use a Markov chain to generate a sequence of <img src="https://latex.codecogs.com/png.latex?x"> values, denoted <img src="https://latex.codecogs.com/png.latex?(x_0,%20x_1,%20x_2,%20%5Cldots,%20x_n)">, in such a way that as <img src="https://latex.codecogs.com/png.latex?n%20%5Crightarrow%20%5Cinfty">, we can guarantee that <img src="https://latex.codecogs.com/png.latex?x_n%20%5Csim%20p(x)">. There are many different ways of setting up a Markov chain that has this property. The Metropolis-Hastings algorithm is one of these.</p>
-<p><br></p>
-<section id="the-proposal-step" class="level3">
-<h3 class="anchored" data-anchor-id="the-proposal-step">The proposal step</h3>
-<p>Here’s how it works. Suppose that the current state of the Markov chain is <img src="https://latex.codecogs.com/png.latex?x_n">, and we want to generate <img src="https://latex.codecogs.com/png.latex?x_%7Bn+1%7D">. In the Metropolis-Hastings algorithm, the generation of <img src="https://latex.codecogs.com/png.latex?x_%7Bn+1%7D"> is a two-stage process.</p>
-<p>The first stage is to generate a <em>candidate</em>, which we’ll denote <img src="https://latex.codecogs.com/png.latex?x%5E%E2%88%97">. The value of <img src="https://latex.codecogs.com/png.latex?x%5E%E2%88%97"> is generated from the proposal distribution that we already know how to sample from. We denote this proposal distribution <img src="https://latex.codecogs.com/png.latex?q(x%5E%E2%88%97%20%7C%20x_n)">. Notice that the distribution we sample from depends on the current state of the Markov chain, <img src="https://latex.codecogs.com/png.latex?x_n">. There are some technical constraints on what you can use as a proposal distribution, but for the most part it can be anything you like.<sup>7</sup> A very typical way to do this is to use a normal distribution centered on the current state <img src="https://latex.codecogs.com/png.latex?x_n">. More formally, we write this as:</p>
-<p><img src="https://latex.codecogs.com/png.latex?%0Ax%5E*%20%7C%20x_n%20%5Csim%20%5Cmbox%7BNormal%7D(x_n,%20%5Csigma%5E2)%0A"> for some standard deviation <img src="https://latex.codecogs.com/png.latex?%5Csigma"> that we select in advance (more on this later!)</p>
-<p><br></p>
-</section>
-<section id="the-accept-reject-step" class="level3">
-<h3 class="anchored" data-anchor-id="the-accept-reject-step">The accept-reject step</h3>
-<p>The second stage is the accept-reject step. Firstly, what you need to do is calculate the <em>acceptance probability</em>, denoted <img src="https://latex.codecogs.com/png.latex?A(x_n%20%5Crightarrow%20x_%E2%88%97)">, which is given by:</p>
-<p><img src="https://latex.codecogs.com/png.latex?%0AA(x_n%20%5Crightarrow%20x_%E2%88%97)%20=%20%5Cmin%20%5Cleft(1,%20%5Cfrac%7Bp(x%5E*)%7D%7Bp(x%5En)%7D%20%5Ctimes%20%5Cfrac%7Bq(x_n%20%7C%20x%5E*)%7D%7Bq(x%5E*%20%7C%20x_n)%7D%20%5Cright)%0A"> There are two things to pay attention to here. Firstly, notice that the ratio <img src="https://latex.codecogs.com/png.latex?p(x%5E*)%20/%20p(x%5En)"> doesn’t depend on the normalising constant for the distribution. Or, to put it in a more helpful way, that integral in the first equation is completely irrelevant and we can ignore it. As a consequence, for our toy problem we can write this:</p>
-<p><img src="https://latex.codecogs.com/png.latex?%0A%5Cfrac%7Bp(x%5E*)%7D%7Bp(x%5En)%7D%20=%20%5Cfrac%7B%5Cexp(-%7Bx%5E*%7D%5E2)%20%5Cleft(2%20+%20%5Csin(5x%5E*)%20+%20%5Csin(2x%5E*)%5Cright)%7D%7B%5Cexp(-%7Bx_n%7D%5E2)%20%5Cleft(2%20+%20%5Csin(5x_n)%20+%20%5Csin(2x_n)%5Cright)%7D%0A"> That’s a nice simple thing to compute with no need for any numerical integration or, gods forbid, solving the integral analytically.</p>
-<p>The second thing to pay attention to is the behaviour of the other term, <img src="https://latex.codecogs.com/png.latex?q(x_n%20%7C%20x%5E*)%20/%20q(x%5E*%20%7C%20x_n)">. What this term does is correct for any biases that the proposal distribution might induce. In this expression, the denominator <img src="https://latex.codecogs.com/png.latex?q(x%5E%E2%88%97%20%7C%20x_n)"> describes the probability with which you’d choose <img src="https://latex.codecogs.com/png.latex?x%5E*"> as the candidate if the current state of the Markov chain is <img src="https://latex.codecogs.com/png.latex?x_n">. The numerator, however, describes the probability of a transition that goes the other way: that is, if the current state had actually been <img src="https://latex.codecogs.com/png.latex?x%5E%E2%88%97">, what is the probability that you would have generated <img src="https://latex.codecogs.com/png.latex?x%5En"> as the candidate value? If the proposal distribution is symmetric, then these two probabilities will turn out to be equal. For example, if the proposal distribution is normal, then:</p>
-<p><img src="https://latex.codecogs.com/png.latex?%0A%5Cbegin%7Barray%7D%7Brcl%7D%0Aq(x%5E*%20%7C%20x_n)%20&amp;%20=%20&amp;%20%5Cfrac%7B1%7D%7B%5Csqrt%7B2%20%5Cpi%7D%20%5Csigma%7D%20%5Cexp%20%5Cleft(%20-%5Cfrac%7B1%7D%7B2%20%5Csigma%5E2%7D%20%5Cleft(x_n%20-%20x%5E*%5Cright)%5E2%20%5Cright)%20%5C%5C%0Aq(x_n%20%7C%20x%5E*)%20&amp;%20=%20&amp;%20%5Cfrac%7B1%7D%7B%5Csqrt%7B2%20%5Cpi%7D%20%5Csigma%7D%20%5Cexp%20%5Cleft(%20-%5Cfrac%7B1%7D%7B2%20%5Csigma%5E2%7D%20%5Cleft(x%5E*%20-%20x_n%20%5Cright)%5E2%20%5Cright)%0A%5Cend%7Barray%7D%0A"></p>
-<p>Clearly, <img src="https://latex.codecogs.com/png.latex?q(x%5E*%20%7C%20x_n)%20=%20q(x_n%20%7C%20x%5E*)"> for all choices of <img src="https://latex.codecogs.com/png.latex?x_n"> and <img src="https://latex.codecogs.com/png.latex?x%5E*">, and as a consequence the ratio <img src="https://latex.codecogs.com/png.latex?q(x_n%20%7C%20x%5E*)%20/%20q(x%5E*%20%7C%20x_n)"> is always 1 in this case.</p>
-<p>This special case of the Metropolis-Hastings algorithm, in which the proposal distribution is symmetric, is referred to as the <em>Metropolis algorithm</em>.</p>
-<p>Okay. Having proposed the candidate <img src="https://latex.codecogs.com/png.latex?x%5E%E2%88%97"> and calculated the acceptance probability, <img src="https://latex.codecogs.com/png.latex?A(x_n%20%5Crightarrow%20x%5E%E2%88%97)">, we now either decide to “accept” the candidate and set <img src="https://latex.codecogs.com/png.latex?x_%7Bn+1%7D%20=%20x%5E%E2%88%97"> or we “reject” the candidate and set <img src="https://latex.codecogs.com/png.latex?x_%7Bn+1%7D%20=%20x_n">. To make this decision, we generate a uniformly distributed random number between 0 and 1, denoted <img src="https://latex.codecogs.com/png.latex?u">. Then:</p>
-<p><img src="https://latex.codecogs.com/png.latex?%0Ax_%7Bn+1%7D%20=%20%5Cleft%5C%7B%0A%5Cbegin%7Barray%7D%7Brl%7D%0Ax%5E*%20&amp;%20%5Cmbox%7B%20if%20%7D%20u%20%5Cleq%20A(x_n%20%5Crightarrow%20x%5E%E2%88%97)%20%5C%5C%0Ax_n%20&amp;%20%5Cmbox%7B%20otherwise%7D%0A%5Cend%7Barray%7D%0A%5Cright.%0A"> In essence, this is the entirety of the Metropolis-Hastings algorithm! True, there are quite a few technical issues that attach to this, and if you’re interested in using the algorithm for practical purposes I strongly encourage you to do some further reading to make sure you understand the traps in detail, but for now I’ll just give you some examples of things that work and things that don’t, to give you a bit of a feel for how it works in practice.</p>
-<p><br></p>
-</section>
-</section>
-<section id="implementing-the-sampler" class="level2">
-<h2 class="anchored" data-anchor-id="implementing-the-sampler">Implementing the sampler</h2>
-<p>Okay. That’s enough mathematics. Let’s have a look at some R code implementing the Metropolis-Hastings algorithm for the toy problem: can we write an R function that draws samples from the weird looking probability distribution I plotted at the start of this post?</p>
-<p>To do this, I’ll define the sampler in terms of three functions. First, we have a <code>target()</code> function that calculates the probability of a given sample <code>x</code>, or – more precisely – calculates the numerator term in the equation describing the probability density:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1">target <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">function</span>(x) {</span>
-<span id="cb1-2">  <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">exp</span>(<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span>x<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">^</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span>) <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span> (<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span> <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">sin</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">5</span> <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span> x) <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">sin</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span> <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span> x))</span>
-<span id="cb1-3">}</span></code></pre></div>
-</div>
-<p>Estoy emocionada. 😐</p>
-<p>Next we define a <code>metropolis_step()</code> function that takes some value <code>x</code> corresponding to the current state of the Markov chain, and a parameter <code>sigma</code> that describes the standard deviation of the proposal distribution:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb2" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1">metropolis_step <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">function</span>(x, sigma) {</span>
-<span id="cb2-2">  proposed_x <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">rnorm</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span>, <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">mean =</span> x, <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">sd =</span> sigma)</span>
-<span id="cb2-3">  accept_prob <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">min</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span>, <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">target</span>(proposed_x) <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">/</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">target</span>(x))</span>
-<span id="cb2-4">  u <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">runif</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span>)</span>
-<span id="cb2-5">  <span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">if</span>(u <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">&lt;=</span> accept_prob) {</span>
-<span id="cb2-6">    value <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> proposed_x</span>
-<span id="cb2-7">    accepted <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="cn" style="color: #8f5902;
-background-color: null;
-font-style: inherit;">TRUE</span></span>
-<span id="cb2-8">  } <span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">else</span> {</span>
-<span id="cb2-9">    value <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> x</span>
-<span id="cb2-10">    accepted <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="cn" style="color: #8f5902;
-background-color: null;
-font-style: inherit;">FALSE</span></span>
-<span id="cb2-11">  }</span>
-<span id="cb2-12">  out <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">data.frame</span>(<span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">value =</span> value, <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">accepted =</span> accepted)</span>
-<span id="cb2-13">  out</span>
-<span id="cb2-14">}</span></code></pre></div>
-</div>
-<p>Finally we can write a <code>metropolis_sampler()</code> function that runs the Metropolis algorithm for some number of steps:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb3" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1">metropolis_sampler <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">function</span>(initial_value, </span>
-<span id="cb3-2">                               <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">n =</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1000</span>, </span>
-<span id="cb3-3">                               <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">sigma =</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span>, </span>
-<span id="cb3-4">                               <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">burnin =</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">0</span>, </span>
-<span id="cb3-5">                               <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">lag =</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span>) {</span>
-<span id="cb3-6">  </span>
-<span id="cb3-7">  results <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">list</span>()</span>
-<span id="cb3-8">  current_state <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> initial_value</span>
-<span id="cb3-9">  <span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">for</span>(i <span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">in</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span><span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">:</span>burnin) {</span>
-<span id="cb3-10">    out <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">metropolis_step</span>(current_state, sigma)</span>
-<span id="cb3-11">    current_state <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> out<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">$</span>value</span>
-<span id="cb3-12">  }</span>
-<span id="cb3-13">  <span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">for</span>(i <span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">in</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span><span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">:</span>n) {</span>
-<span id="cb3-14">    <span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">for</span>(j <span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">in</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span><span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">:</span>lag) {</span>
-<span id="cb3-15">      out <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">metropolis_step</span>(current_state, sigma)</span>
-<span id="cb3-16">      current_state <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> out<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">$</span>value</span>
-<span id="cb3-17">    }</span>
-<span id="cb3-18">    results[[i]] <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> out</span>
-<span id="cb3-19">  }</span>
-<span id="cb3-20">  results <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">do.call</span>(rbind, results)</span>
-<span id="cb3-21">  results</span>
-<span id="cb3-22">}</span></code></pre></div>
-</div>
-<p>We have several arguments here. Three of them follow intuitively from the mathematical description I gave in the last section:</p>
-<ul>
-<li><code>initial_value</code> is the start point for the Markov chain</li>
-<li><code>n</code> is the number of samples we want to draw from the target distribution</li>
-<li><code>sigma</code> is the standard deviation of the normal distribution we use to propose candidate values at each step</li>
-</ul>
-<p>The other two are:</p>
-<ul>
-<li><code>burnin</code> is the number of iterations we run the sampler for before recording results<sup>8</sup></li>
-<li><code>lag</code> is the number of iterations we run the sampler for between successive samples</li>
-</ul>
-<p>I’ll talk more about these input arguments later, but for now let’s take a look at what happens when we call our <code>metropolis_sampler()</code> function:</p>
-<div class="cell">
-<div class="sourceCode cell-code" id="cb4" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">set.seed</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1234</span>)</span>
-<span id="cb4-2">out <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">metropolis_sampler</span>(<span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">initial_value =</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">0</span>)</span>
-<span id="cb4-3">out[<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span><span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">:</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">10</span>, ]</span></code></pre></div>
-<div class="cell-output cell-output-stdout">
-<pre><code>        value accepted
-1   0.3143686    FALSE
-2   0.3500985     TRUE
-3   0.3500985    FALSE
-4   0.3500985    FALSE
-5   0.3500985    FALSE
-6  -0.1665712     TRUE
-7  -0.9428251     TRUE
-8   0.4271852     TRUE
-9   0.3168997     TRUE
-10  0.3352164     TRUE</code></pre>
-</div>
-</div>
-<p>As you can see it returns a data frame with <code>n</code> rows and two columns. The first column records the numeric <code>value</code> that was sampled, and <code>accepted</code> is a logical variable indicating whether this value arose from accepting the proposal (rather than rejecting it).</p>
-<p><br></p>
-<section id="the-effect-of-proposal-width" class="level3">
-<h3 class="anchored" data-anchor-id="the-effect-of-proposal-width">The effect of proposal width</h3>
-<p>In practice when you’re implementing a Metropolis algorithm, the choice of proposal distribution matters a lot. If it’s too narrow, your sampler will have an extremely high acceptance rate on average, but it will move around extremely slowly. To use the technical term, it has a very low <em>mixing</em> rate. This distorts your estimate of the target distribution. However, if it’s too wide, the acceptance rate becomes too low and the chain gets stuck on specific values for long periods of time. This also distorts your estimate of the target distribution. Yes, technically, if you run your accursed sampler long enough despite it’s poor choice of proposal distribution it will eventually produce the right answer… but wouldn’t you prefer a sampler that gives you the right answer quickly rather than slowly?</p>
-<p>This idea is illustrated in the plots below, in which I’ve run a Metropolis sampler with <code>n = 10000</code> on our toy problem three times. On the left, I’ve made a good choice of proposal distribution, setting <code>sigma = 1</code>. In the middle, my proposal distribution is too narrow (I set <code>sigma = .025</code> and it doesn’t work). On the right, my proposal distribution is too wide: it turns out that <code>sigma = 50</code> isn’t a good idea for this problem either:</p>
-<div class="cell">
-<details>
-<summary>Source code for plots</summary>
-<div class="sourceCode cell-code" id="cb6" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">set.seed</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1234</span>)</span>
-<span id="cb6-2"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">par</span>(<span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">mar =</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">c</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">4</span>, <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">4</span>, <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span>, <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span>))</span>
-<span id="cb6-3"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">layout</span>(<span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">matrix</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span><span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">:</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">6</span>, <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">nrow =</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span>, <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">ncol =</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">3</span>))</span>
-<span id="cb6-4">sigma <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">c</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span>, <span class="fl" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">0.025</span>, <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">50</span>)</span>
-<span id="cb6-5">n <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">10000</span></span>
-<span id="cb6-6"><span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">for</span>(i <span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">in</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span><span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">:</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">3</span>) {</span>
-<span id="cb6-7">  out <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">metropolis_sampler</span>(</span>
-<span id="cb6-8">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">initial_value =</span> <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span>, </span>
-<span id="cb6-9">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">n =</span> n, </span>
-<span id="cb6-10">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">sigma =</span> sigma[i]</span>
-<span id="cb6-11">  )</span>
-<span id="cb6-12">  <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">hist</span>(</span>
-<span id="cb6-13">    out<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">$</span>value, </span>
-<span id="cb6-14">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">breaks =</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">seq</span>(<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">3</span>, <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">3</span>, .<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">05</span>),</span>
-<span id="cb6-15">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">main =</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">paste</span>(<span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"Sample values: sigma ="</span>, sigma[i]),</span>
-<span id="cb6-16">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">xlab =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"Value, x"</span>,</span>
-<span id="cb6-17">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">ylab =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"Frequency"</span></span>
-<span id="cb6-18">  )</span>
-<span id="cb6-19">  x <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">seq</span>(<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">3</span>, <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">3</span>, .<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">05</span>)</span>
-<span id="cb6-20">  p <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">target</span>(<span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">seq</span>(<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">3</span>, <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">3</span>, .<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">05</span>))</span>
-<span id="cb6-21">  expected <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> n <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span> p <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">/</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">sum</span>(p) </span>
-<span id="cb6-22">  <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">lines</span>(</span>
-<span id="cb6-23">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">x =</span> x, </span>
-<span id="cb6-24">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">y =</span> expected, </span>
-<span id="cb6-25">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">type =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"l"</span>, </span>
-<span id="cb6-26">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">col =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"red"</span>,</span>
-<span id="cb6-27">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">lwd =</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span></span>
-<span id="cb6-28">  )</span>
-<span id="cb6-29">  <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">plot</span>(</span>
-<span id="cb6-30">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">x =</span> out<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">$</span>value, </span>
-<span id="cb6-31">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">y =</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span><span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">:</span>n, </span>
-<span id="cb6-32">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">type =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"l"</span>, </span>
-<span id="cb6-33">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">xlim =</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">c</span>(<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">3</span>, <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">3</span>),</span>
-<span id="cb6-34">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">xlab =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"Value, x"</span>,</span>
-<span id="cb6-35">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">ylab =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"Time"</span></span>
-<span id="cb6-36">  )</span>
-<span id="cb6-37">}</span></code></pre></div>
-</details>
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2023-04-12_metropolis-hastings/index_files/figure-html/unnamed-chunk-6-1.png" class="img-fluid" width="672"></p>
-</div>
-</div>
-<p>The way to read these plots is as follows: for all three values of <code>sigma</code>, we have two plots. The top one shows a histogram of the samples values obtained using the Metropolis sampler (that’s the black bars). Superimposed on this is a red line showing the distribution of values you’d expect to obtain when sampling from the true distribution. The lower panel plots the Markov chain itself: the sequence of generated values.<sup>9</sup></p>
-<p>In the leftmost plots, we see what happens when we choose a good proposal distribution: the chain shown in the lower panel moves rapidly across the whole distribution, without getting stuck in any one place. In the far right panel, we see what happens when the proposal distribution is too wide: the chain gets stuck in one spot for long periods of time. It does manage to make big jumps, covering the whole range, but because the acceptance rate is so low that the distribution of samples is highly irregular. Finally, in the middle panel, if we set the proposal distribution to be too narrow, the acceptance rate is very high so the chain doesn’t get stuck in any one spot, but it doesn’t cover a very wide range. This simple example should give you an intuition for why you need to “play around” with the choice of proposal distribution. A good proposal distribution can make a huge difference!<sup>10</sup></p>
-<p><br></p>
-</section>
-<section id="the-role-of-the-burn-in-period" class="level3">
-<h3 class="anchored" data-anchor-id="the-role-of-the-burn-in-period">The role of the burn-in period</h3>
-<p>Up to this point I haven’t really explained what the <code>burnin</code> and <code>lag</code> parameters are there for. To be honest I don’t plan to go into details, but here’s the basic idea. First, let’s think about the burn-in issue. Suppose you started the sampler at a very bad location… say <code>initial_value = -3</code>, and – just so that we can exaggerate the problem – we’ll use a proposal distribution that is too narrow, say <code>sigma = .1</code>. The image below shows three runs of this sampler:</p>
-<div class="cell">
-<details>
-<summary>Source code for plots</summary>
-<div class="sourceCode cell-code" id="cb7" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">set.seed</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1234</span>)</span>
-<span id="cb7-2"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">par</span>(<span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">mar =</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">c</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">4</span>, <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">4</span>, <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span>, <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span>))</span>
-<span id="cb7-3"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">layout</span>(<span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">matrix</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span><span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">:</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">6</span>, <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">nrow =</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span>, <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">ncol =</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">3</span>))</span>
-<span id="cb7-4">n <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1000</span></span>
-<span id="cb7-5"><span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">for</span>(i <span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">in</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span><span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">:</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">3</span>) {</span>
-<span id="cb7-6">  out <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">metropolis_sampler</span>(</span>
-<span id="cb7-7">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">initial_value =</span> <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">3</span>, </span>
-<span id="cb7-8">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">n =</span> n, </span>
-<span id="cb7-9">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">sigma =</span> .<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span></span>
-<span id="cb7-10">  )</span>
-<span id="cb7-11">  <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">hist</span>(</span>
-<span id="cb7-12">    out<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">$</span>value, </span>
-<span id="cb7-13">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">breaks =</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">seq</span>(<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">4</span>, <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">4</span>, .<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">05</span>),</span>
-<span id="cb7-14">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">main =</span> <span class="cn" style="color: #8f5902;
-background-color: null;
-font-style: inherit;">NULL</span>,</span>
-<span id="cb7-15">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">xlab =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"Value, x"</span>,</span>
-<span id="cb7-16">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">ylab =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"Frequency"</span></span>
-<span id="cb7-17">  )</span>
-<span id="cb7-18">  x <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">seq</span>(<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">4</span>, <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">4</span>, .<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">05</span>)</span>
-<span id="cb7-19">  p <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">target</span>(<span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">seq</span>(<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">4</span>, <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">4</span>, .<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">05</span>))</span>
-<span id="cb7-20">  expected <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> n <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span> p <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">/</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">sum</span>(p) </span>
-<span id="cb7-21">  <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">lines</span>(</span>
-<span id="cb7-22">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">x =</span> x, </span>
-<span id="cb7-23">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">y =</span> expected, </span>
-<span id="cb7-24">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">type =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"l"</span>, </span>
-<span id="cb7-25">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">col =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"red"</span>,</span>
-<span id="cb7-26">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">lwd =</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span></span>
-<span id="cb7-27">  )</span>
-<span id="cb7-28">  <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">plot</span>(</span>
-<span id="cb7-29">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">x =</span> out<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">$</span>value, </span>
-<span id="cb7-30">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">y =</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span><span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">:</span>n, </span>
-<span id="cb7-31">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">type =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"l"</span>, </span>
-<span id="cb7-32">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">xlim =</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">c</span>(<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">4</span>, <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">4</span>),</span>
-<span id="cb7-33">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">xlab =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"Value, x"</span>,</span>
-<span id="cb7-34">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">ylab =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"Time"</span></span>
-<span id="cb7-35">  )</span>
-<span id="cb7-36">  <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">abline</span>(<span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">h =</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">200</span>, <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">lty =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"dotted"</span>)</span>
-<span id="cb7-37">}</span></code></pre></div>
-</details>
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2023-04-12_metropolis-hastings/index_files/figure-html/unnamed-chunk-7-1.png" class="img-fluid" width="672"></p>
-</div>
-</div>
-<p>As you can see, the sampler spends the first 200 or so iterations slowly moving rightwards towards the main body of the distribution. Once it gets there, the samples start to look okay, but notice that the histograms are biased towards the left (i.e., towards the bad start location). A simple way to fix this problem is to let the algorithm run for a while before starting to collect actual samples. The length of time that you spend doing this is called the <em>burn in period</em>.</p>
-<p>To illustrate how it helps, the figure below shows what would have happened if I’d used a burn in period of 200 iterations for the same sampler:</p>
-<div class="cell">
-<details>
-<summary>Source code for plots</summary>
-<div class="sourceCode cell-code" id="cb8" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">set.seed</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1234</span>)</span>
-<span id="cb8-2"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">par</span>(<span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">mar =</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">c</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">4</span>, <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">4</span>, <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span>, <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span>))</span>
-<span id="cb8-3"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">layout</span>(<span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">matrix</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span><span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">:</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">6</span>, <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">nrow =</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span>, <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">ncol =</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">3</span>))</span>
-<span id="cb8-4">n <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1000</span></span>
-<span id="cb8-5"><span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">for</span>(i <span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">in</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span><span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">:</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">3</span>) {</span>
-<span id="cb8-6">  out <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">metropolis_sampler</span>(</span>
-<span id="cb8-7">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">initial_value =</span> <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">3</span>, </span>
-<span id="cb8-8">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">burnin =</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">200</span>,</span>
-<span id="cb8-9">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">n =</span> n, </span>
-<span id="cb8-10">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">sigma =</span> .<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span></span>
-<span id="cb8-11">  )</span>
-<span id="cb8-12">  <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">hist</span>(</span>
-<span id="cb8-13">    out<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">$</span>value, </span>
-<span id="cb8-14">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">breaks =</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">seq</span>(<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">4</span>, <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">4</span>, .<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">05</span>),</span>
-<span id="cb8-15">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">main =</span> <span class="cn" style="color: #8f5902;
-background-color: null;
-font-style: inherit;">NULL</span>,</span>
-<span id="cb8-16">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">xlab =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"Value, x"</span>,</span>
-<span id="cb8-17">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">ylab =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"Frequency"</span></span>
-<span id="cb8-18">  )</span>
-<span id="cb8-19">  x <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">seq</span>(<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">4</span>, <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">4</span>, .<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">05</span>)</span>
-<span id="cb8-20">  p <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">target</span>(<span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">seq</span>(<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">4</span>, <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">4</span>, .<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">05</span>))</span>
-<span id="cb8-21">  expected <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> n <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span> p <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">/</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">sum</span>(p) </span>
-<span id="cb8-22">  <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">lines</span>(</span>
-<span id="cb8-23">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">x =</span> x, </span>
-<span id="cb8-24">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">y =</span> expected, </span>
-<span id="cb8-25">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">type =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"l"</span>, </span>
-<span id="cb8-26">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">col =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"red"</span>,</span>
-<span id="cb8-27">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">lwd =</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span></span>
-<span id="cb8-28">  )</span>
-<span id="cb8-29">  <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">plot</span>(</span>
-<span id="cb8-30">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">x =</span> out<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">$</span>value, </span>
-<span id="cb8-31">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">y =</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span><span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">:</span>n, </span>
-<span id="cb8-32">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">type =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"l"</span>, </span>
-<span id="cb8-33">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">xlim =</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">c</span>(<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">4</span>, <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">4</span>),</span>
-<span id="cb8-34">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">xlab =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"Value, x"</span>,</span>
-<span id="cb8-35">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">ylab =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"Time"</span></span>
-<span id="cb8-36">  )</span>
-<span id="cb8-37">}</span></code></pre></div>
-</details>
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2023-04-12_metropolis-hastings/index_files/figure-html/unnamed-chunk-8-1.png" class="img-fluid" width="672"></p>
-</div>
-</div>
-<p>It’s still not ideal – largely because we don’t have many samples, we haven’t set a <code>lag</code>, and the value of <code>sigma</code> isn’t very well chosen – but you can see that the bias caused by the poor choice of starting value has disappeared.</p>
-<p><br></p>
-</section>
-<section id="the-role-of-the-lag-parameter" class="level3">
-<h3 class="anchored" data-anchor-id="the-role-of-the-lag-parameter">The role of the lag parameter</h3>
-<p>Finally, I’ll mention in passing the role played by the <code>lag</code> parameter.<sup>11</sup> In some situations you can be forced into using a proposal distribution that has a very low acceptance rate. When that happens, you’re left with an awkward Markov chain that gets stuck in one location for long periods of time. One thing that people often do in that situation is allow several iterations of the sampler to elapse in between successive samples. This is the <code>lag</code> between samples. The effect of this is illustrated in below, which shows the behaviour of a sampler with a very wide proposal distribution (<code>sigma = 50</code>) with <code>n = 1000</code> samples drawn, at <code>lag = 0</code> (left), <code>lag = 10</code> (middle) and <code>lag = 100</code> (right).</p>
-<div class="cell">
-<details>
-<summary>Source code for plots</summary>
-<div class="sourceCode cell-code" id="cb9" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">set.seed</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1234</span>)</span>
-<span id="cb9-2"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">par</span>(<span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">mar =</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">c</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">4</span>, <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">4</span>, <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span>, <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span>))</span>
-<span id="cb9-3"><span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">layout</span>(<span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">matrix</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span><span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">:</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">6</span>, <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">nrow =</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span>, <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">ncol =</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">3</span>))</span>
-<span id="cb9-4">n <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1000</span></span>
-<span id="cb9-5">lag <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">c</span>(<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">0</span>, <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">10</span>, <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">100</span>)</span>
-<span id="cb9-6"><span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">for</span>(i <span class="cf" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">in</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span><span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">:</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">3</span>) {</span>
-<span id="cb9-7">  out <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">metropolis_sampler</span>(</span>
-<span id="cb9-8">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">initial_value =</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">0</span>,</span>
-<span id="cb9-9">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">lag =</span> lag[i],</span>
-<span id="cb9-10">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">n =</span> n, </span>
-<span id="cb9-11">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">sigma =</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">50</span></span>
-<span id="cb9-12">  )</span>
-<span id="cb9-13">  <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">hist</span>(</span>
-<span id="cb9-14">    out<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">$</span>value, </span>
-<span id="cb9-15">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">breaks =</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">seq</span>(<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">4</span>, <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">4</span>, .<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">05</span>),</span>
-<span id="cb9-16">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">main =</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">paste</span>(<span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"Lag:"</span>, lag[i]),</span>
-<span id="cb9-17">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">xlab =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"Value, x"</span>,</span>
-<span id="cb9-18">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">ylab =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"Frequency"</span></span>
-<span id="cb9-19">  )</span>
-<span id="cb9-20">  x <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">seq</span>(<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">4</span>, <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">4</span>, .<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">05</span>)</span>
-<span id="cb9-21">  p <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">target</span>(<span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">seq</span>(<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">4</span>, <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">4</span>, .<span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">05</span>))</span>
-<span id="cb9-22">  expected <span class="ot" style="color: #003B4F;
-background-color: null;
-font-style: inherit;">&lt;-</span> n <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">*</span> p <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">/</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">sum</span>(p) </span>
-<span id="cb9-23">  <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">lines</span>(</span>
-<span id="cb9-24">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">x =</span> x, </span>
-<span id="cb9-25">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">y =</span> expected, </span>
-<span id="cb9-26">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">type =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"l"</span>, </span>
-<span id="cb9-27">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">col =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"red"</span>,</span>
-<span id="cb9-28">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">lwd =</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">2</span></span>
-<span id="cb9-29">  )</span>
-<span id="cb9-30">  <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">plot</span>(</span>
-<span id="cb9-31">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">x =</span> out<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">$</span>value, </span>
-<span id="cb9-32">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">y =</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span><span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">:</span>n, </span>
-<span id="cb9-33">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">type =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"l"</span>, </span>
-<span id="cb9-34">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">xlim =</span> <span class="fu" style="color: #4758AB;
-background-color: null;
-font-style: inherit;">c</span>(<span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">-</span><span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">4</span>, <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">4</span>),</span>
-<span id="cb9-35">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">xlab =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"Value, x"</span>,</span>
-<span id="cb9-36">    <span class="at" style="color: #657422;
-background-color: null;
-font-style: inherit;">ylab =</span> <span class="st" style="color: #20794D;
-background-color: null;
-font-style: inherit;">"Time"</span></span>
-<span id="cb9-37">  )</span>
-<span id="cb9-38">}</span></code></pre></div>
-</details>
-<div class="cell-output-display">
-<p><img src="https://blog.djnavarro.net/posts/2023-04-12_metropolis-hastings/index_files/figure-html/unnamed-chunk-9-1.png" class="img-fluid" width="672"></p>
-</div>
-</div>
-<p>Formally speaking, the thing we’re trying to do here by increasing <code>lag</code> is reduce the <a href="https://en.wikipedia.org/wiki/Autocorrelation">autocorrelation</a> between successive samples in our chain. In an ideal world we want our sampled values to be <em>independent</em> samples from the target distribution <img src="https://latex.codecogs.com/png.latex?p(x)">. The more our samples are correlated with each other, the more potential there is for the histogram of sampled values to depart systematically from the target distribution. Introducing a lag between successive samples is a simple way to achieve this.</p>
-<p><br></p>
-</section>
-</section>
-<section id="a-word-of-warning" class="level2">
-<h2 class="anchored" data-anchor-id="a-word-of-warning">A word of warning</h2>
-<p>The discussion in this post is <em>heavily</em> oversimplified. It doesn’t talk at all about the conditions required to make Metropolis sampling work, it doesn’t talk about diagnostics, and it certainly doesn’t talk about what happens when we move this into higher dimensional problems. I haven’t made any attempt to implement this efficiently, either: there’s little point in me doing that when there are already many very efficient tools already in existence. My goal when I wrote this was so that my class could have an example that was simple enough that they could implement it themselves and get a sense of what MCMC algorithms do. At one point I had this idea that I’d gradually expand on these materials so that students could work their way up from introductory materials like this to more realistic examples, but I never really found the time to do that. Maybe one day!</p>
-<!--------------- appendices go here ----------------->
-
-
-</section>
-
-
-<div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
-
-<ol>
-<li id="fn1"><p>Bizarrely, this actually happens to me a lot. It’s totally surreal.↩︎</p></li>
-<li id="fn2"><p>Another surreal experience that I’ve had quite a bit lately is getting rejected from data science jobs because I don’t have a computer science degree and my qualifications are technically in psychology. Apparently I’m considered skilled enough to <em>teach</em> computational statistics to university computer science students, but still considered less skilled at those tools than the students that I taught? I mean, it’s either that or tech company recruiters don’t actually read the résumés that they get sent… but that couldn’t possibly be true, right? Efficient market hypothesis and all that…↩︎</p></li>
-<li id="fn3"><p>Okay. So, I just know that a serious statistician will read this at some point, and – from bitter experience – I’ve learned that when a lady person writes about mathematics and is unclear on even the smallest thing her credibility is immediately subject to question. So, in an attempt to forestall any misapprehensions, I most certainly understand the difference between a density function and a distribution function, and equally I know that it is conventional to use lower case to refer to densities and upper case to refer to distributions and probability mass functions. However, I wrote this note for undergraduate computer science students, and accordingly I chose to keep my notation simple, even if it is a little imprecise.↩︎</p></li>
-<li id="fn4"><p>Some asides: my experience teaching this class is that it’s quite common for people new to statistics to struggle with the concept of <a href="https://en.wikipedia.org/wiki/Probability_density_function">probability density</a>. It’s not super important for the purposes of this post, and to a first approximation it’s totally okay to think of <img src="https://latex.codecogs.com/png.latex?p(x)"> as “the probability of observing <img src="https://latex.codecogs.com/png.latex?x"> (sort of)”. It is of course the case that the difference between a pdf, a pmf, and a cdf matters when you start doing mathematical statistics, but I would never be so cruel as to inflict that stuff on my undergraduate computer science students! Not once did refer to sigma algebras in my undergrad teaching, honest. Though, looking back, I did once inflict Kolmogorov complexity on a class. It was… not a good decision.↩︎</p></li>
-<li id="fn5"><p>It’s worth mentioning that, at this point in the class my students had all been shown several examples of the <a href="https://en.wikipedia.org/wiki/Curse_of_dimensionality">curse of dimensionality</a> problem. So even though yes, of course it’s easy to solve this problem in one-dimension, they were all acutely aware that using brute force numerical integration methods to compute the denominator isn’t going to work we started trying to do something more realistic than my toy example.↩︎</p></li>
-<li id="fn6"><p>At this point in the class students had most certainly encountered Markov chains!↩︎</p></li>
-<li id="fn7"><p>That said, it’s worth mentioning one important property of the proposal distribution: the sampler won’t work if there are some values of <img src="https://latex.codecogs.com/png.latex?x"> that never get proposed!↩︎</p></li>
-<li id="fn8"><p>The “burn in” period also goes by the name “warm up” period.↩︎</p></li>
-<li id="fn9"><p>This is usually referred to as a “trace plot”. Eyeballing the trace plot is a useful thing to do when examining the behaviour of your MCMC algorithm, but beware… it is a very crude method. The devil is very much in the details here.↩︎</p></li>
-<li id="fn10"><p>At this point she asks herself… does she want to talk about methods for automatically choosing a good proposal? No.&nbsp;No she does not.↩︎</p></li>
-<li id="fn11"><p>This is often referred to as the “thinning” rate. ↩︎</p></li>
-</ol>
-</section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div id="quarto-reuse" class="quarto-appendix-contents"><div><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2023,
-  author = {Navarro, Danielle},
-  title = {The {Metropolis-Hastings} Algorithm},
-  date = {2023-04-12},
-  url = {https://blog.djnavarro.net/posts/2023-04-12_metropolis-hastings},
-  langid = {en}
-}
-</code></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2023" class="csl-entry quarto-appendix-citeas">
-Navarro, Danielle. 2023. <span>“The Metropolis-Hastings
-Algorithm.”</span> April 12, 2023. <a href="https://blog.djnavarro.net/posts/2023-04-12_metropolis-hastings">https://blog.djnavarro.net/posts/2023-04-12_metropolis-hastings</a>.
-</div></div></section></div> ]]></description>
-  <category>Statistics</category>
-  <category>MCMC</category>
-  <guid>https://blog.djnavarro.net/posts/2023-04-12_metropolis-hastings/index.html</guid>
-  <pubDate>Tue, 11 Apr 2023 14:00:00 GMT</pubDate>
-  <media:content url="https://blog.djnavarro.net/posts/2023-04-12_metropolis-hastings/cover.jpg" medium="image" type="image/jpeg"/>
 </item>
 </channel>
 </rss>

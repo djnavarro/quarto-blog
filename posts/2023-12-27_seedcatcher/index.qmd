@@ -1,0 +1,337 @@
+---
+title: "Fine-grained control of RNG seeds in R"
+description: "In which the author was *trying* to fuck a spider but ended up shaving a yak with a fabulous Dua Lipa soundtrack in the background"
+date: "2023-12-27"
+categories: ["R", "Randomness"]
+image: houdini.jpg
+image-alt: "Screenshot from the video clip to 'Houdini' by Dua Lipa"
+--- 
+
+<!--------------- my typical setup ----------------->
+
+```{r}
+#| label: setup
+#| include: false
+very_wide <- 500
+wide <- 136
+narrow <- 76
+options(width = narrow)
+cache_images <- TRUE
+
+# save the built-in output hook
+hook_output <- knitr::knit_hooks$get("output")
+
+# set a new output hook to truncate text output
+knitr::knit_hooks$set(output = function(x, options) {
+  if (!is.null(n <- options$out.lines)) {
+    x <- xfun::split_lines(x)
+    if (length(x) > n) {
+      # truncate the output
+      x <- c(head(x, n), "....\n")
+    }
+    x <- paste(x, collapse = "\n")
+  }
+ hook_output(x, options)
+})
+```
+
+<!--------------- post begins here ----------------->
+
+Ah fuck it. So. Earlier this morning^[Okay fine it was yesterday morning, because instead of finishing this blog post last night as I'd intended I went out for cocktails. Sue me.] I [posted on mastodon](https://hachyderm.io/@djnavarro/111655059799138922) about the sense of sadness I have about the death of turn-of-the-century-yes-this-century blog culture:
+
+> I was reading a thread about how the norms around blog posts have changed over the years, where “writing something up a blog post” now has a kind of formality to it that it didn’t have 20 years ago (yes, I did in fact have a blog in 2003), which in turn makes blogging feel more like work than joy. This seems like a genuine cultural loss. 
+
+Once upon a much happier time, we had a blogging culture where writing a blog post didn't have to be "A Very Serious Blog Post By A Very Serious Person". The craft of blogging wasn't built around the idea that blog posts are miniature journal articles. Back then it was understood that a blog post was an inherently ephemeral and rarely serious thing. You'd have an idle thought, spend a small amount of time developing the idea, write it up, and **ET FUCKING VOILA BITCHES I HAVE A BLOG POST**.
+
+I kind of loved that culture. It's precisely in that spirit that I decided, in my last post, to cobble together an absolutely-cursed rethinking of the [blogdown](https://bookdown.org/yihui/blogdown/) R package and write an unapologetically-unhinged [post](https://knitr-11ty.djnavarro.net/posts/the-blogdown-of-theseus/) about it. The "eleventy plus knitr" system I built in an afternoon -- following the [Bob Katter principle](https://www.youtube.com/watch?v=1i739SyCu9I) in which "I ain't spending any time on it, because in the meantime, every three months a person's torn to pieces by a crocodile in North Queensland" -- was a fun toy, and nothing more than that. This is *exactly* what blogs are for, and precisely the reason why the subtitle on that post is "Because you know what? I *am* here to [fuck spiders](https://www.urbandictionary.com/define.php?term=Not%20here%20to%20Fuck%20Spiders)". The entire purpose of blogging is to have some fun. It's not a public relations exercise.^[One of the most cursed things that has happened to public tech culture is the idea of corporate-style "community". Oh look at me, I'm a tHouGHt lEaDer iN tEcH blah blah blah. Honey, if I wanted to masturbate in public there are much easier ways to make men pay to watch me do it.] ^[Somewhat relatedly, I often think to myself that the reason why a lot of technical blog posts end up with very bland writing is that the author feels obligated to "act professionally" on their blog, for fear that their employer might see it and react negatively if they ever use the word "fuck". I understand and share that sentiment but also... I've worked as an academic, I've worked in tech, and I now work in pharma. Anyone who knows me professionally knows that (especially as I've gotten older) I don't ever talk like this at work. Professionalism is important, *in a professional context*. But my blog is not my job, and in much the same way that [trying to be a professional artist sucked all the joy out of making art for me](https://blog.djnavarro.net/posts/2023-12-16_another-year-ends/#art), trying to be professional in my blog posts sucks all the joy out of writing. In my professional life I have to be restrained, and things that are essential to my very character -- my queerness, for instance -- are inadmissable and unspeakable in a work context. I'm frankly unwilling to extend that level of self-imposed closeting to my personal life. This blog is part of my personal life, not my professional life. So I get to be me here. If that bothers people they are free to not read my blog.] ^[As Dan Simpson once remarked, it is *extremely* homophobic of quarto not to support nested footnotes. Like, what the hell are queers supposed to do when we can't turn our blog posts into a tangled web of unhinged footnotes? This is our primary defence mechanism to ensure that the straights on linkedin won't ever try to interact with us, damn it.]
+
+So let's fuck some spiders.
+
+## Managing computational state when generating pseudo-random numbers
+
+The spider I'm thinking about today relates to the problem of generating pseudo-random numbers in a reproducible way. Generating a sequence of numbers that satisfy formal definitions of randomness is an inherently tricky business and programming languages have a very, ummmmm, mixed track record in finding ways to do it sanely. The core of the problem lies in the fact that computers are Turing machines, and as such are deterministic systems. You can't make a deterministic system behave "randomly" without doing quite a bit of mathematical work to (a) decide what "randomly" means in this context and, (b) constructing algorithms that produce behaviour that we are willing to describe as "random". Fortunately for us, this part of the problem was solved a long time ago, and I have no desire whatsoever to use this post to discuss the [Mersenne Twister](https://en.wikipedia.org/wiki/Mersenne_Twister) in relation to [Martin-Löf randomness](https://en.wikipedia.org/wiki/Algorithmically_random_sequence).^[No seriously. I spent a solid six months of my mid-20s life reading journal articles about algorithmic randomness and its relationships to Kolmogorov complexity and Bayesian inference, when instead I could have spent that time going full femboy and it was a terrible fucking decision.] The algorithm is good enough for my purposes, it's implemented as a random number generator (usually one of many) in various language, and that is *fine*.
+
+The tricky part, from a practical perspective, is that pseudo-random number generators are [stateful](https://en.wikipedia.org/wiki/State_(computer_science)) entities that depend on a "random number generator seed", and -- by design! -- they are spectacularly sensitive to the seed. If you do even the tiniest thing in your code that touches the RNG seed, *every* subsequent action that uses that RNG will be changed in fundamental ways. If you want to program carefully around random number generators, you need to be super careful with managing the RNG seed.
+
+Ah fuck it. [Dua Lipa](https://www.youtube.com/watch?v=suAR1PYFNYA) already said it better:
+
+> I come and I go <br>
+Tell me all the ways you need me <br>
+I'm not here for long <br>
+Catch me or I go Houdini <br>
+I come and I go <br>
+Prove you got the right to please me <br>
+Everybody knows <br>
+Catch me or I go Houdini
+
+From a reproducible computing perspective, you'd better catch the RNG state and work carefully with it, or else it will be gone forever. 
+
+![](houdini.png){fig-alt="Screenshot from the video clip to 'Houdini'"}
+
+## How do different languages manage RNG state?
+
+How should we manage the RNG state in a programming language? It's a difficult problem, and I am absolutely *not* the person to resolve the question. I'm basically an idiot, and I don't even pretend to know what the right answer to this is. That being said, I think there's essentially three categories of solution that exist in the wild:
+
+- **The javascript style:** The solution in vanilla javascript is basically a "fuck you" to the user. The core random number generator is `Math.random()` and it doesn't let you specify the seed at all. If you want reproducible sequences of random numbers in javascript you can go fuck yourself.^[Yes I know about [seedrandom](https://www.npmjs.com/package/seedrandom), shut up.]
+
+- **The C++ style:** The solution in C++ is to use the `random` library, in which the RNG state is itself an object that must be passed to a probabilistic function, creating an object that can then be used to generate random numbers using the RNG state. It's somewhat rigorous, but it leads to code like this, which is so obnoxiously painful that I barely even have words:
+
+    ```cpp
+    #include <iostream>
+    #include <random>
+
+    int main() {
+        // set seed using time, define PRNG with Mersenne Twister
+        long unsigned int seed = static_cast<long unsigned int>(time(0));
+        std::mt19937_64 mersenne {seed};
+    
+        // sample_poisson() draws from Poisson(4.1) and returns an integer.
+        std::poisson_distribution<int> sample_poisson(4.1);
+    
+        // draw poisson sample (passing the PRNG as argument) and write to stdout
+        std::cout << "poisson sample: " << sample_poisson(mersenne) << std::endl;
+        return 0;
+    }
+    ```
+
+    Honey I just wanted some Poisson variates I didn't want your life story.
+    
+- **The R style:** Okay what if we secretly placed the RNG state into a `.Random.seed` variable that exists in the global environment but made it invisible so a typical user will never see it or think about it, and then have a `set.seed()` function to control it in ways that 99% of users won't ever think about?
+
+Um. There is, as the young people say, a lot to unpack here. 
+
+## On the particulars of the R approach
+
+Okay yes, that little summary is a bit of rhetorical largesse on my part. It should be obvious to anyone who knows me that the primary focus I have in writing about this topic is thinking about how R solves this. The whole purpose of talking about the "three styles" in the previous section is that I want to contrast the core approach in R with two other styles I've seen in other languages: compared to R, javascript is utterly lacking in rigour on this topic and as a consequence is utterly useless for analysts, whereas -- by way of deliberately constructed contrast -- C++ has rigour but is utterly lacking in practicality for everyday data analysis. The set of analysts who are going to put up with C++ bullshit when trying to simulate from a model is perilously close to measure zero. There is a *reason* why R adopts the peculiar solution it does.^[In defence of both C++ and javascript, you could probably argue the same for those languages: C++ is a systems language, and you're not really supposed to use it for everyday data analysis. The tedious verbosity of C++ code in this context reflects the function of the language. Similarly, javascript was designed to support scripting for web pages, and while there are now libraries that support data analysis in javascript, it wasn't originally designed for that purpose and so "vanilla" javascript doesn't come with the same level of careful thought on this topic that you see in base R. My point in using those two as contrasts to R is not to call them bad languages, but to highlight the fact that different languages make different choices that reflect the primary function those languages were designed to support.]
+
+So let's unpack it a tiny bit. We'll start by looking at the `.Random.seed` object itself.
+
+### What's in the `.Random.seed` babe?
+
+As I mentioned, what R does when you call `set.seed()` is create a hidden variable called `.Random.seed` that exists in the users global workspace, and is used to specify the state of the random number generator.^[Note that the `.Random.seed` vector doesn't actually exist at start up: it is created explicitly when the user calls `set.seed()`, but it will also be created for you if you do something that requires the RNG without previously calling `set.seed()`, using the current time and the process ID as the input.] Here's what it looks like when we call `set.seed()` with `seed = 1`:
+
+```{r, out.lines=4}
+set.seed(1)
+state <- .Random.seed
+state
+```
+
+I've truncated the output because the actual `state` variable here is quite long and we don't need all that clutter.^[I swear to the almighty femme top above, every single time I have to write a knitr hook I have to spend 20 minutes googling to find [this page](https://bookdown.org/yihui/rmarkdown-cookbook/hook-truncate.html) again. I don't know why this specific thing is so hard to search for, but I'm about *this* close to writing a pointless blog post on my own site that just copies the damn code line for line, just so that I don't have to search for it again.] It's noticeable, when you look at this thing, that the first two elements of the `.Random.seed` seem to be rather different from the others. Let's test that by calling `set.seed()` with `seed = 2`: 
+
+```{r, out.lines=4}
+set.seed(2)
+state <- .Random.seed
+state
+```
+
+Yeah okay, there's something going on here. The first two values in this vector are clearly different in some sense from the rest of the numbers. Let's start with the first element of our state vector, the `10403` value. This one is not part of the random number generator itself. Rather, it's used to encode the *kind* of random number generator in use. The way to decode what means is to split it up into three numbers, like this `1 04 03`. From the help documentation:
+
+> The lowest two decimal digits are in 0:(k-1) where k is the number of available RNGs. The hundreds represent the type of normal generator (starting at 0), and the ten thousands represent the type of discrete uniform sampler. 
+
+To help make sense of this, it helps to realise that `set.seed()` has more arguments to it than just the `seed` value. There are in fact four arguments, as shown below:
+
+```r
+set.seed(seed, kind = NULL, normal.kind = NULL, sample.kind = NULL)
+```
+
+The `kind` argument specifies which RNG algorithm should be used to generate uniform random numbers (e.g., Mersenne Twister, the default), which is usually the thing we're interested in, at least to the extent that most probabilistic process require that we have a generator for uniform random numbers. This is what the `03` part of that `10403` number refers to. However. There are two special cases that come up so often that R allows you to customise them. The `normal.kind` argument to `set.seed()` specifies the algorithm to by used when generating normally distributed numbers (e.g., Box-Muller), and this is is what the `04` part of `10403` references. The `sample.kind` argument refers to the algorithm used when sampling from a discrete set (e.g., as in the `sample()` function), and the `1` part of `10403` refers to that. 
+
+As to what the different options are, what defaults are used, and how those defaults have changed across different versions of R, I'll just refer the interested reader to the help documentation, because honestly that's not the point of this post. For now, it's enough to recognise that the first element of `.Random.seed` specifies the kind of RNG, and that by default we're using the Mersenne Twister any time we need uniform random numbers.
+
+Okay, what about that second element? Much like the `10403` value in the first position, the `624` number in the second position seems to be screaming out "hello I am not actually a part of the RNG state" too, and indeed that's correct. It's specific to the Mersenne Twister, and is used to indicate that the *actual* Mersenne Twister RNG state is an integer vector of length 624. And shockingly, if we take a look at how long our `state` variable is
+
+```{r}
+length(state)
+```
+
+we get an answer of 626: there are 624 integers used to specify the state of the Mersenne Twister, one integer used to indicate that yes the Mersenne Twister state has length 624, and one more integer used to indicate that (among other things) we're using the Mersenne Twister.
+
+That checks out.
+
+### Let's be random
+
+Well that was tiresome. I seem to be pathologically incapable of writing a short blog post without going off on bizarre yak-shaving tangents. Sorry. Anyway, let's get back on track and do something that relies on the state of the RNG, shall we? First, we'll reset the value of `.Random.seed` and capture its initial value:
+
+```{r}
+set.seed(1)
+state <- .Random.seed
+```
+
+Next, I'll do something that requires the random number generator:
+
+```{r}
+sample(10)
+```
+
+When I do this, there are two things that happen. Most obviously, by calling `sample()` I now have a random permutation of the numbers between 1 to 10. But as a hidden side effect, the value of `.Random.seed` has changed.^[Parenthetically, if you want to configure R so that you get notified every time `.Random.seed` changes, you can set up a callback handler to do this. Henrik Bengtsson has a [nice post](https://www.jottr.org/2020/09/21/detect-when-the-random-number-generator-was-used/) showing you how to do this. I have something similar set up in my `.Rprofile`.] Because the RNG state has changed, if I repeat the exercise I get a different random permutation:
+
+```{r}
+sample(10)
+```
+
+This is of course the desired behaviour, but the only reason it works is by relying on the `.Random.seed` vector. If I restore the original state of the RNG before calling `sample()`, I get the exact same result as the first time:
+
+```{r}
+.Random.seed <- state
+sample(10)
+```
+
+Again, this is expected and desired behaviour. 
+
+### Strengths and weaknesses of the R approach
+
+The approach used in R reflect as a specific philosophy that emerges from the core purpose of the language: **R is a scripting language designed to support scientific data analysis**. This core goal leads to two key features:
+
+- Scientists care about computational reproducibility, so (unlike javascript) base R comes with the `set.seed()` function that allows you to initialise the state of the RNG in a reproducible way. In fact, R goes one step further and provides a `RNGversion()` function that supports backward-compatibility across R versions, because the low level details of how R implements random number generation have changed over the years. 
+
+- Data analysts need simple, practical solutions. The C++ style where you have to construct an RNG object and then explicitly pass it as an argument when you want to sample from a distribution is awkward and frustrating, and rarely helpful when doing everyday data analysis.
+
+These twin considerations lead to the R solution: there's *one* RNG state variable in R, tucked away in a hidden variable in the user workspace, and you rarely have to think about it in any more detail than remembering to include `set.seed()` in your analysis script. In some ways it's an inelegant solution, but it's shockingly effective from a practical standpoint.
+
+However. 
+
+There are edge cases when the R solution doesn't quite work as well as you'd hope, and I've encountered them more than once. Because R relies on a single `.Random.seed` variable to manage state, there's no easy way for the analyst to make a distinction between "things I'm doing that incidentally require some random numbers", and "other probabilistic things I'm doing that are utterly essential to a simulation". Everything you do in an R script relies on the *same* random number generator, and uses the *same* seed to manage that state. This can sometimes be fragile, because any line of code that "incidentally" touches the RNG will affect the results from any "essential" probabilistic code you write later in the script. That happens a lot with code that has this structure:
+
+1. set the RNG seed
+2. do some essential probabilistic simulations
+3. do something that incidentally calls the RNG
+4. do some more essential probabilistic simulation
+
+When you write the code, what you sort of have in your head is that "I'm setting the RNG seed in part 1 in order to ensure that the simulations in part 2 and 4 are reproducible", but you have a hidden dependence on the code in part 3. Often times, you don't even realise that the code in part 3 is affecting the RNG state because there are lots of R functions that incidentally use the RNG without you realising it.
+
+Often what people do to address this, when they are aware of this issue, is to set the seed multiple times, at key points in the code:
+
+1. set the RNG seed
+2. do some essential probabilistic simulations
+3. do something that incidentally calls the RNG
+4. set the RNG seed again
+5. do some more essential probabilistic simulation
+
+By setting the seed in multiple places, you have a solution that is more robust. If, for example, there are package updates that change the manner in which the code in part 3 touches the RNG, your simulation in part 5 won't be affected. It's a defensive coding trick to minimise your exposure to unexpected changes to RNG state, and it works pretty well.^[More generally, though, if you want to be completely safe you'd probably need to use tools like [Docker](https://www.docker.com/), [renv](https://rstudio.github.io/renv/), and [rig](https://github.com/r-lib/rig) to control the computational environment. But that's beyond the scope.]
+
+
+![](dance-the-night.png){fig-alt="Screenshot from the video clip to 'Dance The Night' by Dua Lipa"}
+
+## Creating an "isolated" RNG seed
+
+As you can probably guess, I am actually a huge fan of the R solution. Yes, it's an unprincipled hack where the language "cheats" by creating a hidden global state variable, but it really does work for the vast majority of use cases and it doesn't waste the analysts time by making them do all the dirty work managing the RNG themselves. From its inception R has *never* been a language that cares about ideological purity: as Hadley Wickham once noted,^[I'm too lazy to track down the original citation or the exact quote, but I think he said it during an rstudio::conf / posit::conf talk. The specifics don't matter very much.] R is first and foremost a language for "getting shit done". 
+
+That being said, sometimes I find myself wishing there was a way of creating an "isolated" RNG seed. The idea here is that as the data analyst, I know perfectly well which parts of my code are essential to my probabilistic simulations, and what I really want to do is "protect" those parts of the code by executing them with a dedicated RNG. All my incidental code can use the global RNG state, but nothing I do in the incidental code would affect the output of the protected simulation code, [not one hair out of place](https://www.youtube.com/watch?v=OiC1rgCPmUQ).
+
+> Watch me dance, dance the night away <br>
+My heart could be burnin', but you won't see it on my face <br>
+Watch me dance, dance the night away <br>
+I'll still keep the party runnin', not one hair out of place 
+
+On the face of it, this seems hard to accomplish with R because the `.Random.seed` variable is aggressively unique. The documentation makes it very clear that the only place R will look for the RNG state is the `.Random.seed` variable in the user global environment, so you cannot solve this problem by creating a new `.Random.seed` variable in another environment. However, the documentation also makes clear that you are *absolutely* allowed to save the value of `.Random.seed` and restore it later.^[The exact phrasing in the documentation says that `.Random.seed` "can be saved and restored, but should not be altered by the user", i.e., it's totally fine to copy the RNG state, just don't try to modify the values stored in the vector yourself because you'll almost certainly mess it up.] In other words, you totally could do something like this:
+
+1. Use `set.seed()` to create the "to-be-isolated" RNG, and then do something like `protected_state <- .Random.seed` to store the state of that RNG
+2. Use `set.seed()` again to set the "global" RNG state
+3. Do some "incidental" random things (implicitly using the global RNG state)
+4. In preparation for the protected step, cache the global state in a temporary `global_state <- .Random.seed`
+5. Restore the protected RNG with `.Random.seed <- protected_state`
+6. Run your "protected" simulation code
+7. Capture the updated state `protected_state <- .Random.seed`
+8. Restore the global RNG with `.Random.seed <- global_state`
+
+This approach works perfectly well, actually. There is absolutely nothing stopping you from caching the state of a protected RNG separately from the global RNG, and occasionally restoring it when you specifically want to use the protected RNG. The only problem with the solution is that I am *absolutely* not willing to faff about writing code that does this in my everyday analysis work. It's time-consuming and annoying, and I have deadlines to meet. 
+
+Enter, stage left, the [R6](https://r6.r-lib.org/) package. It is almost obnoxiously easy to design a stateful R6 class that solves this problem. Here's how you do it:
+
+```{r}
+Seed <- R6::R6Class("Seed",
+  public = list(
+    initialize = function(...) {
+      old <- eval(.Random.seed, envir = .GlobalEnv)
+      set.seed(...)
+      self$state <- eval(.Random.seed, envir = .GlobalEnv)
+      assign(".Random.seed", old, envir = .GlobalEnv)
+    },
+    state = NULL,
+    use = function(expr, envir = parent.frame()) {
+      old <- eval(.Random.seed, envir = .GlobalEnv)
+      assign(".Random.seed", self$state, envir = .GlobalEnv)
+      x <- eval(substitute(expr), envir = envir)
+      self$state <- eval(.Random.seed, envir = .GlobalEnv)
+      assign(".Random.seed", old, envir = .GlobalEnv)
+      return(x)
+    }
+  )
+)
+```
+
+The `Seed` class is terribly simple. When you initialise a new `Seed` object, it temporarily caches the global `.Random.seed` state, then calls `set.seed()` to create the protected RNG state. This protected state is then cached within the `Seed` object itself as the `$state` field.^[I should probably have made this a private field rather than a public field, and then written a public accessor method like `$get_state()` or whatever. But this is a toy example, I'm not trying to be rigorous here.] Finally, it restores the global `.Random.seed` variable to its original state.
+
+Using the protected seed is pretty straightforward: the `Seed` class has a `$use()` method to which you pass an R expression. All code in that expression is evaluated using the protected RNG state rather than the global state. The mechanism here is exatly the same: the `$use()` method caches the global RNG state, copies the `$state` field to the `.Random.seed`, then executes the R code. After the code has executed, the new value of `.Random.seed` is copied back to the `$state` field, and then the global state is restored. 
+
+Let's have a look at how it works. First, I'll set the "usual" RNG state using `set.seed()` with `seed = 123`. Then, I'll create two new isolated RNG seeds, both of which use `seed = 1`:
+
+```{r}
+set.seed(123)
+state <- .Random.seed
+x <- Seed$new(1)
+y <- Seed$new(1)
+```
+
+Next, I'll call `sample()` using these isolated seeds:
+
+```{r, results='hold'}
+x$use(sample(10))
+y$use(sample(10))
+```
+
+Notice that both of these produce identical output (as they should, since they were both initialised using the same `seed` value), and the output is exactly the same as the results we saw earlier when I used `set.seed(1)`. So far, so good. Okay, now let's use these isolated seeds a second time:
+
+```{r, results='hold'}
+x$use(sample(10))
+y$use(sample(10))
+```
+
+Again, the results are identical to each other, and they're also identical to the results we saw earlier when I called `sample()` a second time after using `set.seed(1)`. Also what we're expecting. Yay! Finally, let's check that using these isolated RNG seeds has left the state of `.Random.seed` in the global workspace unchanged:
+
+```{r}
+all.equal(state, .Random.seed)
+```
+
+Yup. It works.^[It should go without saying that this isn't guaranteed to work properly if we're doing a multi-threaded execution thing. But that's true for normal random number generation anyway: you need special tools when doing random number generation in parallel. One of these days I want to do a deep dive on that topic, but it's totally something for a future post.] 
+
+Importantly for the desired functionality, the protection runs the other way too. RNG-sensitive code executed using the global RNG doesn't affect the behaviour of code executed using one of the protected generators. This is actually the key feature, so let's take a look. As before, we'll set up our global generator and two identical protected generators. 
+
+```{r}
+set.seed(123)
+state <- .Random.seed
+x <- Seed$new(1)
+y <- Seed$new(1)
+```
+
+Next, I'll use the `x` generator to do something that we might imagine is part of an "essential" simulation exercise:
+
+```{r}
+x$use(sample(10))
+```
+
+Unsurprisingly, it produces the same output. Now here's the key part. What would have happened if I ran some incidental code beforehand? Well, let's do exactly that:
+
+```{r}
+runif(1)
+```
+
+In my hypothetical scenario, this would be something that happens during the incidental code (e.g., maybe a function I called on the side -- in order to explore something that came up during the scientific reasoning process, because analysis code is *not* production code and it has an inherently different logic^[One of these days I want to write a post about what counts as "best practice" for writing analysis code that doesn't go into prod but might be sent to a regulator, because seriously my babes that is a fucking different beast altogether. But that's for another time.] -- happened to generate a random number in order to break a tie or whatever). In the normal course of events, this would alter the state of the RNG for all subsequent code. But, if we now repeat the "essential" line of code using the `y` generator, we see that it still produces the exact same answer:
+
+```{r}
+y$use(sample(10))
+```
+
+Well that's a relief. I mean, this is what we should expect because `x` and `y` were both created to be identical generators and they were both designed to be isolated from the global RNG state, so of course state changes in the global RNG are entirely irrelevant to the behaviour of code that uses one of the protected generators, but it's nice to confirm. 
+
+This is the behaviour I wish I had easy access to in R. There are times when I have "special" code that I really, really, really want to be executed with its very own RNG, completely isolated from the global RNG. It actually irritates me that the solution to the problem can be implemented in R6 with a mere 19 lines of code. Annoyed that I didn't think of this years ago tbqh. 
+
+## Wrapping up
+
+So okay, I solved the problem I was idly thinking about when I decided to fuck this particular spider. What now?
+
+It would be pretty easy to wrap something like this in a package I suppose,^[On the off chance anyone does go down this path, I propose the name "seedcatcher" so that all the stats gays can make "no loads refused" jokes about it. See also, "lubridate".] but (a) I'm too lazy to write it myself, and (b) I think the use case for it is pretty narrowly confined to situations when you are writing a very long script that performs an "essential" simulation and also contains incidental code isn't supposed to affect the simulation itself. Plus, and perhaps most importantly, (c) remember how I said this was a spider-fucking post? I said it and I bloody well meant it. I'm not trying to Solve A Big Problem here. I'm just playing around with code and enjoying the act of writing about it.
+
+That being said, I have to admit I've encountered a few situations in my professional life where I really wished there were a package that implemented something like the `Seed` class. I had one experience a little while back where I'd inherited a long simulation script that did the right thing insofar as it called `set.seed()` at the top of the script, but it had lots of essential simulation code interleaved between other code that was used for non-essential purposes and incidentally modified the RNG state. It was a nightmare to try to refactor the code without breaking reproducibility. Eventually I just had to give up. The code absolutely did need to be refactored because of the future use that we had in mind, and -- despite the original programmers laudable effort to do the right thing -- it was absolutely impossible to do so without changing the results of the simulations. It would have been a lot easier to do this if the "essential" simulation code had been properly isolated from the incidental code. Situations like this are exactly the ones where you want something like the `Seed` class. 
+
+Anyway. Whatever. This was supposed to be an exercise in fucking a spider not shaving a yak, and frankly there has been altogether too much [yak shaving](https://en.wiktionary.org/wiki/yak_shaving) going on in this post. So let's leave it there, yes? 
