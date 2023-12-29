@@ -63,7 +63,7 @@ Catch me or I go Houdini
 
 From a reproducible computing perspective, you'd better catch the RNG state and work carefully with it, or else it will be gone forever. 
 
-## How do different languages manage RNG state? A half-arsed review of bad solutions to a hard problem
+## How do different languages manage RNG state?
 
 How should we manage the RNG state in a programming language? It's a difficult problem, and I am absolutely *not* the person to resolve the question. I'm basically an idiot, and I don't even pretend to know what the right answer to this is. That being said, I think there's essentially three categories of solution that exist in the wild:
 
@@ -206,10 +206,26 @@ By setting the seed in multiple places, you have a solution that is more robust.
 
 ## Creating an "isolated" RNG seed
 
-The [R6](https://r6.r-lib.org/) package is a goddamn delight:
+As you can probably guess, I am actually a huge fan of the R solution. Yes, it's an unprincipled hack where the language "cheats" by creating a hidden global state variable, but it really does work for the vast majority of use cases and it doesn't waste the analysts time by making them do all the dirty work managing the RNG themselves. From its inception R has *never* been a language that cares about ideological purity: as Hadley Wickham once noted,^[I'm too lazy to track down the original citation or the exact quote, but I think he said it during an rstudio::conf / posit::conf talk. The specifics don't matter very much.] R is first and foremost a language for "getting shit done". 
+
+That being said, sometimes I find myself wishing there was a way of creating an "isolated" RNG seed. The idea here is that as the data analyst, I know perfectly well which parts of my code are essential to my probabilistic simulations, and what I really want to do is "protect" those parts of the code by executing them with a dedicated RNG. All my incidental code can use the global RNG state, but nothing I do in the incidental state would affect the output of the protected simulation code.
+
+On the face of it, this seems hard to accomplish with R because the `.Random.seed` variable is aggressively unique. The documentation makes it very clear that the only place R will look for the RNG state is the `.Random.seed` variable in the user global environment, so you cannot solve this problem by creating a new `.Random.seed` variable in another environment. However, the documentation also makes clear that you are *absolutely* allowed to save the value of `.Random.seed` and restore it later.^[The exact phrasing in the documentation says that `.Random.seed` "can be saved and restored, but should not be altered by the user", i.e., it's totally fine to copy the RNG state, just don't try to modify the values stored in the vector yourself because you'll almost certainly mess it up.] In other words, you totally could do something like this:
+
+1. Use `set.seed()` to create the "to-be-isolated" RNG, and then do something like `protected_state <- .Random.seed` to store the state of that RNG
+2. Use `set.seed()` again to set the "global" RNG state
+3. Do some "incidental" random things (implicitly using the global RNG state)
+4. In preparation for the protected step, cache the global state in a temporary `global_state <- .Random.seed`
+5. Restore the protected RNG with `.Random.seed <- protected_state`
+6. Run your "protected" simulation code
+7. Capture the updated state `protected_state <- .Random.seed`
+8. Restore the global RNG with `.Random.seed <- global_state`
+
+This approach works perfectly well, actually. There is absolutely nothing stopping you from caching the state of a protected RNG separately from the global RNG, and occasionally restoring it when you specifically want to use the protected RNG. The only problem with the solution is that I am *absolutely* not willing to faff about write code that does this. It's time-consuming and annoying, and I have deadlines to meet. 
+
+Enter, stage left, the [R6](https://r6.r-lib.org/) package. It is almost obnoxiously easy to design a stateful R6 class that solves this problem. Here's how you do it:
 
 ```{r}
-# an R6 class that creates manages an isolated RNG seed
 Seed <- R6::R6Class("Seed",
   public = list(
     initialize = function(...) {
@@ -229,18 +245,19 @@ Seed <- R6::R6Class("Seed",
     }
   )
 )
-
-# constructor function
-new_seed <- function(...) Seed$new(...)
 ```
 
-Let's test it. First, I'll set the "usual" RNG state using `set.seed()` with `seed = 123`. Then, I'll use the constructor function `new_seed()` to create two new isolated RNG seeds, both of which use `seed = 1`:
+The `Seed` class is terribly simple. When you initialise a new `Seed` object, it temporarily caches the global `.Random.seed` state, then calls `set.seed()` to create the protected RNG state. This protected state is then cached within the `Seed` object itself as the `$state` field.^[I should probably have made this a private field rather than a public field, and then written a public accessor method like `$get_state()` or whatever. But this is a toy example, I'm not trying to be rigorous here.] Finally, it restores the global `.Random.seed` variable to its original state.
+
+Using the protected seed is pretty straightforward: the `Seed` class has a `$use()` method to which you pass an R expression. All code in that expression is evaluated using the protected RNG state rather than the global state. The mechanism here is exatly the same: the `$use()` method caches the global RNG state, copies the `$state` field to the `.Random.seed`, then executes the R code. After the code has executed, the new value of `.Random.seed` is copied back to the `$state` field, and then the global state is restored. 
+
+Let's have a look at how it works. First, I'll set the "usual" RNG state using `set.seed()` with `seed = 123`. Then, I'll create two new isolated RNG seeds, both of which use `seed = 1`:
 
 ```{r}
 set.seed(123)
 state <- .Random.seed
-x <- new_seed(1)
-y <- new_seed(1)
+x <- Seed$new(1)
+y <- Seed$new(1)
 ```
 
 Next, I'll call `sample()` using these isolated seeds:
@@ -263,4 +280,11 @@ Again, the results are identical to each other, and they're also identical to th
 all.equal(state, .Random.seed)
 ```
 
-Yup. It works.^[It should go without saying that this isn't guaranteed to work properly if we're doing a multi-threaded execution thing. But that's true for normal random number generation anyway: you need special tools when doing random number generation in parallel.]
+Yup. It works.^[It should go without saying that this isn't guaranteed to work properly if we're doing a multi-threaded execution thing. But that's true for normal random number generation anyway: you need special tools when doing random number generation in parallel. One of these days I want to do a deep dive on that topic, but it's totally something for a future post.] 
+
+## Wrapping up
+
+It would be pretty easy to wrap something like this in a package I suppose, but (a) I'm too lazy to write it myself, and (b) I think the use case for it is pretty narrowly confined to situations when you are writing a very long script that performs an "essential" simulation and also contains incidental code isn't supposed to affect the simulation itself. Plus, and perhaps most importantly, (c) remember how I said this was a spider-fucking post? I said it and I bloody well meant it. I'm not trying to Solve A Big Problem here. I'm just playing around with code and enjoying the act of writing about it.
+
+That being said, I have to admit I've encountered a few situations in my professional life where I really wished there were a package that implemented something like the `Seed` class. I had one experience a little while back where I'd inherited a long simulation script that did the right thing insofar as it called `set.seed()` at the top of the script, but it had lots of essential simulation code interleaved between other code that was used for non-essential purposes and incidentally modified the RNG state. It was a nightmare to try to refactor the code without breaking reproducibility. Eventually I just had to give up. The code absolutely did need to be refactored because of the future use that we had in mind, and -- despite the original programmers laudable effort to do the right thing -- it was absolutely impossible to do so without changing the results of the simulations. It would have been a lot easier to do this if the "essential" simulation code had been properly isolated from the incidental code. Situations like this are exactly the ones where you want something like the `Seed` class. 
+
