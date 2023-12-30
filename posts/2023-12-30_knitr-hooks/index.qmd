@@ -1,0 +1,192 @@
+---
+title: "Writing knitr hooks"
+description: "Customising knitr output with hook functions is a handy skill, and I can never quite remember it when I need to, so here's a blog post to remind myself"
+date: "2023-12-30"
+categories: ["R", "Literate Programming"]
+image: "yarn.jpg"
+image-alt: "Photo of brightly coloured yarn"
+--- 
+
+<!--------------- my typical setup ----------------->
+
+```{r}
+#| label: setup
+#| include: false
+very_wide <- 500
+wide <- 136
+narrow <- 76
+options(width = narrow)
+cache_images <- TRUE
+set.seed(1)
+```
+
+<!--------------- post begins here ----------------->
+
+A very common situation I encounter when writing a blog post or writing a book chapter using R markdown or quarto arises when the command I want to use generates a lot of output, and I don't want all of the output to be displayed in the output. Every time I run into this problem, I have this vague recollection that "oh yeah, I need to write a knit hook for this", but I can never quite remember how to do that and have to search online for the answer. The answer, incidentally, is described explicitly in the [R Markdown Cookbook](https://bookdown.org/yihui/rmarkdown-cookbook/hook-truncate.html). 
+
+Since the answer is already online in a pretty obvious place, I don't actually need to write a blog post about it. But I'm going to anyway, because every time I actually do need to write a knit hook, I find myself realising that I don't understand them as well as I ought to. So here goes. 
+
+## Chunk options
+
+This is a post about knit hooks, but it helps to start with a refresher on knitr chunk options. I'm assuming, for the purposes of this post, that anyone reading is already pretty familiar with R markdown and quarto, and knows that when I write a document like this and want to execute some R code, I include an appropriately annotated code chunk in the source like so:
+
+```{r}
+#| echo: fenced
+1 + 1
+```
+
+When the document is rendered to HTML, it's the job of the knitr package to parse this chunk, execute the code, and append the output to the document as necessary. You can customise the manner in which knitr does this via [chunk options](https://bookdown.org/yihui/rmarkdown/r-code.html), but the code chunk above doesn't specify any options, so default values are used. 
+
+So what are the defaults, and where are they stored?
+
+The `knitr::opts_chunk` object is used to control the options for code chunks. The object is a list of several functions. The two we use most often are `$get()` and `$set()`.
+
+```{r}
+options <- knitr::opts_chunk$get()
+```
+
+This `options` variable is a list containing all the default values that are applied when knitting the code chunks in the markdown document. If the user doesn't specify a value for a specific chunk option, these are the default values that are applied. There's a lot of these options:
+
+```{r}
+names(options)
+```
+
+The `fig.path` option, for example, is used to specify where generated output images should be written. It's a nice one to illustrate the customisability of knitr because you get a different output depending on context. The blog post is a quarto document, and has different knitr defaults to what you'd see if the same code were run at the console:
+
+```{r}
+options$fig.path
+```
+
+If I'd run the same output at the console, I would get a different answer. When called from the console the default option for `fig.path` is `"figures"`. For example, when I constructed my ["knitr + eleventy" blog](https://knitr-11ty.djnavarro.net/posts/the-blogdown-of-theseus/) this is how I was calling knitr, and accordingly the images were written to a "figures" folder. The defaults, when knitr is used in the context of this on this quarto blog, are different. 
+
+## Knit hooks
+
+So now we turn to [knitr hooks](https://yihui.org/knitr/hooks/). Hooks are user-customisable functions that you can use to control how the knitr options are interpreted, and modify the output that knitr creates. In the same fashion that the `knitr::opts_chunk` object is used to control the chunk options, there's a `knitr::knit_hooks` object used to control hooks. Again, this object is a list of functions, and the two we use most often are `$get()` and `$set()`.^[In addition to `knit_hooks` and `opt_chunks`, knitr has several other objects that can be used to control the behaviour of the package. These are `knit_patterns`, `knit_patterns`, `opts_current`, and `opts_knit`. They all have the same basic structure, including `$get()` and `$set()` functions. These objects are documented [here](https://yihui.org/knitr/objects/).] We can retrieve the hooks by calling the `$get()` function:
+
+```{r}
+hooks <- knitr::knit_hooks$get()
+```
+
+There are 12 default knit hooks in this list:
+
+```{r}
+names(hooks)
+```
+
+The documentation for [output hooks](https://bookdown.org/yihui/rmarkdown-cookbook/output-hooks.html) gives a nice summary for most of these. Seven of the hooks are quite specific, and are applied to only one type of output:
+
+- `source`: Handles how knitr processes the source code inside a chunk
+- `output`: Handles how knitr processes ordinary R output (i.e., not warnings, messages, or errors)
+- `warning`: Handles how knitr processes warning output (e.g., from `warning()`)
+- `message`: Handles how knitr processes message output (e.g., from `message()`)
+- `error`: Handles how knitr processes error output (e.g., from `stop()`)
+- `plot`: Handles how knitr processes graphics output
+- `inline`: Handles how knitr processes output from inline R code
+
+There are two output hooks that are broader in scope:
+
+- `chunk`: Applied to all output from a code chunk
+- `document`: Applied to all output within the document
+
+The other three (`evaluate`, `evaluate.inline`, and `text`) aren't discussed as much, and while I did get a little curious and started going down a rabbit hole looking at them, for once in my life I'll be smart and not get sucked all the way in. 
+
+
+## Custom output hooks
+
+The general advice when writing custom output hooks is that you shouldn't try to write the whole thing yourself. By design, knitr will create default hooks that are appropriate to the specific context, and your safest bet is to first retrieve the default hook by calling the `$get()` function, like this:
+
+```{r}
+default_hook_output <- knitr::knit_hooks$get("output")
+```
+
+Then you can write your own hook that does some pre-processing to the inputs, before passing the modified inputs to the default hook. So, having already saved the default hook as `default_hook_output` I'd write my custom output hook like this:
+
+```{r}
+custom_hook_output <- function(x, options) {
+  n <- options$out.lines
+  if(!is.null(n)) {
+    x <- xfun::split_lines(x)
+    if (length(x) > n) x <- c(head(x, n), "....\n")
+    x <- paste(x, collapse = "\n")
+  }
+  default_hook_output(x, options)
+}
+```
+
+There's a few things going on here that are worth highlighting. First, notice that output hooks take two arguments `x` and `options`. The `x` argument is the raw text string that needs to be rendered: in this case, the string would correspond to the output that would normally be printed to the R console. The `options` argument is the list of knitr chunk options. The value of `options` that gets passed to the hook includes any values that were specified by the user in the chunk options, and also any default values that were not specified by the user. In this instance, `out.lines` is intended to indicate the maximum number of lines of R output to write to the rendered output document. It's not one of the default chunk options (i.e., it wasn't one of the options we saw in the previous section), and so if the user doesn't specify a value for `out.lines` in the chunk options, `options$out.lines` will return a value of `NULL` in our custom hook, and so our `custom_hook_output()` will skip all the pre-processing in that case. However, if the user does specify a value for `out.lines`, it does a little text manipulation to alter the value of `x` before it is passed onto the default output hook.
+
+Having written our custom hook, we apply it by using the `$set()` function:
+
+```{r}
+knitr::knit_hooks$set(output = custom_hook_output)
+```
+
+Now that we have a knit hook that knows how to interpret `out.lines` as a chunk option, I can incorporate it into a knitr code chunk just like any other one:
+
+```{r, out.lines = 4}
+#| echo: fenced
+runif(200)
+```
+
+The output here would normally be considerably longer than 4 lines, but we've applied a custom hook that enforces the truncation, so we get nicer output. Notice also that, in the same way that standard chunk options like `fig.width` and `fig.height` become `fig-width` and `fig-height` when you're setting them via custom code comments, our new `out.lines` option becomes `out-lines` when used in that context:
+
+```{r}
+#| echo: fenced
+#| out-lines: 4
+runif(200)
+```
+
+## Custom chunk hooks
+
+In the previous section, we effectively created a new chunk option called `out.lines` simply by virtue of modifying one of the standard output hooks that is capable of interpreting it and modify the output accordingly. That approach doesn't always work, particularly if the new option that you want to create requires that code be executed before and after knitr processes the chunk. In those situations we may need to write a "chunk hook" that is triggered whenever the new chunk option has a non-null value. Chunk hooks have a different structure than output hooks. The *R Markdown Cookbook* has some nice examples of this, including one for [timing how long it takes the chunk to execute](https://bookdown.org/yihui/rmarkdown-cookbook/time-chunk.html). I'll adapt that one here.
+
+To understand how to write a chunk hook, the key thing to realise is that it gets called twice: once before knitr executes the code in the chunk, and once again afterwards. The function can take up to four arguments, all of which are optional:
+
+- `before` is a logical value indicating whether the function is being called before or after the code chunk is executed
+- `options` is the list of chunk options
+- `envir` is the environment in which the code chunk is executed
+- `name` is the name of the code chunk option that triggered the hook function
+
+As a general rule, the chunk hook is called for its side effects not the return value. However, if it returns a character output, knitr will add that output to the document output as-is.
+
+Designing a chunk hook that records the amount of time taken to execute takes a little thought. When the hook is triggered the first time (with `before = TRUE`) we want to record the system time somewhere (e.g., in a variable called `start_time`). Then, when the hook is triggered the second time (with `before = FALSE`) we want to record the system time again (e.g., as `stop_time`), and compute the difference in time. We can do this using a [function factory](https://adv-r.hadley.nz/function-factories.html) to create stateful functions. Here's what that looks like: 
+
+```{r}
+create_timer_hook <- function() {
+  start_time <- NULL
+  function(before, options) {
+    if (before) {
+      start_time <<- Sys.time()
+    } else {
+      stop_time <- Sys.time()
+      elapsed <- difftime(stop_time, start_time, units = "secs")
+      paste(
+        "<div style='font-size: 70%; text-align: right'>",
+        "Elapsed time:", 
+        round(elapsed, 2), 
+        "secs",
+        "</div>"
+      )
+    }
+  }
+}
+```
+
+When `create_timer_hook()` is called it returns a function, or -- more precisely -- it returns a closure. When called with `before == TRUE`, it records the system time and uses the super assignment operator `<<-` to store that value as `start_time`. However, because `start_time` is defined in the enclosing environment (which survives at least as long as the function itself exists) rather than the execution environment (an ephemeral environment that exists only while the function is being called), the value of `start_time` is persistent, and still exists later on when the hook is triggered a second time with `before == FALSE`. That makes it possible to compute the difference with `difftime()` and make a nice little character string with some HTML that will be printed in the final document.
+
+To put this into action, we set the custom hook like this:
+
+```{r}
+knitr::knit_hooks$set(timer = create_timer_hook())
+```
+
+By doing this `timer` become the code chunk option that triggers the hook, and we can now use it in the document:
+
+```{r}
+#| echo: fenced
+#| timer: true
+#| out-lines: 4
+runif(10000)
+```
+
+And with that, we are done!
