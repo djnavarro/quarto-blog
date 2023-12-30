@@ -15,7 +15,418 @@
 <link>https://blog.djnavarro.net/index.html</link>
 </image>
 <generator>quarto-1.3.433</generator>
-<lastBuildDate>Tue, 26 Dec 2023 13:00:00 GMT</lastBuildDate>
+<lastBuildDate>Fri, 29 Dec 2023 13:00:00 GMT</lastBuildDate>
+<item>
+  <title>Writing knitr hooks</title>
+  <dc:creator>Danielle Navarro</dc:creator>
+  <link>https://blog.djnavarro.net/posts/2023-12-30_knitr-hooks/index.html</link>
+  <description><![CDATA[ 
+
+
+
+
+<!--------------- my typical setup ----------------->
+<!--------------- post begins here ----------------->
+<p>A very common situation I encounter when writing a blog post or writing a book chapter using R markdown or quarto arises when the command I want to use generates a lot of output, and I don’t want all of the output to be displayed in the output. Every time I run into this problem, I have this vague recollection that “oh yeah, I need to write a knit hook for this”, but I can never quite remember how to do that and have to search online for the answer. The answer, incidentally, is described explicitly in the <a href="https://bookdown.org/yihui/rmarkdown-cookbook/hook-truncate.html">R Markdown Cookbook</a>.</p>
+<p>Since the answer is already online in a pretty obvious place, I don’t actually need to write a blog post about it. But I’m going to anyway, because every time I actually do need to write a knit hook, I find myself realising that I don’t understand them as well as I ought to. So here goes.</p>
+<section id="chunk-options" class="level2">
+<h2 class="anchored" data-anchor-id="chunk-options">Chunk options</h2>
+<p>This is a post about knit hooks, but it helps to start with a refresher on knitr chunk options. I’m assuming, for the purposes of this post, that anyone reading is already pretty familiar with R markdown and quarto, and knows that when I write a document like this and want to execute some R code, I include an appropriately annotated code chunk in the source like so:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode markdown code-with-copy"><code class="sourceCode markdown"><span id="cb1-1"><span class="in" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">```{r}</span></span>
+<span id="cb1-2"><span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">1</span> <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">+</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">1</span></span>
+<span id="cb1-3"><span class="in" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">```</span></span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] 2</code></pre>
+</div>
+</div>
+<p>When the document is rendered to HTML, it’s the job of the knitr package to parse this chunk, execute the code, and append the output to the document as necessary. You can customise the manner in which knitr does this via <a href="https://bookdown.org/yihui/rmarkdown/r-code.html">chunk options</a>, but the code chunk above doesn’t specify any options, so default values are used.</p>
+<p>So what are the defaults, and where are they stored?</p>
+<p>The <code>knitr::opts_chunk</code> object is used to control the options for code chunks. The object is a list of several functions. The two we use most often are <code>$get()</code> and <code>$set()</code>.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb3" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1">options <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> knitr<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span>opts_chunk<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">get</span>()</span></code></pre></div>
+</div>
+<p>This <code>options</code> variable is a list containing all the default values that are applied when knitting the code chunks in the markdown document. If the user doesn’t specify a value for a specific chunk option, these are the default values that are applied. There’s a lot of these options:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb4" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">names</span>(options)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code> [1] "eval"          "echo"          "results"       "tidy"         
+ [5] "tidy.opts"     "collapse"      "prompt"        "comment"      
+ [9] "highlight"     "size"          "background"    "strip.white"  
+[13] "cache"         "cache.path"    "cache.vars"    "cache.lazy"   
+[17] "dependson"     "autodep"       "cache.rebuild" "fig.keep"     
+[21] "fig.show"      "fig.align"     "fig.path"      "dev"          
+[25] "dev.args"      "dpi"           "fig.ext"       "fig.width"    
+[29] "fig.height"    "fig.env"       "fig.cap"       "fig.scap"     
+[33] "fig.lp"        "fig.subcap"    "fig.pos"       "out.width"    
+[37] "out.height"    "out.extra"     "fig.retina"    "external"     
+[41] "sanitize"      "interval"      "aniopts"       "warning"      
+[45] "error"         "message"       "render"        "ref.label"    
+[49] "child"         "engine"        "split"         "include"      
+[53] "purl"          "fenced.echo"   "ft.shadow"    </code></pre>
+</div>
+</div>
+<p>The <code>fig.path</code> option, for example, is used to specify where generated output images should be written. It’s a nice one to illustrate the customisability of knitr because you get a different output depending on context. The blog post is a quarto document, and has different knitr defaults to what you’d see if the same code were run at the console:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb6" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1">options<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span>fig.path</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>[1] "index_files/figure-html/"</code></pre>
+</div>
+</div>
+<p>If I’d run the same output at the console, I would get a different answer. When called from the console the default option for <code>fig.path</code> is <code>"figures"</code>. For example, when I constructed my <a href="https://knitr-11ty.djnavarro.net/posts/the-blogdown-of-theseus/">“knitr + eleventy” blog</a> this is how I was calling knitr, and accordingly the images were written to a “figures” folder. The defaults, when knitr is used in the context of this on this quarto blog, are different.</p>
+</section>
+<section id="knit-hooks" class="level2">
+<h2 class="anchored" data-anchor-id="knit-hooks">Knit hooks</h2>
+<p>So now we turn to <a href="https://yihui.org/knitr/hooks/">knitr hooks</a>. Hooks are user-customisable functions that you can use to control how the knitr options are interpreted, and modify the output that knitr creates. In the same fashion that the <code>knitr::opts_chunk</code> object is used to control the chunk options, there’s a <code>knitr::knit_hooks</code> object used to control hooks. Again, this object is a list of functions, and the two we use most often are <code>$get()</code> and <code>$set()</code>.<sup>1</sup> We can retrieve the hooks by calling the <code>$get()</code> function:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb8" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1">hooks <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> knitr<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span>knit_hooks<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">get</span>()</span></code></pre></div>
+</div>
+<p>There are 12 default knit hooks in this list:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb9" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">names</span>(hooks)</span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code> [1] "source"          "output"          "warning"         "message"        
+ [5] "error"           "plot"            "inline"          "chunk"          
+ [9] "text"            "evaluate.inline" "evaluate"        "document"       </code></pre>
+</div>
+</div>
+<p>The documentation for <a href="https://bookdown.org/yihui/rmarkdown-cookbook/output-hooks.html">output hooks</a> gives a nice summary for most of these. Seven of the hooks are quite specific, and are applied to only one type of output:</p>
+<ul>
+<li><code>source</code>: Handles how knitr processes the source code inside a chunk</li>
+<li><code>output</code>: Handles how knitr processes ordinary R output (i.e., not warnings, messages, or errors)</li>
+<li><code>warning</code>: Handles how knitr processes warning output (e.g., from <code>warning()</code>)</li>
+<li><code>message</code>: Handles how knitr processes message output (e.g., from <code>message()</code>)</li>
+<li><code>error</code>: Handles how knitr processes error output (e.g., from <code>stop()</code>)</li>
+<li><code>plot</code>: Handles how knitr processes graphics output</li>
+<li><code>inline</code>: Handles how knitr processes output from inline R code</li>
+</ul>
+<p>There are two output hooks that are broader in scope:</p>
+<ul>
+<li><code>chunk</code>: Applied to all output from a code chunk</li>
+<li><code>document</code>: Applied to all output within the document</li>
+</ul>
+<p>The other three (<code>evaluate</code>, <code>evaluate.inline</code>, and <code>text</code>) aren’t discussed as much, and while I did get a little curious and started going down a rabbit hole looking at them, for once in my life I’ll be smart and not get sucked all the way in.</p>
+</section>
+<section id="custom-output-hooks" class="level2">
+<h2 class="anchored" data-anchor-id="custom-output-hooks">Custom output hooks</h2>
+<p>The general advice when writing custom output hooks is that you shouldn’t try to write the whole thing yourself. By design, knitr will create default hooks that are appropriate to the specific context, and your safest bet is to first retrieve the default hook by calling the <code>$get()</code> function, like this:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb11" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb11-1">default_hook_output <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> knitr<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span>knit_hooks<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">get</span>(<span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"output"</span>)</span></code></pre></div>
+</div>
+<p>Then you can write your own hook that does some pre-processing to the inputs, before passing the modified inputs to the default hook. So, having already saved the default hook as <code>default_hook_output</code> I’d write my custom output hook like this:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb12" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb12-1">custom_hook_output <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="cf" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">function</span>(x, options) {</span>
+<span id="cb12-2">  n <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> options<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span>out.lines</span>
+<span id="cb12-3">  <span class="cf" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">if</span>(<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">!</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">is.null</span>(n)) {</span>
+<span id="cb12-4">    x <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> xfun<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">split_lines</span>(x)</span>
+<span id="cb12-5">    <span class="cf" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">if</span> (<span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">length</span>(x) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">&gt;</span> n) x <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">c</span>(<span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">head</span>(x, n), <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"....</span><span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">\n</span><span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"</span>)</span>
+<span id="cb12-6">    x <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">paste</span>(x, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">collapse =</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"</span><span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">\n</span><span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"</span>)</span>
+<span id="cb12-7">  }</span>
+<span id="cb12-8">  <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">default_hook_output</span>(x, options)</span>
+<span id="cb12-9">}</span></code></pre></div>
+</div>
+<p>There’s a few things going on here that are worth highlighting. First, notice that output hooks take two arguments <code>x</code> and <code>options</code>. The <code>x</code> argument is the raw text string that needs to be rendered: in this case, the string would correspond to the output that would normally be printed to the R console. The <code>options</code> argument is the list of knitr chunk options. The value of <code>options</code> that gets passed to the hook includes any values that were specified by the user in the chunk options, and also any default values that were not specified by the user. In this instance, <code>out.lines</code> is intended to indicate the maximum number of lines of R output to write to the rendered output document. It’s not one of the default chunk options (i.e., it wasn’t one of the options we saw in the previous section), and so if the user doesn’t specify a value for <code>out.lines</code> in the chunk options, <code>options$out.lines</code> will return a value of <code>NULL</code> in our custom hook, and so our <code>custom_hook_output()</code> will skip all the pre-processing in that case. However, if the user does specify a value for <code>out.lines</code>, it does a little text manipulation to alter the value of <code>x</code> before it is passed onto the default output hook.</p>
+<p>Having written our custom hook, we apply it by using the <code>$set()</code> function:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb13" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1">knitr<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span>knit_hooks<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">set</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">output =</span> custom_hook_output)</span></code></pre></div>
+</div>
+<p>Now that we have a knit hook that knows how to interpret <code>out.lines</code> as a chunk option, I can incorporate it into a knitr code chunk just like any other one:</p>
+<div class="cell" data-out.lines="4">
+<div class="sourceCode cell-code" id="cb14" style="background: #f1f3f5;"><pre class="sourceCode markdown code-with-copy"><code class="sourceCode markdown"><span id="cb14-1"><span class="in" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">```{r, out.lines = 4}</span></span>
+<span id="cb14-2"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">runif</span>(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">200</span>)</span>
+<span id="cb14-3"><span class="in" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">```</span></span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>  [1] 0.26550866 0.37212390 0.57285336 0.90820779 0.20168193 0.89838968
+  [7] 0.94467527 0.66079779 0.62911404 0.06178627 0.20597457 0.17655675
+ [13] 0.68702285 0.38410372 0.76984142 0.49769924 0.71761851 0.99190609
+ [19] 0.38003518 0.77744522 0.93470523 0.21214252 0.65167377 0.12555510
+....</code></pre>
+</div>
+</div>
+<p>The output here would normally be considerably longer than 4 lines, but we’ve applied a custom hook that enforces the truncation, so we get nicer output. Notice also that, in the same way that standard chunk options like <code>fig.width</code> and <code>fig.height</code> become <code>fig-width</code> and <code>fig-height</code> when you’re setting them via custom code comments, our new <code>out.lines</code> option becomes <code>out-lines</code> when used in that context:</p>
+<div class="cell" data-out.lines="4">
+<div class="sourceCode cell-code" id="cb16" style="background: #f1f3f5;"><pre class="sourceCode markdown code-with-copy"><code class="sourceCode markdown"><span id="cb16-1"><span class="in" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">```{r}</span></span>
+<span id="cb16-2"><span class="co" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">#| out-lines: 4</span></span>
+<span id="cb16-3"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">runif</span>(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">200</span>)</span>
+<span id="cb16-4"><span class="in" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">```</span></span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>  [1] 0.26750821 0.21864528 0.51679684 0.26895059 0.18116833 0.51857614
+  [7] 0.56278294 0.12915685 0.25636760 0.71793528 0.96140994 0.10014085
+ [13] 0.76322269 0.94796635 0.81863469 0.30829233 0.64957946 0.95335545
+ [19] 0.95373265 0.33997920 0.26247411 0.16545393 0.32216806 0.51012521
+....</code></pre>
+</div>
+</div>
+</section>
+<section id="custom-chunk-hooks" class="level2">
+<h2 class="anchored" data-anchor-id="custom-chunk-hooks">Custom chunk hooks</h2>
+<p>In the previous section, we effectively created a new chunk option called <code>out.lines</code> simply by virtue of modifying one of the standard output hooks that is capable of interpreting it and modify the output accordingly. That approach doesn’t always work, particularly if the new option that you want to create requires that code be executed before and after knitr processes the chunk. In those situations we may need to write a “chunk hook” that is triggered whenever the new chunk option has a non-null value. Chunk hooks have a different structure than output hooks. The <em>R Markdown Cookbook</em> has some nice examples of this, including one for <a href="https://bookdown.org/yihui/rmarkdown-cookbook/time-chunk.html">timing how long it takes the chunk to execute</a>. I’ll adapt that one here.</p>
+<p>To understand how to write a chunk hook, the key thing to realise is that it gets called twice: once before knitr executes the code in the chunk, and once again afterwards. The function can take up to four arguments, all of which are optional:</p>
+<ul>
+<li><code>before</code> is a logical value indicating whether the function is being called before or after the code chunk is executed</li>
+<li><code>options</code> is the list of chunk options</li>
+<li><code>envir</code> is the environment in which the code chunk is executed</li>
+<li><code>name</code> is the name of the code chunk option that triggered the hook function</li>
+</ul>
+<p>As a general rule, the chunk hook is called for its side effects not the return value. However, if it returns a character output, knitr will add that output to the document output as-is.</p>
+<p>Designing a chunk hook that records the amount of time taken to execute takes a little thought. When the hook is triggered the first time (with <code>before = TRUE</code>) we want to record the system time somewhere (e.g., in a variable called <code>start_time</code>). Then, when the hook is triggered the second time (with <code>before = FALSE</code>) we want to record the system time again (e.g., as <code>stop_time</code>), and compute the difference in time. We can do this using a <a href="https://adv-r.hadley.nz/function-factories.html">function factory</a> to create stateful functions. Here’s what that looks like:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb18" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1">create_timer_hook <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="cf" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">function</span>() {</span>
+<span id="cb18-2">  start_time <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="cn" style="color: #8f5902;
+background-color: null;
+font-style: inherit;">NULL</span></span>
+<span id="cb18-3">  <span class="cf" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">function</span>(before, options) {</span>
+<span id="cb18-4">    <span class="cf" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">if</span> (before) {</span>
+<span id="cb18-5">      start_time <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;&lt;-</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">Sys.time</span>()</span>
+<span id="cb18-6">    } <span class="cf" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">else</span> {</span>
+<span id="cb18-7">      stop_time <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">Sys.time</span>()</span>
+<span id="cb18-8">      elapsed <span class="ot" style="color: #003B4F;
+background-color: null;
+font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">difftime</span>(stop_time, start_time, <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">units =</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"secs"</span>)</span>
+<span id="cb18-9">      <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">paste</span>(</span>
+<span id="cb18-10">        <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"&lt;div style='font-size: 70%; text-align: right'&gt;"</span>,</span>
+<span id="cb18-11">        <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"Elapsed time:"</span>, </span>
+<span id="cb18-12">        <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">round</span>(elapsed, <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">2</span>), </span>
+<span id="cb18-13">        <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"secs"</span>,</span>
+<span id="cb18-14">        <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"&lt;/div&gt;"</span></span>
+<span id="cb18-15">      )</span>
+<span id="cb18-16">    }</span>
+<span id="cb18-17">  }</span>
+<span id="cb18-18">}</span></code></pre></div>
+</div>
+<p>When <code>create_timer_hook()</code> is called it returns a function, or – more precisely – it returns a closure. When called with <code>before == TRUE</code>, it records the system time and uses the super assignment operator <code>&lt;&lt;-</code> to store that value as <code>start_time</code>. However, because <code>start_time</code> is defined in the enclosing environment (which survives at least as long as the function itself exists) rather than the execution environment (an ephemeral environment that exists only while the function is being called), the value of <code>start_time</code> is persistent, and still exists later on when the hook is triggered a second time with <code>before == FALSE</code>. That makes it possible to compute the difference with <code>difftime()</code> and make a nice little character string with some HTML that will be printed in the final document.</p>
+<p>To put this into action, we set the custom hook like this:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb19" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb19-1">knitr<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span>knit_hooks<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">$</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">set</span>(<span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">timer =</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">create_timer_hook</span>())</span></code></pre></div>
+</div>
+<p>By doing this <code>timer</code> become the code chunk option that triggers the hook, and we can now use it in the document:</p>
+<div class="cell" data-timer="true" data-out.lines="4">
+<div class="sourceCode cell-code" id="cb20" style="background: #f1f3f5;"><pre class="sourceCode markdown code-with-copy"><code class="sourceCode markdown"><span id="cb20-1"><span class="in" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">```{r}</span></span>
+<span id="cb20-2"><span class="co" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">#| timer: true</span></span>
+<span id="cb20-3"><span class="co" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">#| out-lines: 4</span></span>
+<span id="cb20-4"><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">runif</span>(<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">10000</span>)</span>
+<span id="cb20-5"><span class="in" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">```</span></span></code></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>    [1] 0.6588776091 0.1850699645 0.9543781369 0.8978484920 0.9436970544
+    [6] 0.7236907512 0.3703570659 0.7810175403 0.0111495086 0.9403087122
+   [11] 0.9937492262 0.3574057452 0.7476350635 0.7929090238 0.7058590064
+   [16] 0.4758250387 0.4946545260 0.3080524488 0.6950122463 0.8227933056
+....</code></pre>
+</div>
+<div style="font-size: 70%; text-align: right">
+Elapsed time: 0.03 secs
+</div>
+</div>
+<p>And with that, we are done!</p>
+
+
+</section>
+
+
+<div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
+
+<ol>
+<li id="fn1"><p>In addition to <code>knit_hooks</code> and <code>opt_chunks</code>, knitr has several other objects that can be used to control the behaviour of the package. These are <code>knit_patterns</code>, <code>knit_patterns</code>, <code>opts_current</code>, and <code>opts_knit</code>. They all have the same basic structure, including <code>$get()</code> and <code>$set()</code> functions. These objects are documented <a href="https://yihui.org/knitr/objects/">here</a>.↩︎</p></li>
+</ol>
+</section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div id="quarto-reuse" class="quarto-appendix-contents"><div><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2023,
+  author = {Navarro, Danielle},
+  title = {Writing Knitr Hooks},
+  date = {2023-12-30},
+  url = {https://blog.djnavarro.net/posts/2023-12-30_knitr-hooks},
+  langid = {en}
+}
+</code></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2023" class="csl-entry quarto-appendix-citeas">
+Navarro, Danielle. 2023. <span>“Writing Knitr Hooks.”</span> December
+30, 2023. <a href="https://blog.djnavarro.net/posts/2023-12-30_knitr-hooks">https://blog.djnavarro.net/posts/2023-12-30_knitr-hooks</a>.
+</div></div></section></div> ]]></description>
+  <category>R</category>
+  <category>Literate Programming</category>
+  <guid>https://blog.djnavarro.net/posts/2023-12-30_knitr-hooks/index.html</guid>
+  <pubDate>Fri, 29 Dec 2023 13:00:00 GMT</pubDate>
+  <media:content url="https://blog.djnavarro.net/posts/2023-12-30_knitr-hooks/yarn.jpg" medium="image" type="image/jpeg"/>
+</item>
 <item>
   <title>Fine-grained control of RNG seeds in R</title>
   <dc:creator>Danielle Navarro</dc:creator>
@@ -699,6 +1110,7 @@ December 23, 2023. <a href="https://blog.djnavarro.net/posts/2023-12-24_blogdown
   <category>Javascript</category>
   <category>R</category>
   <category>Blogging</category>
+  <category>Literate Programming</category>
   <guid>https://blog.djnavarro.net/posts/2023-12-24_blogdown-of-theseus/index.html</guid>
   <pubDate>Fri, 22 Dec 2023 13:00:00 GMT</pubDate>
   <media:content url="https://blog.djnavarro.net/posts/2023-12-24_blogdown-of-theseus/theseus-and-ariadne.jpg" medium="image" type="image/jpeg"/>
@@ -20792,185 +21204,6 @@ April 26, 2023. <a href="https://blog.djnavarro.net/posts/2023-04-26_non-compart
   <guid>https://blog.djnavarro.net/posts/2023-04-26_non-compartmental-analysis/index.html</guid>
   <pubDate>Tue, 25 Apr 2023 14:00:00 GMT</pubDate>
   <media:content url="https://blog.djnavarro.net/posts/2023-04-26_non-compartmental-analysis/cover.jpg" medium="image" type="image/jpeg"/>
-</item>
-<item>
-  <title>A personal essay on Bayes factors</title>
-  <dc:creator>Danielle Navarro</dc:creator>
-  <link>https://blog.djnavarro.net/posts/2023-04-12_bayes-factors/index.html</link>
-  <description><![CDATA[ 
-
-
-
-
-<!--------------- my typical setup ----------------->
-<!--------------- post begins here ----------------->
-<blockquote class="blockquote">
-<p>You like my gin and tonic kisses ’cause you know they taste so sweet<br> And I know you got your missus, but there ain’t no one like me<br> &nbsp;&nbsp; –Elle King and Miranda Lambert</p>
-</blockquote>
-<p>So. As my loyal<sup>1</sup> readers may have worked out, I have decided that now is the time to resurrect blog posts from my dark past. Oh sure, I can walk in the bright and blessed world of data science and adorn myself in <a href="https://www.imdb.com/title/tt9079692/">all that hard glossy armour</a> that is the perquisite of trade, but I have a dark past. Once upon a time I <a href="https://www.quotes.net/mquote/56448">delved too deep</a> into the dark realms of statistics. I fought with dragons (frequentists), trolls (objective Bayesians), and balrogs (subjective Bayesians). Occasionally I emerged victorious, in the sense that I am not yet dead. In this respect I am proud of myself, but oh my… to survive this in perilous land, I too have had to scorch the earth and burn all the bridges. These are dangerous paths to tread, and there are few things a statistician loves more than a whimsical death.</p>
-<p>Yeah, anyway. I have opinions about <a href="https://en.wikipedia.org/wiki/Bayes_factor">Bayes factors</a>, and since I am no longer required to give a fuck about academic norms, I shall raise them from the dead. Or, to use normal language, I’m gonna repost a rant I wrote a few years back because I bloody well can…</p>
-<div class="column-page">
-<p><img src="https://blog.djnavarro.net/posts/2023-04-12_bayes-factors/katy.jpg" class="img-fluid" alt="Katy Perry in a wedding dress, looking apprehensive"></p>
-</div>
-<p><br></p>
-<section id="the-post" class="level2">
-<h2 class="anchored" data-anchor-id="the-post">The post…</h2>
-<blockquote class="blockquote">
-<p>’Cause you’re hot then you’re cold <br> You’re yes then you’re no <br> You’re in then you’re out <br> You’re up then you’re down <br> You’re wrong when it’s right <br> It’s black and it’s white<br> &nbsp;&nbsp; –<a href="https://youtu.be/kTHNpusq654">Katy Perry</a></p>
-</blockquote>
-<p>I have mixed feelings about Bayes factors. As Katy Perry once observed, it’s <em>extremely</em> <a href="https://www.youtube.com/watch?v=kTHNpusq654">hard to make valid inferences</a> when you aren’t even sure what the hell it is you’re trying to make inferences about. Oh sure, it’s easy enough to tell pretty stories about rational reasoning with respect to a prior, but if we’re going to have a serious statistical relationship you need to bring more than a <a href="https://en.wikipedia.org/wiki/Dutch_book">Dutch book argument</a> to the table.</p>
-<p><br></p>
-</section>
-<section id="love-at-first-sight" class="level2 page-columns page-full">
-<h2 class="anchored" data-anchor-id="love-at-first-sight">Love at first sight</h2>
-<p>I first discovered Bayes factors in 1999, as a new Ph.D.&nbsp;student working on problems in similarity judgment and categorisation. I read <a href="https://www.tandfonline.com/doi/abs/10.1080/01621459.1995.10476572">Kass and Raftery (1995)</a> and was head over heels. As long as one accepts the principle of inverse probability, a Bayesian reasoner can evaluate a hypothesis <img src="https://latex.codecogs.com/png.latex?h"> in light of data <img src="https://latex.codecogs.com/png.latex?d"> in a simple fashion:</p>
-<p><img src="https://latex.codecogs.com/png.latex?%0AP(h%7Cd)%20=%20%5Cfrac%7BP(d%7Ch)%20P(h)%7D%7BP(d)%7D%0A"></p>
-<p>I suspect most people reading this post already knows what Bayes rule says, but not everyone who follows me cares that much so let’s break this down:<sup>2</sup></p>
-<ul>
-<li><img src="https://latex.codecogs.com/png.latex?P(h)"> is my <em>prior belief</em>: how plausible was <img src="https://latex.codecogs.com/png.latex?h"> before the data arrived?</li>
-<li><img src="https://latex.codecogs.com/png.latex?P(h%7Cd)"> is my <em>posterior belief</em>: how plausible is <img src="https://latex.codecogs.com/png.latex?h"> now that I’ve seen the data?</li>
-<li><img src="https://latex.codecogs.com/png.latex?P(d%7Ch)"> is the <em>likelihood</em>: the probability that we would have observed data <img src="https://latex.codecogs.com/png.latex?d"> if the hypothesis <img src="https://latex.codecogs.com/png.latex?h"> describes the true data generating mechanism <sup>3</sup> <sup>4</sup></li>
-</ul>
-<p>When comparing two competing hypotheses <img src="https://latex.codecogs.com/png.latex?h_0"> and <img src="https://latex.codecogs.com/png.latex?h_1">, I can compute the posterior odds favouring one over the other simply by dividing the two posterior probabilities,</p>
-<p><img src="https://latex.codecogs.com/png.latex?%0A%5Cfrac%7BP(h_1%20%7C%20d)%7D%7BP(h_0%20%7C%20d)%7D%20=%20%5Cfrac%7BP(d%7Ch_1)%7D%7BP(d%7Ch_0)%7D%20%5Ctimes%20%5Cfrac%7BP(h_1)%7D%7BP(h_0)%7D%0A"></p>
-<p>Or, in something closer to every day language:</p>
-<p><img src="https://latex.codecogs.com/png.latex?%0A%5Cmbox%7Bposterior%20odds%7D%20=%20%5Cmbox%7BBayes%20factor%7D%20%5Ctimes%20%5Cmbox%7Bprior%20odds%7D%0A"></p>
-<p>Thus the Bayes factor (BF) is defined by the ratio of the two likelihoods, and it has a natural interpretation as a <em>weight of evidence</em>. It tells me how I need to adjust my beliefs in light of data. And it’s so simple…</p>
-<p><img src="https://latex.codecogs.com/png.latex?%0A%5Cmbox%7BBF%7D%20=%20%5Cfrac%7BP(d%7Ch_1)%7D%7BP(d%7Ch_0)%7D%0A"></p>
-<p>What’s not to love?</p>
-<p>Better yet, it even extends naturally from simple hypotheses to full fledged models. Suppose I have a theoretically meaningful computational model <img src="https://latex.codecogs.com/png.latex?%5Cmathcal%7BM%7D"> for some psychological phenomenon, with parameter(s) <img src="https://latex.codecogs.com/png.latex?%5Ctheta">. For any choice of parameter values <img src="https://latex.codecogs.com/png.latex?%5Ctheta"> my model provides me with a likelihood function for the data <img src="https://latex.codecogs.com/png.latex?P(d%7C%5Ctheta)">, and my researcher knowledge of the world provides a prior <img src="https://latex.codecogs.com/png.latex?P(%5Ctheta%7C%5Cmathcal%7BM%7D)"> belief about the relative plausibility of different parameters. So the <em>a priori</em> prediction that my model makes about the probability of observing data <img src="https://latex.codecogs.com/png.latex?d"> in my experiment is calculated with the <em>marginal likelihood</em> <sup>5</sup></p>
-<p><img src="https://latex.codecogs.com/png.latex?%0AP(d%20%7C%20%5Cmathcal%7BM%7D)%20=%20%5Csum_%5Ctheta%20P(d%20%7C%20%5Ctheta)%20P(%5Ctheta%20%7C%20%5Cmathcal%7BM%7D)%0A"></p>
-<p>The intuition is dead simple (or so I thought at the time)…. if I don’t know which parameter <img src="https://latex.codecogs.com/png.latex?%5Ctheta"> is the right one, I should hedge my bets by constructing an appropriate weighted average. Easy-peasy. This gives me a Bayes factor that I can use to compare two computational models like so:</p>
-<p><img src="https://latex.codecogs.com/png.latex?%0A%5Cmbox%7BBF%7D%20=%20%5Cfrac%7BP(d%7C%5Cmathcal%7BM%7D_1)%7D%7BP(d%7C%5Cmathcal%7BM%7D_0)%7D%0A"></p>
-<p>Honestly, I don’t see why this “statistics business” is so hard, I thought. All you have to do to scale up from simple hypotheses to serious theory evaluation is turn an italicised <img src="https://latex.codecogs.com/png.latex?h"> into a squiggly <img src="https://latex.codecogs.com/png.latex?%5Cmathcal%7BM%7D"> and you’re done! I read the Myung and Pitt (1997) paper on <a href="https://link.springer.com/article/10.3758/BF03210778">model selection with Bayes factors</a> and thought yep, this is it. Problem solved. Easy!</p>
-<p>Oh, you sweet summer child.</p>
-<p><br></p>
-<div class="column-page">
-<p><img src="https://blog.djnavarro.net/posts/2023-04-12_bayes-factors/lana.jpg" class="img-fluid" alt="Photo of Lana Del Rey"></p>
-</div>
-</section>
-<section id="seeds-of-doubt" class="level2">
-<h2 class="anchored" data-anchor-id="seeds-of-doubt">Seeds of doubt</h2>
-<blockquote class="blockquote">
-<p>I’m feelin’ electric tonight <br> Cruisin’ down the coast, goin’ about 99<br> Got my bad baby by my heavenly side<br> I know if I go, I’ll die happy tonight<br> &nbsp;&nbsp; – <a href="https://youtu.be/TdrL3QxjyVw">Lana Del Rey</a></p>
-</blockquote>
-<p>During my PhD I used Bayes factors (or similar tools) a <em>lot</em>. One of my very first papers (<a href="https://papers.djnavarro.net/2003_hybridsimilarity.">this one</a> sought to combine multidimensional scaling methods with overlapping clustering methods in a way that would allow someone to estimate stimulus representations that have both continuous and discrete parts (e.g., our intuitions about number are partly continuous insofar as they pertain to magnitude, but also discrete when they pertain to other arithmetic properties), using Laplace approximations to the Bayes factor to automatically determine the appropriate number of clusters and dimensions. The technique had some problems. Collections of weighted binary features (as used in featural reprentations; <a href="https://doi.org/10.1037/0033-295X.84.4.327">Tversky 1977</a>, <a href="https://doi.org/10.1037/0033-295X.86.2.87">Shepard and Arabie 1979</a>) induce a <em>qualitatively different parameter space</em> than co-ordinates in a Minkowski space<sup>6</sup> (<a href="https://doi.org/10.1007/BF02291665">Shepard 1974</a>), and so when you try to mix them together into a hybrid similarity representation you get… weirdness.</p>
-<p>Any time you compute the marginal likelihood <img src="https://latex.codecogs.com/png.latex?P(d%20%7C%20%5Cmathcal%7BM%7D)"> you are implicitly introducing a penalty for excess complexity, so the Bayes factor incorporates a form of automatic Ockham’s razor. But when I built the hybrid model I found that the (implied) penalty term for <em>“adding one more continuous dimension for an MDS solution”</em> doesn’t seem to be commensurate with the (implied) penalty term for <em>“adding one more discrete feature”</em> and while I could get some decent solutions in some cases (the numbers example worked pretty well…) I never did find a general version that would “just work”.</p>
-<p>I put it down to the fact that the priors <img src="https://latex.codecogs.com/png.latex?P(%5Ctheta%7C%5Cmathcal%7BM%7D)"> were kind of ad hoc… after all, I didn’t know what would make sense as a plausible prior that would render continuous things and discrete things commensurate with one another in a way that made sense for the psychological problems I wanted to solve. I assumed the right answer would come to me one day.</p>
-<p>It hasn’t yet, but I’m still hoping it will.</p>
-<p><br></p>
-</section>
-<section id="seeing-other-statistics-at-least-thats-what-i-said-i-was-doing" class="level2 page-columns page-full">
-<h2 class="anchored" data-anchor-id="seeing-other-statistics-at-least-thats-what-i-said-i-was-doing">Seeing other statistics (at least that’s what I said I was doing)</h2>
-<blockquote class="blockquote">
-<p>We lay on the bed there <br> Kissing just for practice <br> Could we please be objective? <br> ’Cause the other boys are queuing up behind us <br> &nbsp;&nbsp; – <a href="https://youtu.be/Gzfsx3HkBTk">Belle &amp; Sebastian</a></p>
-</blockquote>
-<p>At about this point in time, I became fascinated with some of Jay Myung and Mark Pitt’s other papers on alternative ways to do model selection. For instance, in <a href="https://doi.org/10.1037/0033-295X.109.3.472">2003</a> they advocated the use of model selection by minimum description length (MDL). The MDL approach to statistical inference comes out of algorithmic information theory and can be viewed as a stripped down form of Kolmogorov complexity (KC). In KC we would say something like this…</p>
-<blockquote class="blockquote">
-<p>The Kolmogorov complexity of a string S with respect to programming language L is the length (in bits) of the shortest program P that prints S and then halts.</p>
-</blockquote>
-<p>… so the idea would be to think of a model <img src="https://latex.codecogs.com/png.latex?%5Cmathcal%7BM%7D"> as a program and use it as a tool to compress the data <img src="https://latex.codecogs.com/png.latex?d">. Whichever model compresses the data the most is the winner. Strictly speaking, KC is useless in real life because it’s uncomputable<sup>7</sup> but there are many ways of taking the idea and transforming it to something that you can use. The best known (I think?) is <a href="https://doi.org/10.1109/18.481776">Jorma Rissanen’s</a> stochastic complexity approach (borrowing from work by Shtarkov) but I’ve always had a soft spot for <a href="https://academic.oup.com/comjnl/article-abstract/42/4/270/558949">Wallace and Dowe’s</a> explicitly Bayesian formulation of the problem.</p>
-<p>As you can probably tell, during the early 2000s I read a lot of statistics papers that I didn’t understand all that well.</p>
-<p>What I did notice though is that many of these techniques end up constructing some version of the marginal likelihood <img src="https://latex.codecogs.com/png.latex?P(d%7C%5Cmathcal%7BM%7D)">. They all have different motivations and not all of them allow a clear probabilistic interpretation (Rissanen doesn’t endorse a Bayesian interpretation of MDL, for instance), but they have more in common with one another than I’d originally thought. I even started reading some <a href="https://doi.org/10.1073/pnas.170283897">information geometry</a> and found roughly the same thing. A large number of these model selection criteria can be viewed as series expansions of <img src="https://latex.codecogs.com/png.latex?%5Cln%20P(d%7C%5Cmathcal%7BM%7D)">, with “small” terms omitted (usually <img src="https://latex.codecogs.com/png.latex?O(1)">). Yay, I thought! This is fantastic. Particulars notwithstanding, there is a strong theoretical justification for basing my inferences on the marginal likelihood.</p>
-<p>It didn’t take long for my enthusiasm to fade again. The first time I tried to use this for model selection in the wild (selecting between different retention functions in recall memory tasks) I broke it <a href="https://www.mitpressjournals.org/doi/10.1162/0899766041336378">pretty badly</a>. It turns out that <img src="https://latex.codecogs.com/png.latex?O(1)"> terms can be <em>very fucking large</em> in practice, and you can get all sorts of absurd results (e.g., a nested model that is judged to be more complex than the full one) when you use these model selection criteria with “small” (say, a mere 1000 or so observations) samples.</p>
-<p>I expanded my dating pool further. I had an on again off again thing with Bayesian nonparametrics (<a href="http://dx.doi.org/10.1016/j.jmp.2005.11.006">here</a>, <a href="http://dx.doi.org/10.1162/neco.2008.04-07-504">here</a>, <a href="https://doi.org/10.1037/rev0000077">here</a>), I dated <a href="http://dx.doi.org/10.1016/j.jmp.2005.06.008">normalised maximum likelihood</a>, and various other things besides. They all let me down somehow. It turns out that NML is mostly useless in real life, Bayesian nonparametric models don’t converge to anything sensible in some situations, and so on.</p>
-<p>I never dated a p-value though. I do have standards.</p>
-<p><br></p>
-<p><br></p>
-<div class="column-page">
-<p><img src="https://blog.djnavarro.net/posts/2023-04-12_bayes-factors/taylor.jpg" class="img-fluid" alt="Photo of Taylor Swift in a bathtub full of money and jewels."></p>
-</div>
-</section>
-<section id="what-problems-do-we-study" class="level2">
-<h2 class="anchored" data-anchor-id="what-problems-do-we-study">What problems do we study?</h2>
-<blockquote class="blockquote">
-<p>But I got smarter, I got harder in the nick of time <br> Honey, I rose up from the dead, I do it all the time <br> I’ve got a list of names and yours is in red, underlined <br> &nbsp;&nbsp; – <a href="https://youtu.be/3tmd-ClpJxA">Taylor Swift</a></p>
-</blockquote>
-<p>Just lately I’ve been wondering how many of the practical problems I’ve encountered stem from the fact that almost no statistical problems worth caring about are <img src="https://latex.codecogs.com/png.latex?%5Cmathcal%7BM%7D">-closed (this time around it’s <a href="https://twitter.com/dan_p_simpson/status/991621450837741569">Dan Simpson’s fault</a> I’m thinking about this, but it’s been a recurring theme in my thoughts for a long time). At the moment I’m reading <a href="https://projecteuclid.org/download/pdfview_1/euclid.ba/1378729923">this paper</a> by Clarke, Clarke and Yu (2013), and I’ll steal their words. The first paragraph of the paper starts with this</p>
-<blockquote class="blockquote">
-<p>Prediction problems naturally fall into three classes, namely M-closed, M-complete, and M-open, based on the properties of the data generator (DG) (Bernardo and Smith 2000). Briefly, M-closed problems are those where it is reasonable to assume that the true model is one of the models under consideration, i.e., the true model is actually on the model list (at least in the sense that error due to model mis-specification is negligible compared to any other source of error). This class of problems is comparatively simple and well studied.</p>
-</blockquote>
-<p>Ouch. That’s about 99% of the statistical methodology that I was taught (and see in the psychological literature) and they’ve discarded it as too simplistic to be bothered talking about. It’d hurt less if they weren’t entirely correct. Almost all of what we talk about in psychology frames the problem of inference as one of “choosing the true model”, and it’s implicit that one of the models is presumed to be correct.</p>
-<p>This is never accurate in real life. We often hand wave this way by quoting George Box’s famous aphorism <em>all models are wrong but some are useful</em>, yet we are rarely explicit in psychology in saying what we mean by “useful”. At one point I tried formulating what I thought I meant: for many cognitive science experiments that are designed to be “operationalised” versions of a more complex real world situation, I think it makes little sense to bother making predictions about low-level features of the data, and a model is most useful if when makes the <a href="http://dx.doi.org/10.1037/0033-295X.113.1.57">correct a priori predictions about theoretically-relevant ordinal patterns in the data</a>. But that’s not a very generalisable criterion, it doesn’t apply in situations where you actually do have to care about all the features in the data, and so on. I’ve never seen anyone come up with anything that I found compelling either.</p>
-<p>That’s the thing about stepping outside of the <img src="https://latex.codecogs.com/png.latex?%5Cmathcal%7BM%7D">-closed world… nothing really works the way it’s supposed to. In the most difficult case you have <img src="https://latex.codecogs.com/png.latex?%5Cmathcal%7BM%7D">-open problems:</p>
-<blockquote class="blockquote">
-<p>M-open problems are those in which the DG does not admit a true model. The DG is so complex (in some sense) that there is no true model that we can even imagine. For instance, one can regard the Collected Works of William Shakespeare as a sequence of letters. Unarguably this data set had a DG (William Shakespeare), but it makes no sense to model the mechanism by which the data was generated. One might try to use the first n letters to predict the n + 1 letter and do better than merely guessing, but one should not expect such a predictor, or any model associated with it, to generate more great literature. The same point applies to the nucleotide sequence in a chromosome, the purchases of a consumer over time, and many other settings. In these cases, we are only able to compare different predictors without reference to a true model.</p>
-</blockquote>
-<p>Oh yes. <img src="https://latex.codecogs.com/png.latex?%5Cmathcal%7BM%7D">-open problems are <em>nasty</em>. You have to find some sensible way to discuss what it means to make good prediction that doesn’t rely on any notion of “true models”, because there is no sense in which the data generating mechanism can possibly be mapped to anything that you or I would <em>ever</em> call a “model”. I suspect that this is part of the reason why some of the MDL people (e.g.&nbsp;Jorma Rissanen) <em>don’t</em> want to formulate their model selection procedures with reference to any notion of a “true model”. The moment you allow yourself the “crutch” of assuming that a true model exists, you’re left unable to justify any claims in an <img src="https://latex.codecogs.com/png.latex?%5Cmathcal%7BM%7D">-open world. Clarke et al comment on that actually…</p>
-<blockquote class="blockquote">
-<p>From a log-loss point of view, the Shtarkov solution (Shtarkov 1987) has also been extensively studied in the M-open case, see Cesa-Bianchi and Lugosi (2006), but has not caught on partially because the conditions for it to exist are so narrow</p>
-</blockquote>
-<p>… where (assuming it’s the paper I’m thinking of) Shtarkov’s work is linked to Rissanen’s approach to MDL that some folks in psychology (such as myself, once upon a time!) had argued for. But it’s like Clarke et al say, this approach is basically useless in real life because there are so few scenarios where you can <em>do</em> anything with it.</p>
-<p>On the other hand, there’s a sense in which the <img src="https://latex.codecogs.com/png.latex?%5Cmathcal%7BM%7D">-open scenario above is more pessimistic than it needs to be. Not every statistical problem is as hard as generating new Shakespeare novels….</p>
-<blockquote class="blockquote">
-<p>By contrast, M-complete problems are those where the DG has a true model that can be imagined but is not identifiable in any closed form. Inability to write a model explicitly may arise because the model is too complicated or because its constituent pieces are not known. The key point for an M-complete problem is that it is plausible to assume that a true model - also called a “belief model” - exists because this enables its use in reasoning even if a prior cannot be meaningfully assigned in the usual way. For instance, if a true model exists a bias-variance decomposition can be developed, at least in principle, even when the true model is not explicitly known.</p>
-</blockquote>
-<p>I think this is where most of our practical problems in science lie. If we knew enough about a phenomenon to put us in <img src="https://latex.codecogs.com/png.latex?%5Cmathcal%7BM%7D">-closed world we wouldn’t bother to study it, and if we knew so little that we couldn’t even imagine a true model (putting us in <img src="https://latex.codecogs.com/png.latex?%5Cmathcal%7BM%7D">-open land) it would be foolish to try. So in practice we live in the land of <img src="https://latex.codecogs.com/png.latex?%5Cmathcal%7BM%7D">-complete inference problems. There are interesting results in this situation. I haven’t read much about this in a long time, but my recollection from earlier reading was that in this situation a Bayes factor selection procedure will asymptotically converge to the model <img src="https://latex.codecogs.com/png.latex?%5Cmathcal%7BM%7D"> that is closest to the true distribution in Kullback-Leibler divergence.</p>
-<p>I used to find this reassuring. I’m less sure now.</p>
-<p><br></p>
-</section>
-<section id="its-the-little-things" class="level2 page-columns page-full">
-<h2 class="anchored" data-anchor-id="its-the-little-things">It’s the little things</h2>
-<blockquote class="blockquote">
-<p>Oh, life is bigger <br> It’s bigger <br> Than you and you are not me <br> The lengths that I will go to <br> The distance in your eyes <br> Oh no, I’ve said too much <br> I set it up &nbsp;&nbsp; – <a href="https://youtu.be/xwtdhWltSIg">R.E.M.</a></p>
-</blockquote>
-<p>The worry I have with leaning so heavily on “convergence in KL terms” comes from a few sources. For one thing I’m starting to go beyond the limits of my own skill. You actually have to have a very good grasp of the theory to know what the hell this actually means, and I’m not sure I do. I’m a little unsure about what <em>practical</em> conclusions I should draw about a model if all I can say is that it is closer to the truth in the sense of a very specific information distance measure defined over distributions.</p>
-<p>The impression I have had when working with KL divergence is that it really does seem to depend on every property of the distributions, but as a researcher I often don’t care about every little thing in the data. Worse, to the extent that Bayes factors specifically depend on the <em>prior</em> to specify the marginal distribution in question, I have this intuition that even modest mistakes in you specify the prior (especially the tails) could do very strange things. Looking back over the various papers I’ve written about in this post, I feel like it’s been a recurring theme that the details really matter. Just in this little reminiscence…</p>
-<ul>
-<li>When thinking about similarity modelling, I found stimulus features and stimulus dimensions don’t seem to have commensurate complexity as judged by the most sensible Bayesian method I could think of</li>
-<li>When doing very simple memory modelling, the best approximations I knew of (Fisher information approximation to MDL) gave absurd predictions because of the weird structure of the models</li>
-<li>In categorisation, when using “infinite dimensional” nonparametric Bayesian models … oh, don’t even get me started.</li>
-</ul>
-<p>… and the thing is <em>these issues have caused my inferences to misbehave every single time I have tried to automate them</em>.</p>
-<p>In real world data analysis, nothing works the way it’s supposed to and I have grown deeply skeptical that <em>any</em> rule governed approach to automating statistical inference makes much sense.</p>
-<p><br></p>
-<div class="column-page">
-<p><img src="https://blog.djnavarro.net/posts/2023-04-12_bayes-factors/florence.jpg" class="img-fluid" alt="Photo of a woman lying dramatically on a bed"></p>
-</div>
-</section>
-<section id="what-to-do" class="level2">
-<h2 class="anchored" data-anchor-id="what-to-do">What to do?</h2>
-<blockquote class="blockquote">
-<p>’Cause I’m gonna be free and I’m gonna be fine <br> (Holding on for your call) <br> ’Cause I’m gonna be free and I’m gonna be fine <br> (Maybe not tonight) <br> &nbsp;&nbsp; – [Florence and the Machine)(https://youtu.be/zZr5Tid3Qw4)</p>
-</blockquote>
-<p>Honestly, I don’t know. I like Bayesian inference a great deal, and I still find Bayes factors useful in those circumstances where I (1) trust the prior, (2) understand the models and (3) have faith in the (either numerical or analytic) approximations used to estimate it. I don’t have a better alternative, and I’m certainly not going to countenance a return to using p-values<sup>8</sup>. More than anything else, the one thing I don’t want to see happen is to have the current revival off Bayesian methods in psychology ossify into something like what happened with p-values.</p>
-<p>What I think happened there is not necessarily that p-values are inherently useless and that’s why our statistics went bad. Rather, it’s that introductory methods classes taught students that there was A RIGHT WAY TO DO THINGS and those students became professors and taught other students and eventually we ended up with an absurd dogs breakfast of an inference system that (I suspect) even Fisher or Neyman would have found ridiculous. If I’ve learned nothing else from my research on <a href="http://dx.doi.org/10.1111/cogs.12667">cultural evolution and iterated learning</a> it’s that a collection of perfectly-rational learners can in fact ratchet themselves into believing foolish things, and that it’s the agents with most extreme biases that tend to dominate how the system evolves.</p>
-<p>Whatever we do with Bayesian methods, whatever role Bayes factors play, whether we use default or informed priors, the one thing I feel strongly about is this… we should try to avoid anything that resembles a prescriptive approach to inference that instructs scientists THIS IS HOW WE DO IT and instills in them the same fear of the Bayesian gods that I was once taught to have for the frequentist deities.</p>
-<p>It doesn’t help anyone, and it makes science worse.</p>
-<!--------------- appendices go here ----------------->
-
-
-</section>
-
-
-<div id="quarto-appendix" class="default"><section id="footnotes" class="footnotes footnotes-end-of-document"><h2 class="anchored quarto-appendix-heading">Footnotes</h2>
-
-<ol>
-<li id="fn1"><p>lol↩︎</p></li>
-<li id="fn2"><p>Throughout this post I will follow my usual tendency to ignore things like the difference between densities and probabilities, and I will absolutely <em>not</em> waste everyone’s time by introducing <img src="https://latex.codecogs.com/png.latex?%5Csigma">-algebras, because this is a blog post not a bloody measure theory textbook. If such things unnerve you too greatly, I refer you whichever section of <a href="https://books.google.com.au/books?hl=en&amp;lr=&amp;id=s5LHBgAAQBAJ&amp;oi=fnd&amp;pg=PR7&amp;dq=schervish+theory+of+statistics&amp;ots=qZHiGJ_sA5&amp;sig=-KkG3LxmWEFikss6L9PP1wC159E#v=onepage&amp;q=schervish%20theory%20of%20statistics&amp;f=false">Mark Schervish’s very excellent textbook</a> will allow you to feel love again.↩︎</p></li>
-<li id="fn3"><p>Again… if you feel inclined to instruct me on the difference between <img src="https://latex.codecogs.com/png.latex?P(x%7C%5Ctheta)"> and <img src="https://latex.codecogs.com/png.latex?%5Cmathcal%7BL%7D(%5Ctheta%7Cx)">… don’t. Go take it up with Fisher’s ashes. He’s the one who tried to misuse the ordinary natural language meaning of the word “likelihood” by inappropriately attaching probabilistic connotations to a score function that frequentists are explicitly forbidden to interpret as a probability↩︎</p></li>
-<li id="fn4"><p>No seriously. Go visit his ashes. Fisher retired to St Mark’s college in Adelaide, and his ashes are kept in St Peter’s Cathedral in North Adelaide, a short walk from the University. The staff there are very friendly and will gladly show you to them.↩︎</p></li>
-<li id="fn5"><p>IF YOU EMAIL ME TO TALK ABOUT UNCOUNTABLY INFINITE SETS OR TRY TO DISCUSS LEBESGUE MEASURABLE FUNCTIONS IN MY PRESENCE I WILL HUNT YOU DOWN, CUT YOU INTO INFINITESMALLY THIN HORIZONTAL SLICES AND FEED THE SLICES TO MY CHILDREN.↩︎</p></li>
-<li id="fn6"><p>Something about metric MDS rather than nonmetric MDS… don’t @ me↩︎</p></li>
-<li id="fn7"><p>FOR REASONS↩︎</p></li>
-<li id="fn8"><p>That’s not to say I think there is no role for orthodox inference, nor that controlling error rates is a thing we should just not think about anymore. I just don’t think that this is a sensible idea to build an entire theory of inference around↩︎</p></li>
-</ol>
-</section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div id="quarto-reuse" class="quarto-appendix-contents"><div><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a></div></div></section><section class="quarto-appendix-contents"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2023,
-  author = {Navarro, Danielle},
-  title = {A Personal Essay on {Bayes} Factors},
-  date = {2023-04-12},
-  url = {https://blog.djnavarro.net/posts/2023-04-12_bayes-factors},
-  langid = {en}
-}
-</code></pre><div class="quarto-appendix-secondary-label">For attribution, please cite this work as:</div><div id="ref-navarro2023" class="csl-entry quarto-appendix-citeas">
-Navarro, Danielle. 2023. <span>“A Personal Essay on Bayes
-Factors.”</span> April 12, 2023. <a href="https://blog.djnavarro.net/posts/2023-04-12_bayes-factors">https://blog.djnavarro.net/posts/2023-04-12_bayes-factors</a>.
-</div></div></section></div> ]]></description>
-  <category>Statistics</category>
-  <category>Bayes</category>
-  <guid>https://blog.djnavarro.net/posts/2023-04-12_bayes-factors/index.html</guid>
-  <pubDate>Tue, 11 Apr 2023 14:00:00 GMT</pubDate>
-  <media:content url="https://blog.djnavarro.net/posts/2023-04-12_bayes-factors/katy.jpg" medium="image" type="image/jpeg"/>
 </item>
 </channel>
 </rss>
