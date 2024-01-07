@@ -40,131 +40,92 @@ seedrandom = require('seedrandom@3.0.5')
 
 ```{ojs}
 function pastiche(seed) {
-
-  const pars = {height: 600, width: 1000, nrow: 6, ncol: 10, iter: 100}
-  
-  // random number generator and canvas
+  // setup
+  const par = {height: 600, width: 1000, nrow: 6, ncol: 10, iter: 100}
   const rng = seedrandom(seed)
-  let ctx = DOM.context2d(pars.width, pars.height)  
+  const ctx = DOM.context2d(par.width, par.height)  
+  const pal = pickOne(palettes, rng)
   
-  // sample palette and set canvas background
-  const palette = sampleArray(palettes, rng)
-  ctx.fillStyle = sampleArray(palette, rng)
-  ctx.fillRect(0, 0, pars.width, pars.height)
-
-  // define the grid
-  let grid = defineGrid(pars, palette, rng)
-
-  // create the image
-  for (let i = 0; i < pars.iter; i++) {
-    grid.map(cell => {
-      cell.draw(ctx)
-      cell.update(rng)
-    })
+  // image
+  ctx.fillStyle = pickOne(pal, rng)
+  ctx.fillRect(0, 0, par.width, par.height)
+  let particles = makeParticles(par, pal, rng)
+  for (let i = 0; i < par.iter; i++) {
+    particles.map(p => {p.draw(ctx); p.move(rng)})
   }
-
   return ctx.canvas
 }
 ```
 
 
 ```{ojs}
-function defineGrid(pars, palette, rng) {
-  const rowheight = pars.height / pars.nrow
-  const colwidth = pars.width / pars.ncol
+function makeParticles(par, pal, rng) {
+  const rowheight = par.height / par.nrow
+  const colwidth = par.width / par.ncol
   const s = Math.min(rowheight, colwidth) * 2
-  
-  let grid = []
+  let particles = []
   let k = 0
-  for (let c = 0; c < (pars.ncol - 1); c++) {
-    for (let r = 0; r < (pars.nrow - 1); r++) {
-      grid[k] = {
+  for (let c = 0; c < (par.ncol - 1); c++) {
+    for (let r = 0; r < (par.nrow - 1); r++) {
+      particles[k] = {
         id: k,
         col: c,
         row: r,
         size: s,
         x: colwidth * (c + 1),
         y: rowheight * (r + 1),
-        xmax: pars.width,
-        ymax: pars.height,
+        xmax: par.width,
+        ymax: par.height,
         xstep: colwidth,
         ystep: rowheight,
         start: Math.PI * 2 * rng.double(),
         stop: Math.PI * 2 * rng.double(),
-        valid: true,
-        shade: sampleArray(palette, rng),
+        shade: pickOne(pal, rng),
         vertical: rng.double() < .5,
         exponent: .9,
-        draw: function(ctx) { drawCell(this, ctx) },
-        update: function(rng) { updateCell(this, rng) }
+        draw: function(ctx) {drawParticle(this, ctx)},
+        move: function(rng) {moveParticle(this, rng)}
       }
       k++
     }
   }
-  return grid
+  return particles
 }
 ```
 
 ```{ojs}
-function drawCell(cell, ctx) {
-  
-  const w = ctx.canvas.width
-  const h = ctx.canvas.height
-  
-  function drawOne(x, y) {
-    ctx.fillStyle = cell.shade
-    ctx.strokeStyle = cell.shade
-    ctx.lineWidth = 5
-    ctx.beginPath()
-    ctx.arc(x, y, cell.size, cell.start, cell.stop)
-    ctx.fill()
-    ctx.stroke()
-    ctx.closePath();
-  }
-  
-  // the "base" shape
-  drawOne(cell.x, cell.y)
-  
-  // boundaries to consider for wrapping
-  let xover  = (cell.x + cell.size) > h      
-  let yover  = (cell.y + cell.size) > w
-  let xunder = (cell.x - cell.size) < 0
-  let yunder = (cell.y - cell.size) < 0
-  
-  // cases where we wrap around one boundary
-  if (xover)  drawOne(cell.x - w, cell.y)
-  if (yover)  drawOne(cell.x, cell.y - h)
-  if (xunder) drawOne(w - cell.x, cell.y)
-  if (yunder) drawOne(cell.x, h - cell.y)
-  
-  // cases where we wrap around both boundaries
-  if (xover & yover)   drawOne(cell.x - w, cell.y - h)
-  if (xover & yunder)  drawOne(cell.x - w, h - cell.y)
-  if (xunder & yover)  drawOne(w - cell.x, cell.y - h)
-  if (xunder & yunder) drawOne(w - cell.x, h - cell.y)
+function drawParticle(p, ctx) {
+  ctx.fillStyle = p.shade
+  ctx.strokeStyle = p.shade
+  ctx.lineWidth = 5
+  ctx.beginPath()
+  ctx.arc(p.x, p.y, p.size, p.start, p.stop)
+  ctx.fill()
+  ctx.stroke()
+  ctx.closePath()
 }
 ```    
 
 ```{ojs}
-function updateCell(cell, rng) {
-  if (cell.vertical) {
-    cell.y = cell.y + cell.ystep * rng.double()
-    if (cell.y > cell.ymax) cell.y = cell.y - cell.ymax
-    if (cell.y < 0) cell.y = cell.ymax - cell.y
+function moveParticle(p, rng) {
+  if (p.vertical) {
+    p.y = p.y + p.ystep * rng.double()
+    if (p.y > p.ymax) p.y = p.y - p.ymax
+    if (p.y < 0) p.y = p.ymax - p.y
   } else {
-    cell.x = cell.x + cell.xstep * rng.double()
-    if (cell.x > cell.xmax) cell.x = cell.x - cell.xmax
-    if (cell.x < 0) cell.x = cell.xmax - cell.x
+    p.x = p.x + p.xstep * rng.double()
+    if (p.x > p.xmax) p.x = p.x - p.xmax
+    if (p.x < 0) p.x = p.xmax - p.x
   }
-  cell.size = cell.size * cell.exponent
-  cell.start = Math.PI * 2 * rng.double()
-  cell.stop = Math.PI * 2 * rng.double()
+  p.size = p.size * p.exponent
+  p.start = Math.PI * 2 * rng.double()
+  p.stop = Math.PI * 2 * rng.double()
 }
 ```
 
 ```{ojs}
-function sampleArray(items, rng) {
-  return(items[Math.floor(rng.double()*items.length)]);
+function pickOne(items, rng) {
+  return items[Math.floor(rng.double()*items.length)]
 }
 ```
 
