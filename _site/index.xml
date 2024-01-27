@@ -70,11 +70,11 @@
 </div>
 </div>
 </div>
-<p>I’ll unpack these steps below.</p>
+<p>I’ll unpack these steps below, showing the actual code used to create these images and walking through some of the logic and design considerations that goes into building a system like this one.<sup>2</sup></p>
 </section>
 <section id="creating-a-base-image" class="level2 page-columns page-full">
 <h2 class="anchored" data-anchor-id="creating-a-base-image">Creating a base image</h2>
-<p>First let’s take a look at the base images. As you can see from the one shown in the left panel above, these aren’t super-complicated things and they could be generated in many different ways. Somewhat arbitrarily, I decided that for this system I’d build them using via simple cellular automaton implemented in C++ and called from R via <a href="https://www.rcpp.org/">Rcpp</a>. There’s no principled reason for this, I just happened to have suitable code lying around from a previous generative art system called <a href="https://art.djnavarro.net/gallery/stoneskip/">stoneskip</a>, which produces pieces like these:<sup>2</sup></p>
+<p>First let’s take a look at the base images. As you can see from the one shown in the left panel above, these aren’t super-complicated things and they could be generated in many different ways. Somewhat arbitrarily, I decided that for this system I’d build them using via simple cellular automaton implemented in C++ and called from R via <a href="https://www.rcpp.org/">Rcpp</a>. There’s no principled reason for this, I just happened to have suitable code lying around from a previous generative art system called <a href="https://art.djnavarro.net/gallery/stoneskip/">stoneskip</a>, which produces pieces like these:<sup>3</sup></p>
 <div>
 
 </div>
@@ -91,7 +91,7 @@
 </div>
 </div>
 </div>
-<p>That said, the implementation used in splatter is different from the stoneskip system. The C++ code below defines an <code>automaton()</code> function that is exposed to R via Rcpp, and can be used to create the base images:<sup>3</sup> <sup>4</sup></p>
+<p>That said, the implementation used in splatter is different from the stoneskip system. The C++ code below defines an <code>automaton()</code> function that is exposed to R via Rcpp, and can be used to create the base images:<sup>4</sup> <sup>5</sup></p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb1" style="background: #f1f3f5;"><pre class="sourceCode cpp code-with-copy"><code class="sourceCode cpp"><span id="cb1-1"><span class="pp" style="color: #AD0000;
 background-color: null;
@@ -652,8 +652,7 @@ font-style: inherit;">normalise</span>()</span>
 <span id="cb2-14">    )</span>
 <span id="cb2-15">}</span></code></pre></div>
 </div>
-<p>In this function I use <code>tidyr::expand_grid()</code> to create a data frame with <code>x</code> and <code>y</code> coordinates for every element in a grid, and then “flatten” the matrix returned by <code>automaton()</code> into a vector that becomes the <code>value</code> column.<sup>5</sup> Because in principle we might later on want to use vector field that moves points in three dimensions there’s also a <code>z</code> column that has a constant value, and because this base data is used to initialise an iterative process, we have a column <code>iter</code> that records the iteration number (currently 0). Finally, we have a <code>id</code> column that assigns each element of the grid a unique number, which can come in handy later on.</p>
-<p>In any case, here’s what we get when we call the <code>base_data()</code> function:</p>
+<p>The primary intention in this function is to create a data frame that has columns <code>x</code> and <code>y</code> that specify coordinates for every element in a grid, and a <code>value</code> column that is populated by calling the <code>automaton()</code> function that Rcpp exposes to the R session.<sup>6</sup> Here it is in action:</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb3" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1">base <span class="ot" style="color: #003B4F;
 background-color: null;
@@ -705,7 +704,13 @@ font-style: inherit;">5</span></span>
 # ℹ 9,990 more rows</code></pre>
 </div>
 </div>
-<p>To get a sense of what it looks like visually we can use <code>ggplot2::geom_raster()</code> to produce a kind of “heat map” representation of this object:</p>
+<p>You can see from the output that there are a few other columns in the output. These are added because this base data is used as the initial state for a set of particles that we’re going to place within a vector field and then trace their paths. The logic for including each of these:</p>
+<ul>
+<li><p>We might want to use a vector field that moves points in three dimensions, so there’s also a <code>z</code> column (which is set to a constant value in this case). I’m not really using this feature in the splatter system, but I’ve done it in the past in other systems. One handy trick if you want to give a system a feeling of “mild inhomogeneity” – with different points appearing to move according to similar but not identical flow fields – is to displace each point by a small amount in the <code>z</code> coordinate, and then use a three-dimensional flow field to move the points in three dimensions, while only plotting the <code>x</code> and <code>y</code> values. You can also use the “hidden <code>z</code> coordinate” trick as a way of smoothly changing the colour.</p></li>
+<li><p>Similarly, because this base data is used as the initial state for an iterative process, there is also a column <code>iter</code> that records the iteration number (set to 0 for the base data). One the one hand this is nice for housekeeping purposes (e.g., filtering the data to find the subset corresponding to a particular iteration), but later on we’ll actually use this in the plots.</p></li>
+<li><p>Finally, we have a <code>id</code> column that assigns each element of the grid a unique number, which can come in handy later on if we want to trace out the path followed by a single particle.</p></li>
+</ul>
+<p>All that being said, at this point in the development of our system the things we’re most interested in are the <code>x</code> and <code>y</code> coordinates of each cell in our grid, and the <code>value</code> that we use to provide an initial colour to that location. At this point we don’t actually have a genuine palette to map <code>value</code> onto an actual colour, so for now we’ll just use the <a href="https://ggplot2.tidyverse.org/">ggplot2</a> default:</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb5" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1">base <span class="sc" style="color: #5E5E5E;
 background-color: null;
@@ -792,11 +797,12 @@ font-style: inherit;">0</span>))</span></code></pre></div>
 </div>
 </div>
 </div>
-<p>This is our base image. It’s not super exciting or even particularly aesthetically pleasing, but that’s not the point. What I’m looking for in the base image is something that varies fairly smoothly to create an overall “shape” for the final image, and with enough random variations and irregularities to produce interesting textures in the final image. It’s important to have <em>something</em> that works to create these base images: they do a lot of work in creating the composition of the final art work, and without them you end up with pieces that lack global structure and feel a bit bland. That being said, I don’t think it matters much how you create the base images: there’s lots of different algorithms that would work perfectly well for this purpose.</p>
+<p>This is our base image. It’s not super exciting or even particularly aesthetically pleasing, but that’s not the point. What I’m looking for in the base image is something that varies fairly smoothly to create an overall “shape” for the final image, and with enough random variations and irregularities to produce interesting textures in the final image. When building a system like this I’ve found that it’s important to have <em>something</em> that plays this role. They do a huge amount of work in defining the “composition” of the final art work, and if you don’t put a bit of thought into what this part of the system looks like you can end up with pieces that don’t have global structure, and feel a bit bland.</p>
+<p>That being said, I don’t think there’s anything very special about the <code>automaton()</code> function I have used in the splatter system. It was a pretty arbitrary choice, and I’m entirely certain that you could swap it out for any number of alternative algorithms and end up with fabulous pieces.</p>
 </section>
 <section id="creating-the-flow" class="level2">
 <h2 class="anchored" data-anchor-id="creating-the-flow">Creating the flow</h2>
-<p>Now that we have a base image to provide a bit of global structure, we’re going to need a vector field that we can use to create a sense of flow in the piece. This part is by far the most elaborate part of splatter, and it relies heavily on the <a href="https://ambient.data-imaginist.com/">ambient</a> package. I’ll start by writing a function <code>curl_step()</code> that defines a vector field that specifies, for every point defined by <code>x</code>, <code>y</code>, and <code>z</code> coordinates, how quickly and in what direction a particle located at that point is moving. When passed a data frame <code>data</code> that contains columns <code>x</code>, <code>y</code>, and <code>z</code>, it returns a new data frame with updated coordinates derived by moving each point a small distance defined by the relevant element in the vector field.<sup>6</sup> Additionally, since our input data frame has an <code>iter</code> column corresponding to the iteration number (recall earlier our “base image” has <code>iter = 0</code> for every cell), the output data frame records the updated iteration number.</p>
+<p>Now that we have a base image to provide a bit of global structure, we’re going to need a vector field that we can use to create a sense of flow in the piece. This part is by far the most elaborate part of splatter, and it relies heavily on the <a href="https://ambient.data-imaginist.com/">ambient</a> package. I’ll start by writing a function <code>curl_step()</code> that defines a vector field that specifies, for every point defined by <code>x</code>, <code>y</code>, and <code>z</code> coordinates, how quickly and in what direction a particle located at that point is moving. When passed a data frame <code>data</code> that contains columns <code>x</code>, <code>y</code>, and <code>z</code>, it returns a new data frame with updated coordinates derived by moving each point a small distance defined by the relevant element in the vector field.<sup>7</sup> Additionally, since our input data frame has an <code>iter</code> column corresponding to the iteration number (recall earlier our “base image” has <code>iter = 0</code> for every cell), the output data frame records the updated iteration number.</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb6" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1">curl_step <span class="ot" style="color: #003B4F;
 background-color: null;
@@ -899,8 +905,8 @@ font-style: inherit;">*</span> scale</span>
 <span id="cb6-21">  data</span>
 <span id="cb6-22">}</span></code></pre></div>
 </div>
-<p>There’s quite a lot going on internally here. I’d write a longer description that unpacks all the details here, but as it happens I’ve written about it before in the “spatial noise” notes for the <a href="">art from code</a> workshop I gave a couple of years ago: there’s a section discussing <a href="https://art-from-code.netlify.app/day-1/session-2/#curl-of-a-spatial-noise-pattern">curl fields</a> in the context of <code>ambient::curl_noise()</code>, which is coupled with a sections discussing how <code>ambient::fracture()</code> can be used in conjunction with a spatial noise generator (like <code>ambient::gen_simplex()</code>) and a specific fractal (like <code>ambient::ridged()</code>) to create more elaborate and visually interesting flow fields. So, rather than repeat myself, I’ll just refer the interested reader to those notes!</p>
-<p>Next, I’ll define a function <code>curl_loop()</code>that uses <code>purrr::accumulate()</code> to iteratively apply the <code>curl_step()</code> function. It starts with an initial state provided by the base image, and then treats the output of every call to <code>curl_step()</code> as the input to the next call. All the intermediate results are stored, resulting in a list of data frames (one per iteration) that is then collapsed (using <code>dplyr::bind_rows()</code>) into one large data frame that traces the paths of all points across many iterations.</p>
+<p>There’s quite a lot going on internally here, and I’m not going to dive deeply into the ambient package in this post. I’ll provide a visual illustration of what happens when <code>curl_step()</code> is called – it’s a bit lower in the post after I define the <code>curl_loop()</code> function – but if you’re interested in a more detailed explanation of the logic underpinning this code, I’ll refer you to the notes I wrote for my <a href="https://art-from-code.netlify.app/">art from code</a> workshop I gave a couple of years ago. The notes have a section discussing <a href="https://art-from-code.netlify.app/day-1/session-2/#curl-of-a-spatial-noise-pattern">curl fields</a> and how they are generated using <code>ambient::curl_noise()</code>, along with sections discussing how <code>ambient::fracture()</code> can be used to create more elaborate and visually interesting flow fields with fractals.</p>
+<p>In any case let’s move onto the next step, in which I’ll define a function <code>curl_loop()</code>that uses <code>purrr::accumulate()</code> to iteratively apply the <code>curl_step()</code> function. It starts with an initial state provided by the base image, and then treats the output of every call to <code>curl_step()</code> as the input to the next call. All the intermediate results are stored, resulting in a list of data frames (one per iteration) that is then collapsed into one large data frame that traces the paths of all points across many iterations.</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb7" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1">curl_loop <span class="ot" style="color: #003B4F;
 background-color: null;
@@ -920,15 +926,11 @@ background-color: null;
 font-style: inherit;">accumulate</span>(</span>
 <span id="cb7-7">    <span class="at" style="color: #657422;
 background-color: null;
-font-style: inherit;">.x =</span> (<span class="dv" style="color: #AD0000;
+font-style: inherit;">.x =</span> <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">1</span><span class="sc" style="color: #5E5E5E;
 background-color: null;
-font-style: inherit;">:</span>iterations) <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span>,</span>
+font-style: inherit;">:</span>iterations,</span>
 <span id="cb7-8">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">.f =</span> curl_step,</span>
@@ -1002,7 +1004,7 @@ font-style: inherit;">5</span></span>
 # ℹ 999,990 more rows</code></pre>
 </div>
 </div>
-<p>This <code>flow</code> data frame provides all the structural elements required to draw the plot. We don’t have a proper palette yet, but that’s the only thing we’re missing. Here’s what it looks like when we create an image using the default shades-of-blue palette in ggplot2:</p>
+<p>This <code>flow</code> data frame provides all the structural elements required to draw the plot. Here’s what it looks like when we create an image using the default shades-of-blue palette in ggplot2:</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb10" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1">pic <span class="ot" style="color: #003B4F;
 background-color: null;
@@ -1124,26 +1126,151 @@ font-style: inherit;">transition_time</span>(iter)</span></code></pre></div>
 <p><img src="https://blog.djnavarro.net/posts/2024-01-26_splatter/anim.gif" class="img-fluid quarto-figure quarto-figure-center figure-img" width="800"></p>
 </figure>
 </div>
-<p>In this version you can see how the plot “begins” with 10000 “particles” laid out on a regular grid, and then iteratively “moves” each of those particles along a path defined by the vector field, with each particle gradually shrinking in size over “time”.</p>
+<p>In this animation you can see how the plot begins with 10000 “particles” laid out on a regular grid (i.e., there’s one particle for each cell in the original base data), and then iteratively “moves” each of those particles along a path defined by the vector field (created by repeatedly calling <code>curl_step()</code>). You can also see that each particle is gradually shrinking in size over time, a feature that is also used in the splatter plots.</p>
+<p>To unpack it a little further, we can use the <code>flow</code> data to create a visual representation of what the vector field itself looks like:</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb12" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb12-1">flow <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span> </span>
+<span id="cb12-2">  dplyr<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">filter</span>(iter <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">&lt;</span> <span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">2</span>) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">|&gt;</span></span>
+<span id="cb12-3">  ggplot2<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">ggplot</span>(ggplot2<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">aes</span>(</span>
+<span id="cb12-4">    <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">x =</span> x,</span>
+<span id="cb12-5">    <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">y =</span> y,</span>
+<span id="cb12-6">    <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">group =</span> id</span>
+<span id="cb12-7">  )) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">+</span> </span>
+<span id="cb12-8">  ggplot2<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">geom_path</span>(</span>
+<span id="cb12-9">    <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">arrow =</span> grid<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">arrow</span>(</span>
+<span id="cb12-10">      <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">length =</span> grid<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">unit</span>(.<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">008</span>, <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"npc"</span>),</span>
+<span id="cb12-11">      <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">ends =</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"last"</span>,</span>
+<span id="cb12-12">      <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">type =</span> <span class="st" style="color: #20794D;
+background-color: null;
+font-style: inherit;">"open"</span></span>
+<span id="cb12-13">    )</span>
+<span id="cb12-14">  ) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">+</span> </span>
+<span id="cb12-15">  ggplot2<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">coord_equal</span>(</span>
+<span id="cb12-16">    <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">xlim =</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">c</span>(.<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">2</span>, .<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">5</span>),</span>
+<span id="cb12-17">    <span class="at" style="color: #657422;
+background-color: null;
+font-style: inherit;">ylim =</span> <span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">c</span>(.<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">2</span>, .<span class="dv" style="color: #AD0000;
+background-color: null;
+font-style: inherit;">5</span>)</span>
+<span id="cb12-18">  ) <span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">+</span></span>
+<span id="cb12-19">  ggplot2<span class="sc" style="color: #5E5E5E;
+background-color: null;
+font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
+background-color: null;
+font-style: inherit;">theme_void</span>()</span></code></pre></div>
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="https://blog.djnavarro.net/posts/2024-01-26_splatter/index_files/figure-html/vector-field-1.png" class="img-fluid figure-img" width="960"></p>
+</figure>
+</div>
+</div>
+</div>
+<p>In this plot, what I’ve done is taken the locations of each of the particles at iteration 0 (because at time 0 the points all sit on a regular grid) and drawn a little arrow that shows where each of them move to when <code>curl_step()</code> is applied. This gives us a rough visualisation of what the vector field looks like. The field itself doesn’t change, but of course once you start moving the particles they no longer sit on a nice grid. To illustrate both of these facts, here’s the same plot but this time I show the step from iteration 10 to iteration 11:</p>
+<div class="cell">
+<div class="cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="https://blog.djnavarro.net/posts/2024-01-26_splatter/index_files/figure-html/vector-field-2-1.png" class="img-fluid figure-img" width="960"></p>
+</figure>
+</div>
+</div>
+</div>
+<p>At any given location the arrow is still the same (because the vector field itself is invariant), but it’s not a nice clean grid in this version because the particles will naturally tend to bunch up as you move them through the field.<sup>8</sup></p>
+<p>In any case, I think that at this point we have a fairly decent sense of how the splatter pieces are shaped by the underlying vector field, so it’s time to move on…</p>
 </section>
 <section id="choosing-a-palette" class="level2 page-columns page-full">
 <h2 class="anchored" data-anchor-id="choosing-a-palette">Choosing a palette</h2>
 <p>The final part of the splatter system is the paletting system. At this point I confess I started to get a little bit lazy, and created a very simple paletting system that doesn’t always work. Basically, the system is hard coded with a list of 100 colours and it randomly samples 4 of them to define a linear gradient palette that interpolates between those four shades. Here’s a <code>sample_palette()</code> function that implements this:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb12" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb12-1">sample_palette <span class="ot" style="color: #003B4F;
+<div class="sourceCode cell-code" id="cb13" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1">sample_palette <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> <span class="cf" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">function</span>(seed, size) {</span>
-<span id="cb12-2">  <span class="fu" style="color: #4758AB;
+<span id="cb13-2">  <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">set.seed</span>(seed)</span>
-<span id="cb12-3">  cols <span class="ot" style="color: #003B4F;
+<span id="cb13-3">  cols <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">c</span>(</span>
-<span id="cb12-4">    <span class="st" style="color: #20794D;
+<span id="cb13-4">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#de9151"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -1154,7 +1281,7 @@ background-color: null;
 font-style: inherit;">"#bc5d2e"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#bbb8b2"</span>,</span>
-<span id="cb12-5">    <span class="st" style="color: #20794D;
+<span id="cb13-5">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#a63446"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -1165,7 +1292,7 @@ background-color: null;
 font-style: inherit;">"#000004"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#7e1946"</span>,</span>
-<span id="cb12-6">    <span class="st" style="color: #20794D;
+<span id="cb13-6">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#ffffff"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -1176,7 +1303,7 @@ background-color: null;
 font-style: inherit;">"#c08497"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#f7af9d"</span>,</span>
-<span id="cb12-7">    <span class="st" style="color: #20794D;
+<span id="cb13-7">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#aa8f66"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -1187,7 +1314,7 @@ background-color: null;
 font-style: inherit;">"#61c9a8"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#ba3b46"</span>,</span>
-<span id="cb12-8">    <span class="st" style="color: #20794D;
+<span id="cb13-8">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#241023"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -1198,7 +1325,7 @@ background-color: null;
 font-style: inherit;">"#d5e68d"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#47a025"</span>,</span>
-<span id="cb12-9">    <span class="st" style="color: #20794D;
+<span id="cb13-9">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#64113f"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -1209,7 +1336,7 @@ background-color: null;
 font-style: inherit;">"#f7cacd"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#84e6f8"</span>,</span>
-<span id="cb12-10">    <span class="st" style="color: #20794D;
+<span id="cb13-10">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#660000"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -1220,7 +1347,7 @@ background-color: null;
 font-style: inherit;">"#8c001a"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#ff9000"</span>,</span>
-<span id="cb12-11">    <span class="st" style="color: #20794D;
+<span id="cb13-11">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#c9cba3"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -1231,7 +1358,7 @@ background-color: null;
 font-style: inherit;">"#723d46"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#472d30"</span>,</span>
-<span id="cb12-12">    <span class="st" style="color: #20794D;
+<span id="cb13-12">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#0e7c7b"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -1242,7 +1369,7 @@ background-color: null;
 font-style: inherit;">"#d62246"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#4b1d3f"</span>,</span>
-<span id="cb12-13">    <span class="st" style="color: #20794D;
+<span id="cb13-13">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#0a0908"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -1253,7 +1380,7 @@ background-color: null;
 font-style: inherit;">"#a9927d"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#5e503f"</span>,</span>
-<span id="cb12-14">    <span class="st" style="color: #20794D;
+<span id="cb13-14">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#020202"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -1264,7 +1391,7 @@ background-color: null;
 font-style: inherit;">"#a188a6"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#9da2ab"</span>,</span>
-<span id="cb12-15">    <span class="st" style="color: #20794D;
+<span id="cb13-15">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#c2c1c2"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -1275,7 +1402,7 @@ background-color: null;
 font-style: inherit;">"#bd4089"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#f51aa4"</span>,</span>
-<span id="cb12-16">    <span class="st" style="color: #20794D;
+<span id="cb13-16">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#820263"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -1286,7 +1413,7 @@ background-color: null;
 font-style: inherit;">"#2e294e"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#ffd400"</span>,</span>
-<span id="cb12-17">    <span class="st" style="color: #20794D;
+<span id="cb13-17">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#f4e409"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -1297,7 +1424,7 @@ background-color: null;
 font-style: inherit;">"#a63c06"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#710000"</span>,</span>
-<span id="cb12-18">    <span class="st" style="color: #20794D;
+<span id="cb13-18">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#d9d0de"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -1308,7 +1435,7 @@ background-color: null;
 font-style: inherit;">"#ab4967"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#0c1713"</span>,</span>
-<span id="cb12-19">    <span class="st" style="color: #20794D;
+<span id="cb13-19">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#012622"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -1319,7 +1446,7 @@ background-color: null;
 font-style: inherit;">"#e98a15"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#59114d"</span>,</span>
-<span id="cb12-20">    <span class="st" style="color: #20794D;
+<span id="cb13-20">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#3c1518"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -1330,7 +1457,7 @@ background-color: null;
 font-style: inherit;">"#d58936"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#fffb46"</span>,</span>
-<span id="cb12-21">    <span class="st" style="color: #20794D;
+<span id="cb13-21">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#6e0d25"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -1341,7 +1468,7 @@ background-color: null;
 font-style: inherit;">"#774e24"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#6a381f"</span>,</span>
-<span id="cb12-22">    <span class="st" style="color: #20794D;
+<span id="cb13-22">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#bcabae"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -1352,7 +1479,7 @@ background-color: null;
 font-style: inherit;">"#716969"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#fbfbfb"</span>,</span>
-<span id="cb12-23">    <span class="st" style="color: #20794D;
+<span id="cb13-23">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#2b4162"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -1363,16 +1490,16 @@ background-color: null;
 font-style: inherit;">"#d7b377"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#8f754f"</span></span>
-<span id="cb12-24">  )</span>
-<span id="cb12-25">  <span class="fu" style="color: #4758AB;
+<span id="cb13-24">  )</span>
+<span id="cb13-25">  <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">sample</span>(cols, <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">size =</span> size)</span>
-<span id="cb12-26">}</span></code></pre></div>
+<span id="cb13-26">}</span></code></pre></div>
 </div>
 <p>Here’s a few random palettes generated using this function:</p>
-<div class="sourceCode cell-code" id="cb13" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1">scales<span class="sc" style="color: #5E5E5E;
+<div class="sourceCode cell-code" id="cb14" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb14-1">scales<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
 background-color: null;
@@ -1387,7 +1514,7 @@ background-color: null;
 font-style: inherit;">size =</span> <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">4</span>))</span>
-<span id="cb13-2">scales<span class="sc" style="color: #5E5E5E;
+<span id="cb14-2">scales<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
 background-color: null;
@@ -1402,7 +1529,7 @@ background-color: null;
 font-style: inherit;">size =</span> <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">4</span>))</span>
-<span id="cb13-3">scales<span class="sc" style="color: #5E5E5E;
+<span id="cb14-3">scales<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
 background-color: null;
@@ -1430,14 +1557,14 @@ font-style: inherit;">4</span>))</span></code></pre></div>
 </div>
 </div>
 </div>
-<p>It doesn’t always produce satisfying colour schemes, but it succeeds often enough for the system to be workable. In any case, now that we have a paletting system we can write a <code>make_plot()</code> function that applies the palette using <code>ggplot2::scale_colour_gradientn()</code>:</p>
+<p>It doesn’t always produce satisfying colour schemes, but it succeeds often enough for the system to be workable. And now that we have a paletting system we can write a <code>make_plot()</code> function that applies the palette using <code>ggplot2::scale_colour_gradientn()</code>:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb14" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb14-1">make_plot <span class="ot" style="color: #003B4F;
+<div class="sourceCode cell-code" id="cb15" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb15-1">make_plot <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> <span class="cf" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">function</span>(data, seed) {</span>
-<span id="cb14-2">  palette <span class="ot" style="color: #003B4F;
+<span id="cb15-2">  palette <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
 background-color: null;
@@ -1448,10 +1575,10 @@ background-color: null;
 font-style: inherit;">size =</span> <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">4</span>)</span>
-<span id="cb14-3">  data <span class="sc" style="color: #5E5E5E;
+<span id="cb15-3">  data <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">|&gt;</span></span>
-<span id="cb14-4">    ggplot2<span class="sc" style="color: #5E5E5E;
+<span id="cb15-4">    ggplot2<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
 background-color: null;
@@ -1460,47 +1587,47 @@ background-color: null;
 font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">aes</span>(</span>
-<span id="cb14-5">      <span class="at" style="color: #657422;
+<span id="cb15-5">      <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">x =</span> x,</span>
-<span id="cb14-6">      <span class="at" style="color: #657422;
+<span id="cb15-6">      <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">y =</span> y,</span>
-<span id="cb14-7">      <span class="at" style="color: #657422;
+<span id="cb15-7">      <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">colour =</span> value,</span>
-<span id="cb14-8">      <span class="at" style="color: #657422;
+<span id="cb15-8">      <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">size =</span> <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">-</span>iter</span>
-<span id="cb14-9">    )) <span class="sc" style="color: #5E5E5E;
+<span id="cb15-9">    )) <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">+</span></span>
-<span id="cb14-10">    ggplot2<span class="sc" style="color: #5E5E5E;
+<span id="cb15-10">    ggplot2<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">geom_point</span>(</span>
-<span id="cb14-11">      <span class="at" style="color: #657422;
+<span id="cb15-11">      <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">stroke =</span> <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">0</span>, </span>
-<span id="cb14-12">      <span class="at" style="color: #657422;
+<span id="cb15-12">      <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">show.legend =</span> <span class="cn" style="color: #8f5902;
 background-color: null;
 font-style: inherit;">FALSE</span></span>
-<span id="cb14-13">    ) <span class="sc" style="color: #5E5E5E;
+<span id="cb15-13">    ) <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">+</span> </span>
-<span id="cb14-14">    ggplot2<span class="sc" style="color: #5E5E5E;
+<span id="cb15-14">    ggplot2<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">coord_equal</span>(</span>
-<span id="cb14-15">      <span class="at" style="color: #657422;
+<span id="cb15-15">      <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">xlim =</span> <span class="fu" style="color: #4758AB;
 background-color: null;
@@ -1509,7 +1636,7 @@ background-color: null;
 font-style: inherit;">05</span>, .<span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">95</span>),</span>
-<span id="cb14-16">      <span class="at" style="color: #657422;
+<span id="cb15-16">      <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">ylim =</span> <span class="fu" style="color: #4758AB;
 background-color: null;
@@ -1518,10 +1645,10 @@ background-color: null;
 font-style: inherit;">05</span>, .<span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">95</span>)</span>
-<span id="cb14-17">    ) <span class="sc" style="color: #5E5E5E;
+<span id="cb15-17">    ) <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">+</span> </span>
-<span id="cb14-18">    ggplot2<span class="sc" style="color: #5E5E5E;
+<span id="cb15-18">    ggplot2<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
 background-color: null;
@@ -1536,7 +1663,7 @@ background-color: null;
 font-style: inherit;">6</span>)) <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">+</span></span>
-<span id="cb14-19">    ggplot2<span class="sc" style="color: #5E5E5E;
+<span id="cb15-19">    ggplot2<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
 background-color: null;
@@ -1545,14 +1672,14 @@ background-color: null;
 font-style: inherit;">colours =</span> palette) <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">+</span></span>
-<span id="cb14-20">    ggplot2<span class="sc" style="color: #5E5E5E;
+<span id="cb15-20">    ggplot2<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">theme_void</span>()</span>
-<span id="cb14-21">}</span>
-<span id="cb14-22"></span>
-<span id="cb14-23"><span class="fu" style="color: #4758AB;
+<span id="cb15-21">}</span>
+<span id="cb15-22"></span>
+<span id="cb15-23"><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">make_plot</span>(flow, <span class="at" style="color: #657422;
 background-color: null;
@@ -1569,16 +1696,16 @@ font-style: inherit;">123</span>)</span></code></pre></div>
 </div>
 <p>At this point, we have our final image.</p>
 </section>
-<section id="the-finished-system" class="level2 page-columns page-full">
-<h2 class="anchored" data-anchor-id="the-finished-system">The finished system</h2>
-<p>In order to play around with system, it’s helpful to wrap the whole process from beginning to end in a <code>splatter()</code> function that generates images. It takes a single argument <code>seed</code>, which can either be a scalar seed value that is used for the base image, the flow step, and the palette sampling, or it can be a length three vector that supplies separate seed for each component:</p>
+<section id="exploring-the-system" class="level2 page-columns page-full">
+<h2 class="anchored" data-anchor-id="exploring-the-system">Exploring the system</h2>
+<p>In order to play around with system, it’s helpful to wrap the whole generative process from beginning to end in a <code>splatter()</code> function that generates images. It takes a single argument <code>seed</code>, which can either be a scalar seed value that is used for all components to the system, or it can be a three-element vector that supplies separate seeds for the base data, the vector field, and the palette:</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb15" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb15-1">splatter <span class="ot" style="color: #003B4F;
+<div class="sourceCode cell-code" id="cb16" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb16-1">splatter <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> <span class="cf" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">function</span>(seed) {</span>
-<span id="cb15-2">  <span class="fu" style="color: #4758AB;
+<span id="cb16-2">  <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">stopifnot</span>(<span class="fu" style="color: #4758AB;
 background-color: null;
@@ -1591,7 +1718,7 @@ background-color: null;
 font-style: inherit;">1</span>, <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">3</span>))</span>
-<span id="cb15-3">  <span class="cf" style="color: #003B4F;
+<span id="cb16-3">  <span class="cf" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">if</span>(<span class="fu" style="color: #4758AB;
 background-color: null;
@@ -1606,74 +1733,74 @@ background-color: null;
 font-style: inherit;">rep</span>(seed, <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">3</span>)</span>
-<span id="cb15-4">  <span class="fu" style="color: #4758AB;
+<span id="cb16-4">  <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">base_data</span>(</span>
-<span id="cb15-5">    <span class="at" style="color: #657422;
+<span id="cb16-5">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">seed =</span> seed[<span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">1</span>],</span>
-<span id="cb15-6">    <span class="at" style="color: #657422;
+<span id="cb16-6">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">rows =</span> <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">100</span>,</span>
-<span id="cb15-7">    <span class="at" style="color: #657422;
+<span id="cb16-7">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">cols =</span> <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">100</span>,</span>
-<span id="cb15-8">    <span class="at" style="color: #657422;
+<span id="cb16-8">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">iterations =</span> <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">400000</span>,</span>
-<span id="cb15-9">    <span class="at" style="color: #657422;
+<span id="cb16-9">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">span =</span> <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">5</span></span>
-<span id="cb15-10">  ) <span class="sc" style="color: #5E5E5E;
+<span id="cb16-10">  ) <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">|&gt;</span></span>
-<span id="cb15-11">  <span class="fu" style="color: #4758AB;
+<span id="cb16-11">  <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">curl_loop</span>(</span>
-<span id="cb15-12">    <span class="at" style="color: #657422;
+<span id="cb16-12">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">seed =</span> seed[<span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">2</span>],</span>
-<span id="cb15-13">    <span class="at" style="color: #657422;
+<span id="cb16-13">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">iterations =</span> <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">99</span>,</span>
-<span id="cb15-14">    <span class="at" style="color: #657422;
+<span id="cb16-14">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">scale =</span> .<span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">0002</span>,</span>
-<span id="cb15-15">    <span class="at" style="color: #657422;
+<span id="cb16-15">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">octaves =</span> <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">5</span></span>
-<span id="cb15-16">  ) <span class="sc" style="color: #5E5E5E;
+<span id="cb16-16">  ) <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">|&gt;</span></span>
-<span id="cb15-17">  <span class="fu" style="color: #4758AB;
+<span id="cb16-17">  <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">make_plot</span>(<span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">seed =</span> seed[<span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">3</span>])</span>
-<span id="cb15-18">}</span></code></pre></div>
+<span id="cb16-18">}</span></code></pre></div>
 </div>
 <p>The ability to set the seed separately for each of the components is useful for illustrating the role played by each one. First let’s look at what happens when we hold the base image and the vector field constant, but vary the palette:</p>
-<div class="sourceCode cell-code" id="cb16" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb16-1"><span class="fu" style="color: #4758AB;
+<div class="sourceCode cell-code" id="cb17" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb17-1"><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">splatter</span>(<span class="at" style="color: #657422;
 background-color: null;
@@ -1686,7 +1813,7 @@ background-color: null;
 font-style: inherit;">102</span>, <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">100</span>))</span>
-<span id="cb16-2"><span class="fu" style="color: #4758AB;
+<span id="cb17-2"><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">splatter</span>(<span class="at" style="color: #657422;
 background-color: null;
@@ -1699,7 +1826,7 @@ background-color: null;
 font-style: inherit;">102</span>, <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">123</span>))</span>
-<span id="cb16-3"><span class="fu" style="color: #4758AB;
+<span id="cb17-3"><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">splatter</span>(<span class="at" style="color: #657422;
 background-color: null;
@@ -1727,7 +1854,7 @@ font-style: inherit;">666</span>))</span></code></pre></div>
 </div>
 <p>As you’d expect, these are all structurally the same image: same shapes, same flowing look, but with very different colour schemes, and of course this drastically changes the feel of each piece.</p>
 <p>Alternatively, we can keep the base image and palette constant, but use a different vector field each time. Looking at the images below, you can see how this changes the “fine grain” of the image. The effect is much subtler, but it’s definitely noticeable. It’s almost as if someone were trying to paint the same piece all three times, but the brush strokes are different every time:</p>
-<div class="sourceCode cell-code" id="cb17" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb17-1"><span class="fu" style="color: #4758AB;
+<div class="sourceCode cell-code" id="cb18" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1"><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">splatter</span>(<span class="at" style="color: #657422;
 background-color: null;
@@ -1740,7 +1867,7 @@ background-color: null;
 font-style: inherit;">123</span>, <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">666</span>))</span>
-<span id="cb17-2"><span class="fu" style="color: #4758AB;
+<span id="cb18-2"><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">splatter</span>(<span class="at" style="color: #657422;
 background-color: null;
@@ -1753,7 +1880,7 @@ background-color: null;
 font-style: inherit;">456</span>, <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">666</span>))</span>
-<span id="cb17-3"><span class="fu" style="color: #4758AB;
+<span id="cb18-3"><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">splatter</span>(<span class="at" style="color: #657422;
 background-color: null;
@@ -1780,7 +1907,7 @@ font-style: inherit;">666</span>))</span></code></pre></div>
 </div>
 </div>
 <p>Finally, we can vary the base image but keep the vector field and palette the same:</p>
-<div class="sourceCode cell-code" id="cb18" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1"><span class="fu" style="color: #4758AB;
+<div class="sourceCode cell-code" id="cb19" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb19-1"><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">splatter</span>(<span class="at" style="color: #657422;
 background-color: null;
@@ -1793,7 +1920,7 @@ background-color: null;
 font-style: inherit;">100</span>, <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">123</span>))</span>
-<span id="cb18-2"><span class="fu" style="color: #4758AB;
+<span id="cb19-2"><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">splatter</span>(<span class="at" style="color: #657422;
 background-color: null;
@@ -1806,7 +1933,7 @@ background-color: null;
 font-style: inherit;">100</span>, <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">123</span>))</span>
-<span id="cb18-3"><span class="fu" style="color: #4758AB;
+<span id="cb19-3"><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">splatter</span>(<span class="at" style="color: #657422;
 background-color: null;
@@ -1834,6 +1961,9 @@ font-style: inherit;">123</span>))</span></code></pre></div>
 </div>
 <p>This, to my mind, is the strangest effect of all. Varying the base image changes the overall distribution of, as you’d expect, but when you look very closely at the images you can see that they all have the same “brush strokes”. The swirling circular pattern in the centre-left of image (which was very evident in the animated image) is present in all three images: on the left image it shows up as a pattern of red and orange strokes curling around one another, but on the right that same swirl is now mostly pink and black. For the image in the middle the swirl is harder to see because it’s almost entirely painted in orange, with just a little bit of black.</p>
 </section>
+<section id="wrap-up" class="level2">
+<h2 class="anchored" data-anchor-id="wrap-up">Wrap up</h2>
+</section>
 
 
 
@@ -1846,23 +1976,23 @@ font-style: inherit;">123</span>))</span></code></pre></div>
 <div class="code-with-filename-file">
 <pre><strong>automaton.cpp</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb19" style="background: #f1f3f5;"><pre class="sourceCode cpp code-with-copy"><code class="sourceCode cpp"><span id="cb19-1"><span class="pp" style="color: #AD0000;
+<div class="sourceCode cell-code" id="cb20" style="background: #f1f3f5;"><pre class="sourceCode cpp code-with-copy"><code class="sourceCode cpp"><span id="cb20-1"><span class="pp" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">#include </span><span class="im" style="color: #00769E;
 background-color: null;
 font-style: inherit;">&lt;Rcpp.h&gt;</span></span>
-<span id="cb19-2"><span class="kw" style="color: #003B4F;
+<span id="cb20-2"><span class="kw" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">using</span> <span class="kw" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">namespace</span> Rcpp<span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">;</span></span>
-<span id="cb19-3"></span>
-<span id="cb19-4"><span class="co" style="color: #5E5E5E;
+<span id="cb20-3"></span>
+<span id="cb20-4"><span class="co" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">// wrap position to grid</span></span>
-<span id="cb19-5"><span class="dt" style="color: #AD0000;
+<span id="cb20-5"><span class="dt" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">int</span> wrap<span class="op" style="color: #5E5E5E;
 background-color: null;
@@ -1877,7 +2007,7 @@ background-color: null;
 font-style: inherit;">)</span> <span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">{</span></span>
-<span id="cb19-6">  <span class="cf" style="color: #003B4F;
+<span id="cb20-6">  <span class="cf" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">if</span><span class="op" style="color: #5E5E5E;
 background-color: null;
@@ -1894,7 +2024,7 @@ background-color: null;
 font-style: inherit;">+</span> size<span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">;</span></span>
-<span id="cb19-7">  <span class="cf" style="color: #003B4F;
+<span id="cb20-7">  <span class="cf" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">if</span><span class="op" style="color: #5E5E5E;
 background-color: null;
@@ -1909,22 +2039,22 @@ background-color: null;
 font-style: inherit;">-</span> size<span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">;</span></span>
-<span id="cb19-8">  <span class="cf" style="color: #003B4F;
+<span id="cb20-8">  <span class="cf" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">return</span> pos<span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">;</span></span>
-<span id="cb19-9"><span class="op" style="color: #5E5E5E;
+<span id="cb20-9"><span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">}</span></span>
-<span id="cb19-10"></span>
-<span id="cb19-11"><span class="co" style="color: #5E5E5E;
+<span id="cb20-10"></span>
+<span id="cb20-11"><span class="co" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">// automaton run function</span></span>
-<span id="cb19-12"><span class="co" style="color: #5E5E5E;
+<span id="cb20-12"><span class="co" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">// [[Rcpp::export]]</span></span>
-<span id="cb19-13">NumericMatrix automaton<span class="op" style="color: #5E5E5E;
+<span id="cb20-13">NumericMatrix automaton<span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">(</span><span class="dt" style="color: #AD0000;
 background-color: null;
@@ -1945,8 +2075,8 @@ background-color: null;
 font-style: inherit;">)</span> <span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">{</span></span>
-<span id="cb19-14">  </span>
-<span id="cb19-15">  <span class="dt" style="color: #AD0000;
+<span id="cb20-14">  </span>
+<span id="cb20-15">  <span class="dt" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">int</span> source_row <span class="op" style="color: #5E5E5E;
 background-color: null;
@@ -1955,7 +2085,7 @@ background-color: null;
 font-style: inherit;">0</span><span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">;</span></span>
-<span id="cb19-16">  <span class="dt" style="color: #AD0000;
+<span id="cb20-16">  <span class="dt" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">int</span> source_col <span class="op" style="color: #5E5E5E;
 background-color: null;
@@ -1964,7 +2094,7 @@ background-color: null;
 font-style: inherit;">0</span><span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">;</span></span>
-<span id="cb19-17">  <span class="dt" style="color: #AD0000;
+<span id="cb20-17">  <span class="dt" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">int</span> span_row <span class="op" style="color: #5E5E5E;
 background-color: null;
@@ -1973,7 +2103,7 @@ background-color: null;
 font-style: inherit;">0</span><span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">;</span></span>
-<span id="cb19-18">  <span class="dt" style="color: #AD0000;
+<span id="cb20-18">  <span class="dt" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">int</span> span_col <span class="op" style="color: #5E5E5E;
 background-color: null;
@@ -1982,7 +2112,7 @@ background-color: null;
 font-style: inherit;">0</span><span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">;</span></span>
-<span id="cb19-19">  <span class="dt" style="color: #AD0000;
+<span id="cb20-19">  <span class="dt" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">int</span> row <span class="op" style="color: #5E5E5E;
 background-color: null;
@@ -1991,7 +2121,7 @@ background-color: null;
 font-style: inherit;">0</span><span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">;</span></span>
-<span id="cb19-20">  <span class="dt" style="color: #AD0000;
+<span id="cb20-20">  <span class="dt" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">int</span> col <span class="op" style="color: #5E5E5E;
 background-color: null;
@@ -2000,7 +2130,7 @@ background-color: null;
 font-style: inherit;">0</span><span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">;</span></span>
-<span id="cb19-21">  <span class="dt" style="color: #AD0000;
+<span id="cb20-21">  <span class="dt" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">int</span> r <span class="op" style="color: #5E5E5E;
 background-color: null;
@@ -2009,7 +2139,7 @@ background-color: null;
 font-style: inherit;">0</span><span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">;</span></span>
-<span id="cb19-22">  <span class="dt" style="color: #AD0000;
+<span id="cb20-22">  <span class="dt" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">int</span> c <span class="op" style="color: #5E5E5E;
 background-color: null;
@@ -2018,7 +2148,7 @@ background-color: null;
 font-style: inherit;">0</span><span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">;</span></span>
-<span id="cb19-23">  <span class="dt" style="color: #AD0000;
+<span id="cb20-23">  <span class="dt" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">double</span> source_val <span class="op" style="color: #5E5E5E;
 background-color: null;
@@ -2027,15 +2157,15 @@ background-color: null;
 font-style: inherit;">0</span><span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">;</span></span>
-<span id="cb19-24">  </span>
-<span id="cb19-25">  NumericMatrix grid<span class="op" style="color: #5E5E5E;
+<span id="cb20-24">  </span>
+<span id="cb20-25">  NumericMatrix grid<span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">(</span>n_rows<span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">,</span> n_cols<span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">);</span></span>
-<span id="cb19-26">  <span class="cf" style="color: #003B4F;
+<span id="cb20-26">  <span class="cf" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">for</span> <span class="op" style="color: #5E5E5E;
 background-color: null;
@@ -2056,7 +2186,7 @@ background-color: null;
 font-style: inherit;">++)</span> <span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">{</span></span>
-<span id="cb19-27">    <span class="cf" style="color: #003B4F;
+<span id="cb20-27">    <span class="cf" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">for</span> <span class="op" style="color: #5E5E5E;
 background-color: null;
@@ -2077,7 +2207,7 @@ background-color: null;
 font-style: inherit;">++)</span> <span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">{</span></span>
-<span id="cb19-28">      grid<span class="op" style="color: #5E5E5E;
+<span id="cb20-28">      grid<span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">(</span>row<span class="op" style="color: #5E5E5E;
 background-color: null;
@@ -2098,14 +2228,14 @@ background-color: null;
 font-style: inherit;">1</span><span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">);</span></span>
-<span id="cb19-29">    <span class="op" style="color: #5E5E5E;
+<span id="cb20-29">    <span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">}</span></span>
-<span id="cb19-30">  <span class="op" style="color: #5E5E5E;
+<span id="cb20-30">  <span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">}</span></span>
-<span id="cb19-31">  </span>
-<span id="cb19-32">  <span class="cf" style="color: #003B4F;
+<span id="cb20-31">  </span>
+<span id="cb20-32">  <span class="cf" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">for</span> <span class="op" style="color: #5E5E5E;
 background-color: null;
@@ -2126,7 +2256,7 @@ background-color: null;
 font-style: inherit;">++)</span> <span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">{</span></span>
-<span id="cb19-33">    source_row <span class="op" style="color: #5E5E5E;
+<span id="cb20-33">    source_row <span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">=</span> floor<span class="op" style="color: #5E5E5E;
 background-color: null;
@@ -2141,7 +2271,7 @@ background-color: null;
 font-style: inherit;">,</span> n_rows<span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">));</span></span>
-<span id="cb19-34">    source_col <span class="op" style="color: #5E5E5E;
+<span id="cb20-34">    source_col <span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">=</span> floor<span class="op" style="color: #5E5E5E;
 background-color: null;
@@ -2156,7 +2286,7 @@ background-color: null;
 font-style: inherit;">,</span> n_cols<span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">));</span></span>
-<span id="cb19-35">    source_val <span class="op" style="color: #5E5E5E;
+<span id="cb20-35">    source_val <span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">=</span> grid<span class="op" style="color: #5E5E5E;
 background-color: null;
@@ -2165,7 +2295,7 @@ background-color: null;
 font-style: inherit;">,</span> source_col<span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">);</span></span>
-<span id="cb19-36">    span_row <span class="op" style="color: #5E5E5E;
+<span id="cb20-36">    span_row <span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">=</span> floor<span class="op" style="color: #5E5E5E;
 background-color: null;
@@ -2180,7 +2310,7 @@ background-color: null;
 font-style: inherit;">,</span> max_span<span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">));</span></span>
-<span id="cb19-37">    span_col <span class="op" style="color: #5E5E5E;
+<span id="cb20-37">    span_col <span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">=</span> floor<span class="op" style="color: #5E5E5E;
 background-color: null;
@@ -2195,26 +2325,26 @@ background-color: null;
 font-style: inherit;">,</span> max_span<span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">));</span></span>
-<span id="cb19-38">    row <span class="op" style="color: #5E5E5E;
+<span id="cb20-38">    row <span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">=</span> source_row <span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">-</span> span_row<span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">;</span></span>
-<span id="cb19-39">    col <span class="op" style="color: #5E5E5E;
+<span id="cb20-39">    col <span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">=</span> source_col <span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">-</span> span_col<span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">;</span></span>
-<span id="cb19-40">    <span class="cf" style="color: #003B4F;
+<span id="cb20-40">    <span class="cf" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">do</span> <span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">{</span></span>
-<span id="cb19-41">      c <span class="op" style="color: #5E5E5E;
+<span id="cb20-41">      c <span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">=</span> wrap<span class="op" style="color: #5E5E5E;
 background-color: null;
@@ -2223,12 +2353,12 @@ background-color: null;
 font-style: inherit;">,</span> n_cols<span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">);</span></span>
-<span id="cb19-42">      <span class="cf" style="color: #003B4F;
+<span id="cb20-42">      <span class="cf" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">do</span> <span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">{</span></span>
-<span id="cb19-43">        r <span class="op" style="color: #5E5E5E;
+<span id="cb20-43">        r <span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">=</span> wrap<span class="op" style="color: #5E5E5E;
 background-color: null;
@@ -2237,7 +2367,7 @@ background-color: null;
 font-style: inherit;">,</span> n_rows<span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">);</span></span>
-<span id="cb19-44">        grid<span class="op" style="color: #5E5E5E;
+<span id="cb20-44">        grid<span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">(</span>r<span class="op" style="color: #5E5E5E;
 background-color: null;
@@ -2264,10 +2394,10 @@ background-color: null;
 font-style: inherit;">2</span><span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">;</span></span>
-<span id="cb19-45">        row<span class="op" style="color: #5E5E5E;
+<span id="cb20-45">        row<span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">++;</span></span>
-<span id="cb19-46">      <span class="op" style="color: #5E5E5E;
+<span id="cb20-46">      <span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">}</span> <span class="cf" style="color: #003B4F;
 background-color: null;
@@ -2280,10 +2410,10 @@ background-color: null;
 font-style: inherit;">+</span> span_row<span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">);</span></span>
-<span id="cb19-47">      col<span class="op" style="color: #5E5E5E;
+<span id="cb20-47">      col<span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">++;</span></span>
-<span id="cb19-48">    <span class="op" style="color: #5E5E5E;
+<span id="cb20-48">    <span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">}</span> <span class="cf" style="color: #003B4F;
 background-color: null;
@@ -2296,16 +2426,16 @@ background-color: null;
 font-style: inherit;">+</span> span_col<span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">);</span></span>
-<span id="cb19-49">  <span class="op" style="color: #5E5E5E;
+<span id="cb20-49">  <span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">}</span></span>
-<span id="cb19-50">  </span>
-<span id="cb19-51">  <span class="cf" style="color: #003B4F;
+<span id="cb20-50">  </span>
+<span id="cb20-51">  <span class="cf" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">return</span> grid<span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">;</span></span>
-<span id="cb19-52"><span class="op" style="color: #5E5E5E;
+<span id="cb20-52"><span class="op" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">}</span></span></code></pre></div>
 </details>
@@ -2318,28 +2448,28 @@ font-style: inherit;">}</span></span></code></pre></div>
 <div class="code-with-filename-file">
 <pre><strong>splatter.R</strong></pre>
 </div>
-<div class="sourceCode cell-code" id="cb20" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb20-1">Rcpp<span class="sc" style="color: #5E5E5E;
+<div class="sourceCode cell-code" id="cb21" style="background: #f1f3f5;"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb21-1">Rcpp<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">sourceCpp</span>(<span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"automaton.cpp"</span>)</span>
-<span id="cb20-2"></span>
-<span id="cb20-3">base_data <span class="ot" style="color: #003B4F;
+<span id="cb21-2"></span>
+<span id="cb21-3">base_data <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> <span class="cf" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">function</span>(seed, rows, cols, iterations, span) {</span>
-<span id="cb20-4">  <span class="fu" style="color: #4758AB;
+<span id="cb21-4">  <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">set.seed</span>(seed)</span>
-<span id="cb20-5">  tidyr<span class="sc" style="color: #5E5E5E;
+<span id="cb21-5">  tidyr<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">expand_grid</span>(</span>
-<span id="cb20-6">    <span class="at" style="color: #657422;
+<span id="cb21-6">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">x =</span> <span class="fu" style="color: #4758AB;
 background-color: null;
@@ -2350,7 +2480,7 @@ background-color: null;
 font-style: inherit;">1</span>, <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">length.out =</span> cols),</span>
-<span id="cb20-7">    <span class="at" style="color: #657422;
+<span id="cb21-7">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">y =</span> <span class="fu" style="color: #4758AB;
 background-color: null;
@@ -2361,32 +2491,32 @@ background-color: null;
 font-style: inherit;">1</span>, <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">length.out =</span> rows),</span>
-<span id="cb20-8">    <span class="at" style="color: #657422;
+<span id="cb21-8">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">z =</span> <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">1</span>,</span>
-<span id="cb20-9">    <span class="at" style="color: #657422;
+<span id="cb21-9">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">iter =</span> <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">0</span></span>
-<span id="cb20-10">  ) <span class="sc" style="color: #5E5E5E;
+<span id="cb21-10">  ) <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">|&gt;</span></span>
-<span id="cb20-11">    dplyr<span class="sc" style="color: #5E5E5E;
+<span id="cb21-11">    dplyr<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">mutate</span>(</span>
-<span id="cb20-12">      <span class="at" style="color: #657422;
+<span id="cb21-12">      <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">id =</span> dplyr<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">row_number</span>(),</span>
-<span id="cb20-13">      <span class="at" style="color: #657422;
+<span id="cb21-13">      <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">value =</span> <span class="fu" style="color: #4758AB;
 background-color: null;
@@ -2395,79 +2525,79 @@ background-color: null;
 font-style: inherit;">automaton</span>(rows, cols, iterations, span)) <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">|&gt;</span></span>
-<span id="cb20-14">        <span class="fu" style="color: #4758AB;
+<span id="cb21-14">        <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">as.vector</span>() <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">|&gt;</span></span>
-<span id="cb20-15">        ambient<span class="sc" style="color: #5E5E5E;
+<span id="cb21-15">        ambient<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">normalise</span>()</span>
-<span id="cb20-16">    )</span>
-<span id="cb20-17">}</span>
-<span id="cb20-18"></span>
-<span id="cb20-19">curl_step <span class="ot" style="color: #003B4F;
+<span id="cb21-16">    )</span>
+<span id="cb21-17">}</span>
+<span id="cb21-18"></span>
+<span id="cb21-19">curl_step <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> <span class="cf" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">function</span>(data, </span>
-<span id="cb20-20">                      iteration, </span>
-<span id="cb20-21">                      scale, </span>
-<span id="cb20-22">                      octaves, </span>
-<span id="cb20-23">                      seed) {</span>
-<span id="cb20-24">  </span>
-<span id="cb20-25">  noise_data <span class="ot" style="color: #003B4F;
+<span id="cb21-20">                      iteration, </span>
+<span id="cb21-21">                      scale, </span>
+<span id="cb21-22">                      octaves, </span>
+<span id="cb21-23">                      seed) {</span>
+<span id="cb21-24">  </span>
+<span id="cb21-25">  noise_data <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> ambient<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">curl_noise</span>(</span>
-<span id="cb20-26">    <span class="at" style="color: #657422;
+<span id="cb21-26">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">x =</span> data<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">$</span>x,</span>
-<span id="cb20-27">    <span class="at" style="color: #657422;
+<span id="cb21-27">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">y =</span> data<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">$</span>y,</span>
-<span id="cb20-28">    <span class="at" style="color: #657422;
+<span id="cb21-28">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">z =</span> data<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">$</span>z,</span>
-<span id="cb20-29">    <span class="at" style="color: #657422;
+<span id="cb21-29">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">seed =</span> seed,</span>
-<span id="cb20-30">    <span class="at" style="color: #657422;
+<span id="cb21-30">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">generator =</span> ambient<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">::</span>fracture,</span>
-<span id="cb20-31">    <span class="at" style="color: #657422;
+<span id="cb21-31">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">noise =</span> ambient<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">::</span>gen_simplex,</span>
-<span id="cb20-32">    <span class="at" style="color: #657422;
+<span id="cb21-32">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">fractal =</span> ambient<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">::</span>ridged,</span>
-<span id="cb20-33">    <span class="at" style="color: #657422;
+<span id="cb21-33">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">octaves =</span> octaves</span>
-<span id="cb20-34">  )</span>
-<span id="cb20-35">  data<span class="sc" style="color: #5E5E5E;
+<span id="cb21-34">  )</span>
+<span id="cb21-35">  data<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">$</span>iter <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> iteration</span>
-<span id="cb20-36">  data<span class="sc" style="color: #5E5E5E;
+<span id="cb21-36">  data<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">$</span>x <span class="ot" style="color: #003B4F;
 background-color: null;
@@ -2480,7 +2610,7 @@ background-color: null;
 font-style: inherit;">$</span>x <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">*</span> scale</span>
-<span id="cb20-37">  data<span class="sc" style="color: #5E5E5E;
+<span id="cb21-37">  data<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">$</span>y <span class="ot" style="color: #003B4F;
 background-color: null;
@@ -2493,7 +2623,7 @@ background-color: null;
 font-style: inherit;">$</span>y <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">*</span> scale</span>
-<span id="cb20-38">  data<span class="sc" style="color: #5E5E5E;
+<span id="cb21-38">  data<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">$</span>z <span class="ot" style="color: #003B4F;
 background-color: null;
@@ -2506,73 +2636,69 @@ background-color: null;
 font-style: inherit;">$</span>z <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">*</span> scale</span>
-<span id="cb20-39">  data</span>
-<span id="cb20-40">}</span>
-<span id="cb20-41"></span>
-<span id="cb20-42">curl_loop <span class="ot" style="color: #003B4F;
+<span id="cb21-39">  data</span>
+<span id="cb21-40">}</span>
+<span id="cb21-41"></span>
+<span id="cb21-42">curl_loop <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> <span class="cf" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">function</span>(data, </span>
-<span id="cb20-43">                      seed, </span>
-<span id="cb20-44">                      iterations, </span>
-<span id="cb20-45">                      scale, </span>
-<span id="cb20-46">                      octaves) {</span>
-<span id="cb20-47">  states <span class="ot" style="color: #003B4F;
+<span id="cb21-43">                      seed, </span>
+<span id="cb21-44">                      iterations, </span>
+<span id="cb21-45">                      scale, </span>
+<span id="cb21-46">                      octaves) {</span>
+<span id="cb21-47">  states <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> purrr<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">accumulate</span>(</span>
-<span id="cb20-48">    <span class="at" style="color: #657422;
+<span id="cb21-48">    <span class="at" style="color: #657422;
 background-color: null;
-font-style: inherit;">.x =</span> (<span class="dv" style="color: #AD0000;
+font-style: inherit;">.x =</span> <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">1</span><span class="sc" style="color: #5E5E5E;
 background-color: null;
-font-style: inherit;">:</span>iterations) <span class="sc" style="color: #5E5E5E;
-background-color: null;
-font-style: inherit;">+</span> <span class="dv" style="color: #AD0000;
-background-color: null;
-font-style: inherit;">1</span>,</span>
-<span id="cb20-49">    <span class="at" style="color: #657422;
+font-style: inherit;">:</span>iterations,</span>
+<span id="cb21-49">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">.f =</span> curl_step,</span>
-<span id="cb20-50">    <span class="at" style="color: #657422;
+<span id="cb21-50">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">.init =</span> data,</span>
-<span id="cb20-51">    <span class="at" style="color: #657422;
+<span id="cb21-51">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">scale =</span> scale,</span>
-<span id="cb20-52">    <span class="at" style="color: #657422;
+<span id="cb21-52">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">octaves =</span> octaves,</span>
-<span id="cb20-53">    <span class="at" style="color: #657422;
+<span id="cb21-53">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">seed =</span> seed</span>
-<span id="cb20-54">  )</span>
-<span id="cb20-55">  dplyr<span class="sc" style="color: #5E5E5E;
+<span id="cb21-54">  )</span>
+<span id="cb21-55">  dplyr<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">bind_rows</span>(states)</span>
-<span id="cb20-56">}</span>
-<span id="cb20-57"></span>
-<span id="cb20-58">sample_palette <span class="ot" style="color: #003B4F;
+<span id="cb21-56">}</span>
+<span id="cb21-57"></span>
+<span id="cb21-58">sample_palette <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> <span class="cf" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">function</span>(seed, size) {</span>
-<span id="cb20-59">  <span class="fu" style="color: #4758AB;
+<span id="cb21-59">  <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">set.seed</span>(seed)</span>
-<span id="cb20-60">  cols <span class="ot" style="color: #003B4F;
+<span id="cb21-60">  cols <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">c</span>(</span>
-<span id="cb20-61">    <span class="st" style="color: #20794D;
+<span id="cb21-61">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#de9151"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -2583,7 +2709,7 @@ background-color: null;
 font-style: inherit;">"#bc5d2e"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#bbb8b2"</span>,</span>
-<span id="cb20-62">    <span class="st" style="color: #20794D;
+<span id="cb21-62">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#a63446"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -2594,7 +2720,7 @@ background-color: null;
 font-style: inherit;">"#000004"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#7e1946"</span>,</span>
-<span id="cb20-63">    <span class="st" style="color: #20794D;
+<span id="cb21-63">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#ffffff"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -2605,7 +2731,7 @@ background-color: null;
 font-style: inherit;">"#c08497"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#f7af9d"</span>,</span>
-<span id="cb20-64">    <span class="st" style="color: #20794D;
+<span id="cb21-64">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#aa8f66"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -2616,7 +2742,7 @@ background-color: null;
 font-style: inherit;">"#61c9a8"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#ba3b46"</span>,</span>
-<span id="cb20-65">    <span class="st" style="color: #20794D;
+<span id="cb21-65">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#241023"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -2627,7 +2753,7 @@ background-color: null;
 font-style: inherit;">"#d5e68d"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#47a025"</span>,</span>
-<span id="cb20-66">    <span class="st" style="color: #20794D;
+<span id="cb21-66">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#64113f"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -2638,7 +2764,7 @@ background-color: null;
 font-style: inherit;">"#f7cacd"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#84e6f8"</span>,</span>
-<span id="cb20-67">    <span class="st" style="color: #20794D;
+<span id="cb21-67">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#660000"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -2649,7 +2775,7 @@ background-color: null;
 font-style: inherit;">"#8c001a"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#ff9000"</span>,</span>
-<span id="cb20-68">    <span class="st" style="color: #20794D;
+<span id="cb21-68">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#c9cba3"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -2660,7 +2786,7 @@ background-color: null;
 font-style: inherit;">"#723d46"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#472d30"</span>,</span>
-<span id="cb20-69">    <span class="st" style="color: #20794D;
+<span id="cb21-69">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#0e7c7b"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -2671,7 +2797,7 @@ background-color: null;
 font-style: inherit;">"#d62246"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#4b1d3f"</span>,</span>
-<span id="cb20-70">    <span class="st" style="color: #20794D;
+<span id="cb21-70">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#0a0908"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -2682,7 +2808,7 @@ background-color: null;
 font-style: inherit;">"#a9927d"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#5e503f"</span>,</span>
-<span id="cb20-71">    <span class="st" style="color: #20794D;
+<span id="cb21-71">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#020202"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -2693,7 +2819,7 @@ background-color: null;
 font-style: inherit;">"#a188a6"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#9da2ab"</span>,</span>
-<span id="cb20-72">    <span class="st" style="color: #20794D;
+<span id="cb21-72">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#c2c1c2"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -2704,7 +2830,7 @@ background-color: null;
 font-style: inherit;">"#bd4089"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#f51aa4"</span>,</span>
-<span id="cb20-73">    <span class="st" style="color: #20794D;
+<span id="cb21-73">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#820263"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -2715,7 +2841,7 @@ background-color: null;
 font-style: inherit;">"#2e294e"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#ffd400"</span>,</span>
-<span id="cb20-74">    <span class="st" style="color: #20794D;
+<span id="cb21-74">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#f4e409"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -2726,7 +2852,7 @@ background-color: null;
 font-style: inherit;">"#a63c06"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#710000"</span>,</span>
-<span id="cb20-75">    <span class="st" style="color: #20794D;
+<span id="cb21-75">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#d9d0de"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -2737,7 +2863,7 @@ background-color: null;
 font-style: inherit;">"#ab4967"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#0c1713"</span>,</span>
-<span id="cb20-76">    <span class="st" style="color: #20794D;
+<span id="cb21-76">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#012622"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -2748,7 +2874,7 @@ background-color: null;
 font-style: inherit;">"#e98a15"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#59114d"</span>,</span>
-<span id="cb20-77">    <span class="st" style="color: #20794D;
+<span id="cb21-77">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#3c1518"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -2759,7 +2885,7 @@ background-color: null;
 font-style: inherit;">"#d58936"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#fffb46"</span>,</span>
-<span id="cb20-78">    <span class="st" style="color: #20794D;
+<span id="cb21-78">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#6e0d25"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -2770,7 +2896,7 @@ background-color: null;
 font-style: inherit;">"#774e24"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#6a381f"</span>,</span>
-<span id="cb20-79">    <span class="st" style="color: #20794D;
+<span id="cb21-79">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#bcabae"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -2781,7 +2907,7 @@ background-color: null;
 font-style: inherit;">"#716969"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#fbfbfb"</span>,</span>
-<span id="cb20-80">    <span class="st" style="color: #20794D;
+<span id="cb21-80">    <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#2b4162"</span>, <span class="st" style="color: #20794D;
 background-color: null;
@@ -2792,20 +2918,20 @@ background-color: null;
 font-style: inherit;">"#d7b377"</span>, <span class="st" style="color: #20794D;
 background-color: null;
 font-style: inherit;">"#8f754f"</span></span>
-<span id="cb20-81">  )</span>
-<span id="cb20-82">  <span class="fu" style="color: #4758AB;
+<span id="cb21-81">  )</span>
+<span id="cb21-82">  <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">sample</span>(cols, <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">size =</span> size)</span>
-<span id="cb20-83">}</span>
-<span id="cb20-84"></span>
-<span id="cb20-85">make_plot <span class="ot" style="color: #003B4F;
+<span id="cb21-83">}</span>
+<span id="cb21-84"></span>
+<span id="cb21-85">make_plot <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> <span class="cf" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">function</span>(data, seed) {</span>
-<span id="cb20-86">  palette <span class="ot" style="color: #003B4F;
+<span id="cb21-86">  palette <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> <span class="fu" style="color: #4758AB;
 background-color: null;
@@ -2816,10 +2942,10 @@ background-color: null;
 font-style: inherit;">size =</span> <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">4</span>)</span>
-<span id="cb20-87">  data <span class="sc" style="color: #5E5E5E;
+<span id="cb21-87">  data <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">|&gt;</span></span>
-<span id="cb20-88">    ggplot2<span class="sc" style="color: #5E5E5E;
+<span id="cb21-88">    ggplot2<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
 background-color: null;
@@ -2828,47 +2954,47 @@ background-color: null;
 font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">aes</span>(</span>
-<span id="cb20-89">      <span class="at" style="color: #657422;
+<span id="cb21-89">      <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">x =</span> x,</span>
-<span id="cb20-90">      <span class="at" style="color: #657422;
+<span id="cb21-90">      <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">y =</span> y,</span>
-<span id="cb20-91">      <span class="at" style="color: #657422;
+<span id="cb21-91">      <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">colour =</span> value,</span>
-<span id="cb20-92">      <span class="at" style="color: #657422;
+<span id="cb21-92">      <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">size =</span> <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">-</span>iter</span>
-<span id="cb20-93">    )) <span class="sc" style="color: #5E5E5E;
+<span id="cb21-93">    )) <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">+</span></span>
-<span id="cb20-94">    ggplot2<span class="sc" style="color: #5E5E5E;
+<span id="cb21-94">    ggplot2<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">geom_point</span>(</span>
-<span id="cb20-95">      <span class="at" style="color: #657422;
+<span id="cb21-95">      <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">stroke =</span> <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">0</span>, </span>
-<span id="cb20-96">      <span class="at" style="color: #657422;
+<span id="cb21-96">      <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">show.legend =</span> <span class="cn" style="color: #8f5902;
 background-color: null;
 font-style: inherit;">FALSE</span></span>
-<span id="cb20-97">    ) <span class="sc" style="color: #5E5E5E;
+<span id="cb21-97">    ) <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">+</span> </span>
-<span id="cb20-98">    ggplot2<span class="sc" style="color: #5E5E5E;
+<span id="cb21-98">    ggplot2<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">coord_equal</span>(</span>
-<span id="cb20-99">      <span class="at" style="color: #657422;
+<span id="cb21-99">      <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">xlim =</span> <span class="fu" style="color: #4758AB;
 background-color: null;
@@ -2877,7 +3003,7 @@ background-color: null;
 font-style: inherit;">05</span>, .<span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">95</span>),</span>
-<span id="cb20-100">      <span class="at" style="color: #657422;
+<span id="cb21-100">      <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">ylim =</span> <span class="fu" style="color: #4758AB;
 background-color: null;
@@ -2886,10 +3012,10 @@ background-color: null;
 font-style: inherit;">05</span>, .<span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">95</span>)</span>
-<span id="cb20-101">    ) <span class="sc" style="color: #5E5E5E;
+<span id="cb21-101">    ) <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">+</span> </span>
-<span id="cb20-102">    ggplot2<span class="sc" style="color: #5E5E5E;
+<span id="cb21-102">    ggplot2<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
 background-color: null;
@@ -2904,7 +3030,7 @@ background-color: null;
 font-style: inherit;">6</span>)) <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">+</span></span>
-<span id="cb20-103">    ggplot2<span class="sc" style="color: #5E5E5E;
+<span id="cb21-103">    ggplot2<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
 background-color: null;
@@ -2913,19 +3039,19 @@ background-color: null;
 font-style: inherit;">colours =</span> palette) <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">+</span></span>
-<span id="cb20-104">    ggplot2<span class="sc" style="color: #5E5E5E;
+<span id="cb21-104">    ggplot2<span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">::</span><span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">theme_void</span>()</span>
-<span id="cb20-105">}</span>
-<span id="cb20-106"></span>
-<span id="cb20-107">splatter <span class="ot" style="color: #003B4F;
+<span id="cb21-105">}</span>
+<span id="cb21-106"></span>
+<span id="cb21-107">splatter <span class="ot" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">&lt;-</span> <span class="cf" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">function</span>(seed) {</span>
-<span id="cb20-108">  <span class="fu" style="color: #4758AB;
+<span id="cb21-108">  <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">stopifnot</span>(<span class="fu" style="color: #4758AB;
 background-color: null;
@@ -2938,7 +3064,7 @@ background-color: null;
 font-style: inherit;">1</span>, <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">3</span>))</span>
-<span id="cb20-109">  <span class="cf" style="color: #003B4F;
+<span id="cb21-109">  <span class="cf" style="color: #003B4F;
 background-color: null;
 font-style: inherit;">if</span>(<span class="fu" style="color: #4758AB;
 background-color: null;
@@ -2953,71 +3079,71 @@ background-color: null;
 font-style: inherit;">rep</span>(seed, <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">3</span>)</span>
-<span id="cb20-110">  <span class="fu" style="color: #4758AB;
+<span id="cb21-110">  <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">base_data</span>(</span>
-<span id="cb20-111">    <span class="at" style="color: #657422;
+<span id="cb21-111">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">seed =</span> seed[<span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">1</span>],</span>
-<span id="cb20-112">    <span class="at" style="color: #657422;
+<span id="cb21-112">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">rows =</span> <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">100</span>,</span>
-<span id="cb20-113">    <span class="at" style="color: #657422;
+<span id="cb21-113">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">cols =</span> <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">100</span>,</span>
-<span id="cb20-114">    <span class="at" style="color: #657422;
+<span id="cb21-114">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">iterations =</span> <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">400000</span>,</span>
-<span id="cb20-115">    <span class="at" style="color: #657422;
+<span id="cb21-115">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">span =</span> <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">5</span></span>
-<span id="cb20-116">  ) <span class="sc" style="color: #5E5E5E;
+<span id="cb21-116">  ) <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">|&gt;</span></span>
-<span id="cb20-117">  <span class="fu" style="color: #4758AB;
+<span id="cb21-117">  <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">curl_loop</span>(</span>
-<span id="cb20-118">    <span class="at" style="color: #657422;
+<span id="cb21-118">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">seed =</span> seed[<span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">2</span>],</span>
-<span id="cb20-119">    <span class="at" style="color: #657422;
+<span id="cb21-119">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">iterations =</span> <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">99</span>,</span>
-<span id="cb20-120">    <span class="at" style="color: #657422;
+<span id="cb21-120">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">scale =</span> .<span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">0002</span>,</span>
-<span id="cb20-121">    <span class="at" style="color: #657422;
+<span id="cb21-121">    <span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">octaves =</span> <span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">5</span></span>
-<span id="cb20-122">  ) <span class="sc" style="color: #5E5E5E;
+<span id="cb21-122">  ) <span class="sc" style="color: #5E5E5E;
 background-color: null;
 font-style: inherit;">|&gt;</span></span>
-<span id="cb20-123">  <span class="fu" style="color: #4758AB;
+<span id="cb21-123">  <span class="fu" style="color: #4758AB;
 background-color: null;
 font-style: inherit;">make_plot</span>(<span class="at" style="color: #657422;
 background-color: null;
 font-style: inherit;">seed =</span> seed[<span class="dv" style="color: #AD0000;
 background-color: null;
 font-style: inherit;">3</span>])</span>
-<span id="cb20-124">}</span></code></pre></div>
+<span id="cb21-124">}</span></code></pre></div>
 </details>
 </div>
 </div>
@@ -3027,11 +3153,13 @@ font-style: inherit;">3</span>])</span>
 
 <ol>
 <li id="fn1"><p>See <a href="../../posts/2021-09-07_water-colours/">this post</a> for an old write up of the water colours system.↩︎</p></li>
-<li id="fn2"><p>I should also mention that this code is very loosely based on the “stepping-stone automaton” that I discovered a few years ago when looking at Antonio Sánchez Chinchón’s <a href="https://github.com/aschinchon/watercolors">watercolour art</a>, and was the inspiration for my stoneskip system which I adapted to implement the <code>automaton()</code> function.↩︎</p></li>
-<li id="fn3"><p>In complete honesty this code is slightly different to the version I implemented in the original <a href="https://github.com/djnavarro/series-splatter">splatter</a> code. In the original version I was a little sloppy about managing the random seed, and in several places I was using the C++ native <code>rand()</code> function for some of the random number generation. That’s problematic in the generative art context because I want to exercise control over the RNG seed from R using the usual <code>set.seed()</code> function, so I need my C++ code to consistently call the random number generators in R using <code>R::runif()</code>↩︎</p></li>
-<li id="fn4"><p>At some level I’m mildly amused that I’m writing a C++ function that I can call from R, and said C++ function reaches back up to R to invoke a random number generator that is implemented in C.↩︎</p></li>
-<li id="fn5"><p>To control for any restriction of range that might have happened due to repeated averaging inside the C++ function, I use <code>ambient::normalise()</code> to ensure that the smallest <code>value</code> in this vector is always 0, and the largest <code>value</code> is always 1.↩︎</p></li>
-<li id="fn6"><p>Yes I do know this is the worst explanation of fields ever. Hush.↩︎</p></li>
+<li id="fn2"><p>Okay fine. It’s not the <em>actual</em> source code for the original system, because the original system is an absolute mess of things I decided to modify on a whim and is not particularly pleasant. Instead, the code here (which is reproduced in full in the “source code” appendix) is a cleaner version that is almost equivalent to the original. And to be honest, if I were starting from scratch I’d be using this cleaned up version and not the bizarre mess that is the original source code.↩︎</p></li>
+<li id="fn3"><p>I should also mention that this code is very loosely based on the “stepping-stone automaton” that I discovered a few years ago when looking at Antonio Sánchez Chinchón’s <a href="https://github.com/aschinchon/watercolors">watercolour art</a>, and was the inspiration for my stoneskip system which I adapted to implement the <code>automaton()</code> function.↩︎</p></li>
+<li id="fn4"><p>In complete honesty this code is slightly different to the version I implemented in the original <a href="https://github.com/djnavarro/series-splatter">splatter</a> code. In the original version I was a little sloppy about managing the random seed, and in several places I was using the C++ native <code>rand()</code> function for some of the random number generation. That’s problematic in the generative art context because I want to exercise control over the RNG seed from R using the usual <code>set.seed()</code> function, so I need my C++ code to consistently call the random number generators in R using <code>R::runif()</code>↩︎</p></li>
+<li id="fn5"><p>At some level I’m mildly amused that I’m writing a C++ function that I can call from R, and said C++ function reaches back up to R to invoke a random number generator that is implemented in C.↩︎</p></li>
+<li id="fn6"><p>In the code here I’m using <code>as.vector()</code> to “flatten” the matrix to a vector. To control for any restriction of range that might have happened due to repeated averaging inside the C++ function, I use <code>ambient::normalise()</code> to ensure that the smallest <code>value</code> in this vector is always 0, and the largest <code>value</code> is always 1.↩︎</p></li>
+<li id="fn7"><p>Yes I do know this is the worst explanation of fields ever. Hush.↩︎</p></li>
+<li id="fn8"><p>It is of course also true to note that the paths that emerge when you do this are only a piecewise-linear approximation to the continuous-flow paths. When you take a series of discrete linear steps like this, errors are introduced at each step. But this is generative art not real analysis class so I’m not at all bothered by that.↩︎</p></li>
 </ol>
 </section><section class="quarto-appendix-contents" id="quarto-reuse"><h2 class="anchored quarto-appendix-heading">Reuse</h2><div class="quarto-appendix-contents"><div><a rel="license" href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a></div></div></section><section class="quarto-appendix-contents" id="quarto-citation"><h2 class="anchored quarto-appendix-heading">Citation</h2><div><div class="quarto-appendix-secondary-label">BibTeX citation:</div><pre class="sourceCode code-with-copy quarto-appendix-bibtex"><code class="sourceCode bibtex">@online{navarro2024,
   author = {Navarro, Danielle},

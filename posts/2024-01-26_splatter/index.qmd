@@ -60,7 +60,7 @@ The core logic of splatter is pretty simple three-step process:
 
 :::
 
-I'll unpack these steps below.
+I'll unpack these steps below, showing the actual code used to create these images and walking through some of the logic and design considerations that goes into building a system like this one.^[Okay fine. It's not the *actual* source code for the original system, because the original system is an absolute mess of things I decided to modify on a whim and is not particularly pleasant. Instead, the code here (which is reproduced in full in the "source code" appendix) is a cleaner version that is almost equivalent to the original. And to be honest, if I were starting from scratch I'd be using this cleaned up version and not the bizarre mess that is the original source code.]
 
 
 ## Creating a base image
@@ -166,9 +166,7 @@ base_data <- function(seed, rows, cols, iterations, span) {
 }
 ```
 
-In this function I use `tidyr::expand_grid()` to create a data frame with `x` and `y` coordinates for every element in a grid, and then "flatten" the matrix returned by `automaton()` into a vector that becomes the `value` column.^[To control for any restriction of range that might have happened due to repeated averaging inside the C++ function, I use `ambient::normalise()` to ensure that the smallest `value` in this vector is always 0, and the largest `value` is always 1.] Because in principle we might later on want to use vector field that moves points in three dimensions there's also a `z` column that has a constant value, and because this base data is used to initialise an iterative process, we have a column `iter` that records the iteration number (currently 0). Finally, we have a `id` column that assigns each element of the grid a unique number, which can come in handy later on. 
-
-In any case, here's what we get when we call the `base_data()` function:
+The primary intention in this function is to create a data frame that has columns `x` and `y` that specify coordinates for every element in a grid, and a `value` column that is populated by calling the `automaton()` function that Rcpp exposes to the R session.^[In the code here I'm using `as.vector()` to "flatten" the matrix to a vector. To control for any restriction of range that might have happened due to repeated averaging inside the C++ function, I use `ambient::normalise()` to ensure that the smallest `value` in this vector is always 0, and the largest `value` is always 1.] Here it is in action:
 
 ```{r base-data-frame}
 base <- base_data(
@@ -182,7 +180,15 @@ base <- base_data(
 base
 ```
 
-To get a sense of what it looks like visually we can use `ggplot2::geom_raster()` to produce a kind of "heat map" representation of this object:
+You can see from the output that there are a few other columns in the output. These are added because this base data is used as the initial state for a set of particles that we're going to place within a vector field and then trace their paths. The logic for including each of these:
+
+- We might want to use a vector field that moves points in three dimensions, so there's also a `z` column (which is set to a constant value in this case). I'm not really using this feature in the splatter system, but I've done it in the past in other systems. One handy trick if you want to give a system a feeling of "mild inhomogeneity" -- with different points appearing to move according to similar but not identical flow fields -- is to displace each point by a small amount in the `z` coordinate, and then use a three-dimensional flow field to move the points in three dimensions, while only plotting the `x` and `y` values. You can also use the "hidden `z` coordinate" trick as a way of smoothly changing the colour. 
+
+- Similarly, because this base data is used as the initial state for an iterative process, there is also a column `iter` that records the iteration number (set to 0 for the base data). One the one hand this is nice for housekeeping purposes (e.g., filtering the data to find the subset corresponding to a particular iteration), but later on we'll actually use this in the plots.
+
+- Finally, we have a `id` column that assigns each element of the grid a unique number, which can come in handy later on if we want to trace out the path followed by a single particle.
+
+All that being said, at this point in the development of our system the things we're most interested in are the `x` and `y` coordinates of each cell in our grid, and the `value` that we use to provide an initial colour to that location. At this point we don't actually have a genuine palette to map `value` onto an actual colour, so for now we'll just use the [ggplot2](https://ggplot2.tidyverse.org/) default:
 
 ```{r base-image-plot}
 base |>
@@ -198,7 +204,9 @@ base |>
   ggplot2::scale_y_continuous(expand = c(0, 0))
 ```
 
-This is our base image. It's not super exciting or even particularly aesthetically pleasing, but that's not the point. What I'm looking for in the base image is something that varies fairly smoothly to create an overall "shape" for the final image, and with enough random variations and irregularities to produce interesting textures in the final image. It's important to have *something* that works to create these base images: they do a lot of work in creating the composition of the final art work, and without them you end up with pieces that lack global structure and feel a bit bland. That being said, I don't think it matters much how you create the base images: there's lots of different algorithms that would work perfectly well for this purpose. 
+This is our base image. It's not super exciting or even particularly aesthetically pleasing, but that's not the point. What I'm looking for in the base image is something that varies fairly smoothly to create an overall "shape" for the final image, and with enough random variations and irregularities to produce interesting textures in the final image. When building a system like this I've found that it's important to have *something* that plays this role. They do a huge amount of work in defining the "composition" of the final art work, and if you don't put a bit of thought into what this part of the system looks like you can end up with pieces that don't have global structure, and feel a bit bland. 
+
+That being said, I don't think there's anything very special about the `automaton()` function I have used in the splatter system. It was a pretty arbitrary choice, and I'm entirely certain that you could swap it out for any number of alternative algorithms and end up with fabulous pieces. 
 
 ## Creating the flow
 
@@ -229,9 +237,9 @@ curl_step <- function(data,
 }
 ```
 
-There's quite a lot going on internally here. I'd write a longer description that unpacks all the details here, but as it happens I've written about it before in the "spatial noise" notes for the [art from code]() workshop I gave a couple of years ago: there's a section discussing [curl fields](https://art-from-code.netlify.app/day-1/session-2/#curl-of-a-spatial-noise-pattern) in the context of `ambient::curl_noise()`, which is coupled with a sections discussing how `ambient::fracture()` can be used in conjunction with a spatial noise generator (like `ambient::gen_simplex()`) and a specific fractal (like `ambient::ridged()`) to create more elaborate and visually interesting flow fields. So, rather than repeat myself, I'll just refer the interested reader to those notes!
+There's quite a lot going on internally here, and I'm not going to dive deeply into the ambient package in this post. I'll provide a visual illustration of what happens when `curl_step()` is called -- it's a bit lower in the post after I define the `curl_loop()` function -- but if you're interested in a more detailed explanation of the logic underpinning this code, I'll refer you to the notes I wrote for my [art from code](https://art-from-code.netlify.app/) workshop I gave a couple of years ago. The notes have a section discussing [curl fields](https://art-from-code.netlify.app/day-1/session-2/#curl-of-a-spatial-noise-pattern) and how they are generated using `ambient::curl_noise()`, along with sections discussing how `ambient::fracture()` can be used to create more elaborate and visually interesting flow fields with fractals. 
 
-Next, I'll define a function `curl_loop()`that uses `purrr::accumulate()` to iteratively apply the `curl_step()` function. It starts with an initial state provided by the base image, and then treats the output of every call to `curl_step()` as the input to the next call. All the intermediate results are stored, resulting in a list of data frames (one per iteration) that is then collapsed (using `dplyr::bind_rows()`) into one large data frame that traces the paths of all points across many iterations.
+In any case let's move onto the next step, in which I'll define a function `curl_loop()`that uses `purrr::accumulate()` to iteratively apply the `curl_step()` function. It starts with an initial state provided by the base image, and then treats the output of every call to `curl_step()` as the input to the next call. All the intermediate results are stored, resulting in a list of data frames (one per iteration) that is then collapsed into one large data frame that traces the paths of all points across many iterations.
 
 ```{r curl-loop}
 curl_loop <- function(data, 
@@ -240,7 +248,7 @@ curl_loop <- function(data,
                       scale, 
                       octaves) {
   states <- purrr::accumulate(
-    .x = (1:iterations) + 1,
+    .x = 1:iterations,
     .f = curl_step,
     .init = data,
     scale = scale,
@@ -265,7 +273,7 @@ flow <- base |>
 flow
 ```
 
-This `flow` data frame provides all the structural elements required to draw the plot. We don't have a proper palette yet, but that's the only thing we're missing. Here's what it looks like when we create an image using the default shades-of-blue palette in ggplot2:
+This `flow` data frame provides all the structural elements required to draw the plot. Here's what it looks like when we create an image using the default shades-of-blue palette in ggplot2:
 
 ```{r flowing-plot}
 pic <- flow |>
@@ -297,7 +305,60 @@ pic + gganimate::transition_time(iter)
 
 ![](anim.gif){width=800 fig-align="center"}
 
-In this version you can see how the plot "begins" with 10000 "particles" laid out on a regular grid, and then iteratively "moves" each of those particles along a path defined by the vector field, with each particle gradually shrinking in size over "time". 
+In this animation you can see how the plot begins with 10000 "particles" laid out on a regular grid (i.e., there's one particle for each cell in the original base data), and then iteratively "moves" each of those particles along a path defined by the vector field (created by repeatedly calling `curl_step()`). You can also see that each particle is gradually shrinking in size over time, a feature that is also used in the splatter plots. 
+
+To unpack it a little further, we can use the `flow` data to create a visual representation of what the vector field itself looks like:
+
+```{r vector-field}
+flow |> 
+  dplyr::filter(iter < 2) |>
+  ggplot2::ggplot(ggplot2::aes(
+    x = x,
+    y = y,
+    group = id
+  )) + 
+  ggplot2::geom_path(
+    arrow = grid::arrow(
+      length = grid::unit(.008, "npc"),
+      ends = "last",
+      type = "open"
+    )
+  ) + 
+  ggplot2::coord_equal(
+    xlim = c(.2, .5),
+    ylim = c(.2, .5)
+  ) +
+  ggplot2::theme_void()
+```
+
+In this plot, what I've done is taken the locations of each of the particles at iteration 0 (because at time 0 the points all sit on a regular grid) and drawn a little arrow that shows where each of them move to when `curl_step()` is applied. This gives us a rough visualisation of what the vector field looks like. The field itself doesn't change, but of course once you start moving the particles they no longer sit on a nice grid. To illustrate both of these facts, here's the same plot but this time I show the step from iteration 10 to iteration 11:
+
+```{r vector-field-2}
+#| echo: false
+flow |> 
+  dplyr::filter(iter %in% 10:11) |>
+  ggplot2::ggplot(ggplot2::aes(
+    x = x,
+    y = y,
+    group = id
+  )) + 
+  ggplot2::geom_path(
+    arrow = grid::arrow(
+      length = grid::unit(.008, "npc"),
+      ends = "last",
+      type = "open"
+    )
+  ) + 
+  ggplot2::coord_equal(
+    xlim = c(.2, .5),
+    ylim = c(.2, .5)
+  ) +
+  ggplot2::theme_void()
+```
+
+At any given location the arrow is still the same (because the vector field itself is invariant), but it's not a nice clean grid in this version because the particles will naturally tend to bunch up as you move them through the field.^[It is of course also true to note that the paths that emerge when you do this are only a piecewise-linear approximation to the continuous-flow paths. When you take a series of discrete linear steps like this, errors are introduced at each step. But this is generative art not real analysis class so I'm not at all bothered by that.]
+
+In any case, I think that at this point we have a fairly decent sense of how the splatter pieces are shaped by the underlying vector field, so it's time to move on...
 
 ## Choosing a palette
 
@@ -344,7 +405,7 @@ scales::show_col(sample_palette(seed = 123, size = 4))
 scales::show_col(sample_palette(seed = 666, size = 4))
 ```
 
-It doesn't always produce satisfying colour schemes, but it succeeds often enough for the system to be workable. In any case, now that we have a paletting system we can write a `make_plot()` function that applies the palette using `ggplot2::scale_colour_gradientn()`:
+It doesn't always produce satisfying colour schemes, but it succeeds often enough for the system to be workable. And now that we have a paletting system we can write a `make_plot()` function that applies the palette using `ggplot2::scale_colour_gradientn()`:
 
 ```{r shading-plots}
 make_plot <- function(data, seed) {
@@ -375,9 +436,9 @@ make_plot(flow, seed = 123)
 At this point, we have our final image. 
 
 
-## The finished system
+## Exploring the system
 
-In order to play around with system, it's helpful to wrap the whole process from beginning to end in a `splatter()` function that generates images. It takes a single argument `seed`, which can either be a scalar seed value that is used for the base image, the flow step, and the palette sampling, or it can be a length three vector that supplies separate seed for each component:
+In order to play around with system, it's helpful to wrap the whole generative process from beginning to end in a `splatter()` function that generates images. It takes a single argument `seed`, which can either be a scalar seed value that is used for all components to the system, or it can be a three-element vector that supplies separate seeds for the base data, the vector field, and the palette:
 
 ```{r splatter-function}
 splatter <- function(seed) {
@@ -433,6 +494,9 @@ splatter(seed = c(123, 100, 123))
 ```
 
 This, to my mind, is the strangest effect of all. Varying the base image changes the overall distribution of, as you'd expect, but when you look very closely at the images you can see that they all have the same "brush strokes". The swirling circular pattern in the centre-left of image (which was very evident in the animated image) is present in all three images: on the left image it shows up as a pattern of red and orange strokes curling around one another, but on the right that same swirl is now mostly pink and black. For the image in the middle the swirl is harder to see because it's almost entirely painted in orange, with just a little bit of black.
+
+## Wrap up
+
 
 
 ## Source code {.appendix}
@@ -548,7 +612,7 @@ curl_loop <- function(data,
                       scale, 
                       octaves) {
   states <- purrr::accumulate(
-    .x = (1:iterations) + 1,
+    .x = 1:iterations,
     .f = curl_step,
     .init = data,
     scale = scale,
