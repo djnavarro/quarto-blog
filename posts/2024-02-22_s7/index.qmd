@@ -81,6 +81,8 @@ There is, as the young people say a lot to unpack here...
 
 This whole thing started because I wanted to learn how to use the relatively new [S7 object oriented programming system](https://rconsortium.github.io/S7/) that is intended to serve as a successor to the informal-but-janky [S3](https://adv-r.hadley.nz/s3.html) system and the formal-but-painful [S4](https://adv-r.hadley.nz/s4.html) system that already exist within R.^[For folks outside of the R community: S3, S4, and S7 are all considered to be "functional" OOP systems, and they are broadly similar to function overloading in C++ and, I have recently learned, is also analogous to how methods are defined in Julia for functions of the same name but with different signatures. The functional style of OOP programming is one in which methods attach to generic functions (or to function names), as opposed to more traditional "encapsulated" OOP systems in which methods attach to objects. The encapsulated style is standard in Python, for example, and also appears in R via the [R6](https://adv-r.hadley.nz/r6.html) OOP system that I have used in other blog posts (e.g., [here](https://blog.djnavarro.net/posts/2022-12-22_queue/) and [here](https://blog.djnavarro.net/posts/2023-12-27_seedcatcher/)). I mention these tiresome details because I have learned to my detriment that if I don't exhaustively list the various distinctions between OOP systems and how R adopts multiple styles, I *will* have to deal with tiresome people mansplaining to me how R is bad at OOP and how OOP in R is wrong and isn't *really* OOP and honestly I'm asleep before I finish reading the complaint.] It seemed like a very simple exercise when I started, but as with any exercise in learning a new thing I very quickly felt like a dog trying to understand Norway. 
 
+### Writing an S7 class
+
 Okay look. It's kind of like this. While eventually the plan is for S7 to become part of base R, right now it's a package so we'll have to load the package:
 
 ```{r}
@@ -129,8 +131,652 @@ cc@radius <- 2
 cc
 ```
 
+Amazing. Thrilling. The excitement, it cannot be contained.
+
+### Adding default values
+
+```{r}
+circle <- new_class(
+  name = "circle", 
+  properties = list(
+    x = new_property(class = class_numeric, default = 0),
+    y = new_property(class = class_numeric, default = 0),
+    radius = new_property(class = class_numeric, default = 1)
+  )
+)
+```
+
+```{r}
+circle(x = 2)
+```
+
+
+### Computed properties
+
+Let's be honest. This circle class only represents a circle in the most abstract sense. It's a list of three numbers that you need to describe a circle, but it doesn't actually compute any points that lie on the circumference of said circle. If you wanted to *draw* the circle in question, you'd have to actually compute those points yourself. We can improve on this situation. 
+
+```{r}
+circle <- new_class(
+  name = "circle", 
+  properties = list(
+    x = new_property(class_numeric, default = 0),
+    y = new_property(class_numeric, default = 0),
+    radius = new_property(class_numeric, default = 1),
+    n = new_property(class_integer, default = 100L),
+    points = new_property(
+      class = class_data.frame,
+      getter = function(self) {
+        angle <- seq(0, 2 * pi, length.out = self@n)
+        data.frame(
+          x = self@x + self@radius * cos(angle),
+          y = self@y + self@radius * sin(angle)
+        )
+      } 
+    )    
+  )
+)
+```
+
+When I create a new circle, the `points` property is automatically computed using the user-specified `x`, `y`, `radius`, and `n` properties:
+
+```{r}
+cc <- circle(x = 1, y = 2, radius = 3, n = 50L)
+cc
+```
+
+When I update one of the other properties, the computed `points` property is automatically updated:
+
+```{r}
+cc@n <- 5L
+cc
+```
+
+Notice, however, that because I defined a "getter" function for `points` and (deliberately) chose not to define a `setter` fuction, this computed property is read-only. You cannot directly modify `points`:
+
+```{r}
+#| error: true
+cc@points <- data.frame(x = 1:3, y = 4:6)
+```
+
+For the purposes of the tool I want to create this is a desirable feature. I *don't* want users trying to manually create the `points` that lie on the circumference of a circle. The abstract concept of a circle is defined by `x`, `y` and `radius`, and if I want to create `n` evenly spaced points on the circle, then these points are automatically computed as a byproduct of specifying these values. 
+
+### Validators
+
+```{r}
+circle <- new_class(
+  name = "circle", 
+  properties = list(
+    x = new_property(class_numeric, default = 0),
+    y = new_property(class_numeric, default = 0),
+    radius = new_property(class_numeric, default = 1),
+    n = new_property(class_integer, default = 100L),
+    points = new_property(
+      class = class_data.frame,
+      getter = function(self) {
+        angle <- seq(0, 2 * pi, length.out = self@n)
+        data.frame(
+          x = self@x + self@radius * cos(angle),
+          y = self@y + self@radius * sin(angle)
+        )
+      } 
+    )    
+  ),
+  validator = function(self) {
+    if (length(self@x) != 1) return("x must be length 1")
+    if (length(self@y) != 1) return("y must be length 1")
+    if (length(self@radius) != 1) return("radius must be length 1")
+    if (length(self@n) != 1) return("n must be length 1")
+    if (self@radius < 0) return("radius must be a non-negative number")
+    if (self@n < 1L) return("n must be a positive integer")
+  }
+)
+```
+
+```{r}
+#| error: true
+circle(radius = -0.234)
+```
+
+### Building structure
+
+To start transforming this into something a little more realistic, we will need to create a richer collection of classes. For instance, in the code above I stored the computed `points` as a simple data frame. It would be more sensible to define an actual S7 class for this, with its own validator to make sure that any shape classes I define compute a valid set of points:
+
+```{r}
+points <- new_class(
+  name = "points",
+  properties = list(
+    x = class_numeric,
+    y = class_numeric
+  ),
+  validator = function(self) {
+    if (length(self@x) != length(self@y)) {
+      "x and y must be the same length"
+    }
+  }
+)
+```
+
+Similarly, when the time comes to start drawing these things, my circles (and other shapes) will need to have a defined `style`. Again, I can create a class for this:
+
+```{r}
+style <- new_class(
+  name = "style",
+  properties = list(
+    color     = new_property(class_character, default = "black"),
+    fill      = new_property(class_character, default = "black"),
+    linewidth = new_property(class_numeric, default = 1)
+  )
+)
+```
+
+You'll notice that `style` currently doesn't have a validator. It probably should, but I haven't yet thought carefully about what constraints I *want* to impose on `style` objects, so right now this is a bit freeform. 
+
+Later on, I'm going to define several different kinds of drawable shapes, and they'll have some structural similarities that I want to enforce. To that end I'll create an class called `drawable`:^[Ideally I'd like to make this an abstract class, in which users can't directly create a new `drawable`. In principle this is achievable by setting `abstract = TRUE` in the call to `new_class()`, but what I've found so far is that creates problems when -- as happens slightly later in the post -- I define a custom constructor function for my "circle-subclassing-drawable" class. I imagine this will be dealt with at some point, but for now I'm just ignoring the idea of abstract classes.]
+
+```{r}
+drawable <- new_class(
+  name = "drawable",
+  properties = list(
+    style = new_property(
+      class = style,
+      default = style()
+    ),
+    points = new_property(
+      class = points,
+      getter = function(self) points(x = numeric(0L), y = numeric(0L))
+    )
+  )
+)
+```
+
+Okay, so now we can define `circle` as a subclass of `drawable`:
+
+```{r}
+circle <- new_class(
+  name = "circle",
+  parent = drawable,
+  properties = list(
+    x = new_property(class_numeric, default = 0),
+    y = new_property(class_numeric, default = 0),
+    radius = new_property(class_numeric, default = 1),
+    n = new_property(class_integer, default = 100L),
+    points = new_property(
+      class = points,
+      getter = function(self) {
+        angle <- seq(0, 2 * pi, length.out = self@n)
+        points(
+          x = self@x + self@radius * cos(angle),
+          y = self@y + self@radius * sin(angle)
+        )
+      }
+    )
+  ),
+  validator = function(self) {
+    if (length(self@x) != 1) return("x must be length 1")
+    if (length(self@y) != 1) return("y must be length 1")
+    if (length(self@radius) != 1) return("radius must be length 1")
+    if (length(self@n) != 1) return("n must be length 1")
+    if (self@radius < 0) return("radius must be a non-negative number")
+    if (self@n < 1L) return("n must be a positive integer")
+  }
+)
+```
+
+```{r}
+cc <- circle()
+cc
+```
+
+```{r}
+class(cc)
+```
+
+Notice though, that this is cumbersome: if you want to override the default style you have to create a circle like this
+
+```{r}
+circle(style = style(color = "red"), radius = 2)
+```
+
+The reason this is cumbersome is that I have created a structure where all drawables necessarily contain a user-customisable `style` object and a read-only `points` object. This is a deliberate design choice because I want the ability to easily extract these two things out of any given object:
+
+```{r}
+cc@style
+cc@points
+```
+
+As you can imagine, this is a handy feature in a generative art tool. Nevertheless it's a huge pain in the arse when it comes to constructing a new `circle` object. Fortunately we have...
+
+### Constructors
+
+```{r}
+circle <- new_class(
+  name = "circle",
+  parent = drawable,
+  properties = list(
+    x      = class_numeric,
+    y      = class_numeric,
+    radius = class_numeric,
+    n      = class_integer,
+    points = new_property(
+      class = points,
+      getter = function(self) {
+        angle <- seq(0, 2 * pi, length.out = self@n)
+        points(
+          x = self@x + self@radius * cos(angle),
+          y = self@y + self@radius * sin(angle)
+        )
+      }
+    )
+  ),
+  validator = function(self) {
+    if (length(self@x) != 1) return("x must be length 1")
+    if (length(self@y) != 1) return("y must be length 1")
+    if (length(self@radius) != 1) return("radius must be length 1")
+    if (length(self@n) != 1) return("n must be length 1")
+    if (self@radius < 0) return("radius must be a non-negative number")
+    if (self@n < 1L) return("n must be a positive integer")
+  },
+  constructor = function(x = 0, y = 0, radius = 1, n = 100L, ...) {
+    new_object(
+      drawable(),
+      x = x,
+      y = y,
+      radius = radius,
+      n = n,
+      style = style(...)
+    )
+  }
+)
+```
+
+So now I can create a circle in my preferred style in a natural way:
+
+```{r}
+cc <- circle(radius = 2, fill = "purple")
+cc
+```
+
+### Other drawables
+
+```{r}
+shape <- new_class(
+  name = "shape",
+  parent = drawable,
+  properties = list(
+    x = class_numeric,
+    y = class_numeric,
+    points = new_property(
+      class = points,
+      getter = function(self) {
+        points(x = self@x, y = self@y)
+      }
+    )
+  ),
+  validator = function(self) {
+    if (length(self@x) != length(self@y)) {
+      "x and y must be the same length"
+    }
+  },
+  constructor = function(x, y, ...) {
+    new_object(
+      drawable(),
+      x = x,
+      y = y,
+      style = style(...)
+    )
+  }
+)
+```
+
+```{r}
+sq <- shape(
+  x = c(0, 0, 1, 1), 
+  y = c(0, 1, 1, 0),
+  fill = "red"
+)
+sq
+```
 
 ## Act II: Grid
 
+### Drawing drawables
+
+```{r}
+draw <- new_generic("draw", dispatch_args = "object")
+```
+
+```{r}
+method(draw, drawable) <- function(object, xlim = NULL, ylim = NULL, ...) {
+
+  # plotting area is a single viewport with equal-axis scaling
+  if (is.null(xlim)) xlim <- range(object@points@x)
+  if (is.null(ylim)) ylim <- range(object@points@x)
+  x_width <- xlim[2] - xlim[1]
+  y_width <- ylim[2] - ylim[1]
+  vp <- grid::viewport(
+    xscale = xlim,
+    yscale = ylim,
+    width  = grid::unit(min(1, x_width / y_width), "snpc"),
+    height = grid::unit(min(1, y_width / x_width), "snpc"),
+  )
+
+  # shapes are always polygon grobs
+  grob <- grid::polygonGrob(
+    x = object@points@x,
+    y = object@points@y,
+    gp = grid::gpar(
+      col = object@style@color,
+      fill = object@style@fill,
+      lwd = object@style@linewidth
+    ),
+    vp = vp,
+    default.units = "native"
+  )
+
+  # draw the grob
+  grid::grid.newpage()
+  grid::grid.draw(grob)
+}
+```
+
+```{r}
+draw(cc)
+```
+
+```{r}
+draw(sq)
+```
+
+### Making sketches
+
+```{r}
+sketch <- new_class(
+  name = "sketch",
+  properties = list(
+    shapes = new_property(class = class_list, default = list())
+  ),
+  validator = function(self) {
+    if (!all(purrr::map_lgl(self@shapes, \(d) inherits(d, "drawable")))) {
+      "shapes must be a list of drawable-classed objects"
+    }
+  }
+)
+```
+
+```{r}
+method(draw, sketch) <- function(object, xlim = NULL, ylim = NULL, ...) {
+
+  # set default axis limits
+  if (is.null(xlim)) {
+    xlim <- c(
+      min(purrr::map_dbl(object@shapes, \(s, id) min(s@points@x))),
+      max(purrr::map_dbl(object@shapes, \(s, id) max(s@points@x)))
+    )
+  }
+  if (is.null(ylim)) {
+    ylim <- c(
+      min(purrr::map_dbl(object@shapes, \(s) min(s@points@y))),
+      max(purrr::map_dbl(object@shapes, \(s) max(s@points@y)))
+    )
+  }
+
+  # plotting area is a single viewport with equal-axis scaling
+  x_width <- xlim[2] - xlim[1]
+  y_width <- ylim[2] - ylim[1]
+  vp <- grid::viewport(
+    xscale = xlim,
+    yscale = ylim,
+    width  = grid::unit(min(1, x_width / y_width), "snpc"),
+    height = grid::unit(min(1, y_width / x_width), "snpc"),
+  )
+
+  # draw the grobs
+  grid::grid.newpage()
+  for(s in object@shapes) {
+    grob <- grid::polygonGrob(
+      x = s@points@x,
+      y = s@points@y,
+      gp = grid::gpar(
+        col = s@style@color,
+        fill = s@style@fill,
+        lwd = s@style@linewidth
+      ),
+      vp = vp,
+      default.units = "native"
+    )
+    grid::grid.draw(grob)
+  }
+}
+```
+
+```{r}
+sk <- sketch(list(cc, sq))
+draw(sk)
+```
+
+### Fallback methods
+
+```{r}
+method(draw, class_any) <- function(object, ...) {
+  rlang::warn("Non-drawable objects ignored by draw()")
+  return(invisible(NULL))
+}
+```
+
+```{r}
+draw("a string is not a drawable")
+```
+
 ## Act III: Ambient
+
+
+### Blobs
+
+Blobs are essentially "circles with a non-constant radius", where the irregularity in the radius is a smoothly varying distortion created with Perlin noise:
+
+```{r}
+blob <- new_class(
+  name = "blob",
+  parent = drawable,
+  properties = list(
+    x          = class_numeric,
+    y          = class_numeric,
+    radius     = class_numeric,
+    range      = class_numeric,
+    n          = class_integer,
+    frequency  = class_numeric,
+    octaves    = class_integer,
+    seed       = class_integer,
+    points = new_property(
+      class = points,
+      getter = function(self) {
+        angle <- seq(0, 2*pi, length.out = self@n)
+        pointwise_radius <- ambient::fracture(
+          noise = ambient::gen_simplex,
+          fractal = ambient::fbm,
+          x = self@x + cos(angle) * self@radius,
+          y = self@y + sin(angle) * self@radius,
+          frequency = self@frequency,
+          seed = self@seed,
+          octaves = self@octaves
+        ) |>
+          ambient::normalize(to = self@radius + c(-1, 1) * self@range)
+        points(
+          x = self@x + pointwise_radius * cos(angle),
+          y = self@y + pointwise_radius * sin(angle)
+        )
+      }
+    )
+  ),
+  constructor = function(x = 0,
+                         y = 0,
+                         radius = 1,
+                         range = 0.2,
+                         n = 100L,
+                         frequency = 1,
+                         octaves = 2L,
+                         seed = 1L,
+                         ...) {
+    new_object(
+      drawable(),
+      x = x,
+      y = y,
+      radius = radius,
+      range = range,
+      n = n,
+      frequency = frequency,
+      octaves = octaves,
+      seed = seed,
+      style = style(...)
+    )
+  },
+  validator = function(self) {
+    if (length(self@x) != 1) return("x must be length 1")
+    if (length(self@y) != 1) return("y must be length 1")
+    if (length(self@radius) != 1) return("radius must be length 1")
+    if (length(self@range) != 1) return("range must be length 1")
+    if (length(self@n) != 1) return("n must be length 1")
+    if (length(self@frequency) != 1) return("frequency must be length 1")
+    if (length(self@octaves) != 1) return("octaves must be length 1")
+    if (length(self@seed) != 1) return("seed must be length 1")
+    if (self@radius < 0) return("radius must be a non-negative number")
+    if (self@range < 0) return("range must be a non-negative number")
+    if (self@frequency < 0) return("frequency must be a non-negative number")
+    if (self@n < 1L) return("n must be a positive integer")
+    if (self@octaves < 1L) return("octaves must be a positive integer")
+  }
+)
+```
+
+```{r}
+bb <- blob(n = 500L)
+draw(bb)
+```
+
+So, using the rainbow `palette` I defined at the top of the post:
+
+```{r}
+values <- tibble::tibble(
+  x = cos(seq(0, pi * 5/3, length.out = 6)),
+  y = sin(seq(0, pi * 5/3, length.out = 6)),
+  n = 500L,
+  fill = palette,
+  color = fill
+)
+
+blobs <- purrr::pmap(values, blob)
+blobs |> sketch() |> draw()
+```
+
+### Ribbons
+
+Ribbons are similar to blobs, but the polygon is defined by movement along a line rather than around a circle:
+
+```{r}
+ribbon <- new_class(
+  name = "ribbon",
+  parent = drawable,
+  properties = list(
+    x          = class_numeric,
+    y          = class_numeric,
+    xend       = class_numeric,
+    yend       = class_numeric,
+    width      = class_numeric,
+    n          = class_integer,
+    frequency  = class_numeric,
+    octaves    = class_integer,
+    seed       = class_integer,
+    points = new_property(
+      class = points,
+      getter = function(self) {
+        x <- seq(self@x, self@xend, length.out = self@n)
+        y <- seq(self@y, self@yend, length.out = self@n)
+        displacement <- ambient::fracture(
+          noise = ambient::gen_simplex,
+          fractal = ambient::fbm,
+          x = x,
+          y = y,
+          frequency = self@frequency,
+          seed = self@seed,
+          octaves = self@octaves
+        ) |>
+          ambient::normalize(to = c(0, 1))
+        taper <- sqrt(
+          seq(0, 1, length.out = self@n) * seq(1, 0, length.out = self@n)
+        )
+        width <- displacement * taper * self@width
+        dx <- self@xend - self@x
+        dy <- self@yend - self@y
+        points(
+          x = c(x - width * dy, x[self@n:1L] + width[self@n:1L] * dy),
+          y = c(y + width * dx, y[self@n:1L] - width[self@n:1L] * dx)
+        )
+      }
+    )
+  ),
+  constructor = function(x = 0,
+                         y = 0,
+                         xend = 1,
+                         yend = 1,
+                         width = 0.2,
+                         n = 100L,
+                         frequency = 1,
+                         octaves = 2L,
+                         seed = 1L,
+                         ...) {
+    new_object(
+      drawable(),
+      x = x,
+      y = y,
+      xend = xend,
+      yend = yend,
+      width = width,
+      n = n,
+      frequency = frequency,
+      octaves = octaves,
+      seed = seed,
+      style = style(...)
+    )
+  },
+  validator = function(self) {
+    if (length(self@x) != 1) return("x must be length 1")
+    if (length(self@y) != 1) return("y must be length 1")
+    if (length(self@xend) != 1) return("xend must be length 1")
+    if (length(self@yend) != 1) return("yend must be length 1")
+    if (length(self@width) != 1) return("width must be length 1")
+    if (length(self@n) != 1) return("n must be length 1")
+    if (length(self@frequency) != 1) return("frequency must be length 1")
+    if (length(self@octaves) != 1) return("octaves must be length 1")
+    if (length(self@seed) != 1) return("seed must be length 1")
+    if (self@width < 0) return("width must be a non-negative number")
+    if (self@frequency < 0) return("frequency must be a non-negative number")
+    if (self@n < 1L) return("n must be a positive integer")
+    if (self@octaves < 1L) return("octaves must be a positive integer")
+  }
+)
+```
+
+```{r}
+rb <- ribbon(n = 500L)
+draw(rb)
+```
+
+```{r}
+set.seed(101L)
+values <- tibble::tibble(
+  x = rnorm(200L, sd = 1.5),
+  y = rnorm(200L, sd = 1.5),
+  xend = x + 1,
+  yend = y,
+  width = 1,
+  n = 500L,
+  fill = sample(palette, 200L, replace = TRUE),
+  color = fill
+)
+
+ribbons <- purrr::pmap(values, ribbon)
+ribbons |> 
+  sketch() |> 
+  draw(xlim = c(-2, 2), ylim = c(-2, 2))
+```
 
