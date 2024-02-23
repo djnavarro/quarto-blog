@@ -261,6 +261,23 @@ For the purposes of the tool I want to create, the read-only nature of `points` 
 
 > Am I a woman? I mean, men seem pretty happy to humiliate me, choke me, and rape me as if I *were* a woman, but is that the validation I want? It says "female" on all my documents now, and I fought tooth and nail for years to make that happen. Is the fight itself enough for me to earn my place as a valid woman? But if it is, then why the fuck am I *constantly* having to justify my life to the satisfaction of men who ignore me when I talk about the cruel reality of life as a trans woman, treat every interaction with me like they're having an academic debate, and whose only interest in my life is using me as a vehicle to argue that I have an unfair advantage in the sporting contests that I'm too frightened to participate in? Is there a point at which I too can make a valid claim to be the victim of misogyny?
 
+Another limitation to the `circle` class that I've just created is that there is no *validator* function. The role of a validator is to ensure that the values that the user passes during object construction correspond to a valid object. A circle can't really have a negative `radius`. The `x` and `y` values that define the center of the circle need to be scalar values. The number of points `n` can't be non-negative. The class that I've just created doesn't enforce these constraints. Sometimes this means that you can pass nonsense values and end up with something that *looks* like a valid circle, but isn't:
+
+```{r}
+circle(x = 1:2, y = 1)
+```
+
+Other times, you can pass nonsense values and get an error message because one of the internal function calls doesn't work properly:
+
+```{r}
+#| error: true
+circle(n = -4L)
+```
+
+Neither of these outcomes is a good thing. What you really need here is a validator function that checks the user inputs and throws an informative error whenever those inputs are invalid. A nice feature of S7 is that it supports validators "out of the box", and makes the validator part of the class definition itself. 
+
+So here is an updated `circle` class definition that incorporates a validator function. It's a relatively clean setup, because you can simply have the validator return the string for your error message, or else have a `NULL` return value if the inputs are good:
+
 ```{r}
 circle <- new_class(
   name = "circle", 
@@ -291,14 +308,22 @@ circle <- new_class(
 )
 ```
 
+This probably isn't the ideal form for the `circle` validator (e.g., I could probably think more about what messages should be returned) but it illustrates the basic idea. The key thing is that, for example, if I try to pass a negative `radius` I get an error:
+
 ```{r}
 #| error: true
 circle(radius = -0.234)
 ```
 
+One thing I'm learning very quickly is that when you're designing a system that is built from many different classes, it is *extremely* valuable to have validators for all your classes. Debugging becomes much easier on the one hand, and on the other hand you can always move forward in your code knowing that when class A depend on class B in some fashion, you can always rely on knowing that every class B object that class A works with will be a valid instance of class B. A little bit of extra effort when writing the class definition spares you a lot of pain down the track when you're trying to make sense of how your classes interact with each other.
+
 ### Building structure
 
-To start transforming this into something a little more realistic, we will need to create a richer collection of classes. For instance, in the code above I stored the computed `points` as a simple data frame. It would be more sensible to define an actual S7 class for this, with its own validator to make sure that any shape classes I define compute a valid set of points:
+> The constituent pieces of an oppressive system are often innocuous on their face, very often the result of thoughtlessness rather than malice. The consequences, however, are cruel. Crying in a hotel lobby at a conference when your documentation doesn't match your appearance and the staff are arguing with each other over whether you're really the person on the drivers licence. Crying in a lecture theatre in front of an audience because the programmer who designed the IT system didn't consider name and gender to be malleable properties so even though you've updated your records with HR, the IT system has just outed you to all your students. Trying to work out if -- notwithstanding the threats of violence on this topic that obviously you can't report because they came from senior academics -- you're allowed to use the bathroom next to your office because nobody bothered to write a policy document, and instead walking a kilometer to go off-campus to pee. Living in dread waiting for the next time you fall into the cracks in the system.
+
+Up to this point, all I have done when designing my system is define a `circle` class that creates objects with a specific structure. In order to expand this into a richer tool that can eventually support the artistic goals I have in mind, I'm going to need to broaden my vision and think about a collection of related classes that play nicely with one another.
+
+In order to make this shift, a natural place to start is thinking about what kind of objects should be stored internally within a `circle` object (and other shapes). For instance, in the code above I stored the computed `points` as a simple data frame. It would be more sensible to define an actual S7 class for this, with its own validator to make sure that any shape classes I define compute a valid set of points:
 
 ```{r}
 points <- new_class(
@@ -315,7 +340,7 @@ points <- new_class(
 )
 ```
 
-Similarly, when the time comes to start drawing these things, my circles (and other shapes) will need to have a defined `style`. Again, I can create a class for this:
+Similarly, when the time comes to start drawing these things, my circles (and other shapes) will need to have a defined visual `style`. Again, I can create a class for this:
 
 ```{r}
 style <- new_class(
@@ -328,9 +353,9 @@ style <- new_class(
 )
 ```
 
-You'll notice that `style` currently doesn't have a validator. It probably should, but I haven't yet thought carefully about what constraints I *want* to impose on `style` objects, so right now this is a bit freeform. 
+You'll notice that `style` currently doesn't have a validator, and it doesn't support a very wide range of properties. The artistic system I want to consider has the constraint that *every* drawable shape is a polygon of some kind, and needs to have stylistic properties that one associates with polygons. The `color`, `fill`, and `linewidth` properties that exist within this `style` class are a beginning, but nothing more than that. Similarly, the absence of a validator is a strong hint that I haven't finished thinking through what I want this class to be. For the current purposes the `style` class works, but it's very far from complete.
 
-Later on, I'm going to define several different kinds of drawable shapes, and they'll have some structural similarities that I want to enforce. To that end I'll create an class called `drawable`:^[Ideally I'd like to make this an abstract class, in which users can't directly create a new `drawable`. In principle this is achievable by setting `abstract = TRUE` in the call to `new_class()`, but what I've found so far is that creates problems when -- as happens slightly later in the post -- I define a custom constructor function for my "circle-subclassing-drawable" class. I imagine this will be dealt with at some point, but for now I'm just ignoring the idea of abstract classes.]
+Let's move on, and start thinking about what happens when my system has a richer collection of drawable shapes than just circles. Later on in this post I'm going to define several different kinds of drawable shapes (e.g., the `blob` and `ribbon` objects in the initial artwork), and they'll all have some structural similarities to one another that I want to enforce. To that end I'll create a class called `drawable`.^[Ideally I'd like to make this an abstract class, in which users can't directly create a new `drawable`. In principle this is achievable by setting `abstract = TRUE` in the call to `new_class()`, but what I've found so far is that creates problems when -- as happens slightly later in the post -- I define a custom constructor function for my "circle-subclassing-drawable" class. I imagine this will be dealt with at some point, but for now I'm just ignoring the idea of abstract classes.] The `drawable` class will later be used as the parent class for all the shape classes that I want to be, well, drawable. But it's not super interesting in itself. Here's the code:
 
 ```{r}
 drawable <- new_class(
@@ -348,7 +373,9 @@ drawable <- new_class(
 )
 ```
 
-Okay, so now we can define `circle` as a subclass of `drawable`:
+The true purpose of the `drawable` class is that it enforces structure. Every drawable shape class that I later define will necessarily have a computed `points` property, and a user-defined `style` property. As an added benefit, because the only information I'll ever need to draw a shape is captured by `style` and `points`, I will be able to define a single drawing method that works for all `drawable` objects regardless of their specific character.
+
+Okay so now we can define `circle` as a subclass of `drawable`. It doesn't change the code very much. All I'm doing here is adding `parent = drawable` to the class definition:
 
 ```{r}
 circle <- new_class(
@@ -381,31 +408,40 @@ circle <- new_class(
 )
 ```
 
-```{r}
-cc <- circle()
-cc
-```
+To see that our new `circle` class is indeed a subclass of `drawable`, we can create a new circle and check its class attribute:
 
 ```{r}
+cc <- circle()
 class(cc)
 ```
 
-Notice though, that this is cumbersome: if you want to override the default style you have to create a circle like this
+The primary class is `circle`, as you'd expect, and the parent class is `drawable`. Notice also that the object has a third class, `S7_object`: all S7 objects possess this class. 
+
+### Constructors
+
+Imposing this structure on our drawable objects is valuable, and will pay off later because everything that we need to draw the shape is captured by the embedded `style` and `points` objects. However, as an unfortunate side effect of this, I've accidentally defined a class that makes it very hard for the user to supply the stylistic features: the arguments to our new `circle()` function are now:
+
+- `style`, which has to be a call to the `style()` constructor
+- `x`, `y`, `radius`, and `n`, as before
+
+That means that if I want to define a red circle with radius 2, my poor user (i.e., *me*) has to do something rather unpleasant:
 
 ```{r}
 circle(style = style(color = "red"), radius = 2)
 ```
 
-The reason this is cumbersome is that I have created a structure where all drawables necessarily contain a user-customisable `style` object and a read-only `points` object. This is a deliberate design choice because I want the ability to easily extract these two things out of any given object:
+The reason this is cumbersome is that my `drawable` class imposes a structure in which all the stylistic features are captured by the `style` property (shared by all drawables), whereas all the parameters that are used to construct the `points` property are specific to the particular drawable class (`circle`, `blob`, `ribbon`, etc). This internal structure is a good thing insofar as it ensures I can always extract the two key properties from any drawable:
 
 ```{r}
 cc@style
 cc@points
 ```
 
-As you can imagine, this is a handy feature in a generative art tool. Nevertheless it's a huge pain in the arse when it comes to constructing a new `circle` object. Fortunately we have...
+As you can imagine, this is a handy feature in a generative art tool. Nevertheless it's a huge pain in the arse from the user perspective when it comes to constructing a new `circle` object. 
 
-### Constructors
+Fortunately, S7 makes it possible to fix this by allowing the class definition to include a custom *constructor* function that allows the developer to customise the arguments that the user supplies. 
+
+Here's what the `circle` class looks like with a custom constructor:
 
 ```{r}
 circle <- new_class(
@@ -448,7 +484,13 @@ circle <- new_class(
 )
 ```
 
-So now I can create a circle in my preferred style in a natural way:
+There's a few things to note here: 
+
+- The constructor function always ends with a call to `new_object()`, and the first argument is always the parent class (i.e., in this case the parent of `circle` is `drawable`).
+- The way I've cleaned up my arguments is by having four explicitly defined arguments for a circle (`x`, `y`, `radius`, and `n`), and then included the dots `...` that are then passed onto `style()`
+- I've surreptitiously changed the way that my default arguments are specified: the constructor function is now responsible for defining defaults.
+
+The extra effort that goes into writing a custom constructor is in some ways a pain (especially because it does mean that any subclass of `circle` will also need a custom constructor), but in this case it's worth it because I can create a purple circle in a natural way:
 
 ```{r}
 cc <- circle(radius = 2, fill = "purple")
@@ -456,6 +498,10 @@ cc
 ```
 
 ### Other drawables
+
+> Early in transition, walking into the office in my academic department. "So you're a woman now? Are you going to get the surgery? Or did you already have it? Are you looking for a husband?" Um, I was hoping to use the photocopier if that's okay? I have a class handout to prepare. Wasn't planning to have a conversation about my genital status actually, and I feel like if I were a cis woman you'd realise that your professional colleagues' genitals are not an appropriate workplace conversation topic.
+
+Later in the post I'll go on to define the `blob` and `ribbon` classes that are so much fun for artistic purposes, but we have a long way to go before we get to that. One thing I will do now, however, is define a general purpose `shape` class that isn't very interesting, but handy to have as a fallback. The `shape` class has no interesting parameters: the user directly supplies the `x` and `y` coordinates that define the `points` property for the shape. This is very handy artistically in situations where you don't really want to bother defining a shape parametrically, and instead just want to supply the vertices directly:
 
 ```{r}
 shape <- new_class(
@@ -487,6 +533,8 @@ shape <- new_class(
 )
 ```
 
+It's not interesting, but you can use it to manually define a red square like this:
+
 ```{r}
 sq <- shape(
   x = c(0, 0, 1, 1), 
@@ -496,13 +544,27 @@ sq <- shape(
 sq
 ```
 
+Honestly, I'm only mentioning it now because in a moment I'm going to define drawing functions that I'll apply to the circle object `cc` from before, and the `sq` object I've just created.
+
 ## Act II: Grid
 
+At this stage in the development process I have a sensible collection of S7 classes that I can use to represent polygons in a systematic way. I have `style` and `points` classes that capture the "raw" characteristics of the polygons, and I have `drawable` and its child classes `circle` and `shape` (with `blob` and `ribbon` to come shortly) that allows me to construct drawable shapes in a convenient way.
+
+What I *don't* have yet is a method for actually drawing these things. 
+
 ### Drawing drawables
+
+There are a lot of ways I could go about creating actual drawings from `drawable` objects, and I did spend a little time thinking about the pros and cons of different approaches. What I landed on in the end, however, was a strategy where I would define a new generic function called `draw()` and then supply methods for it that use the grid graphics system in R to do the rendering. 
+
+To construct a new generic function in S7, we use the `new_generic()` function. Here's is how I've done that to create `draw()`:
 
 ```{r}
 draw <- new_generic("draw", dispatch_args = "object")
 ```
+
+In this code, the `dispatch_args` argument is used to indicate which arguments to the `draw()` function should be used in method dispatch. I've kept it simple in this case: the specific method that S7 will choose for `draw()` is based on the class of the `object` argument. For the moment, the only class for which I really need to supply a method is the `drawable` class (i.e., how should `draw()` handle the input when it is passed a single `drawable` object), but very shortly I'm going to define a `sketch` class that allows many `drawable` objects to be composed into a single image, so I'll need a `draw()` method to handle `sketch` inputs as well. 
+
+But I am getting ahead of myself. To specify a method for an S7 generic function, we call the `method()` function and specify the generic for which the method is to be defined (i.e., `draw()`), and the class for which the method is defined (i.e., `drawable`). Here's the code that I used:
 
 ```{r}
 method(draw, drawable) <- function(object, xlim = NULL, ylim = NULL, ...) {
@@ -538,13 +600,21 @@ method(draw, drawable) <- function(object, xlim = NULL, ylim = NULL, ...) {
 }
 ```
 
+If you are familiar with the grid package, you can immediately see that this is a very simple use of grid (e.g., compare it to ggplot2, which is very sophisticated in how it uses grid). All I'm doing here is defining a *single* plotting region (i.e., the viewport) and -- because this is art rather than data visualisation -- using `"snpc"` units to enforce a strong constraint that the x and y axes of this plot region will always be on the same scale, similar to how `coord_equal()` works in ggplot2. Our `drawable` object is then used to construct a single polygon grob: the internal `points` object contained within every drawable is used to define the vertices of the polygon, and the internal `style` object contained within every drawable is used to specify the graphical parameters associated with the polygone. See? I told you that all the effort we went to in imposing structure on the `drawable` class would come in handy. The `draw()` method is easy to write because the structure of the objects is aligned with the underlying functions we want those objects to support. 
+
+So here we go. At last we can draw simple shapes. Here's our circle:
+
 ```{r}
 draw(cc)
 ```
 
+Here is our square:
+
 ```{r}
 draw(sq)
 ```
+
+Not exactly high-calibre art, but the foundations are in place for us to start building more interesting tools atop these classes and methods. 
 
 ### Making sketches
 
