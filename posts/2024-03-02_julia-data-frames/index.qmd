@@ -1,0 +1,207 @@
+---
+title: "Working with data in Julia"
+description: "This is a subtitle"
+date: "2024-03-02"
+categories: ["Julia", "Data Wrangling"]
+jupyter: julia-1.10
+--- 
+
+```{julia}
+#| include: false
+using Pkg
+Pkg.activate("sandbox");
+```
+
+<!--------------- post begins here ----------------->
+
+
+## Data frames I
+
+Unlike R, Julia doesn't come with a native class to represent data frames. Instead, there is the DataFrames package which provides the functionality needed to represent tabular data. The `DataFrame()` function allows you to manually construct a data frame, with a syntax that feels very familiar to an R user. Vectors passed as inputs to `DataFrame()` must all have one element for every row in the data frame, or else be length one. So I could construct a small data frame listing the novels from William Gibson's "Sprawl" trilogy like this:
+
+```{julia}
+using DataFrames
+
+sprawl = DataFrame(
+  title = ["Neuromancer", "Count Zero", "Mona Lisa Overdrive"],
+  published = [1984, 1986, 1988], 
+  author = "William Gibson"
+)
+```
+
+Data frames have pretty print methods so the output looks quite nice here. But internally it's essentially a collection of vectors, one for each column. For example, `sprawl.title` is a vector of three strings:
+
+```{julia}
+sprawl.title
+```
+
+In real life though, you don't usually construct a data frame manually. It's more typical to import a data frame from a CSV file or similar. To that end, we can take advantage of the CSV package to read data from a data file:
+
+```{julia}
+using CSV
+starwars_csv = CSV.File("starwars.csv"; missingstring = "NA");
+```
+
+This `starwars_csv` object isn't a data frame yet, it's an object of type CSV.file. Data frames are *columnar* data structures (i.e., a collection of vectors, one per column), whereas a CSV.file is a *rowwise* data structure (i.e., a collection of CSV.row objects, one per row). We can see this by taking a look at the first element in the `starwars_csv` object:
+
+```{julia}
+starwars_csv[1]
+```
+
+To convert this to a DataFrame object, we simply pass it to `DataFrame()`:
+
+```{julia}
+starwars = DataFrame(starwars_csv)
+```
+
+The core tools for working with data frames in Julia feel quite familiar coming from either Matlab or R. You can subset a data frame by passing it numeric indices, for instance:
+
+```{julia}
+starwars[1:6, 1:5]
+```
+
+However, there are other methods for subsetting a data frame. You can also filter the rows of a data frame using logical expressions. Again, this is quite similar to how it works in base R. For instance, I can construct a boolean vector `fair_skinned` which indicates whether the corresponding row in `starwars` refers to a person with fair skin:^[As an aside, notice that I've used `.==` rather than `==` as the equality test. This is because `==` is a scalar operator: it doesn't work for vectors unless you broadcast it using `.`]
+
+```{julia}
+fair_skinned = starwars.skin_color .== "fair";
+```
+
+Now that I have these indices, I can create a subset of the data frame containing only those rows referring to fair skinned person (or robot, or...)
+
+```{julia}
+starwars[fair_skinned, 1:5]
+```
+
+On the columns side, we also have more flexible options for subsetting a data frame. For example, instead of referring to columns using numerical indices, we can select the variables that we want to keep using their names:
+
+```{julia}
+starwars[1:6, [:name, :gender, :homeworld]]
+```
+
+This syntax is worth unpacking slightly, so I'll digress slightly to talk about...
+
+## Symbols
+
+Looking at the syntax in the last code cell, it's fairly clear that `[:name, :gender, :homeworld]` is a vector of three... somethings, but it's not immediately obvious what `:name` actually is. Much like R (and also inherited from Lisp) Julia has extensive [Metaprogramming](https://docs.julialang.org/en/v1/manual/metaprogramming/) capabilities because it has the ability to represent Julia code as data structures within the language itself. In the simplest case, we have [Symbols](https://docs.julialang.org/en/v1/base/base/#Core.Symbol) like `:name`, which are constructed using the quotation operator `:` and used to represent object names. So as you can see, `:name` is an object of type Symbol:
+
+```{julia}
+typeof(:name)
+```
+
+Symbols can be assigned to variables, and those variables can be used as part of expressions to be evaluated. In the code below I create a variable `colname` that stores the symbolic representation of a column name that I can invoke later:
+
+```{julia}
+colname = :title
+```
+
+As a simple example of how symbols can be used in practice, here's a Julia implementation of something like the `pull()` function in the R package dplyr, which allows the user to extract a single column from a data frame:
+
+```{julia}
+function pull(data::DataFrame, column::Symbol)
+  getproperty(data, column)
+end;
+```
+
+In this code I'm using the `getproperty()` function to do the same job that the `.` operator would do in an expression like `sprawl.title`. So here it is in action:
+
+```{julia}
+pull(sprawl, :title)
+```
+
+At the moment this `pull()` function isn't very useful at all -- `pull(sprawl, :title)` is really not an improvement on `sprawl.title` -- but a little bit later when I get around to talking about pipes in Julia it will potentially more valuable.
+
+## Data frames II
+
+Anyway, getting back on track, the key thing to realise is that when I wrote `[:name, :gender, :homeworld]` earlier what I was really doing is constructing a vector of symbols, and it's those symbols that I was using to select the columns that I wanted to retain. The DataFrames package also supplies a various selector functions that can be used to extract a subset of the columns. For example, `Not()` will select every column except the ones that are passed to `Not()`. So if I want to drop the hair color, eye color, sex, and homeworld columns, I could do this:
+
+```{julia}
+starwars[1:6, Not([:hair_color, :eye_color, :sex, :homeworld])]
+```
+
+The `Between()` selector does what you'd think. It returns all columns in between two named columns:
+
+```{julia}
+starwars[1:6, Between(:sex, :homeworld)]
+```
+
+There's also an `All()` selector that returns all columns, but that's not super exciting. More interesting, I think, is the `Cols()` selector which takes a predicate function as input.^[In this context, a predicate function is just one that returns `true` or `false`.] The column names are passed to the function, and they are included in the output if that function returns `true`. So, for example, if I want to extract the columns in the data whose name ends in `"color"` I can do this: 
+
+```{julia}
+starwars[1:6, Cols(x -> endswith(x, "color"))]
+```
+
+## Pipes
+
+Much like recent versions of R, Julia comes with a piping operator `|>` that you can use to pass the output of one function to another one. So let's say I have some numbers stored as `vals`, and I want to compute their geometric mean: 
+
+```{julia}
+vals = [10.2, 12.1, 14.3]
+```
+
+In Julia `mean()` is part of the Statistics package, so we'll load that:
+
+```{julia}
+using Statistics
+```
+
+To compute the geometric mean, we first compute the natural logarithm for each element in `vals` using `log()`, compute the arithmetic mean of those log-values with `mean()`, and then exponentiate the result with `exp()`. Written as a series of nested function calls, it looks like this:
+
+```{julia}
+exp(mean(log.(vals)))
+```
+
+This isn't the neatest looking code, so it is sometimes helpful to rewrite it by piping the output of each function to the next one:^[I should also mention that Julia has the [function composition operator](https://www.juliawiki.com/wiki/Function_composition_(Julia)) that you can use for this purpose also.]
+
+```{julia}
+# vals |> log.() |> mean() |> exp()
+```
+ 
+One limitation to the base pipe in Julia, however, is that you cannot pass other arguments to the functions in the pipeline, nor can you use a placeholder like `_` (as in the R base pipe) to specify whereabouts in the function call the piped object should be inserted. That limits its utility somewhat, though later on I'll show some examples that suggest it's not as big a limitation as it might seem to be. 
+ 
+Nevertheless, I would be remiss if I didn't mention the [Pipe](https://juliapackages.com/p/pipe) package, which provides a more powerful piping operator than Julia's base pipe, supporting `_` placeholder syntax similar to the R base pipe. Loading this pipe generally needs to be done with a little care. If you don't want to override the behaviour of the Julia base pipe, what you need to do when using `using` is to only import the `@pipe` [Macro](https://docs.julialang.org/en/v1/manual/metaprogramming/#man-macros). Like symbols, which I discussed earlier, macros are a tool for metaprogramming in Julia. I'll talk about them in more detail later, but for now it's enough to note that this is how we import only the `@pipe` macro:
+
+```{julia}
+using Pipe: @pipe 
+```
+
+Here it is in action. This is a bit of a silly example -- I'm just computing the "mean publication year" of the sprawl novels, and I can't think of a reason why that's a sensible thing to do -- but it highlights the syntax:
+
+```{julia}
+@pipe sprawl |> 
+  pull(_, :published) |> 
+  mean(_)
+```
+
+The `@pipe` macro is invoked at the start of this expression, which -- thanks to the magic of metaprogramming -- means that the code that follows it is interpreted in a way that might not normally be valid Julia syntax. Notice that the `_` placeholder is required both in the call to my `pull()` function that extracts the column from the data frame, and in the call to `mean()` that is applied to the column.
+
+## Data frames III
+
+```{julia}
+combine(groupby(starwars, :gender), :mass => rand) 
+```
+
+Now that we've talked about pipes, we can see how to rewrite this in a dplyr-like workflow. If you're willing to use the flexible pipe operator supplied by Pipes, then you can make it look very similar indeed to dplyr:
+
+```{julia}
+@pipe starwars |>
+  groupby(_, :gender) |>
+  combine(_, :mass => rand)
+```
+
+Similarly:
+
+```{julia}
+@pipe starwars |>
+  subset(_, :skin_color => x -> x.=="fair") |>
+  pull(_, :name)
+```
+
+However, you can also do something very similar by combining the Julia base pipe with anonymous functions:
+
+```{julia}
+starwars |>
+  (x -> groupby(x, :gender)) |>
+  (x -> combine(x, :mass => rand))
+```
+
+
