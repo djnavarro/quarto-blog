@@ -15,17 +15,21 @@ Pkg.activate("sandbox");
 <!--------------- post begins here ----------------->
 
 
+This is the second of an impromptu three-part series in which, in a decision I am rapidly starting to regret as these posts get longer and longer, I decided it was time to teach myself how to use Julia. In the [first part](/posts/2024-03-01_julia-foundation/) of the series I looked at some foundational concepts (types, functions, pipes, etc), though in a completely idiosyncratic way and ignoring concepts that I find boring (loops, conditionals). I mean, this is a blog where I write "notes to self". It's not a textbook.
 
+Anyway... my thought for the second part of the series is to shift away from core programming concepts and instead look at a practical task that data analysts have to work with on a daily basis: wrangling rectangular data sets. In other words, I'm going to talk about data frames and tools for manipulating them. 
 
 ::: {.column-margin}
 
-![[Mass Effect 1](https://www.deviantart.com/lagota/art/Mass-Effect-1-Final-Poster-295106207). By user [lagota](https://www.deviantart.com/lagota) on Deviant Art, released under a CC-BY-NC-ND licence.](mass-effect-1.jpg){fig-alt="Reimagined Mass Effect 1 cover showing the Normandy departing the Citadel"}
+![[Mass Effect 1](https://www.deviantart.com/lagota/art/Mass-Effect-1-Final-Poster-295106207). By user [lagota](https://www.deviantart.com/lagota) on Deviant Art, released under a CC-BY-NC-ND licence. The astute observer will notice that at no point in this post does the main text reference the *Mass Effect* games. But I don't care, because they are awesome.](mass-effect-1.jpg){fig-alt="Reimagined Mass Effect 1 cover showing the Normandy departing the Citadel"}
 
 :::
 
-## Data frames I
+## Creating data frames
 
-Unlike R, Julia doesn't come with a native class to represent data frames. Instead, there is the DataFrames package which provides the functionality needed to represent tabular data. The `DataFrame()` function allows you to manually construct a data frame, with a syntax that feels very familiar to an R user. Vectors passed as inputs to `DataFrame()` must all have one element for every row in the data frame, or else be length one. So I could construct a small data frame listing the novels from William Gibson's "Sprawl" trilogy like this:
+Unlike R, Julia doesn't come with a native class to represent data frames. Instead, there is the [DataFrames](https://dataframes.juliadata.org/stable/) package which provides the functionality needed to represent tabular data. The `DataFrame()` function allows you to manually construct a data frame, with a syntax that feels very familiar to an R user. Vectors passed as inputs to `DataFrame()` must all have one element for every row in the data frame, or else be length one. 
+
+Continuing the vague science fiction theme that started in the previous post, I'll start by constructing a small data frame listing the novels from William Gibson's *Sprawl* trilogy, which I enjoyed considerably more than Asimov's *Foundation* series that (very very loosely) inspired the TV show of the same name. Anyway, here's how you do that:
 
 ```{julia}
 using DataFrames
@@ -50,17 +54,16 @@ using CSV
 starwars_csv = CSV.File("starwars.csv"; missingstring = "NA");
 ```
 
-This `starwars_csv` object isn't a data frame yet, it's an object of type CSV.file. Data frames are *columnar* data structures (i.e., a collection of vectors, one per column), whereas a CSV.file is a *rowwise* data structure (i.e., a collection of CSV.row objects, one per row). We can see this by taking a look at the first element in the `starwars_csv` object:
+This `starwars_csv` object isn't a data frame yet, it's an object of type CSV.file. Data frames are *columnar* data structures (i.e., a collection of vectors, one per column), whereas a CSV.file is a *rowwise* data structure (i.e., a collection of CSV.row objects, one per row). You could test this for yourself by taking a look at the first element `starwars_csv[1]` to verify that it's a representation of a single CSV row, but the output isn't very interesting so I'm going to move on.
+
+To convert this CSV.file object to a DataFrame object, we can simply pass it to `DataFrame()`, and this time around the data we end up with is a little bit richer than the last one (even if the *Star Wars* movies are incredibly boring compared to the infinitely superior *Sprawl* novels...)
 
 ```{julia}
-starwars_csv[1]
-```
-
-To convert this to a DataFrame object, we simply pass it to `DataFrame()`:
-
-```{julia}
+#| column: page
 starwars = DataFrame(starwars_csv)
 ```
+
+## Subsetting data frames I
 
 The core tools for working with data frames in Julia feel quite familiar coming from either Matlab or R. You can subset a data frame by passing it numeric indices, for instance:
 
@@ -86,7 +89,7 @@ On the columns side, we also have more flexible options for subsetting a data fr
 starwars[1:6, [:name, :gender, :homeworld]]
 ```
 
-This syntax is worth unpacking slightly, so I'll digress slightly to talk about...
+Referring to columns by name is very handy in practice, and there's some hidden Julia concepts here that I didn't talk about in the last post. So with that in mind I'll digress slightly to talk about...
 
 ## Symbols
 
@@ -116,17 +119,19 @@ In this code I'm using the `getproperty()` function to do the same job that the 
 pull(sprawl, :title)
 ```
 
-At the moment this `pull()` function isn't very useful at all -- `pull(sprawl, :title)` is really not an improvement on `sprawl.title` -- but a little bit later when I get around to talking about pipes in Julia it will potentially more valuable.
+I know, it's exciting right?
+
+Okay yeah, at the moment this `pull()` function isn't very useful at all -- `pull(sprawl, :title)` is really not an improvement on `sprawl.title` -- but a little bit later when I get around to talking about data wrangling pipelines it might turn out to be a little less silly. 
 
 
 ::: {.column-margin}
 
-![[Mass Effect 2](https://www.deviantart.com/lagota/art/Mass-Effect-2-Final-Poster-294884760). By user [lagota](https://www.deviantart.com/lagota) on Deviant Art, released under a CC-BY-NC-ND licence.](mass-effect-2.jpg){fig-alt="Reimagined Mass Effect 2 cover showing the Normandy attacked by a Collector ship"}
+![[Mass Effect 2](https://www.deviantart.com/lagota/art/Mass-Effect-2-Final-Poster-294884760). By user [lagota](https://www.deviantart.com/lagota) on Deviant Art, released under a CC-BY-NC-ND licence. Still the strangest of the three games: the main storyline with the Collectors is a hot mess, but it has the best side quests in the series, and the best romance too (Thane, obviously...)](mass-effect-2.jpg){fig-alt="Reimagined Mass Effect 2 cover showing the Normandy attacked by a Collector ship"}
 
 :::
 
 
-## Data frames II
+## Subsetting data frames II
 
 Anyway, getting back on track, the key thing to realise is that when I wrote `[:name, :gender, :homeworld]` earlier what I was really doing is constructing a vector of symbols, and it's those symbols that I was using to select the columns that I wanted to retain. The DataFrames package also supplies a various selector functions that can be used to extract a subset of the columns. For example, `Not()` will select every column except the ones that are passed to `Not()`. So if I want to drop the hair color, eye color, sex, and homeworld columns, I could do this:
 
@@ -146,31 +151,55 @@ There's also an `All()` selector that returns all columns, but that's not super 
 starwars[1:6, Cols(x -> endswith(x, "color"))]
 ```
 
-
+I find myself liking these selector functions. Coming from the tidyverse style in R where tidyselect is used to govern column selection it feels... not terribly different. Superficially different, perhaps, but the combination of `All()`, `Not()`, `Between()`, and `Cols()` seems to provide a fairly powerful and (I think?) user-friendly way to select columns.
 
 ::: {.column-margin}
 
-![[Mass Effect 3](https://www.deviantart.com/lagota/art/Mass-Effect-3-Final-Poster-290367120). By user [lagota](https://www.deviantart.com/lagota) on Deviant Art, released under a CC-BY-NC-ND licence.](mass-effect-3.jpg){fig-alt="Reimagined Mass Effect 3 cover showing the Normandy facing a fleet fo reapers"}
+![[Mass Effect 3](https://www.deviantart.com/lagota/art/Mass-Effect-3-Final-Poster-290367120). By user [lagota](https://www.deviantart.com/lagota) on Deviant Art, released under a CC-BY-NC-ND licence. No, I will not be drawn into expressing a comment on the ending. I love ME3, in part because every Shepard I've ever played comes into this game already completely broken and makes unhinged choices because of it...](mass-effect-3.jpg){fig-alt="Reimagined Mass Effect 3 cover showing the Normandy facing a fleet fo reapers"}
 
 :::
 
-## Data frames III
+## Data wrangling
+
+Up to this point I haven't really done any data wrangling with the `starwars` data. Okay, yeah, to some extent there's some data wrangling implied by the discussion of subsetting in the previous sections, but in truth none of that is how you'd normally go about it in a more real-world context. So to that end I'll talk about some of the data wrangling functions that DataFrames supplies. 
+
+Let's start with something simple, and not very useful. Suppose what I want to do here is group the data by gender *and* sex, and then for every unique combination of gender and sex that appears in the data set have Julia pick one row at random and report the corresponding mass. To do that is a two step operation. First, I need to use `groupby()` to describe the groups, and then I need to call `combine()` to tell Julia what function to apply separately for each group. This does the trick:
 
 ```{julia}
-combine(groupby(starwars, :gender), :mass => rand) 
+combine(groupby(starwars, [:gender, :sex]), :mass => rand) 
 ```
+
+In the call to `groupby(starwars, [:gender, :sex])` what Julia does is construct a grouped data frame (very similar to what you expect in R, really), and then this grouped data frame is passed to `combine()`. For each such group, we take the relevant subset of the `:mass` column and pass it to the `rand()` function, and by doing so a random mass is returned. 
+
+There's some obvious limitations to note in my code here though. Firstly, I'm not using the pipe `|>` at all, and while it's sort of fine in this context because there's only two steps in my data wrangling exercise, the code is going to get very ugly very quickly if I try to do something fancier. So let's start by fixing this. 
+
+As I mentioned in the first post in this series, one way I could transform this into a pipeline is to use the [Pipe](https://juliapackages.com/p/pipe) package, which supplies a pipe that behaves very similarly to the base pipe in R. However, I'm not going to do that. Instead, I'm going to adopt a workflow where I use the Julia base pipe together with anonymous functions. Here's the same code expressed in this kind of pipeline:
 
 ```{julia}
 starwars |>
-  d -> groupby(d, :gender) |>
+  d -> groupby(d, [:gender, :sex]) |>
   d -> combine(d, :mass => rand)
 ```
+
+I genuinely wasn't expecting this when I first learned about the restrictiveness of the Julia pipe, but I think I really like this syntax. Because you *have* to define an anonymous function at each step in the pipeline, I find noticing that: 
+
+- It's only slightly more verbose than the R style, and has the advantage (to my mind) that you can use this workflow without having to think too much about Julia macros
+- The input argument (in this case `d`) serves the same role that the placeholder (`_` for the R base pipe and the Julia "Pipe-package-pipe", or `.` for the R magrittr pipe)
+- You have the ability to subtly remind yourself of the internal workings of your pipeline by naming the input argument cleverly. If the input to this step in the pipeline is a data frame I tend to call the input argument `d`, but if -- as sometimes happens in real life -- at some point in the pipeline I pull out a column and do a bit of processing on that before returning the results, I might find it handy to use something else to remind myself that this step is applied to string variables. 
+
+As regards that third point, here's an example using the `pull()` function that I defined earlier that does exactly this:
 
 ```{julia}
 starwars |>
   d -> subset(d, :skin_color => x -> x.=="fair") |>
-  d -> pull(d, :name)
+  d -> pull(d, :name) |>
+  n -> map(x -> split(x, " ")[1], n)
 ```
+
+Again, not the most exciting pipeline in the world -- all I'm doing is returning the first names of all the fair-skinned characters -- but it does highlight the fact that the combination of base pipe and anonymous function syntax in Julia works rather well if you're inclined to write in this style.
+
+In fact, the ability to name the input argument is especially helpful in the last line of the pipe where there are two separate functions being used, one of which is a call to `map()` applied to the `:name` column (and takes `n` as the input), and another that is used by `map()` when extracting the first name out of every name (where I've unimaginatively used `x` to name my input).
+
 
 
 ## Image credit
