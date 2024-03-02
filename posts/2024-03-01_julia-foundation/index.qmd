@@ -1,6 +1,6 @@
 ---
 title: "A foundation in Julia"
-description: "This is a subtitle"
+description: "Part one of a three-part series in which I swear I was going to keep it brief but ended up writing a staggeringly long set of notes on what happened when I decided to learn some Julia" 
 date: "2024-03-01"
 categories: ["Julia"]
 jupyter: julia-1.10
@@ -17,6 +17,8 @@ Pkg.activate("sandbox");
 After many years of procrastination and telling myself I'll get around to it later, I've finally decided that now is the time for me to start learning [Julia](https://julialang.org/). At this point in my life I am strong in R, passable in Javascript, and can survive in SQL, C++ and Python if I need them for something. But despite my interest-from-afar in Julia, I haven't had much of an excuse to dive into it before. 
 
 Part of the appeal in Julia is that it's designed to be a high-performance language for scientific computing. Like other scientific languages (e.g., R, Matlab, etc) it has 1-based indexing rather than 0-based indexing (Python, C++, etc). Julia code is automatically compiled giving you performance that is comparable to compiled languages like C++, without the hassle of actually having to deal with the compiler yourself. But we've all heard the sales pitch for Julia before, there's no need for me to repeat it here, and anyway I kinda just want to dive into the code.
+
+![](foundation1.png)
 
 ## Getting started
 
@@ -64,7 +66,7 @@ minutes::Int128 = 60;
 typeof(minutes)
 ```
 
-So while `minutes` and `hours` are both integers they are different types, and -- as you would expect -- are represented differently internally. In an extremely strict language, it would not be possible to multiple `minutes` by `hours` without first converting at least one of them to a different type, but thankfully Julia operators will automatically promote to common type and so I canc calculate the number of minutes in one day without doing the tedious type conversions myself:
+So while `minutes` and `hours` are both integers they are different types, and -- as you would expect -- are represented differently internally. In an extremely strict language, it would not be possible to multiple `minutes` by `hours` without first converting at least one of them to a different type, but thankfully Julia operators will automatically promote to common type and so I can calculate the number of minutes in one day without doing the tedious type conversions myself:
 
 ```{julia}
 typeof(minutes * hours)
@@ -75,6 +77,9 @@ You can see the same mechanism in action when I try to calculate the number of m
 ```{julia}
 typeof(minutes * hours * 1.7)
 ```
+
+![](foundation2.png)
+
 
 ## Vectors
 
@@ -124,6 +129,8 @@ The entries in a dictionary can be indexed using the keys:
 ```{julia}
 danielle["gender"]
 ```
+
+![](foundation3.png)
 
 ## Functions
 
@@ -186,6 +193,8 @@ praise_dict = JSON.parsefile("praise.json")
 ```
 
 Most convenient, because now that I have this `praise_dict` object I'm going to use it in the next section when I return to talking about functions...
+
+![](foundation4.png)
 
 ## Methods
 
@@ -254,4 +263,76 @@ praise.(people)
 ```
 
 As an aside, if you ever needed to find out what methods have been defined for the `praise()` function, you can do so by calling `methods(praise)`.
+
+![](foundation5.png)
+
+
+## Piping
+
+Much like recent versions of R, Julia comes with a piping operator `|>` that you can use to pass the output of one function to another one. So let's say I have some numbers stored as `vals`, and I want to compute their geometric mean: 
+
+```{julia}
+vals = [10.2, 12.1, 14.3]
+```
+
+In Julia `mean()` is part of the Statistics package, so we'll load that:
+
+```{julia}
+using Statistics
+```
+
+
+To compute the geometric mean, we first compute the natural logarithm for each element in `vals` using `log()`, compute the arithmetic mean of those log-values with `mean()`, and then exponentiate the result with `exp()`. Written as a series of nested function calls, it looks like this:
+
+```{julia}
+exp(mean(log.(vals)))
+```
+
+As has been noted many times in the past, one awkward feature of code written in this form is that you have to read it from the inside (innermost parentheses) to the outside in order to understand the sequence of events: first you take `vals` and pass it to `log.()`, then you take these logarithms and pass them to `mean()`, and then you take this mean and pass it to `exp()`. In this specific case it's not terrible to read, because it just so happens that "exp mean log value" is pretty much how the formula for the geometric mean is written mathematically, but most data oriented programming isn't structured to look exactly like an equation, and "inside out" code quickly becomes difficult to read. 
+
+This is where the "pipe" operator `|>` comes in handy. You start with an object on the left hand side, and then pass it to the function named on the right hand side. When you chain a series of piping operations together you end up with code that reads left-to-right rather than inside-out:
+
+```{julia}
+vals .|> log |> mean |> exp
+```
+
+Notice that like other operators, I can use `.` to broadcast when using the pipe.
+
+Much like R, Julia has multiple versions of the pipe. For the purpose of this post I'm only going to talk about the base pipe, which is much much stricter than the magrittr pipe `%>%` in R, and indeed considerably stricter than the base pipe `|>` in R.^[If you are interested in such things, the [Pipe](https://juliapackages.com/p/pipe) package supplies a pipe that is very similar to the R base pipe.] As you can see from the code above, the right hand side of the pipe is a function, *not* a call. The object supplied on the left hand side of the pipe is passed as the first argument to the function. No additional arguments can be supplied to the function on the right.
+
+On the surface this seems very restrictive, but the longer I've been playing with Julia the more I realise it's not as restrictive as I first thought. Because Julia makes it very easy to write anonymous functions, and because there's very little overhead to calling one, you can write a pipeline that consists entirely of calls to anonymous functions. As a very simple example of a "split, apply, combine" style workflow constructed with the Julia pipe, here's how you could use this to reverse each of the individual words in a string:
+
+```{julia}
+"hello cruel world"  |>
+  x -> split(x, " ") |>
+  x -> reverse.(x)   |>
+  x -> join(x, " ")
+```
+
+To make this work I really do need to be able to specify additional arguments to `split()` and `join()`, which would not be permitted in a simpler application of the Julia pipe, but it works perfectly well here because those additional arguments are specified inside the anonymous functions to which the inputs are piped. 
+
+Honestly, as much as I was initially like "ugh this is unwieldy", I'm starting to appreciate the simplicity of the design and how it really does force you to start thinking about your pipelines in functional programming terms.^[So much so, in fact, that while my original plan for these Julia posts was to briefly dispense of the base pipe and spend more time talking about the [Pipe](https://juliapackages.com/p/pipe) package, I think I'm going to skip the package entirely and just use base pipe + anonymous functions. ] 
+
+## Function composition
+
+I should also mention that Julia has the [function composition operator](https://www.juliawiki.com/wiki/Function_composition_(Julia)) `∘` that you can use for this purpose, using much the same notation as in mathematics.^[For most editors that are configured to handle Julia syntax can type the `∘` operator by typing `\circ` and then hitting tab.] So I could define a `geomean()` function as the following composition:
+
+```{julia}
+geomean = exp ∘ mean ∘ (x -> log.(x))
+geomean(vals)
+```
+ 
+In this expression I've used an anonymous function as the third function to be composed so as to ensure that if the user passes a vector such as `vals`, the default behaviour of `geomean()` is to broadcast the call top `log()` (i.e., compute the log of each input individually), then pass the resulting vector of logarithms to `mean()` *as* a vector, and then pass the resulting scalar to `exp()`. 
+
+To be honest, as cute as this is, I'm not sure I see much utility to this right now. So yeah, time to move onto the last "topic" in this foundations post, in which the author will mention but in no way actually explain the extensive capabilities that Julia has for allowing...
+ 
+![](foundation6.png) 
+ 
+## Metaprogramming
+
+Much like R -- and very unlike Matlab, which Julia syntax sometimes resembles -- the design choices underpinning Julia have been influnced heavily by [Lisp](https://en.wikipedia.org/wiki/Lisp_(programming_language)). While I have never actually learned to program in any of the major dialects of Lisp, I've always wanted to, and I'm a huge fan of the way that Lisp and its descendants contain programming constructs that directly represent [abstract syntax trees](https://en.wikipedia.org/wiki/Abstract_syntax_tree) and provide tools that let you manipulate user-supplied code.^[Very often I see programmers who have never worked in a Lisp-descended language (e.g., they know Python, C, etc. but not R, Julia, Scheme, etc.) react in horror and outrage at the things that you are permitted to do in languages that rely extensively on metaprogramming, but honestly I love it. I think it's such a powerful tool for constructing [domain specific languages](https://en.wikipedia.org/wiki/Domain-specific_language) *within* the confines of a more general language.]
+
+Because [Julia Metaprogramming](https://docs.julialang.org/en/v1/manual/metaprogramming/) is such a powerful tool, what I've noticed already -- even as a novice -- is that most practical uses of the language end up relying on it heavily. Julia supports abstract [Symbols](https://docs.julialang.org/en/v1/base/base/#Core.Symbol), [Expressions](https://docs.julialang.org/en/v1/base/base/#Core.Expr), and [Macros](https://docs.julialang.org/en/v1/manual/metaprogramming/#man-macros), all of which start to pop up in your code once you start using it for real world data wrangling and visualisation. So it's pretty important to understand something about how it all works. That said... it's an advanced topic rather than a basic one, so what I think I'm going to do for now is issue a promissory note: I'll talk more about this in later posts as those topics become relevant.
+
+
 
