@@ -159,7 +159,7 @@ I find myself liking these selector functions. Coming from the tidyverse style i
 
 :::
 
-## Data wrangling
+## Data wrangling I: groupby, combine
 
 Up to this point I haven't really done any data wrangling with the `starwars` data. Okay, yeah, to some extent there's some data wrangling implied by the discussion of subsetting in the previous sections, but in truth none of that is how you'd normally go about it in a more real-world context. So to that end I'll talk about some of the data wrangling functions that DataFrames supplies. 
 
@@ -171,7 +171,7 @@ combine(groupby(starwars, [:gender, :sex]), :mass => rand)
 
 In the call to `groupby(starwars, [:gender, :sex])` what Julia does is construct a grouped data frame (very similar to what you expect in R, really), and then this grouped data frame is passed to `combine()`. For each such group, we take the relevant subset of the `:mass` column and pass it to the `rand()` function, and by doing so a random mass is returned. 
 
-There's some obvious limitations to note in my code here though. Firstly, I'm not using the pipe `|>` at all, and while it's sort of fine in this context because there's only two steps in my data wrangling exercise, the code is going to get very ugly very quickly if I try to do something fancier. So let's start by fixing this. 
+There's some obvious limitations to note in my code here though. Firstly, I'm not using the pipe `|>` at all, and while it's sort of fine in this context because there's only two steps in my data wrangling exercise, the code is going to get very ugly very quickly if I try to do something fancier.^[The other issue is that my code doesn't handle missing data gracefully, but that will come up later so I'm ignoring it for now.] So let's start by fixing this. 
 
 As I mentioned in the first post in this series, one way I could transform this into a pipeline is to use the [Pipe](https://juliapackages.com/p/pipe) package, which supplies a pipe that behaves very similarly to the base pipe in R. However, I'm not going to do that. Instead, I'm going to adopt a workflow where I use the Julia base pipe together with anonymous functions. Here's the same code expressed in this kind of pipeline:
 
@@ -200,11 +200,88 @@ Again, not the most exciting pipeline in the world -- all I'm doing is returning
 
 In fact, the ability to name the input argument is especially helpful in the last line of the pipe where there are two separate functions being used, one of which is a call to `map()` applied to the `:name` column (and takes `n` as the input), and another that is used by `map()` when extracting the first name out of every name (where I've unimaginatively used `x` to name my input).
 
+In any case, though it may not be to everyone's tastes, I've found a pipe-centric style that I can use in Julia that I don't mind, so it's time to move on and look at some other functions available in the DataFrames package.
 
+## Data wrangling II: subset, select, sort
+
+In the previous section I gave an example of a workflow that uses `groupby()` and `combine()` to compute summaries of a data frame. But there are other functions that come in very handy for data wrangling: I can use `subset()` to choose a subset of rows^[There is also `filter()` which has a slightly different syntax.], `select()` to choose a subset of columns, and `sort()` to order the rows according to some criterion. For example, here's how I could find all the characters from Tattooine and sort them by weight:
+
+```{julia}
+starwars |> 
+  d -> select(d, [:name, :mass, :homeworld]) |>
+  d -> subset(d, :homeworld => h -> h.=="Tatooine", skipmissing=true) |>
+  d -> sort(d, :mass)
+```
+
+Notice that this time I've been a little smarter about handling missing values. In the call to `subset()` I specified `skipmissing=true` to drop all cases where the homeworld is missing. The `sort()` function doesn't have a `skipmissing` argument, so the results include the two cases where someone from Tatooine doesn't have a stated weight. But hopefully it's clear that I could easily subset the data again to remove any cases with missing values on the `:mass` column if I wanted to. In fact, the DataFrames package supplies functions `dropmissing()`, `allowmissing()`, and `completecases()` that could be used for that purpose. For example:
+
+```{julia}
+starwars |> 
+  d -> select(d, [:name, :mass, :homeworld]) |>
+  d -> subset(d, :homeworld => h -> h.=="Tatooine", skipmissing=true) |>
+  d -> sort(d, :mass, rev=true) |>
+  d -> dropmissing(d, :mass)
+```
+
+The missing `:mass` rows are now gone, and -- just for my own personal amusement -- this time I've sorted the results in order of descending weight by setting `rev=true`.
+
+## Data wrangling III: stack
+
+Consider this:
+
+```{julia}
+starwars |>
+  d -> select(d, [:name, :eye_color, :skin_color, :hair_color])
+```
+
+Suppose what I want to do is transform this into a data set that has variables `:name`, `:body_part`, and `:color`. In other words I want to pivot this into a long-form data set where each character is represented by three rows, and has one row that specifies the colour of the relevant body part. We can do this with the `stack()` function:
+
+```{julia}
+starwars |>
+  d -> select(d, [:name, :eye_color, :skin_color, :hair_color]) |>
+  d -> stack(d, [:eye_color, :skin_color, :hair_color],
+    variable_name=:body_part,
+    value_name=:color
+  )
+```
+
+
+## Data wrangling IV: unstack
+
+We can also go the other way. Let's start with a slightly different data frame called `census`, one that counts the number of characters of each species on each homeworld
+
+```{julia}
+census = starwars |> 
+  d -> dropmissing(d, [:homeworld, :species]) |>
+  d -> groupby(d, [:homeworld, :species]) |> 
+  d -> combine(d, :name => (n -> length(n)) => :count)
+```
+
+So now, if I wanted a version of this data set with one row per `:homeworld` and a column for each `:species` that contains the `:count` of the number of characters of that species on the corresponding world, I could use `unstack()` to pivot from long-form to wide-form data like this:
+
+```{julia}
+#| column: page
+unstack(census, :species, :count, fill=0) 
+```
+
+Here I've specified `fill=0` to indicate missing values should be replaced with zeros, which is very sensible in this case because if there are no characters with a particular species/homeworld combination there wouldn't be a row in `census`. Also, because I can, here's a version that appears in a pipeline where I return only a subset of species, and -- in act of appalling xenophobia -- consider only planets inhabited by at least one human character:
+
+```{julia}
+census|>
+  d -> unstack(d, :species, :count, fill=0) |>
+  d -> select(d, [:homeworld, :Human, :Droid, :Ewok, :Wookiee, :Hutt]) |>
+  d -> subset(d, :Human => h -> h .> 0)
+```
+
+Hm. Not sure what those results say about the willingness of humans to mix with other species in the *Star Wars* universe but it's probably not good to reflect on it too much.
+
+## Data wrangling V: transform
+
+In all honesty I am getting exhausted with this post, and mildly irrited at the fact that I've spent so much time in the *Star Wars* universe rather than in a fictional universe that I actually enjoy. So it's time to start wrapping this one up. There's only one more topic I really want to mention and that's the `transform()` function which you can use to add new columns to a data frame. 
 
 ## Image credit
 
-All the lovely Mass Effect images in this post are from [lagota](https://www.deviantart.com/lagota) on DeviantArt, and are released under a CC-BY-NC-ND licence.
+All the lovely images in this post are from [lagota](https://www.deviantart.com/lagota) on DeviantArt, and are released under a CC-BY-NC-ND licence.
 
 <!-- https://www.deviantart.com/lagota/art/The-illusive-man-306521415 -->
 ![](illusive-man.png)
